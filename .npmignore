@@ -1,0 +1,14 @@
+src/
+tests/
+.github/
+.idea/
+node_modules/
+coverage/
+.nyc_output/
+.turbo/
+.cache/
+.env
+.env.*
+*.log
+*.tgz
+tsconfig.json

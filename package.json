@@ -1,0 +1,165 @@
+{
+  "name": "nexus-ai-pro",
+  "version": "0.2.0",
+  "description": "The Universal AI Pipeline for Node.js - one package, every model, every modality, with guardrails built in",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/nexus.d.ts",
+      "import": "./dist/core/nexus.js"
+    },
+    "./streaming": {
+      "types": "./dist/core/streaming.d.ts",
+      "import": "./dist/core/streaming.js"
+    },
+    "./providers": {
+      "types": "./dist/providers/base.d.ts",
+      "import": "./dist/providers/base.js"
+    },
+    "./providers/*": {
+      "types": "./dist/providers/*.d.ts",
+      "import": "./dist/providers/*.js"
+    },
+    "./security": {
+      "types": "./dist/security/index.d.ts",
+      "import": "./dist/security/index.js"
+    },
+    "./optimizer": {
+      "types": "./dist/optimizer/index.d.ts",
+      "import": "./dist/optimizer/index.js"
+    },
+    "./cache": {
+      "types": "./dist/cache/adapters.d.ts",
+      "import": "./dist/cache/adapters.js"
+    },
+    "./cache/*": {
+      "types": "./dist/cache/*.d.ts",
+      "import": "./dist/cache/*.js"
+    },
+    "./models": {
+      "types": "./dist/models/registry.d.ts",
+      "import": "./dist/models/registry.js"
+    },
+    "./rag": {
+      "types": "./dist/rag/ingestion.d.ts",
+      "import": "./dist/rag/ingestion.js"
+    },
+    "./evals": {
+      "types": "./dist/evals/runner.d.ts",
+      "import": "./dist/evals/runner.js"
+    },
+    "./jobs": {
+      "types": "./dist/jobs/queue.d.ts",
+      "import": "./dist/jobs/queue.js"
+    },
+    "./jobs/*": {
+      "types": "./dist/jobs/*.d.ts",
+      "import": "./dist/jobs/*.js"
+    },
+    "./workflows": {
+      "types": "./dist/workflow/chains.d.ts",
+      "import": "./dist/workflow/chains.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "example:minimal": "tsx examples/minimal.ts",
+    "example:basic": "tsx examples/basic.ts",
+    "example:feature-flags": "tsx examples/feature-flags.ts",
+    "example:security": "tsx examples/security.ts",
+    "example:optimizer": "tsx examples/optimizer.ts",
+    "example:agent": "tsx examples/agent.ts",
+    "test": "npm run build && npm run test:conformance:mock",
+    "test:conformance:mock": "tsx tests/conformance.mock.ts",
+    "test:conformance:real": "tsx tests/conformance.real.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "openai",
+    "anthropic",
+    "claude",
+    "ollama",
+    "router",
+    "streaming",
+    "multi-model",
+    "security",
+    "typescript",
+    "secret-scanner",
+    "secret-scanning",
+    "secret-scrubber",
+    "leak-prevention",
+    "api-key",
+    "api-keys",
+    "token-scanner",
+    "credentials",
+    "security",
+    "github-security",
+    "git-secrets",
+    "pii",
+    "prompt-injection",
+    "ai-security",
+    "llm-security",
+    "typescript",
+    "cli",
+    "devtools"
+  ],
+  "author": "Mkhitar Abrahamyan <mkhitar.abrahamyan99@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": ">=0.24.0",
+    "ollama": ">=0.5.0",
+    "openai": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "openai": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "ollama": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@types/node": "^20.14.0",
+    "ollama": "^0.5.6",
+    "openai": "^4.52.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "examples",
+    "assets",
+    "README.md",
+    "LICENSE",
+    "NEXUS.md.md",
+    "EXPLANATION.md.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mkhitar-abrahamyan/nexus-ai"
+  },
+  "homepage": "https://www.npmjs.com/package/nexus-ai-pro",
+  "bugs": {
+    "url": "https://github.com/mkhitar-abrahamyan/nexus-ai/issues"
+  }
+}
