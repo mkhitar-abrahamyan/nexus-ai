@@ -100,7 +100,13 @@ export {
   type SelfConsistencyOptions,
 } from './hallucination/consistency.js';
 
-export { BaseProvider, type ProviderInfo } from './providers/base.js';
+export {
+  BaseProvider,
+  NexusProviderError,
+  type NexusProviderErrorCategory,
+  type NexusProviderErrorOptions,
+  type ProviderInfo,
+} from './providers/base.js';
 export { OpenAIProvider } from './providers/openai.js';
 export { AnthropicProvider } from './providers/anthropic.js';
 export { GoogleProvider } from './providers/google.js';
@@ -259,6 +265,7 @@ export {
   PROVIDER_CONFORMANCE_FIXTURES,
   runProviderConformance,
   type ProviderConformanceCase,
+  type ProviderConformanceOptions,
   type ProviderConformanceResult,
 } from './testing/provider-conformance.js';
 export {

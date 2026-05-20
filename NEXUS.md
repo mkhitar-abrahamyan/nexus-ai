@@ -130,6 +130,7 @@ Important provider notes:
 - The registry also includes Opus 4.6 (`claude-opus-4-6`) and Opus 4.5 (`claude-opus-4-5-20251101`) because Anthropic docs reference them in Claude Code/Bedrock and batch contexts. Verify account/platform availability before using those in production.
 - Google's current Gemini 3 docs list Gemini 3.1 Pro Preview and Gemini 3.1 Flash-Lite Preview; Gemini 3 Pro Preview is documented as deprecated/shut down.
 - Groq and Mistral are exposed through OpenAI-compatible adapters.
+- OpenAI chat models and Responses-only models both support normalized streaming when the installed `openai` SDK exposes `client.responses.create`.
 - Cohere is exposed through a native `/v2/chat` adapter. It supports non-streaming completions; `stream()` currently emits the completed response as a single text chunk.
 
 ## User Use Cases and APIs
@@ -416,6 +417,7 @@ Implemented:
 - semantic prompt-injection classifier
 - extra workflow templates: RAG answer, structured extraction, classification, compare-and-decide
 - CI conformance workflow and test scripts
+- scheduled/manual real provider conformance workflow with per-provider secret skips
 - native OpenTelemetry SDK examples
 - BullMQ worker example
 - OCR/PDF extraction hooks after upload scanning

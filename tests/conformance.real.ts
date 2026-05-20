@@ -11,13 +11,27 @@ import {
   type BaseProvider,
 } from '../src/index.js';
 
-const providers: Array<{ name: string; model: string; provider: BaseProvider }> = [];
+interface RealConformanceProvider {
+  name: string;
+  model: string;
+  provider: BaseProvider;
+  testJson?: boolean;
+  testStream?: boolean;
+  testTools?: boolean;
+}
+
+const providers: RealConformanceProvider[] = [];
+const globalJsonEnabled = process.env.CONFORMANCE_TEST_JSON !== 'false';
+const globalStreamEnabled = process.env.CONFORMANCE_TEST_STREAM === 'true';
+const globalToolsEnabled = process.env.CONFORMANCE_TEST_TOOLS === 'true';
 
 if (process.env.OPENAI_API_KEY) {
   providers.push({
     name: 'openai',
     model: process.env.OPENAI_CONFORMANCE_MODEL || 'gpt-5.4-mini',
     provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+    testJson: true,
+    testTools: true,
   });
 }
 
@@ -26,6 +40,8 @@ if (process.env.ANTHROPIC_API_KEY) {
     name: 'anthropic',
     model: process.env.ANTHROPIC_CONFORMANCE_MODEL || 'claude-sonnet-4',
     provider: new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY }),
+    testJson: process.env.ANTHROPIC_CONFORMANCE_JSON === 'true',
+    testTools: true,
   });
 }
 
@@ -34,6 +50,8 @@ if (process.env.GOOGLE_API_KEY) {
     name: 'google',
     model: process.env.GOOGLE_CONFORMANCE_MODEL || 'gemini-2.5-flash',
     provider: new GoogleProvider({ apiKey: process.env.GOOGLE_API_KEY }),
+    testJson: true,
+    testTools: true,
   });
 }
 
@@ -42,6 +60,8 @@ if (process.env.GROQ_API_KEY) {
     name: 'groq',
     model: process.env.GROQ_CONFORMANCE_MODEL || 'groq/openai/gpt-oss-20b',
     provider: new GroqProvider({ apiKey: process.env.GROQ_API_KEY }),
+    testJson: true,
+    testTools: true,
   });
 }
 
@@ -50,6 +70,8 @@ if (process.env.MISTRAL_API_KEY) {
     name: 'mistral',
     model: process.env.MISTRAL_CONFORMANCE_MODEL || 'mistral/mistral-small-2603',
     provider: new MistralProvider({ apiKey: process.env.MISTRAL_API_KEY }),
+    testJson: true,
+    testTools: true,
   });
 }
 
@@ -58,6 +80,8 @@ if (process.env.COHERE_API_KEY) {
     name: 'cohere',
     model: process.env.COHERE_CONFORMANCE_MODEL || 'cohere/command-r7b-12-2024',
     provider: new CohereProvider({ apiKey: process.env.COHERE_API_KEY }),
+    testJson: process.env.COHERE_CONFORMANCE_JSON === 'true',
+    testTools: false,
   });
 }
 
@@ -66,6 +90,8 @@ if (process.env.OPENROUTER_API_KEY) {
     name: 'openrouter',
     model: process.env.OPENROUTER_CONFORMANCE_MODEL || 'openrouter/openai/gpt-5.4-mini',
     provider: new OpenRouterProvider({ apiKey: process.env.OPENROUTER_API_KEY }),
+    testJson: true,
+    testTools: true,
   });
 }
 
@@ -74,6 +100,8 @@ if (process.env.OLLAMA_CONFORMANCE === 'true') {
     name: 'ollama',
     model: process.env.OLLAMA_CONFORMANCE_MODEL || 'ollama/llama3.2',
     provider: new OllamaProvider({ baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434' }),
+    testJson: process.env.OLLAMA_CONFORMANCE_JSON !== 'false',
+    testTools: false,
   });
 }
 
@@ -86,8 +114,10 @@ const allResults = [];
 for (const item of providers) {
   const results = await runProviderConformance(item.name, item.provider, {
     model: item.model,
-    testStream: process.env.CONFORMANCE_TEST_STREAM === 'true',
+    testStream: globalStreamEnabled && item.testStream !== false,
     testHealth: true,
+    testJson: globalJsonEnabled && item.testJson !== false,
+    testTools: globalToolsEnabled && item.testTools !== false,
   });
   allResults.push(...results);
 }

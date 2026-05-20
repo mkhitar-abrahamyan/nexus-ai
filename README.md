@@ -659,7 +659,7 @@ For distributed production deployments, use shared infrastructure adapters inste
 - `RedisQueueAdapter` or `BullMQQueueAdapter` for durable jobs.
 - A persisted vector store for RAG corpora that outgrow the in-memory examples.
 
-For streaming UX, prefer providers with native streaming. The Cohere adapter currently supports non-streaming completions and `stream()` emits the completed response as one text chunk.
+For streaming UX, prefer providers with native streaming. OpenAI chat models and Responses-only models both normalize to `text`, `tool_call`, `done`, and `error` chunks when the installed `openai` SDK exposes `client.responses.create`. The Cohere adapter currently supports non-streaming completions and `stream()` emits the completed response as one text chunk.
 
 ## Pipeline, Observability, and Extensions
 
@@ -891,13 +891,13 @@ import {
 const openaiResults = await runProviderConformance(
   'openai',
   new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY! }),
-  { model: 'gpt-5.4-mini', testStream: true, testHealth: true },
+  { model: 'gpt-5.4-mini', testStream: true, testHealth: true, testJson: true, testTools: true },
 );
 
 const groqResults = await runProviderConformance(
   'groq',
   new GroqProvider({ apiKey: process.env.GROQ_API_KEY! }),
-  { model: 'groq/openai/gpt-oss-20b', testStream: true, testHealth: true },
+  { model: 'groq/openai/gpt-oss-20b', testStream: true, testHealth: true, testJson: true },
 );
 ```
 
@@ -1149,6 +1149,9 @@ Output protection also redacts common secrets like private keys, AWS access keys
 ```bash
 npm install
 npm run build
+npm test
+npm run test:types
+npm run test:clean-install
 npm run example:minimal
 npm run example:feature-flags
 npm run example:optimizer
@@ -1157,7 +1160,7 @@ npm run example:basic
 npm run example:agent
 ```
 
-For expected results and manual test cases, see `Nexus.md`.
+For expected results and manual test cases, see `NEXUS.md`.
 
 ## Streaming
 

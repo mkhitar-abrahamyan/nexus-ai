@@ -70,5 +70,53 @@ export class MemoryCache<T> {
 }
 
 export function createCacheKey(value: unknown): string {
-  return JSON.stringify(value, Object.keys(value as Record<string, unknown>).sort());
+  return stableStringify(value);
+}
+
+function stableStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+
+  function normalize(input: unknown): unknown {
+    if (input === undefined || typeof input === 'function' || typeof input === 'symbol') {
+      return undefined;
+    }
+
+    if (typeof input === 'bigint') {
+      return input.toString();
+    }
+
+    if (!input || typeof input !== 'object') {
+      return input;
+    }
+
+    if (input instanceof Date) {
+      return input.toISOString();
+    }
+
+    if (Array.isArray(input)) {
+      return input.map((item) => {
+        const normalized = normalize(item);
+        return normalized === undefined ? null : normalized;
+      });
+    }
+
+    if (seen.has(input)) {
+      return '[Circular]';
+    }
+    seen.add(input);
+
+    const object = input as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(object).sort()) {
+      const normalized = normalize(object[key]);
+      if (normalized !== undefined) {
+        sorted[key] = normalized;
+      }
+    }
+
+    seen.delete(input);
+    return sorted;
+  }
+
+  return JSON.stringify(normalize(value));
 }

@@ -3,6 +3,13 @@ import type { NexusResponse, NexusStream } from '../types/response.js';
 import type { BaseProvider } from '../providers/base.js';
 import type { RouteDecision } from './types.js';
 import type { RetryConfig } from '../types/config.js';
+import {
+  NexusProviderError,
+  createAbortProviderError,
+  createTimeoutProviderError,
+  categorizeProviderError,
+  type NexusProviderErrorCategory,
+} from '../providers/errors.js';
 
 export interface ExecutionOptions {
   timeoutMs?: number;
@@ -28,10 +35,14 @@ export class FailoverExecutor {
 
       for (let retryIndex = 0; retryIndex <= retry.maxRetries; retryIndex += 1) {
         try {
+          this.throwIfAborted(request.signal, attempt.providerName, attempt.model);
           const started = Date.now();
           const response = await this.withTimeout(
             provider.complete({ ...request, model: attempt.model }),
             request.timeoutMs || options.timeoutMs,
+            request.signal,
+            attempt.providerName,
+            attempt.model,
           );
           options.onAttemptSuccess?.(attempt.providerName, Date.now() - started);
           response.meta.routingDecision = {
@@ -44,15 +55,17 @@ export class FailoverExecutor {
           return response;
         } catch (err) {
           options.onAttemptFailure?.(attempt.providerName, err);
-          const category = this.categorizeError(err);
+          if (err instanceof NexusProviderError && err.category === 'abort') {
+            throw err;
+          }
           const message = `${attempt.providerName}/${attempt.model}: ${err instanceof Error ? err.message : String(err)}`;
           errors.push(message);
 
-          if (!retry.enabled || retryIndex >= retry.maxRetries || !retry.retryOn.includes(category)) {
+          if (!this.shouldRetry(err, retry, retryIndex)) {
             break;
           }
 
-          await this.delay(this.retryDelay(retry, retryIndex));
+          await this.delay(this.retryDelay(retry, retryIndex), request.signal);
         }
       }
     }
@@ -67,13 +80,14 @@ export class FailoverExecutor {
     options: ExecutionOptions = {},
   ): NexusStream {
     const self = this;
+    const controller = this.createLinkedAbortController(request.signal);
     return {
       [Symbol.asyncIterator]() {
         const attempts = [{ providerName: decision.providerName, model: decision.model }, ...decision.fallbacks];
-        return self.streamAttempts(request, attempts, providers, options);
+        return self.streamAttempts({ ...request, signal: controller.signal }, attempts, providers, options);
       },
       abort() {
-        // Each provider stream owns its own abort lifecycle once selected.
+        controller.abort();
       },
     };
   }
@@ -95,6 +109,7 @@ export class FailoverExecutor {
         const started = Date.now();
         let emitted = false;
         try {
+          this.throwIfAborted(request.signal, attempt.providerName, attempt.model);
           for await (const chunk of provider.stream({ ...request, model: attempt.model })) {
             if (chunk.type === 'error') throw new Error(chunk.error || 'stream error');
             emitted = emitted || chunk.type === 'text' || chunk.type === 'tool_call';
@@ -105,10 +120,10 @@ export class FailoverExecutor {
         } catch (error) {
           options.onAttemptFailure?.(attempt.providerName, error);
           errors.push(`${attempt.providerName}/${attempt.model}: ${error instanceof Error ? error.message : String(error)}`);
-          if (emitted || !retry.enabled || retryIndex >= retry.maxRetries || !retry.retryOn.includes(this.categorizeError(error))) {
+          if (emitted || !this.shouldRetry(error, retry, retryIndex)) {
             break;
           }
-          await this.delay(this.retryDelay(retry, retryIndex));
+          await this.delay(this.retryDelay(retry, retryIndex), request.signal);
         }
       }
     }
@@ -116,18 +131,33 @@ export class FailoverExecutor {
     yield { type: 'error', error: `All streaming attempts failed: ${errors.join(' | ')}` };
   }
 
-  private async withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
-    if (!timeoutMs || timeoutMs <= 0) return promise;
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
+    providerName: string,
+    model: string,
+  ): Promise<T> {
+    if ((!timeoutMs || timeoutMs <= 0) && !signal) return promise;
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let abortListener: (() => void) | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      timeout = setTimeout(() => reject(new Error(`Provider call timed out after ${timeoutMs}ms`)), timeoutMs);
+      if (timeoutMs && timeoutMs > 0) {
+        timeout = setTimeout(() => reject(createTimeoutProviderError(providerName, model, timeoutMs)), timeoutMs);
+      }
+      if (signal) {
+        abortListener = () => reject(createAbortProviderError(providerName, model, signal.reason));
+        if (signal.aborted) abortListener();
+        else signal.addEventListener('abort', abortListener, { once: true });
+      }
     });
 
     try {
       return await Promise.race([promise, timeoutPromise]);
     } finally {
       if (timeout) clearTimeout(timeout);
+      if (signal && abortListener) signal.removeEventListener('abort', abortListener);
     }
   }
 
@@ -142,13 +172,16 @@ export class FailoverExecutor {
     };
   }
 
-  private categorizeError(error: unknown): Required<RetryConfig>['retryOn'][number] {
-    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-    if (message.includes('timed out') || message.includes('timeout')) return 'timeout';
-    if (message.includes('429') || message.includes('rate limit')) return 'rate-limit';
-    if (message.includes('500') || message.includes('502') || message.includes('503') || message.includes('504')) return 'server-error';
-    if (message.includes('network') || message.includes('fetch failed') || message.includes('econnreset')) return 'network';
-    return 'unknown';
+  private shouldRetry(error: unknown, retry: Required<RetryConfig>, retryIndex: number): boolean {
+    if (!retry.enabled || retryIndex >= retry.maxRetries) return false;
+    if (error instanceof NexusProviderError && !error.retryable) return false;
+    const category = this.categorizeError(error);
+    return retry.retryOn.includes(category as Required<RetryConfig>['retryOn'][number]);
+  }
+
+  private categorizeError(error: unknown): NexusProviderErrorCategory {
+    if (error instanceof NexusProviderError) return error.category;
+    return categorizeProviderError(error);
   }
 
   private retryDelay(retry: Required<RetryConfig>, retryIndex: number): number {
@@ -156,7 +189,41 @@ export class FailoverExecutor {
     return Math.min(retry.baseDelayMs * multiplier, retry.maxDelayMs);
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  private delay(ms: number, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(createAbortProviderError('router', 'retry-delay', signal.reason));
+    if (ms <= 0) return Promise.resolve();
+
+    return new Promise((resolve, reject) => {
+      const cleanup = () => signal?.removeEventListener('abort', abort);
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, ms);
+      const abort = () => {
+        clearTimeout(timeout);
+        cleanup();
+        reject(createAbortProviderError('router', 'retry-delay', signal?.reason));
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+    });
+  }
+
+  private throwIfAborted(signal: AbortSignal | undefined, providerName: string, model: string): void {
+    if (signal?.aborted) {
+      throw createAbortProviderError(providerName, model, signal.reason);
+    }
+  }
+
+  private createLinkedAbortController(signal?: AbortSignal): AbortController {
+    const controller = new AbortController();
+    if (!signal) return controller;
+
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+    }
+
+    return controller;
   }
 }

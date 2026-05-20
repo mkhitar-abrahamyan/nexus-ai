@@ -92,6 +92,7 @@ export interface CompletionRequest {
   };
   stop?: string | string[];
   stream?: boolean;
+  signal?: AbortSignal;
   userId?: string;
   metadata?: Record<string, unknown>;
 }

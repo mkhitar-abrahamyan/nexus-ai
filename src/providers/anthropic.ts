@@ -1,12 +1,71 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
-import type { CompletionRequest, Message, ContentPart } from '../types/messages.js';
+import type { CompletionRequest, ContentPart, Message } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
 import type { AnthropicProviderConfig } from '../types/config.js';
 import { generateRequestId } from '../utils/ids.js';
+import { getRecord, getString } from './type-guards.js';
+
+interface RequestOptions {
+  signal?: AbortSignal;
+}
+
+interface AnthropicClient {
+  messages: {
+    create(params: AnthropicMessageCreateParams, options?: RequestOptions): Promise<AnthropicMessageResponse>;
+    stream(
+      params: AnthropicMessageCreateParams & { stream: true },
+      options?: RequestOptions,
+    ): AsyncIterable<AnthropicStreamEvent>;
+  };
+}
+
+interface AnthropicMessageCreateParams {
+  model: string;
+  messages: AnthropicMessageParam[];
+  max_tokens: number;
+  temperature?: number;
+  top_p?: number;
+  stop_sequences?: string[];
+  system?: string;
+  tools?: AnthropicToolParam[];
+  stream?: boolean;
+}
+
+interface AnthropicMessageParam {
+  role: 'user' | 'assistant';
+  content: string | AnthropicContentBlock[];
+}
+
+type AnthropicContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+  | { type: 'image'; source: { type: 'url'; url: string } };
+
+interface AnthropicToolParam {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+interface AnthropicMessageResponse {
+  model: string;
+  content: AnthropicResponseContentBlock[];
+  stop_reason?: string | null;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
+}
+
+type AnthropicResponseContentBlock =
+  | { type: 'text'; text?: string }
+  | { type: 'tool_use'; id?: string; name?: string; input?: unknown };
+
+type AnthropicStreamEvent = Record<string, unknown> & { type: string };
 
 export class AnthropicProvider extends BaseProvider {
   readonly info: ProviderInfo = { name: 'anthropic', isLocal: false };
-  private client: any;
+  private client?: AnthropicClient;
   private config: AnthropicProviderConfig;
 
   constructor(config: AnthropicProviderConfig) {
@@ -14,26 +73,24 @@ export class AnthropicProvider extends BaseProvider {
     this.config = config;
   }
 
-  private async getClient(): Promise<any> {
+  private async getClient(): Promise<AnthropicClient> {
     if (!this.client) {
       const { default: Anthropic } = await import('@anthropic-ai/sdk');
       this.client = new Anthropic({
         apiKey: this.config.apiKey,
         baseURL: this.config.baseUrl,
-      });
+      }) as AnthropicClient;
     }
     return this.client;
   }
 
-  private formatMessages(messages: Message[]): { system?: string; messages: any[] } {
+  private formatMessages(messages: Message[]): { system?: string; messages: AnthropicMessageParam[] } {
     let system: string | undefined;
-    const formatted: any[] = [];
+    const formatted: AnthropicMessageParam[] = [];
 
     for (const msg of messages) {
       if (msg.role === 'system') {
-        system = typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.filter((p) => p.type === 'text').map((p) => (p as any).text).join('\n');
+        system = this.textFromContent(msg.content);
         continue;
       }
 
@@ -42,7 +99,7 @@ export class AnthropicProvider extends BaseProvider {
         continue;
       }
 
-      const parts: any[] = msg.content.map((part: ContentPart) => {
+      const parts = msg.content.map((part: ContentPart): AnthropicContentBlock => {
         switch (part.type) {
           case 'text':
             return { type: 'text', text: part.text };
@@ -67,10 +124,10 @@ export class AnthropicProvider extends BaseProvider {
             if ('url' in src) {
               return { type: 'image', source: { type: 'url', url: src.url } };
             }
-            return { type: 'text', text: '[image from path — requires preprocessing]' };
+            return { type: 'text', text: '[image from path requires preprocessing]' };
           }
           default:
-            return { type: 'text', text: `[${part.type} content — not yet supported for this provider]` };
+            return { type: 'text', text: `[${part.type} content is not yet supported for this provider]` };
         }
       });
 
@@ -80,21 +137,110 @@ export class AnthropicProvider extends BaseProvider {
     return { system, messages: formatted };
   }
 
-  private formatToolsAnthropic(tools?: CompletionRequest['tools']): any[] | undefined {
+  private formatToolsAnthropic(tools?: CompletionRequest['tools']): AnthropicToolParam[] | undefined {
     if (!tools || tools.length === 0) return undefined;
-    return tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.parameters,
+    return tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      input_schema: tool.parameters,
     }));
   }
 
   async complete(request: CompletionRequest): Promise<NexusResponse> {
-    const client = await this.getClient();
-    const startTime = Date.now();
-    const { system, messages } = this.formatMessages(request.messages);
+    try {
+      this.throwIfAborted(request);
+      const client = await this.getClient();
+      const startTime = Date.now();
+      const params = this.createParams(request);
+      const result = await client.messages.create(params, this.requestOptions(request));
+      const latency = Date.now() - startTime;
 
-    const params: any = {
+      let content = '';
+      const toolCalls: ToolCall[] = [];
+
+      for (const block of result.content) {
+        if (block.type === 'text') {
+          content += block.text || '';
+        } else if (block.type === 'tool_use') {
+          toolCalls.push({
+            id: block.id || generateRequestId(),
+            type: 'function',
+            function: { name: block.name || '', arguments: JSON.stringify(block.input || {}) },
+          });
+        }
+      }
+
+      return {
+        content,
+        role: 'assistant',
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        finishReason: result.stop_reason === 'tool_use' ? 'tool_calls' : 'stop',
+        meta: {
+          requestId: generateRequestId(),
+          providerUsed: 'anthropic',
+          modelUsed: result.model,
+          latencyMs: latency,
+          tokensInput: result.usage?.input_tokens || 0,
+          tokensOutput: result.usage?.output_tokens || 0,
+          tokensSaved: 0,
+          estimatedCost: `$${((result.usage?.input_tokens || 0) / 1000 * 0.003 + (result.usage?.output_tokens || 0) / 1000 * 0.015).toFixed(4)}`,
+          cacheHit: false,
+          guardrailsApplied: [],
+        },
+      };
+    } catch (error) {
+      throw this.normalizeProviderError(error, request);
+    }
+  }
+
+  stream(request: CompletionRequest): NexusStream {
+    const self = this;
+
+    return this.createStream(async function* () {
+      try {
+        self.throwIfAborted(request);
+        const client = await self.getClient();
+        const startTime = Date.now();
+        const stream = client.messages.stream({
+          ...self.createParams(request),
+          stream: true,
+        }, self.requestOptions(request));
+
+        for await (const event of stream) {
+          if (event.type === 'content_block_delta') {
+            const delta = getRecord(event, 'delta');
+            if (getString(delta, 'type') === 'text_delta') {
+              yield { type: 'text', content: getString(delta, 'text') } satisfies StreamChunk;
+            }
+          }
+
+          if (event.type === 'message_stop') {
+            yield {
+              type: 'done',
+              meta: {
+                requestId: generateRequestId(),
+                providerUsed: 'anthropic',
+                modelUsed: request.model,
+                latencyMs: Date.now() - startTime,
+                tokensInput: 0,
+                tokensOutput: 0,
+                tokensSaved: 0,
+                estimatedCost: '$0.00',
+                cacheHit: false,
+                guardrailsApplied: [],
+              },
+            } satisfies StreamChunk;
+          }
+        }
+      } catch (error) {
+        throw self.normalizeProviderError(error, request);
+      }
+    }, request.signal);
+  }
+
+  private createParams(request: CompletionRequest): AnthropicMessageCreateParams {
+    const { system, messages } = this.formatMessages(request.messages);
+    const params: AnthropicMessageCreateParams = {
       model: request.model,
       messages,
       max_tokens: request.maxTokens || 4096,
@@ -107,98 +253,18 @@ export class AnthropicProvider extends BaseProvider {
     const tools = this.formatToolsAnthropic(request.tools);
     if (tools) params.tools = tools;
 
-    const result = await client.messages.create(params);
-    const latency = Date.now() - startTime;
-
-    let content = '';
-    const toolCalls: ToolCall[] = [];
-
-    for (const block of result.content) {
-      if (block.type === 'text') {
-        content += block.text;
-      } else if (block.type === 'tool_use') {
-        toolCalls.push({
-          id: block.id,
-          type: 'function',
-          function: { name: block.name, arguments: JSON.stringify(block.input) },
-        });
-      }
-    }
-
-    return {
-      content,
-      role: 'assistant',
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      finishReason: result.stop_reason === 'tool_use' ? 'tool_calls' : 'stop',
-      meta: {
-        requestId: generateRequestId(),
-        providerUsed: 'anthropic',
-        modelUsed: result.model,
-        latencyMs: latency,
-        tokensInput: result.usage?.input_tokens || 0,
-        tokensOutput: result.usage?.output_tokens || 0,
-        tokensSaved: 0,
-        estimatedCost: `$${((result.usage?.input_tokens || 0) / 1000 * 0.003 + (result.usage?.output_tokens || 0) / 1000 * 0.015).toFixed(4)}`,
-        cacheHit: false,
-        guardrailsApplied: [],
-      },
-    };
+    return params;
   }
 
-  stream(request: CompletionRequest): NexusStream {
-    const self = this;
+  private textFromContent(content: Message['content']): string {
+    if (typeof content === 'string') return content;
+    return content
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n');
+  }
 
-    return this.createStream(async function* () {
-      const client = await self.getClient();
-      const startTime = Date.now();
-      const { system, messages } = self.formatMessages(request.messages);
-
-      const params: any = {
-        model: request.model,
-        messages,
-        max_tokens: request.maxTokens || 4096,
-        temperature: request.temperature,
-        top_p: request.topP,
-        stream: true,
-      };
-
-      if (system) params.system = system;
-      const tools = self.formatToolsAnthropic(request.tools);
-      if (tools) params.tools = tools;
-
-      const stream = client.messages.stream(params);
-
-      for await (const event of stream) {
-        if (event.type === 'content_block_delta') {
-          if (event.delta.type === 'text_delta') {
-            yield { type: 'text', content: event.delta.text } satisfies StreamChunk;
-          } else if (event.delta.type === 'input_json_delta') {
-            // Tool call argument streaming — buffered by Anthropic SDK
-          }
-        }
-
-        if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
-          // Tool call started
-        }
-
-        if (event.type === 'message_stop') {
-          yield {
-            type: 'done',
-            meta: {
-              requestId: generateRequestId(),
-              providerUsed: 'anthropic',
-              modelUsed: request.model,
-              latencyMs: Date.now() - startTime,
-              tokensInput: 0,
-              tokensOutput: 0,
-              tokensSaved: 0,
-              estimatedCost: '$0.00',
-              cacheHit: false,
-              guardrailsApplied: [],
-            },
-          } satisfies StreamChunk;
-        }
-      }
-    });
+  private requestOptions(request: CompletionRequest): RequestOptions | undefined {
+    return request.signal ? { signal: request.signal } : undefined;
   }
 }

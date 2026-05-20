@@ -18,6 +18,15 @@ export interface ProviderConformanceResult {
   error?: string;
 }
 
+export interface ProviderConformanceOptions {
+  model?: string;
+  fixtures?: ProviderConformanceCase[];
+  testStream?: boolean;
+  testHealth?: boolean;
+  testJson?: boolean;
+  testTools?: boolean;
+}
+
 export const PROVIDER_CONFORMANCE_FIXTURES: Record<string, ProviderConformanceCase[]> = {
   openai: baseFixtures('gpt-5.4-mini'),
   anthropic: baseFixtures('claude-sonnet-4'),
@@ -32,16 +41,29 @@ export const PROVIDER_CONFORMANCE_FIXTURES: Record<string, ProviderConformanceCa
 export async function runProviderConformance(
   providerName: string,
   provider: BaseProvider,
-  options: {
-    model?: string;
-    fixtures?: ProviderConformanceCase[];
-    testStream?: boolean;
-    testHealth?: boolean;
-  } = {},
+  options: ProviderConformanceOptions = {},
 ): Promise<ProviderConformanceResult[]> {
-  const fixtures = options.fixtures || PROVIDER_CONFORMANCE_FIXTURES[providerName] || baseFixtures(options.model || 'auto');
+  const fixtureModel = options.model || 'auto';
+  const shouldBuildCustomFixtures = Boolean(options.model || options.testJson === false || options.testTools);
+  const fixtures = options.fixtures
+    || (shouldBuildCustomFixtures
+      ? baseFixtures(fixtureModel, {
+          json: options.testJson !== false,
+          tools: options.testTools === true,
+        })
+      : PROVIDER_CONFORMANCE_FIXTURES[providerName] || baseFixtures(fixtureModel));
   const results: ProviderConformanceResult[] = [];
-  const healthOk = options.testHealth ? await provider.healthCheck() : undefined;
+  let healthOk: boolean | undefined;
+  let healthError: string | undefined;
+
+  if (options.testHealth) {
+    try {
+      healthOk = await provider.healthCheck();
+    } catch (error) {
+      healthOk = false;
+      healthError = error instanceof Error ? error.message : String(error);
+    }
+  }
 
   for (const fixture of fixtures) {
     const request = {
@@ -52,9 +74,15 @@ export async function runProviderConformance(
       const response = await provider.complete(request);
       const completeOk = await fixture.validate(response);
       let streamOk: boolean | undefined;
+      let streamError: string | undefined;
 
       if (options.testStream) {
-        streamOk = await validateStream(provider.stream(request));
+        try {
+          streamOk = await validateStream(provider.stream(request));
+        } catch (error) {
+          streamOk = false;
+          streamError = error instanceof Error ? error.message : String(error);
+        }
       }
 
       results.push({
@@ -64,6 +92,7 @@ export async function runProviderConformance(
         completeOk,
         streamOk,
         healthOk,
+        error: streamError || healthError,
       });
     } catch (error) {
       results.push({
@@ -72,7 +101,7 @@ export async function runProviderConformance(
         caseName: fixture.name,
         completeOk: false,
         healthOk,
-        error: error instanceof Error ? error.message : String(error),
+        error: [healthError, error instanceof Error ? error.message : String(error)].filter(Boolean).join(' | '),
       });
     }
   }
@@ -80,8 +109,9 @@ export async function runProviderConformance(
   return results;
 }
 
-function baseFixtures(model: string): ProviderConformanceCase[] {
-  return [
+function baseFixtures(model: string, options: { json?: boolean; tools?: boolean } = {}): ProviderConformanceCase[] {
+  const includeJson = options.json !== false;
+  const fixtures: ProviderConformanceCase[] = [
     {
       name: 'basic-text-completion',
       request: {
@@ -92,7 +122,10 @@ function baseFixtures(model: string): ProviderConformanceCase[] {
       },
       validate: (response) => response.role === 'assistant' && typeof response.content === 'string',
     },
-    {
+  ];
+
+  if (includeJson) {
+    fixtures.push({
       name: 'json-response-shape',
       request: {
         model,
@@ -116,14 +149,44 @@ function baseFixtures(model: string): ProviderConformanceCase[] {
           return false;
         }
       },
-    },
-  ];
+    });
+  }
+
+  if (options.tools) {
+    fixtures.push({
+      name: 'tool-call-normalization',
+      request: {
+        model,
+        messages: [{ role: 'user', content: 'Call the lookup tool with query "ok".' }],
+        temperature: 0,
+        maxTokens: 96,
+        tools: [
+          {
+            name: 'lookup',
+            description: 'Lookup a short query.',
+            parameters: {
+              type: 'object',
+              required: ['query'],
+              properties: { query: { type: 'string' } },
+            },
+          },
+        ],
+      },
+      validate: (response) => {
+        return Array.isArray(response.toolCalls)
+          && response.toolCalls.some((toolCall) => toolCall.function.name === 'lookup');
+      },
+    });
+  }
+
+  return fixtures;
 }
 
 async function validateStream(stream: AsyncIterable<StreamChunk>): Promise<boolean> {
+  let sawUsableChunk = false;
   for await (const chunk of stream) {
-    if (chunk.type === 'text' || chunk.type === 'done' || chunk.type === 'tool_call') return true;
+    if (chunk.type === 'text' || chunk.type === 'done' || chunk.type === 'tool_call') sawUsableChunk = true;
     if (chunk.type === 'error') return false;
   }
-  return false;
+  return sawUsableChunk;
 }

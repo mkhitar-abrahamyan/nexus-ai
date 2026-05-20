@@ -8,9 +8,15 @@ export interface ConsistencyClient {
 
 export interface SelfConsistencyOptions {
   samples?: number;
+  maxConcurrency?: number;
   temperature?: number;
   topP?: number;
   judge?: (responses: NexusResponse[]) => Promise<NexusResponse> | NexusResponse;
+}
+
+interface SampleFailure {
+  index: number;
+  error: unknown;
 }
 
 export async function completeWithSelfConsistency(
@@ -18,29 +24,73 @@ export async function completeWithSelfConsistency(
   request: CompletionRequest,
   options: SelfConsistencyOptions = {},
 ): Promise<NexusResponse> {
-  const samples = Math.max(1, options.samples || 3);
-  const candidates = await Promise.all(
-    Array.from({ length: samples }, () => client.complete(withFactualDefaults({
+  const requestedSamples = options.samples ?? 3;
+  const samples = Math.max(1, Number.isFinite(requestedSamples) ? Math.floor(requestedSamples) : 3);
+  const requestedConcurrency = options.maxConcurrency ?? 2;
+  const maxConcurrency = Math.min(
+    samples,
+    Math.max(1, Number.isFinite(requestedConcurrency) ? Math.floor(requestedConcurrency) : 2),
+  );
+  const sampleRequests = Array.from({ length: samples }, () => withFactualDefaults({
       ...request,
       temperature: options.temperature ?? request.temperature ?? 0.2,
       topP: options.topP ?? request.topP ?? 0.3,
     }, {
       requireUnknownFallback: true,
       chainOfThought: 'private',
-    }))),
-  );
+    }));
+  const { candidates, failures } = await completeSamples(client, sampleRequests, maxConcurrency);
+
+  if (candidates.length === 0) {
+    throw new AggregateError(
+      failures.map((failure) => failure.error),
+      `Self-consistency failed: all ${samples} samples failed`,
+    );
+  }
 
   const selected = options.judge
     ? await options.judge(candidates)
     : selectMostConsistent(candidates);
 
+  const guardrailsApplied = [...selected.meta.guardrailsApplied, 'self-consistency'];
+  if (failures.length > 0) {
+    guardrailsApplied.push(`self-consistency-recovered-${failures.length}`);
+  }
+
   return {
     ...selected,
     meta: {
       ...selected.meta,
-      guardrailsApplied: [...selected.meta.guardrailsApplied, 'self-consistency'],
+      guardrailsApplied,
     },
   };
+}
+
+async function completeSamples(
+  client: ConsistencyClient,
+  requests: CompletionRequest[],
+  maxConcurrency: number,
+): Promise<{ candidates: NexusResponse[]; failures: SampleFailure[] }> {
+  const candidateSlots: Array<NexusResponse | undefined> = new Array(requests.length);
+  const failures: SampleFailure[] = [];
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < requests.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      try {
+        candidateSlots[index] = await client.complete(requests[index]);
+      } catch (error) {
+        failures.push({ index, error });
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
+  const candidates = candidateSlots.filter((candidate): candidate is NexusResponse => Boolean(candidate));
+  return { candidates, failures };
 }
 
 export function selectMostConsistent(responses: NexusResponse[]): NexusResponse {
