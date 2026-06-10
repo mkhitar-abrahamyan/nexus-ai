@@ -1,6 +1,7 @@
 import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import type { RouteDecision } from '../router/types.js';
+import type { ContextWindowResult } from '../types/context-window.js';
 import type { OptimizationResult } from '../types/optimizer.js';
 import type { SecurityFinding } from '../types/security.js';
 
@@ -14,6 +15,7 @@ export type PipelineHookName =
 export type PipelineStepName =
   | PipelineHookName
   | 'responseFormat'
+  | 'contextWindow'
   | 'tokenOptimization'
   | 'inputSecurity'
   | 'routing'
@@ -48,6 +50,7 @@ export interface PipelineContext {
   request: CompletionRequest;
   response?: NexusResponse;
   route?: RouteDecision;
+  contextWindow?: ContextWindowResult<CompletionRequest>;
   optimization?: OptimizationResult<CompletionRequest>;
   securityFindings: SecurityFinding[];
   guardrailsApplied: string[];

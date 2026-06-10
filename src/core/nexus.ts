@@ -1,8 +1,18 @@
 import type { NexusAIConfig } from '../types/config.js';
 import type { CompletionRequest } from '../types/messages.js';
+import type { ContextSummaryInput, ContextWindowResult } from '../types/context-window.js';
 import type { NexusPlan } from '../types/planning.js';
 import type { NexusResponse, NexusStream } from '../types/response.js';
 import type { AgentConfig, AgentResult } from '../types/agent.js';
+import type {
+  SpeechRequest,
+  SpeechResponse,
+  TranscriptionRequest,
+  TranscriptionResponse,
+  VoiceProvider,
+  VoiceTurnRequest,
+  VoiceTurnResponse,
+} from '../types/voice.js';
 import type { PipelineStep } from '../pipeline/types.js';
 import { BaseProvider } from '../providers/base.js';
 import { OpenAIProvider } from '../providers/openai.js';
@@ -16,6 +26,8 @@ import { CohereProvider } from '../providers/cohere.js';
 import { Router, FailoverExecutor } from '../router/index.js';
 import { Logger } from '../utils/logger.js';
 import { SecurityPipeline } from '../security/index.js';
+import { ContextWindowManager } from '../context/index.js';
+import { VoiceManager } from '../voice/index.js';
 import { TokenOptimizer } from '../optimizer/index.js';
 import { AgentLoop } from '../agent/loop.js';
 import { resolveModel } from '../models/registry.js';
@@ -49,6 +61,8 @@ export class NexusAI {
   private failover = new FailoverExecutor();
   private logger: Logger;
   private security: SecurityPipeline;
+  private contextWindow: ContextWindowManager;
+  private voiceManager: VoiceManager;
   private optimizer: TokenOptimizer;
   private cache: MemoryCache<NexusResponse>;
   private auditLogger: AuditLogger;
@@ -66,6 +80,8 @@ export class NexusAI {
     };
     this.logger = new Logger(this.config.debug);
     this.security = new SecurityPipeline(this.config.security || 'standard');
+    this.contextWindow = new ContextWindowManager(this.config.contextWindow || {});
+    this.voiceManager = new VoiceManager(this.config.voice || {});
     this.optimizer = new TokenOptimizer(this.config.tokenOptimizer || {});
     this.cache = new MemoryCache<NexusResponse>(this.config.cache?.maxEntries || 500);
     this.auditLogger = new AuditLogger(this.config.auditLog);
@@ -106,6 +122,16 @@ export class NexusAI {
           return withResponseFormat(context.request, this.config.responseFormat);
         });
         context.request = formattedRequest;
+      }
+
+      if (this.isContextWindowEnabled()) {
+        const contextWindowResult = await this.pipeline.trace(context, 'contextWindow', () => {
+          return this.contextWindow.optimize(context.request, {
+            summarizer: (input) => this.summarizeContext(input),
+          });
+        });
+        context.contextWindow = contextWindowResult;
+        context.request = contextWindowResult.value;
       }
 
       const optimizationResult = this.isTokenOptimizerEnabled()
@@ -183,6 +209,9 @@ export class NexusAI {
 
       context.response!.meta.guardrailsApplied.push(...context.guardrailsApplied);
       context.response!.meta.tokensSaved += optimizationResult.usage.savedTokens;
+      if (context.contextWindow) {
+        context.response!.meta.contextWindow = context.contextWindow.usage;
+      }
       context.response!.meta.routingDecision = {
         reason: decision.reason,
         fallbacksConsidered: decision.fallbacks.length,
@@ -249,7 +278,11 @@ export class NexusAI {
     const formattedRequest = this.hasResponseFormat(request)
       ? withResponseFormat(request, this.config.responseFormat)
       : request;
-    const optimizationResult = this.optimizer.optimize(formattedRequest);
+    const contextWindowResult = this.isContextWindowEnabled()
+      ? this.contextWindow.preview(formattedRequest)
+      : undefined;
+    const requestForOptimization = contextWindowResult?.value || formattedRequest;
+    const optimizationResult = this.optimizer.optimize(requestForOptimization);
     const securityResult = this.isSecurityEnabled()
       ? this.security.protectInput(optimizationResult.value)
       : { ok: true, value: optimizationResult.value, findings: [], guardrailsApplied: [] };
@@ -264,6 +297,7 @@ export class NexusAI {
     });
     const maxContextTokens = resolved.capabilities?.maxContextTokens;
     const warnings = [
+      ...(contextWindowResult?.warnings || []),
       ...optimizationResult.warnings,
       ...securityResult.findings.map((finding) => finding.message),
     ];
@@ -282,6 +316,7 @@ export class NexusAI {
       providerName: decision.providerName,
       model: resolved.model,
       route: decision,
+      contextWindow: contextWindowResult?.usage,
       tokenUsage: optimizationResult.usage,
       estimatedCost: cost,
       maxContextTokens,
@@ -295,6 +330,10 @@ export class NexusAI {
   }
 
   stream(request: CompletionRequest): NexusStream {
+    if (this.isContextWindowEnabled()) {
+      return this.streamWithContextWindow(request);
+    }
+
     this.rateLimiter.check(request, this.config.rateLimit);
     const formattedRequest = this.hasResponseFormat(request)
       ? withResponseFormat(request, this.config.responseFormat)
@@ -325,8 +364,29 @@ export class NexusAI {
     return loop.run(config);
   }
 
+  async transcribe(request: TranscriptionRequest): Promise<TranscriptionResponse> {
+    return this.voiceManager.transcribe(request);
+  }
+
+  async speak(request: SpeechRequest): Promise<SpeechResponse> {
+    return this.voiceManager.speak(request);
+  }
+
+  async voice(request: VoiceTurnRequest): Promise<VoiceTurnResponse> {
+    return this.voiceManager.runTurn(request, this);
+  }
+
+  async voiceTurn(request: VoiceTurnRequest): Promise<VoiceTurnResponse> {
+    return this.voiceManager.runTurn(request, this);
+  }
+
   registerProvider(name: string, provider: BaseProvider): this {
     this.providers.set(name, provider);
+    return this;
+  }
+
+  registerVoiceProvider(name: string, provider: VoiceProvider): this {
+    this.voiceManager.registerProvider(name, provider);
     return this;
   }
 
@@ -334,8 +394,16 @@ export class NexusAI {
     return this.providers.has(name);
   }
 
+  hasVoiceProvider(name: string): boolean {
+    return this.voiceManager.hasProvider(name);
+  }
+
   listProviders(): string[] {
     return [...this.providers.keys()];
+  }
+
+  listVoiceProviders(): string[] {
+    return this.voiceManager.listProviders();
   }
 
   use(step: PipelineStep): this {
@@ -433,9 +501,137 @@ export class NexusAI {
     return this.config.tokenOptimizer?.enabled !== false;
   }
 
+  private isContextWindowEnabled(): boolean {
+    return this.config.contextWindow !== undefined && this.config.contextWindow.enabled !== false;
+  }
+
   private hasResponseFormat(request: CompletionRequest): boolean {
     const responseFormat = request.responseFormat || this.config.responseFormat;
     return Boolean(responseFormat && responseFormat.type !== 'text');
+  }
+
+  private streamWithContextWindow(request: CompletionRequest): NexusStream {
+    this.rateLimiter.check(request, this.config.rateLimit);
+
+    let inner: NexusStream | undefined;
+    let aborted = false;
+
+    const create = async (): Promise<NexusStream> => {
+      const formattedRequest = this.hasResponseFormat(request)
+        ? withResponseFormat(request, this.config.responseFormat)
+        : request;
+      const contextWindowResult = await this.contextWindow.optimize(formattedRequest, {
+        summarizer: (input) => this.summarizeContext(input),
+      });
+      const optimizationResult = this.optimizer.optimize(contextWindowResult.value);
+      const securityResult = this.isSecurityEnabled()
+        ? this.security.protectInput(optimizationResult.value)
+        : { ok: true, value: optimizationResult.value, findings: [], guardrailsApplied: [] };
+      if (this.isSecurityEnabled()) this.security.assertSafe(securityResult);
+
+      const decision = this.router.route(securityResult.value, this.config, this.providers, this.health.snapshot());
+      this.logger.info('stream route decision', {
+        ...(decision as unknown as Record<string, unknown>),
+        tokensSaved: optimizationResult.usage.savedTokens,
+        contextWindow: contextWindowResult.usage,
+      });
+      const routedRequest = { ...securityResult.value, model: resolveModel(decision.model, this.config).model };
+      const stream = this.failover.stream(routedRequest, decision, this.providers, {
+        timeoutMs: this.config.timeout,
+        retry: this.config.retry,
+        onAttemptSuccess: (providerName, latencyMs) => this.health.recordSuccess(providerName, latencyMs),
+        onAttemptFailure: (providerName, error) => this.health.recordFailure(providerName, error),
+      });
+      const securedStream = this.isSecurityEnabled() ? protectStreamOutput(stream, this.security) : stream;
+      return this.attachContextWindowToStream(securedStream, contextWindowResult);
+    };
+
+    return {
+      async *[Symbol.asyncIterator]() {
+        if (aborted) return;
+        inner = inner || await create();
+        if (aborted) {
+          inner.abort();
+          return;
+        }
+        for await (const chunk of inner) {
+          if (aborted) return;
+          yield chunk;
+        }
+      },
+      abort() {
+        aborted = true;
+        inner?.abort();
+      },
+    };
+  }
+
+  private attachContextWindowToStream(
+    stream: NexusStream,
+    result: ContextWindowResult<CompletionRequest>,
+  ): NexusStream {
+    let aborted = false;
+
+    return {
+      async *[Symbol.asyncIterator]() {
+        for await (const chunk of stream) {
+          if (aborted) return;
+          if (chunk.type === 'done') {
+            yield {
+              ...chunk,
+              meta: {
+                ...chunk.meta,
+                contextWindow: result.usage,
+              },
+            };
+            continue;
+          }
+          yield chunk;
+        }
+      },
+      abort() {
+        aborted = true;
+        stream.abort();
+      },
+    };
+  }
+
+  private async summarizeContext(input: ContextSummaryInput): Promise<string> {
+    const model = input.model || input.request.model;
+    const summaryRequest: CompletionRequest = {
+      model,
+      messages: [
+        { role: 'system', content: input.instruction },
+        {
+          role: 'user',
+          content: [
+            'Summarize this earlier conversation for future context.',
+            'Return only the summary.',
+            '',
+            input.serializedMessages,
+          ].join('\n'),
+        },
+      ],
+      maxTokens: input.maxTokens,
+      estimatedOutputTokens: input.maxTokens,
+      temperature: input.temperature ?? 0.2,
+      signal: input.request.signal,
+      userId: input.request.userId,
+      metadata: {
+        ...input.request.metadata,
+        contextWindowSummary: true,
+      },
+    };
+    const decision = this.router.route(summaryRequest, this.config, this.providers, this.health.snapshot());
+    const routedRequest = { ...summaryRequest, model: resolveModel(decision.model, this.config).model };
+    const response = await this.failover.complete(routedRequest, decision, this.providers, {
+      timeoutMs: this.config.timeout,
+      retry: this.config.retry,
+      onAttemptSuccess: (providerName, latencyMs) => this.health.recordSuccess(providerName, latencyMs),
+      onAttemptFailure: (providerName, error) => this.health.recordFailure(providerName, error),
+    });
+
+    return response.content.trim();
   }
 
   private registerConfiguredProviders(): void {

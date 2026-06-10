@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "The Universal AI Pipeline for Node.js - one package, every model, every modality, with guardrails built in",
   "type": "module",
   "main": "dist/index.js",
@@ -34,6 +34,18 @@
     "./optimizer": {
       "types": "./dist/optimizer/index.d.ts",
       "import": "./dist/optimizer/index.js"
+    },
+    "./context": {
+      "types": "./dist/context/index.d.ts",
+      "import": "./dist/context/index.js"
+    },
+    "./voice": {
+      "types": "./dist/voice/index.d.ts",
+      "import": "./dist/voice/index.js"
+    },
+    "./voice/openai": {
+      "types": "./dist/voice/providers/openai.d.ts",
+      "import": "./dist/voice/providers/openai.js"
     },
     "./cache": {
       "types": "./dist/cache/adapters.d.ts",

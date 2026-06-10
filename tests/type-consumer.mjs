@@ -64,6 +64,7 @@ import {
   AnthropicProvider,
   BaseProvider,
   CohereProvider,
+  ContextWindowManager,
   GoogleProvider,
   GroqProvider,
   MemoryCache,
@@ -72,7 +73,9 @@ import {
   NexusProviderError,
   OllamaProvider,
   OpenRouterProvider,
+  VoiceManager,
   type CompletionRequest,
+  type ContextWindowConfig,
   type CostBudgetConfig,
   type NexusAIConfig,
   type NexusResponse,
@@ -82,12 +85,19 @@ import {
   type ResponseMeta,
   type RetryConfig,
   type RoutingConfig,
+  type SpeechRequest,
   type StreamChunk,
+  type TranscriptionRequest,
   type ToolCall,
+  type VoiceConfig,
+  type VoiceProvider,
 } from 'nexus-ai-pro';
 import { OpenAIProvider } from 'nexus-ai-pro/providers/openai';
 import { NexusProviderError as SubpathProviderError } from 'nexus-ai-pro/providers/errors';
 import { MemoryCache as SubpathMemoryCache } from 'nexus-ai-pro/cache/memory-cache';
+import { ContextWindowManager as SubpathContextWindowManager } from 'nexus-ai-pro/context';
+import { VoiceManager as SubpathVoiceManager } from 'nexus-ai-pro/voice';
+import { OpenAIVoiceProvider } from 'nexus-ai-pro/voice/openai';
 
 class ConsumerProvider extends BaseProvider {
   readonly info = { name: 'consumer', isLocal: true };
@@ -106,6 +116,21 @@ class ConsumerProvider extends BaseProvider {
     });
   }
 }
+
+const voiceProvider: VoiceProvider = {
+  info: { name: 'consumer-voice', supports: { transcription: true, speech: true } },
+  async transcribe(request: TranscriptionRequest) {
+    return { text: 'hello', providerUsed: 'consumer-voice', modelUsed: request.model };
+  },
+  async speak(request: SpeechRequest) {
+    return {
+      audio: { data: new Uint8Array([1]), format: request.format || 'mp3' },
+      providerUsed: 'consumer-voice',
+      modelUsed: request.model,
+      format: request.format || 'mp3',
+    };
+  },
+};
 
 const controller = new AbortController();
 const request: CompletionRequest = {
@@ -139,11 +164,26 @@ const costBudgetConfig: CostBudgetConfig = {
   maxEstimatedCost: 0.1,
   onExceeded: 'warn',
 };
+const contextWindowConfig: ContextWindowConfig = {
+  strategy: 'last-messages-with-summary',
+  lastMessages: 8,
+  summary: {
+    model: 'consumer/summary',
+    maxTokens: 256,
+  },
+};
+const voiceConfig: VoiceConfig = {
+  defaultTranscriptionProvider: 'consumer-voice',
+  defaultSpeechProvider: 'consumer-voice',
+  providers: { 'consumer-voice': voiceProvider },
+};
 const aiConfig: NexusAIConfig = {
   providers: providersConfig,
   routing: routingConfig,
   retry: retryConfig,
   costBudget: costBudgetConfig,
+  contextWindow: contextWindowConfig,
+  voice: voiceConfig,
   defaultModel: 'consumer/test',
   security: 'off',
 };
@@ -157,6 +197,11 @@ const ai = new NexusAI({
 const responsePromise: Promise<NexusResponse> = ai.complete(request);
 const exactCache = new MemoryCache<NexusResponse>();
 const subpathCache = new SubpathMemoryCache<string>();
+const contextManager = new ContextWindowManager(contextWindowConfig);
+const subpathContextManager = new SubpathContextWindowManager(contextWindowConfig);
+const voiceManager = new VoiceManager(voiceConfig);
+const subpathVoiceManager = new SubpathVoiceManager(voiceConfig);
+const openAiVoice = new OpenAIVoiceProvider({ apiKey: 'test' });
 const openAiConfig: OpenAIProviderConfig = { apiKey: 'test', organization: 'org' };
 const provider = new OpenAIProvider({ apiKey: 'test' });
 const providerConstructors = [
@@ -203,6 +248,11 @@ const doneChunk: StreamChunk = { type: 'done', meta };
 void responsePromise;
 void exactCache;
 void subpathCache;
+void contextManager;
+void subpathContextManager;
+void voiceManager;
+void subpathVoiceManager;
+void openAiVoice;
 void aiConfig;
 void providerConstructors;
 void providerName;

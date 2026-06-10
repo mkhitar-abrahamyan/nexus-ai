@@ -11,6 +11,7 @@ import {
   SecurityPipeline,
   collectStream,
   completeWithSelfConsistency,
+  ContextWindowManager,
   createCacheKey,
   createTextStream,
   selectGraphFacts,
@@ -18,7 +19,12 @@ import {
   type CompletionRequest,
   type NexusResponse,
   type NexusStream,
+  type SpeechRequest,
+  type SpeechResponse,
   type StreamChunk,
+  type TranscriptionRequest,
+  type TranscriptionResponse,
+  type VoiceProvider,
 } from '../src/index.js';
 import {
   ResponseFormatError,
@@ -90,6 +96,7 @@ function streamFrom(generator: () => AsyncGenerator<StreamChunk>): NexusStream {
 class SequenceProvider extends BaseProvider {
   readonly info = { name: 'mock', isLocal: true };
   calls = 0;
+  requests: CompletionRequest[] = [];
 
   constructor(private outcomes: Array<NexusResponse | Error>) {
     super();
@@ -97,6 +104,7 @@ class SequenceProvider extends BaseProvider {
 
   async complete(req: CompletionRequest): Promise<NexusResponse> {
     this.calls += 1;
+    this.requests.push(req);
     const outcome = this.outcomes.shift() || response('ok', req.model);
     if (outcome instanceof Error) throw outcome;
     return {
@@ -108,7 +116,8 @@ class SequenceProvider extends BaseProvider {
     };
   }
 
-  stream(): NexusStream {
+  stream(req: CompletionRequest): NexusStream {
+    this.requests.push(req);
     return createTextStream('ok');
   }
 }
@@ -134,6 +143,41 @@ class StreamSequenceProvider extends BaseProvider {
       });
     }
     return outcome;
+  }
+}
+
+class MockVoiceProvider implements VoiceProvider {
+  readonly info = {
+    name: 'voice-mock',
+    isLocal: true,
+    supports: { transcription: true, speech: true },
+  };
+  transcriptions: TranscriptionRequest[] = [];
+  speeches: SpeechRequest[] = [];
+
+  async transcribe(req: TranscriptionRequest): Promise<TranscriptionResponse> {
+    this.transcriptions.push(req);
+    return {
+      text: 'customer wants annual billing',
+      providerUsed: 'voice-mock',
+      modelUsed: req.model || 'mock-stt',
+    };
+  }
+
+  async speak(req: SpeechRequest): Promise<SpeechResponse> {
+    this.speeches.push(req);
+    return {
+      audio: {
+        data: new Uint8Array([1, 2, 3]),
+        format: req.format || 'mp3',
+        mimeType: 'audio/mpeg',
+      },
+      providerUsed: 'voice-mock',
+      modelUsed: req.model || 'mock-tts',
+      voice: req.voice,
+      format: req.format || 'mp3',
+      mimeType: 'audio/mpeg',
+    };
   }
 }
 
@@ -415,6 +459,207 @@ test('response-format validation accepts valid JSON and rejects schema mismatche
   assert.equal(formatted.temperature, 0);
   assert.equal(formatted.topP, 0.1);
   assert.equal(formatted.messages[0].role, 'system');
+});
+
+test('ContextWindowManager keeps the last configured messages', async () => {
+  const manager = new ContextWindowManager({
+    strategy: 'last-messages',
+    lastMessages: 2,
+  });
+
+  const result = await manager.optimize(request({
+    messages: [
+      { role: 'system', content: 'Stay concise.' },
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'second' },
+      { role: 'user', content: 'third' },
+      { role: 'assistant', content: 'fourth' },
+    ],
+  }));
+
+  assert.deepEqual(result.value.messages.map((message) => message.content), [
+    'Stay concise.',
+    'third',
+    'fourth',
+  ]);
+  assert.equal(result.usage.droppedMessages, 2);
+  assert.equal(result.usage.summariesCreated, 0);
+});
+
+test('ContextWindowManager summarizes older messages locally', async () => {
+  const manager = new ContextWindowManager({
+    strategy: 'last-messages-with-summary',
+    lastMessages: 1,
+    summary: {
+      mode: 'local',
+      label: 'Memory',
+    },
+  });
+
+  const result = await manager.optimize(request({
+    messages: [
+      { role: 'user', content: 'The customer prefers annual billing.' },
+      { role: 'assistant', content: 'Noted.' },
+      { role: 'user', content: 'What should we offer now?' },
+    ],
+  }));
+
+  assert.equal(result.value.messages.length, 2);
+  assert.match(String(result.value.messages[0].content), /Memory:/);
+  assert.match(String(result.value.messages[0].content), /annual billing/);
+  assert.equal(result.value.messages[1].content, 'What should we offer now?');
+  assert.equal(result.usage.summarizedMessages, 2);
+  assert.equal(result.usage.summaryMode, 'local');
+});
+
+test('NexusAI.complete can summarize old context with a configured model', async () => {
+  const provider = new SequenceProvider([
+    response('User asked about annual billing; assistant confirmed the preference.'),
+    response('final answer'),
+  ]);
+  const ai = new NexusAI({
+    providers: {},
+    routing: { mode: 'direct' },
+    defaultModel: 'mock/final',
+    security: 'off',
+    tokenOptimizer: { enabled: false },
+    contextWindow: {
+      strategy: 'last-messages-with-summary',
+      lastMessages: 1,
+      summary: {
+        model: 'mock/summary',
+        maxTokens: 64,
+      },
+    },
+  });
+  ai.registerProvider('mock', provider);
+
+  const result = await ai.complete(request({
+    model: 'auto',
+    messages: [
+      { role: 'user', content: 'I prefer annual billing.' },
+      { role: 'assistant', content: 'I will remember annual billing.' },
+      { role: 'user', content: 'Now draft the renewal note.' },
+    ],
+  }));
+
+  assert.equal(result.content, 'final answer');
+  assert.equal(provider.calls, 2);
+  assert.equal(provider.requests[0].model, 'mock/summary');
+  assert.equal(provider.requests[1].model, 'mock/final');
+  assert.match(String(provider.requests[1].messages[0].content), /annual billing/);
+  assert.equal(provider.requests[1].messages.at(-1)?.content, 'Now draft the renewal note.');
+  assert.equal(result.meta.contextWindow?.summaryModel, 'mock/summary');
+  assert.equal(result.meta.contextWindow?.summarizedMessages, 2);
+});
+
+test('NexusAI.stream applies context windows and emits done metadata', async () => {
+  const provider = new SequenceProvider([
+    response('Earlier user prefers annual billing.'),
+  ]);
+  const ai = new NexusAI({
+    providers: {},
+    routing: { mode: 'direct' },
+    defaultModel: 'mock/final',
+    security: 'off',
+    tokenOptimizer: { enabled: false },
+    contextWindow: {
+      strategy: 'last-messages-with-summary',
+      lastMessages: 1,
+      summary: { model: 'mock/summary' },
+    },
+  });
+  ai.registerProvider('mock', provider);
+
+  const chunks: StreamChunk[] = [];
+  for await (const chunk of ai.stream(request({
+    model: 'auto',
+    messages: [
+      { role: 'user', content: 'I prefer annual billing.' },
+      { role: 'assistant', content: 'I will remember that.' },
+      { role: 'user', content: 'Continue.' },
+    ],
+  }))) {
+    chunks.push(chunk);
+  }
+
+  assert.deepEqual(chunks.map((chunk) => chunk.type), ['text', 'done']);
+  assert.equal(provider.requests[0].model, 'mock/summary');
+  assert.equal(provider.requests[1].model, 'mock/final');
+  assert.match(String(provider.requests[1].messages[0].content), /annual billing/);
+  assert.equal(chunks[1].meta?.contextWindow?.summaryModel, 'mock/summary');
+});
+
+test('NexusAI voice helpers use only registered voice providers', async () => {
+  const voice = new MockVoiceProvider();
+  const ai = new NexusAI({
+    providers: {},
+    routing: { mode: 'direct' },
+    defaultModel: 'mock/test',
+    security: 'off',
+    tokenOptimizer: { enabled: false },
+    voice: {
+      defaultTranscriptionProvider: 'mock',
+      defaultSpeechProvider: 'mock',
+      providers: { mock: voice },
+    },
+  });
+
+  const transcript = await ai.transcribe({
+    audio: { buffer: new Uint8Array([1]), filename: 'hello.wav', mimeType: 'audio/wav' },
+  });
+  const speech = await ai.speak({
+    text: 'hello',
+    voice: 'test-voice',
+    format: 'mp3',
+  });
+
+  assert.equal(transcript.text, 'customer wants annual billing');
+  assert.equal(speech.audio.data.length, 3);
+  assert.deepEqual(ai.listVoiceProviders(), ['mock']);
+  assert.equal(ai.hasVoiceProvider('mock'), true);
+});
+
+test('NexusAI.voice transcribes, completes, and optionally speaks', async () => {
+  const textProvider = new SequenceProvider([response('renewal note')]);
+  const voice = new MockVoiceProvider();
+  const ai = new NexusAI({
+    providers: {},
+    routing: { mode: 'direct' },
+    defaultModel: 'mock/test',
+    security: 'off',
+    tokenOptimizer: { enabled: false },
+    voice: {
+      providers: { mock: voice },
+      defaultTranscriptionProvider: 'mock',
+      defaultSpeechProvider: 'mock',
+    },
+  });
+  ai.registerProvider('mock', textProvider);
+
+  const result = await ai.voice({
+    audio: { buffer: new Uint8Array([1, 2]), filename: 'call.wav', mimeType: 'audio/wav' },
+    transcription: { model: 'mock-stt' },
+    completion: {
+      model: 'auto',
+      messages: [{ role: 'system', content: 'Write short replies.' }],
+    },
+    transcriptMessage: {
+      template: 'Caller said: {{transcript}}',
+    },
+    speech: {
+      model: 'mock-tts',
+      voice: 'warm',
+      format: 'mp3',
+    },
+  });
+
+  assert.equal(result.transcriptText, 'customer wants annual billing');
+  assert.equal(result.response.content, 'renewal note');
+  assert.equal(result.speech?.voice, 'warm');
+  assert.equal(textProvider.requests[0].messages[1].content, 'Caller said: customer wants annual billing');
+  assert.equal(voice.transcriptions[0].model, 'mock-stt');
+  assert.equal(voice.speeches[0].text, 'renewal note');
 });
 
 test('provider errors expose category, status, and retry metadata', async () => {

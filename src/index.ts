@@ -21,6 +21,16 @@ export {
 } from './cache/adapters.js';
 export { SemanticCache, type SemanticCacheOptions } from './cache/semantic-cache.js';
 export { ResponseFormatError } from './core/response-format.js';
+export {
+  ContextWindowManager,
+  type ContextWindowRuntime,
+} from './context/index.js';
+export {
+  VoiceManager,
+  VoiceProviderError,
+  VoiceCapabilityError,
+  type VoiceCompletionClient,
+} from './voice/index.js';
 export { hardenPrompt } from './security/prompt-hardening.js';
 export { RateLimiter, NexusRateLimitError } from './ops/rate-limiter.js';
 export { AuditLogger } from './ops/audit-logger.js';
@@ -321,6 +331,35 @@ export type {
   AuditLogConfig,
   RateLimitConfig,
 } from './types/config.js';
+
+export type {
+  ContextSummaryConfig,
+  ContextSummaryInput,
+  ContextSummaryMode,
+  ContextSummarizer,
+  ContextWindowConfig,
+  ContextWindowResult,
+  ContextWindowStrategy,
+  ContextWindowUsage,
+} from './types/context-window.js';
+
+export type {
+  SpeechRequest,
+  SpeechResponse,
+  TranscriptionRequest,
+  TranscriptionResponse,
+  TranscriptionSegment,
+  TranscriptionWord,
+  VoiceAudioFormat,
+  VoiceAudioInput,
+  VoiceAudioOutput,
+  VoiceConfig,
+  VoiceProvider,
+  VoiceProviderInfo,
+  VoiceTranscriptMessageConfig,
+  VoiceTurnRequest,
+  VoiceTurnResponse,
+} from './types/voice.js';
 
 export type {
   Modality,

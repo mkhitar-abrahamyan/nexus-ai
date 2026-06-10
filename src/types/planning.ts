@@ -1,4 +1,5 @@
 import type { RouteDecision } from '../router/types.js';
+import type { ContextWindowUsage } from './context-window.js';
 import type { TokenUsageSnapshot } from './optimizer.js';
 import type { SecurityFinding } from './security.js';
 
@@ -17,6 +18,7 @@ export interface NexusPlan {
   providerName: string;
   model: string;
   route: RouteDecision;
+  contextWindow?: ContextWindowUsage;
   tokenUsage: TokenUsageSnapshot;
   estimatedCost: CostEstimate;
   maxContextTokens?: number;

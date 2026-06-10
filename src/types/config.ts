@@ -1,5 +1,7 @@
 import type { SecurityConfig, SecurityLevel } from './security.js';
 import type { TokenOptimizerConfig } from './optimizer.js';
+import type { ContextWindowConfig } from './context-window.js';
+import type { VoiceConfig } from './voice.js';
 import type { Modality, ModelCapabilities, ModelStatus, RoutingModelPreference } from './providers.js';
 import type { PipelineConfig } from '../pipeline/types.js';
 import type { CacheAdapter } from '../cache/adapters.js';
@@ -176,6 +178,8 @@ export interface NexusAIConfig {
   providers: ProvidersConfig;
   routing?: RoutingConfig;
   security?: SecurityLevel | SecurityConfig;
+  contextWindow?: ContextWindowConfig;
+  voice?: VoiceConfig;
   tokenOptimizer?: TokenOptimizerConfig;
   models?: ModelRegistryConfig;
   cache?: CacheConfig;

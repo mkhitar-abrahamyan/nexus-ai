@@ -1,4 +1,5 @@
 import type { PipelineTrace } from '../pipeline/types.js';
+import type { ContextWindowUsage } from './context-window.js';
 
 export interface ResponseMeta {
   requestId: string;
@@ -15,6 +16,7 @@ export interface ResponseMeta {
     reason: string;
     fallbacksConsidered: number;
   };
+  contextWindow?: ContextWindowUsage;
   verification?: {
     ok: boolean;
     supportRatio: number;
