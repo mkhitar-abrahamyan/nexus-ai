@@ -6,10 +6,26 @@ export interface EvalClient<Response = unknown> {
   complete(request: CompletionRequest): Promise<Response>;
 }
 
+export interface EvalJudgment {
+  score: number;
+  passed: boolean;
+  rationale?: string;
+  labels?: string[];
+  raw?: unknown;
+  providerUsed?: string;
+  modelUsed?: string;
+}
+
+export type EvalJudge<Response = unknown> = (
+  response: Response,
+  testCase: EvalCase<Response>,
+) => boolean | EvalJudgment | Promise<boolean | EvalJudgment>;
+
 export interface EvalCase<Response = unknown> {
   name: string;
   request: CompletionRequest;
-  assert: (response: Response) => boolean | Promise<boolean>;
+  assert?: (response: Response) => boolean | Promise<boolean>;
+  judge?: EvalJudge<Response>;
   expected?: string;
   metrics?: (response: Response) => MetricInputs | Promise<MetricInputs>;
   tags?: string[];
@@ -21,6 +37,7 @@ export interface EvalResult<Response = unknown> {
   durationMs: number;
   response?: Response;
   metrics?: EvalMetrics;
+  judgment?: EvalJudgment;
   error?: string;
   tags?: string[];
 }
@@ -45,7 +62,14 @@ export class EvalRunner<Response = unknown> {
       const caseStarted = Date.now();
       try {
         const response = await this.client.complete(testCase.request);
-        const passed = await testCase.assert(response);
+        if (!testCase.assert && !testCase.judge) {
+          throw new Error(`Eval case "${testCase.name}" requires assert or judge`);
+        }
+        const assertPassed = testCase.assert ? await testCase.assert(response) : true;
+        const judgment = testCase.judge
+          ? normalizeJudgment(await testCase.judge(response, testCase))
+          : undefined;
+        const passed = assertPassed && (judgment?.passed ?? true);
         const metrics = testCase.metrics
           ? await calculateEvalMetrics(await testCase.metrics(response))
           : undefined;
@@ -55,6 +79,7 @@ export class EvalRunner<Response = unknown> {
           durationMs: Date.now() - caseStarted,
           response,
           metrics,
+          judgment,
           tags: testCase.tags,
         });
       } catch (error) {
@@ -78,4 +103,15 @@ export class EvalRunner<Response = unknown> {
       results,
     };
   }
+}
+
+function normalizeJudgment(value: boolean | EvalJudgment): EvalJudgment {
+  if (typeof value === 'boolean') {
+    return {
+      score: value ? 1 : 0,
+      passed: value,
+    };
+  }
+
+  return value;
 }

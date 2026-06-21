@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "The Universal AI Pipeline for Node.js - one package, every model, every modality, with guardrails built in",
   "type": "module",
   "main": "dist/index.js",
@@ -47,6 +47,18 @@
       "types": "./dist/voice/providers/openai.d.ts",
       "import": "./dist/voice/providers/openai.js"
     },
+    "./voice/session": {
+      "types": "./dist/voice/session.d.ts",
+      "import": "./dist/voice/session.js"
+    },
+    "./telephony": {
+      "types": "./dist/telephony/index.d.ts",
+      "import": "./dist/telephony/index.js"
+    },
+    "./telephony/twilio": {
+      "types": "./dist/telephony/providers/twilio.d.ts",
+      "import": "./dist/telephony/providers/twilio.js"
+    },
     "./cache": {
       "types": "./dist/cache/adapters.d.ts",
       "import": "./dist/cache/adapters.js"
@@ -64,8 +76,12 @@
       "import": "./dist/rag/ingestion.js"
     },
     "./evals": {
-      "types": "./dist/evals/runner.d.ts",
-      "import": "./dist/evals/runner.js"
+      "types": "./dist/evals/index.d.ts",
+      "import": "./dist/evals/index.js"
+    },
+    "./evals/judge": {
+      "types": "./dist/evals/judge.d.ts",
+      "import": "./dist/evals/judge.js"
     },
     "./jobs": {
       "types": "./dist/jobs/queue.d.ts",

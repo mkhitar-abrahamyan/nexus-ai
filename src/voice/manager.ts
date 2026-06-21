@@ -6,11 +6,13 @@ import type {
   TranscriptionResponse,
   VoiceConfig,
   VoiceProvider,
+  VoiceSessionConfig,
   VoiceTurnRequest,
   VoiceTurnResponse,
 } from '../types/voice.js';
 import type { NexusResponse } from '../types/response.js';
 import { VoiceCapabilityError, VoiceProviderError } from './errors.js';
+import { VoiceSession, type VoiceSessionCompletionClient } from './session.js';
 
 export interface VoiceCompletionClient {
   complete(request: CompletionRequest): Promise<NexusResponse>;
@@ -87,6 +89,10 @@ export class VoiceManager {
       response,
       speech,
     };
+  }
+
+  createSession(config: VoiceSessionConfig, client: VoiceSessionCompletionClient): VoiceSession {
+    return new VoiceSession(config, this, client);
   }
 
   private async requireTranscription(request: VoiceTurnRequest): Promise<TranscriptionResponse> {

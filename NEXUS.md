@@ -83,6 +83,7 @@ Supporting modules:
 - Chain of Verification
 - self-consistency sampling
 - eval runner and metrics
+- optional LLM-as-judge eval scoring
 - workflow templates
 - web/search connector tools
 - provider conformance fixtures
@@ -95,6 +96,8 @@ Voice is implemented as an optional layer. Import size is controlled through sub
 
 - `nexus-ai-pro/voice` for provider-neutral types, errors, and `VoiceManager`
 - `nexus-ai-pro/voice/openai` for the OpenAI voice adapter
+- `nexus-ai-pro/telephony` for provider-neutral phone-call types and `TelephonyManager`
+- `nexus-ai-pro/telephony/twilio` for the Twilio phone-number adapter
 
 Current support:
 
@@ -102,21 +105,30 @@ Current support:
 - `ai.speak(...)`
 - `ai.voice(...)`
 - `ai.voiceTurn(...)`
+- `ai.createVoiceSession(...)`
 - `registerVoiceProvider(...)`
 - configurable `voice.providers`
 - custom voice providers
 - OpenAI voice provider adapter
 - full completion pipeline reuse after transcription
+- stateful `VoiceSession` turns with prompts, task prompts, tool calls, history, and optional speech
+- optional telephony providers for calls, webhook responses, webhook validation, and media-stream event parsing
 
 Useful test cases:
 
 - registered voice provider can transcribe
 - registered voice provider can synthesize speech
 - `ai.voice(...)` transcribes, appends transcript, calls `ai.complete(...)`, and optionally speaks
+- `VoiceSession` can accept transcript or audio, select matching task prompts, execute tools, and speak
 - `nexus-ai-pro/voice` imports without provider adapters
 - `nexus-ai-pro/voice/openai` imports separately
+- `nexus-ai-pro/voice/session` imports separately
 - type consumer can configure `VoiceConfig`
 - missing voice provider errors clearly
+- registered telephony provider can create calls
+- Twilio adapter can create inline-TwiML/media-stream calls
+- Twilio webhook signatures can be validated
+- Twilio media-stream messages can be normalized
 
 Example:
 
@@ -144,9 +156,16 @@ const result = await ai.voice({
 
 Still future work:
 
-- realtime `VoiceSession`
 - audio chunks in `NexusStream`
-- WebRTC/WebSocket/SIP session helpers
+- WebRTC/SIP session helpers
+- fully managed Twilio/OpenAI realtime bridge
+
+Telephony is intentionally separate from voice:
+
+- `voice` handles file/buffer/stream audio turns.
+- `VoiceSession` handles multi-turn call state and app/tool requests during a conversation.
+- `telephony` handles phone numbers, TwiML, provider webhooks, and media-stream protocol messages.
+- apps can use one, both, or neither.
 
 ## Context Window Testing
 

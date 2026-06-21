@@ -1,4 +1,4 @@
-import type { CompletionRequest } from './messages.js';
+import type { CompletionRequest, Message, ToolDefinition } from './messages.js';
 import type { NexusResponse } from './response.js';
 
 export type VoiceAudioFormat = 'mp3' | 'wav' | 'opus' | 'aac' | 'flac' | 'pcm' | 'webm' | 'ogg';
@@ -118,4 +118,86 @@ export interface VoiceTurnResponse {
   transcriptText: string;
   response: NexusResponse;
   speech?: SpeechResponse;
+}
+
+export type VoicePromptText = string | string[];
+
+export interface VoiceTaskPromptMatcherInput {
+  transcriptText: string;
+  messages: Message[];
+  metadata?: Record<string, unknown>;
+}
+
+export type VoiceTaskPromptMatcher =
+  | string
+  | RegExp
+  | Array<string | RegExp>
+  | ((input: VoiceTaskPromptMatcherInput) => boolean | Promise<boolean>);
+
+export interface VoiceTaskPrompt {
+  name: string;
+  when?: VoiceTaskPromptMatcher;
+  prompt?: VoicePromptText;
+  instructions?: VoicePromptText;
+  tools?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface VoiceSessionToolStep {
+  iteration: number;
+  toolCallId: string;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+export interface VoiceSessionConfig {
+  id?: string;
+  model: string;
+  prompt?: VoicePromptText;
+  systemPrompt?: VoicePromptText;
+  instructions?: VoicePromptText;
+  taskPrompts?: VoiceTaskPrompt[];
+  messages?: Message[];
+  tools?: ToolDefinition[];
+  toolSelection?: 'all' | 'task';
+  maxToolIterations?: number;
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  responseFormat?: CompletionRequest['responseFormat'];
+  stop?: CompletionRequest['stop'];
+  userId?: string;
+  metadata?: Record<string, unknown>;
+  transcription?: Omit<TranscriptionRequest, 'audio'>;
+  transcriptMessage?: VoiceTranscriptMessageConfig;
+  speech?: Omit<SpeechRequest, 'text'> | false;
+  maintainHistory?: boolean;
+  onToolCall?: (step: VoiceSessionToolStep) => void | Promise<void>;
+}
+
+export interface VoiceSessionTurnInput {
+  audio?: VoiceAudioInput;
+  transcript?: string;
+  transcription?: Omit<TranscriptionRequest, 'audio'>;
+  speech?: Omit<SpeechRequest, 'text'> | false;
+  completion?: Partial<CompletionRequest>;
+  prompt?: VoicePromptText;
+  instructions?: VoicePromptText;
+  taskPrompts?: VoiceTaskPrompt[];
+  tools?: ToolDefinition[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface VoiceSessionTurnResponse {
+  sessionId: string;
+  transcript?: TranscriptionResponse;
+  transcriptText: string;
+  response: NexusResponse;
+  speech?: SpeechResponse;
+  toolSteps: VoiceSessionToolStep[];
+  selectedTaskPrompts: string[];
+  messages: Message[];
 }

@@ -269,6 +269,7 @@ Evals:
 - operational metrics
 - RAG metrics
 - safety heuristics
+- optional LLM-as-judge scoring with rubrics and thresholds
 
 ## Voice Integrations
 
@@ -285,6 +286,7 @@ The basic operations are:
 - `ai.transcribe(...)` for speech-to-text
 - `ai.speak(...)` for text-to-speech
 - `ai.voice(...)` for the full voice pipeline
+- `ai.createVoiceSession(...)` for multi-turn call sessions with tools
 - `registerVoiceProvider(...)` for private, local, or hosted services
 
 The full voice turn is:
@@ -299,7 +301,17 @@ audio/transcript
 
 Because the completion step calls `ai.complete(...)`, it reuses routing, security, context-window compaction, token optimization, cache, retries, metrics, and tracing.
 
-Realtime sessions are still future work. That should be added as a separate `VoiceSession` abstraction instead of forcing realtime state into normal completion streams.
+`VoiceSession` adds state across caller turns. It accepts transcript or audio, builds prompts from any combination of `prompt`, `instructions`, and conditional `taskPrompts`, executes registered tools when the model requests app data, and can synthesize the final answer.
+
+Low-level realtime transport is still future work. That should be added as a bridge from telephony/WebSocket/SIP media events into `VoiceSession` instead of forcing socket state into normal completion streams.
+
+Phone-number telephony is a separate optional layer:
+
+- `nexus-ai-pro/telephony` provides provider-neutral call, webhook, and media-stream types.
+- `nexus-ai-pro/telephony/twilio` provides a Twilio adapter without adding the Twilio SDK as a required dependency.
+- `NexusAI` exposes helper methods for outbound calls, TwiML webhook responses, webhook validation, and media event normalization.
+
+This keeps a small transcription/TTS app small, while larger phone-agent apps can add Twilio or another carrier as needed.
 
 ## Choosing a Setup
 

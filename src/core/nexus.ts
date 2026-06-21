@@ -10,9 +10,20 @@ import type {
   TranscriptionRequest,
   TranscriptionResponse,
   VoiceProvider,
+  VoiceSessionConfig,
   VoiceTurnRequest,
   VoiceTurnResponse,
 } from '../types/voice.js';
+import type {
+  CreateCallRequest,
+  CreateCallResponse,
+  TelephonyMediaStreamEvent,
+  TelephonyOutboundAudioMessage,
+  TelephonyProvider,
+  TelephonyResponseRequest,
+  TelephonyWebhookResponse,
+  TelephonyWebhookValidationRequest,
+} from '../types/telephony.js';
 import type { PipelineStep } from '../pipeline/types.js';
 import { BaseProvider } from '../providers/base.js';
 import { OpenAIProvider } from '../providers/openai.js';
@@ -27,7 +38,8 @@ import { Router, FailoverExecutor } from '../router/index.js';
 import { Logger } from '../utils/logger.js';
 import { SecurityPipeline } from '../security/index.js';
 import { ContextWindowManager } from '../context/index.js';
-import { VoiceManager } from '../voice/index.js';
+import { VoiceManager, VoiceSession } from '../voice/index.js';
+import { TelephonyManager } from '../telephony/index.js';
 import { TokenOptimizer } from '../optimizer/index.js';
 import { AgentLoop } from '../agent/loop.js';
 import { resolveModel } from '../models/registry.js';
@@ -63,6 +75,7 @@ export class NexusAI {
   private security: SecurityPipeline;
   private contextWindow: ContextWindowManager;
   private voiceManager: VoiceManager;
+  private telephonyManager: TelephonyManager;
   private optimizer: TokenOptimizer;
   private cache: MemoryCache<NexusResponse>;
   private auditLogger: AuditLogger;
@@ -82,6 +95,7 @@ export class NexusAI {
     this.security = new SecurityPipeline(this.config.security || 'standard');
     this.contextWindow = new ContextWindowManager(this.config.contextWindow || {});
     this.voiceManager = new VoiceManager(this.config.voice || {});
+    this.telephonyManager = new TelephonyManager(this.config.telephony || {});
     this.optimizer = new TokenOptimizer(this.config.tokenOptimizer || {});
     this.cache = new MemoryCache<NexusResponse>(this.config.cache?.maxEntries || 500);
     this.auditLogger = new AuditLogger(this.config.auditLog);
@@ -380,6 +394,35 @@ export class NexusAI {
     return this.voiceManager.runTurn(request, this);
   }
 
+  createVoiceSession(config: VoiceSessionConfig): VoiceSession {
+    return this.voiceManager.createSession(config, this);
+  }
+
+  async createCall(request: CreateCallRequest): Promise<CreateCallResponse> {
+    return this.telephonyManager.createCall(request);
+  }
+
+  async createTelephonyResponse(request: TelephonyResponseRequest): Promise<TelephonyWebhookResponse> {
+    return this.telephonyManager.createWebhookResponse(request);
+  }
+
+  async validateTelephonyWebhook(request: TelephonyWebhookValidationRequest): Promise<boolean> {
+    return this.telephonyManager.validateWebhook(request);
+  }
+
+  parseTelephonyMediaEvent(providerName: string, message: string | Record<string, unknown>): TelephonyMediaStreamEvent | undefined {
+    return this.telephonyManager.parseMediaStreamEvent(providerName, message);
+  }
+
+  formatTelephonyAudioMessage(
+    providerName: string,
+    streamId: string,
+    payload: string,
+    options?: { event?: 'media' | 'mark' | 'clear'; markName?: string },
+  ): TelephonyOutboundAudioMessage {
+    return this.telephonyManager.formatAudioMessage(providerName, streamId, payload, options);
+  }
+
   registerProvider(name: string, provider: BaseProvider): this {
     this.providers.set(name, provider);
     return this;
@@ -387,6 +430,11 @@ export class NexusAI {
 
   registerVoiceProvider(name: string, provider: VoiceProvider): this {
     this.voiceManager.registerProvider(name, provider);
+    return this;
+  }
+
+  registerTelephonyProvider(name: string, provider: TelephonyProvider): this {
+    this.telephonyManager.registerProvider(name, provider);
     return this;
   }
 
@@ -398,12 +446,20 @@ export class NexusAI {
     return this.voiceManager.hasProvider(name);
   }
 
+  hasTelephonyProvider(name: string): boolean {
+    return this.telephonyManager.hasProvider(name);
+  }
+
   listProviders(): string[] {
     return [...this.providers.keys()];
   }
 
   listVoiceProviders(): string[] {
     return this.voiceManager.listProviders();
+  }
+
+  listTelephonyProviders(): string[] {
+    return this.telephonyManager.listProviders();
   }
 
   use(step: PipelineStep): this {

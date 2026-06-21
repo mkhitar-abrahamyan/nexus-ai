@@ -343,6 +343,62 @@ console.log(result.response.content);
 console.log(result.speech?.audio.data);
 ```
 
+### Voice Session With App Requests
+
+Use `VoiceSession` when a call has multiple turns, should keep history, and may need to call your app while talking.
+
+The prompt setup is flexible:
+
+- `prompt` describes the assistant or business role.
+- `instructions` describe behavior.
+- `taskPrompts` add conditional instructions when the caller asks about something specific.
+- `tools` let the model call your app, such as booking, CRM, billing, or inventory APIs.
+
+```ts
+import { tool } from 'nexus-ai-pro';
+
+const session = ai.createVoiceSession({
+  model: 'auto',
+  prompt: 'You are a phone booking assistant for a small clinic.',
+  instructions: [
+    'Keep answers short and natural for a phone call.',
+    'Ask one follow-up question at a time.',
+  ],
+  taskPrompts: [
+    {
+      name: 'booking',
+      when: ['book', 'appointment', 'free slot'],
+      instructions: 'When the caller asks about availability, call check_free_slots before offering times.',
+      tools: ['check_free_slots'],
+    },
+  ],
+  tools: [
+    tool({
+      name: 'check_free_slots',
+      description: 'Check available booking slots for a date.',
+      parameters: {
+        type: 'object',
+        properties: { date: { type: 'string' } },
+        required: ['date'],
+      },
+      execute: async ({ date }) => bookingApi.freeSlots(String(date)),
+    }),
+  ],
+  toolSelection: 'task',
+  speech: { provider: 'openai', voice: 'alloy', format: 'mp3' },
+});
+
+const turn = await session.handleTurn({
+  transcript: 'Do you have any free slots tomorrow?',
+});
+
+console.log(turn.response.content);
+console.log(turn.toolSteps);
+console.log(turn.speech?.audio.data);
+```
+
+You can use only `prompt`, only `instructions`, only `taskPrompts`, or all of them together. For phone calls through Twilio media streams, parse incoming audio/media events in `telephony`, feed complete caller turns into `session.handleTurn(...)`, then send the returned speech audio back through your call transport.
+
 ### Custom Voice Provider
 
 Bring any private, local, or hosted voice service:
@@ -369,7 +425,62 @@ ai.registerVoiceProvider('private-voice', {
 });
 ```
 
-Realtime voice sessions and audio chunks inside `NexusStream` are still future work; the current voice layer covers transcription, speech generation, and full request/response voice turns.
+Low-level realtime transport adapters are still future work; the current voice layer covers transcription, speech generation, full request/response voice turns, and stateful voice sessions with tool calls.
+
+## Phone Number Telephony
+
+Phone-number support is optional and separate from the voice layer. Use `voice` for audio transcription/TTS, and use `telephony` when calls, webhooks, TwiML, or media-stream events are involved.
+
+```ts
+import { TelephonyManager } from 'nexus-ai-pro/telephony';
+import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
+```
+
+Configure only the provider you need:
+
+```ts
+const ai = new NexusAI({
+  providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } },
+  telephony: {
+    defaultProvider: 'twilio',
+    providers: {
+      twilio: new TwilioTelephonyProvider({
+        accountSid: process.env.TWILIO_ACCOUNT_SID!,
+        authToken: process.env.TWILIO_AUTH_TOKEN!,
+      }),
+    },
+  },
+});
+```
+
+Generate a Twilio webhook response for an inbound phone number:
+
+```ts
+const response = await ai.createTelephonyResponse({
+  say: 'Thanks for calling. Connecting you now.',
+  stream: {
+    url: 'wss://voice.example.com/twilio',
+    mode: 'bidirectional',
+    parameters: { tenant: 'acme' },
+  },
+});
+
+return new Response(response.body, {
+  headers: { 'content-type': response.contentType },
+});
+```
+
+Start an outbound call with either a webhook, inline TwiML, an application SID, or a media-stream URL:
+
+```ts
+const call = await ai.createCall({
+  to: '+15551230000',
+  from: '+15557650000',
+  mediaStreamUrl: 'wss://voice.example.com/twilio',
+});
+```
+
+For smaller apps, skip Twilio entirely and register your own `TelephonyProvider`.
 
 ## Security
 
@@ -435,8 +546,34 @@ Available runtime helpers:
 - batch completion with concurrency control
 - in-memory job queue
 - Redis and BullMQ queue adapters
-- eval runner with quality, operations, RAG, and safety metrics
+- eval runner with quality, operations, RAG, safety metrics, and optional LLM-as-judge scoring
+- voice sessions for multi-turn calls with conditional task prompts and app tools
 - workflow templates for RAG answers, extraction, classification, comparison, support, sales, legal review, and code review
+
+Use a plain assertion for small evals, or add an LLM judge when a rubric is more useful than exact matching:
+
+```ts
+import { LLMJudge } from 'nexus-ai-pro/evals';
+
+const judge = new LLMJudge({
+  client: ai,
+  model: 'openai/gpt-4.1-mini',
+  rubric: 'Score whether the answer is correct, concise, and grounded in the supplied context.',
+  passThreshold: 0.7,
+});
+
+const run = await ai.runEvals([
+  {
+    name: 'support answer quality',
+    request: {
+      model: 'auto',
+      messages: [{ role: 'user', content: 'Explain our refund policy.' }],
+    },
+    expected: 'Refunds are available within 30 days.',
+    judge: judge.asEvalJudge(),
+  },
+]);
+```
 
 ## Observability and Reliability
 

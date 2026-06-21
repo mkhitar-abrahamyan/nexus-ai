@@ -73,7 +73,11 @@ import {
   NexusProviderError,
   OllamaProvider,
   OpenRouterProvider,
+  TelephonyManager,
+  LLMJudge,
+  VoiceSession,
   VoiceManager,
+  type CreateCallRequest,
   type CompletionRequest,
   type ContextWindowConfig,
   type CostBudgetConfig,
@@ -87,10 +91,14 @@ import {
   type RoutingConfig,
   type SpeechRequest,
   type StreamChunk,
+  type TelephonyConfig,
+  type TelephonyProvider,
+  type TelephonyResponseRequest,
   type TranscriptionRequest,
   type ToolCall,
   type VoiceConfig,
   type VoiceProvider,
+  type VoiceSessionConfig,
 } from 'nexus-ai-pro';
 import { OpenAIProvider } from 'nexus-ai-pro/providers/openai';
 import { NexusProviderError as SubpathProviderError } from 'nexus-ai-pro/providers/errors';
@@ -98,6 +106,10 @@ import { MemoryCache as SubpathMemoryCache } from 'nexus-ai-pro/cache/memory-cac
 import { ContextWindowManager as SubpathContextWindowManager } from 'nexus-ai-pro/context';
 import { VoiceManager as SubpathVoiceManager } from 'nexus-ai-pro/voice';
 import { OpenAIVoiceProvider } from 'nexus-ai-pro/voice/openai';
+import { VoiceSession as SubpathVoiceSession } from 'nexus-ai-pro/voice/session';
+import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/telephony';
+import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
+import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
 
 class ConsumerProvider extends BaseProvider {
   readonly info = { name: 'consumer', isLocal: true };
@@ -128,6 +140,27 @@ const voiceProvider: VoiceProvider = {
       providerUsed: 'consumer-voice',
       modelUsed: request.model,
       format: request.format || 'mp3',
+    };
+  },
+};
+
+const telephonyProvider: TelephonyProvider = {
+  info: { name: 'consumer-phone', supports: { inbound: true, outbound: true, mediaStreams: true } },
+  async createCall(request: CreateCallRequest) {
+    return {
+      callId: 'call',
+      providerUsed: 'consumer-phone',
+      status: 'queued',
+      direction: 'outbound',
+      to: request.to,
+      from: request.from,
+    };
+  },
+  async createWebhookResponse(request: TelephonyResponseRequest) {
+    return {
+      providerUsed: 'consumer-phone',
+      contentType: 'text/xml',
+      body: request.say ? '<Response><Say>ok</Say></Response>' : '<Response/>',
     };
   },
 };
@@ -177,6 +210,29 @@ const voiceConfig: VoiceConfig = {
   defaultSpeechProvider: 'consumer-voice',
   providers: { 'consumer-voice': voiceProvider },
 };
+const voiceSessionConfig: VoiceSessionConfig = {
+  model: 'consumer/test',
+  prompt: 'Answer as a phone assistant.',
+  instructions: ['Be concise.'],
+  taskPrompts: [{
+    name: 'booking',
+    when: ['booking', /slot/i],
+    instructions: 'Check free slots when asked about bookings.',
+    tools: ['check_free_slots'],
+  }],
+  tools: [{
+    name: 'check_free_slots',
+    description: 'Check free booking slots.',
+    parameters: { type: 'object', properties: { date: { type: 'string' } } },
+    execute: async () => ({ slots: ['10:00'] }),
+  }],
+  toolSelection: 'task',
+  speech: { provider: 'consumer-voice', format: 'mp3' },
+};
+const telephonyConfig: TelephonyConfig = {
+  defaultProvider: 'consumer-phone',
+  providers: { 'consumer-phone': telephonyProvider },
+};
 const aiConfig: NexusAIConfig = {
   providers: providersConfig,
   routing: routingConfig,
@@ -184,6 +240,7 @@ const aiConfig: NexusAIConfig = {
   costBudget: costBudgetConfig,
   contextWindow: contextWindowConfig,
   voice: voiceConfig,
+  telephony: telephonyConfig,
   defaultModel: 'consumer/test',
   security: 'off',
 };
@@ -201,7 +258,14 @@ const contextManager = new ContextWindowManager(contextWindowConfig);
 const subpathContextManager = new SubpathContextWindowManager(contextWindowConfig);
 const voiceManager = new VoiceManager(voiceConfig);
 const subpathVoiceManager = new SubpathVoiceManager(voiceConfig);
+const voiceSession: VoiceSession = ai.createVoiceSession(voiceSessionConfig);
+const subpathVoiceSession = new SubpathVoiceSession(voiceSessionConfig, subpathVoiceManager, ai);
 const openAiVoice = new OpenAIVoiceProvider({ apiKey: 'test' });
+const telephonyManager = new TelephonyManager(telephonyConfig);
+const subpathTelephonyManager = new SubpathTelephonyManager(telephonyConfig);
+const twilioTelephony = new TwilioTelephonyProvider({ accountSid: 'AC123', authToken: 'test' });
+const llmJudge = new LLMJudge({ client: ai, model: 'consumer/test', rubric: 'Score correctness.' });
+const subpathJudge = new SubpathLLMJudge({ client: ai, model: 'consumer/test' });
 const openAiConfig: OpenAIProviderConfig = { apiKey: 'test', organization: 'org' };
 const provider = new OpenAIProvider({ apiKey: 'test' });
 const providerConstructors = [
@@ -252,7 +316,14 @@ void contextManager;
 void subpathContextManager;
 void voiceManager;
 void subpathVoiceManager;
+void voiceSession;
+void subpathVoiceSession;
 void openAiVoice;
+void telephonyManager;
+void subpathTelephonyManager;
+void twilioTelephony;
+void llmJudge;
+void subpathJudge;
 void aiConfig;
 void providerConstructors;
 void providerName;

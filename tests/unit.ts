@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import {
   BaseProvider,
+  EvalRunner,
   FailoverExecutor,
+  LLMJudge,
   MemoryCache,
   NexusAI,
   NexusProviderError,
@@ -15,17 +18,24 @@ import {
   createCacheKey,
   createTextStream,
   selectGraphFacts,
+  tool,
   withKnowledgeGraphContext,
+  type CreateCallRequest,
   type CompletionRequest,
   type NexusResponse,
   type NexusStream,
   type SpeechRequest,
   type SpeechResponse,
   type StreamChunk,
+  type TelephonyProvider,
+  type TelephonyResponseRequest,
+  type TelephonyWebhookValidationRequest,
   type TranscriptionRequest,
   type TranscriptionResponse,
   type VoiceProvider,
+  type VoiceSessionToolStep,
 } from '../src/index.js';
+import { TwilioTelephonyProvider } from '../src/telephony/providers/twilio.js';
 import {
   ResponseFormatError,
   applyResponseFormat,
@@ -178,6 +188,48 @@ class MockVoiceProvider implements VoiceProvider {
       format: req.format || 'mp3',
       mimeType: 'audio/mpeg',
     };
+  }
+}
+
+class MockTelephonyProvider implements TelephonyProvider {
+  readonly info = {
+    name: 'phone-mock',
+    isLocal: true,
+    supports: {
+      inbound: true,
+      outbound: true,
+      mediaStreams: true,
+      webhookValidation: true,
+    },
+  };
+  calls: CreateCallRequest[] = [];
+  responses: TelephonyResponseRequest[] = [];
+  validations: TelephonyWebhookValidationRequest[] = [];
+
+  async createCall(req: CreateCallRequest) {
+    this.calls.push(req);
+    return {
+      callId: 'call_123',
+      providerUsed: 'phone-mock',
+      status: 'queued' as const,
+      direction: 'outbound' as const,
+      to: req.to,
+      from: req.from,
+    };
+  }
+
+  async createWebhookResponse(req: TelephonyResponseRequest) {
+    this.responses.push(req);
+    return {
+      providerUsed: 'phone-mock',
+      contentType: 'text/xml',
+      body: '<Response><Say>ok</Say></Response>',
+    };
+  }
+
+  validateWebhook(req: TelephonyWebhookValidationRequest): boolean {
+    this.validations.push(req);
+    return req.headers?.['x-test-signature'] === 'valid';
   }
 }
 
@@ -660,6 +712,223 @@ test('NexusAI.voice transcribes, completes, and optionally speaks', async () => 
   assert.equal(textProvider.requests[0].messages[1].content, 'Caller said: customer wants annual billing');
   assert.equal(voice.transcriptions[0].model, 'mock-stt');
   assert.equal(voice.speeches[0].text, 'renewal note');
+});
+
+test('VoiceSession selects task prompts, executes tools, keeps history, and speaks', async () => {
+  const toolRequest = response('');
+  toolRequest.toolCalls = [{
+    id: 'call_slots',
+    type: 'function',
+    function: { name: 'check_free_slots', arguments: '{"date":"2026-07-02"}' },
+  }];
+  const textProvider = new SequenceProvider([
+    toolRequest,
+    response('I found two free slots: 10:00 and 14:00.'),
+  ]);
+  const voice = new MockVoiceProvider();
+  const toolSteps: VoiceSessionToolStep[] = [];
+  const ai = new NexusAI({
+    providers: {},
+    routing: { mode: 'direct' },
+    defaultModel: 'mock/test',
+    security: 'off',
+    tokenOptimizer: { enabled: false },
+    voice: {
+      providers: { mock: voice },
+      defaultTranscriptionProvider: 'mock',
+      defaultSpeechProvider: 'mock',
+    },
+  });
+  ai.registerProvider('mock', textProvider);
+
+  const session = ai.createVoiceSession({
+    model: 'auto',
+    prompt: 'You are a helpful booking phone assistant.',
+    instructions: ['Keep spoken answers short.', 'Ask one question at a time.'],
+    taskPrompts: [{
+      name: 'booking',
+      when: ['book', 'slot'],
+      instructions: 'When the caller asks about booking availability, use check_free_slots before offering times.',
+      tools: ['check_free_slots'],
+    }],
+    tools: [
+      tool({
+        name: 'check_free_slots',
+        description: 'Check free booking slots for a date.',
+        parameters: {
+          type: 'object',
+          properties: { date: { type: 'string' } },
+          required: ['date'],
+        },
+        execute: async ({ date }) => ({ date, slots: ['10:00', '14:00'] }),
+      }),
+    ],
+    toolSelection: 'task',
+    speech: { model: 'mock-tts', voice: 'warm', format: 'mp3' },
+    transcriptMessage: { template: 'Caller said: {{transcript}}' },
+    onToolCall: async (step) => {
+      toolSteps.push(step);
+    },
+  });
+
+  const result = await session.handleTurn({
+    transcript: 'Can I book a free slot on July second?',
+  });
+
+  assert.deepEqual(result.selectedTaskPrompts, ['booking']);
+  assert.equal(result.toolSteps[0].toolName, 'check_free_slots');
+  assert.equal(result.toolSteps[0].ok, true);
+  assert.deepEqual(toolSteps.map((step) => step.toolName), ['check_free_slots']);
+  assert.equal(result.response.content, 'I found two free slots: 10:00 and 14:00.');
+  assert.equal(result.speech?.voice, 'warm');
+  assert.equal(voice.speeches[0].text, 'I found two free slots: 10:00 and 14:00.');
+  assert.match(String(textProvider.requests[0].messages[0].content), /Task "booking"/);
+  assert.equal(textProvider.requests[0].messages.some((message) => String(message.content).includes('Caller said:')), true);
+  assert.equal(textProvider.requests[0].tools?.length, 1);
+  assert.equal(textProvider.requests[1].messages.some((message) => message.role === 'tool'), true);
+  assert.equal(session.getHistory().some((message) => message.role === 'tool'), true);
+});
+
+test('NexusAI telephony helpers use only registered telephony providers', async () => {
+  const telephony = new MockTelephonyProvider();
+  const ai = new NexusAI({
+    providers: {},
+    routing: { mode: 'direct' },
+    defaultModel: 'mock/test',
+    security: 'off',
+    telephony: {
+      defaultProvider: 'mock-phone',
+      providers: { 'mock-phone': telephony },
+    },
+  });
+
+  const call = await ai.createCall({
+    to: '+15551230000',
+    from: '+15557650000',
+    twiml: '<Response><Say>Hello</Say></Response>',
+  });
+  const webhook = await ai.createTelephonyResponse({ say: 'Hello caller' });
+  const valid = await ai.validateTelephonyWebhook({
+    url: 'https://example.com/voice',
+    headers: { 'x-test-signature': 'valid' },
+  });
+
+  assert.equal(call.callId, 'call_123');
+  assert.equal(call.to, '+15551230000');
+  assert.equal(webhook.contentType, 'text/xml');
+  assert.equal(valid, true);
+  assert.deepEqual(ai.listTelephonyProviders(), ['mock-phone']);
+  assert.equal(ai.hasTelephonyProvider('mock-phone'), true);
+  assert.equal(telephony.calls[0].from, '+15557650000');
+});
+
+test('Twilio telephony provider creates calls, TwiML, signatures, and media messages', async () => {
+  let capturedUrl = '';
+  let capturedBody: BodyInit | null | undefined;
+  const provider = new TwilioTelephonyProvider({
+    accountSid: 'AC123',
+    authToken: 'secret',
+    fetch: async (url, init) => {
+      capturedUrl = String(url);
+      capturedBody = init?.body;
+      return new Response(JSON.stringify({
+        sid: 'CA123',
+        status: 'queued',
+        to: '+15551230000',
+        from: '+15557650000',
+      }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  const call = await provider.createCall({
+    to: '+15551230000',
+    from: '+15557650000',
+    mediaStreamUrl: 'wss://voice.example.com/stream',
+  });
+  const params = capturedBody as URLSearchParams;
+  const twiml = params.get('Twiml') || '';
+  const webhook = await provider.createWebhookResponse({
+    say: 'Hello',
+    stream: {
+      url: 'wss://voice.example.com/stream',
+      mode: 'bidirectional',
+      parameters: { tenant: 'acme' },
+    },
+  });
+  const parsed = provider.parseMediaStreamEvent({
+    event: 'media',
+    streamSid: 'MZ123',
+    sequenceNumber: '4',
+    media: { track: 'inbound', payload: 'abc', chunk: '2', timestamp: '40' },
+  });
+  const outbound = provider.formatAudioMessage('MZ123', 'abc');
+
+  const signatureUrl = 'https://example.com/voice';
+  const body = new URLSearchParams({ CallSid: 'CA123', From: '+15551230000' });
+  const signature = createHmac('sha1', 'secret')
+    .update(`${signatureUrl}CallSidCA123From+15551230000`)
+    .digest('base64');
+
+  assert.match(capturedUrl, /\/Accounts\/AC123\/Calls\.json$/);
+  assert.equal(call.callId, 'CA123');
+  assert.match(twiml, /<Connect><Stream url="wss:\/\/voice\.example\.com\/stream">/);
+  assert.match(webhook.body, /<Parameter name="tenant" value="acme"\/>/);
+  assert.equal(parsed?.event, 'media');
+  assert.equal(parsed?.event === 'media' ? parsed.payload : '', 'abc');
+  assert.deepEqual(JSON.parse(outbound.body), { event: 'media', streamSid: 'MZ123', media: { payload: 'abc' } });
+  assert.equal(provider.validateWebhook({
+    url: signatureUrl,
+    headers: { 'X-Twilio-Signature': signature },
+    body,
+  }), true);
+});
+
+test('EvalRunner supports optional LLM-as-judge cases', async () => {
+  const targetClient = {
+    async complete(): Promise<NexusResponse> {
+      return response('The answer is concise and grounded.');
+    },
+  };
+  const judgeClient = {
+    async complete(req: CompletionRequest): Promise<NexusResponse> {
+      assert.equal(req.model, 'mock/judge');
+      assert.equal(req.responseFormat?.type, 'json_schema');
+      assert.match(String(req.messages[1].content), /Prefer concise grounded answers/);
+      return response(JSON.stringify({
+        score: 0.85,
+        passed: true,
+        rationale: 'Meets the rubric.',
+        labels: ['grounded'],
+      }), 'mock/judge');
+    },
+  };
+  const judge = new LLMJudge({
+    client: judgeClient,
+    model: 'mock/judge',
+    rubric: 'Prefer concise grounded answers.',
+    passThreshold: 0.7,
+  });
+
+  const result = await new EvalRunner<NexusResponse>(targetClient).run([
+    {
+      name: 'rubric judge',
+      request: request(),
+      expected: 'A grounded concise answer.',
+      judge: judge.asEvalJudge((candidate, testCase) => ({
+        actual: candidate.content,
+        expected: testCase.expected,
+        query: 'What kind of answer is expected?',
+      })),
+    },
+  ]);
+
+  assert.equal(result.passed, true);
+  assert.equal(result.results[0].judgment?.score, 0.85);
+  assert.equal(result.results[0].judgment?.rationale, 'Meets the rubric.');
+  assert.deepEqual(result.results[0].judgment?.labels, ['grounded']);
 });
 
 test('provider errors expose category, status, and retry metadata', async () => {

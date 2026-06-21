@@ -27,10 +27,19 @@ export {
 } from './context/index.js';
 export {
   VoiceManager,
+  VoiceSession,
   VoiceProviderError,
   VoiceCapabilityError,
   type VoiceCompletionClient,
+  type VoiceSessionCompletionClient,
+  type VoiceSessionRuntime,
 } from './voice/index.js';
+export {
+  TelephonyManager,
+  TelephonyProviderError,
+  TelephonyCapabilityError,
+  createVoiceTwiML,
+} from './telephony/index.js';
 export { hardenPrompt } from './security/prompt-hardening.js';
 export { RateLimiter, NexusRateLimitError } from './ops/rate-limiter.js';
 export { AuditLogger } from './ops/audit-logger.js';
@@ -198,9 +207,21 @@ export {
   EvalRunner,
   type EvalCase,
   type EvalClient,
+  type EvalJudge,
+  type EvalJudgment,
   type EvalResult,
   type EvalRunResult,
 } from './evals/runner.js';
+export {
+  LLMJudge,
+  createLLMJudgeEval,
+  parseJudgeResponse,
+  type JudgeClient,
+  type LLMJudgeInput,
+  type LLMJudgeInputMapper,
+  type LLMJudgeOptions,
+  type LLMJudgeResult,
+} from './evals/judge.js';
 export {
   calculateEvalMetrics,
   exactMatch,
@@ -354,12 +375,47 @@ export type {
   VoiceAudioInput,
   VoiceAudioOutput,
   VoiceConfig,
+  VoicePromptText,
   VoiceProvider,
   VoiceProviderInfo,
+  VoiceSessionConfig,
+  VoiceSessionToolStep,
+  VoiceSessionTurnInput,
+  VoiceSessionTurnResponse,
+  VoiceTaskPrompt,
+  VoiceTaskPromptMatcher,
+  VoiceTaskPromptMatcherInput,
   VoiceTranscriptMessageConfig,
   VoiceTurnRequest,
   VoiceTurnResponse,
 } from './types/voice.js';
+
+export type {
+  CreateCallRequest,
+  CreateCallResponse,
+  TelephonyAudioEncoding,
+  TelephonyCallDirection,
+  TelephonyCallStatus,
+  TelephonyConfig,
+  TelephonyConnectedEvent,
+  TelephonyDtmfEvent,
+  TelephonyGatherConfig,
+  TelephonyHttpMethod,
+  TelephonyMarkEvent,
+  TelephonyMediaEvent,
+  TelephonyMediaStreamEvent,
+  TelephonyOutboundAudioMessage,
+  TelephonyProvider,
+  TelephonyProviderInfo,
+  TelephonyResponseRequest,
+  TelephonyStartEvent,
+  TelephonyStopEvent,
+  TelephonyStreamConfig,
+  TelephonyStreamMode,
+  TelephonyStreamTrack,
+  TelephonyWebhookResponse,
+  TelephonyWebhookValidationRequest,
+} from './types/telephony.js';
 
 export type {
   Modality,
