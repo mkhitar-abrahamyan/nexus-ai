@@ -116,13 +116,17 @@ interface OpenAIResponseFunctionCallItem {
 type OpenAIResponseStreamEvent = Record<string, unknown> & { type: string };
 
 export class OpenAIProvider extends BaseProvider {
-  readonly info: ProviderInfo = { name: 'openai', isLocal: false };
+  readonly info: ProviderInfo;
   private client?: OpenAIClient;
   private config: OpenAIProviderConfig;
 
   constructor(config: OpenAIProviderConfig) {
     super();
     this.config = config;
+    this.info = {
+      name: config.providerName || 'openai',
+      isLocal: config.isLocal ?? false,
+    };
   }
 
   private async getClient(): Promise<OpenAIClient> {
@@ -132,7 +136,9 @@ export class OpenAIProvider extends BaseProvider {
         apiKey: this.config.apiKey,
         baseURL: this.config.baseUrl,
         organization: this.config.organization,
-      }) as OpenAIClient;
+        defaultHeaders: this.config.defaultHeaders,
+        defaultQuery: this.config.defaultQuery,
+      } as ConstructorParameters<typeof OpenAI>[0]) as OpenAIClient;
     }
     return this.client;
   }
@@ -173,16 +179,17 @@ export class OpenAIProvider extends BaseProvider {
   }
 
   async complete(request: CompletionRequest): Promise<NexusResponse> {
+    const providerRequest = this.withProviderModel(request);
     try {
-      this.throwIfAborted(request);
-      if (this.requiresResponsesApi(request.model)) {
-        return await this.completeResponses(request);
+      this.throwIfAborted(providerRequest);
+      if (this.requiresResponsesApi(providerRequest.model)) {
+        return await this.completeResponses(providerRequest);
       }
 
       const client = await this.getClient();
       const startTime = Date.now();
-      const params = this.createChatParams(request);
-      const result = await client.chat.completions.create(params, this.requestOptions(request));
+      const params = this.createChatParams(providerRequest);
+      const result = await client.chat.completions.create(params, this.requestOptions(providerRequest));
       const choice = result.choices[0];
 
       if (!choice?.message) {
@@ -200,7 +207,7 @@ export class OpenAIProvider extends BaseProvider {
         meta: this.createMeta(result.model, Date.now() - startTime, inputTokens, outputTokens),
       };
     } catch (error) {
-      throw this.normalizeProviderError(error, request);
+      throw this.normalizeProviderError(error, providerRequest);
     }
   }
 
@@ -209,18 +216,19 @@ export class OpenAIProvider extends BaseProvider {
 
     return this.createStream(async function* () {
       try {
-        self.throwIfAborted(request);
-        if (self.requiresResponsesApi(request.model)) {
-          yield* self.streamResponses(request);
+        const providerRequest = self.withProviderModel(request);
+        self.throwIfAborted(providerRequest);
+        if (self.requiresResponsesApi(providerRequest.model)) {
+          yield* self.streamResponses(providerRequest);
           return;
         }
 
         const client = await self.getClient();
         const startTime = Date.now();
         const stream = await client.chat.completions.create({
-          ...self.createChatParams(request),
+          ...self.createChatParams(providerRequest),
           stream: true,
-        }, self.requestOptions(request));
+        }, self.requestOptions(providerRequest));
 
         const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
 
@@ -250,12 +258,12 @@ export class OpenAIProvider extends BaseProvider {
             yield* self.flushToolCalls(toolCallBuffers);
             yield {
               type: 'done',
-              meta: self.createMeta(request.model, Date.now() - startTime),
+              meta: self.createMeta(providerRequest.model, Date.now() - startTime),
             } satisfies StreamChunk;
           }
         }
       } catch (error) {
-        throw self.normalizeProviderError(error, request);
+        throw self.normalizeProviderError(error, self.withProviderModel(request));
       }
     }, request.signal);
   }
@@ -541,6 +549,24 @@ export class OpenAIProvider extends BaseProvider {
 
   private requestOptions(request: CompletionRequest): RequestOptions | undefined {
     return request.signal ? { signal: request.signal } : undefined;
+  }
+
+  private withProviderModel(request: CompletionRequest): CompletionRequest {
+    const model = this.stripConfiguredPrefix(request.model);
+    return model === request.model ? request : { ...request, model };
+  }
+
+  private stripConfiguredPrefix(model: string): string {
+    const prefixes = Array.isArray(this.config.modelPrefix)
+      ? this.config.modelPrefix
+      : this.config.modelPrefix ? [this.config.modelPrefix] : [];
+
+    for (const prefix of prefixes) {
+      const marker = `${prefix}/`;
+      if (model.startsWith(marker)) return model.slice(marker.length);
+    }
+
+    return model;
   }
 
   private *flushToolCalls(

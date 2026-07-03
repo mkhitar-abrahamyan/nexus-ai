@@ -71,7 +71,7 @@ export class AutoRouter {
     const normalized = model.startsWith('ollama/') ? model.slice(7) : model;
     const caps = registry[model] || registry[normalized] || this.localFallbackCapabilities(model);
 
-    if (strategy === 'privacy') return model.startsWith('ollama/') ? 100 : 30;
+    if (strategy === 'privacy') return isLocalModel(model) ? 100 : 30;
     if (strategy === 'speed') return this.speedScore(model, caps);
     if (strategy === 'cost') return this.costScore(model, caps);
     return this.qualityScore(model, caps);
@@ -83,13 +83,13 @@ export class AutoRouter {
       streaming: true,
       toolCalling: false,
       maxContextTokens: 8192,
-      costPer1kInput: model.startsWith('ollama/') ? 0 : 0.001,
-      costPer1kOutput: model.startsWith('ollama/') ? 0 : 0.003,
+      costPer1kInput: isLocalModel(model) ? 0 : 0.001,
+      costPer1kOutput: isLocalModel(model) ? 0 : 0.003,
     };
   }
 
   private costScore(model: string, caps: ModelCapabilities): number {
-    if (model.startsWith('ollama/')) return 100;
+    if (isLocalModel(model)) return 100;
     const totalCost = caps.costPer1kInput + caps.costPer1kOutput;
     return Math.max(1, 100 - totalCost * 1000);
   }
@@ -97,7 +97,7 @@ export class AutoRouter {
   private speedScore(model: string, caps: ModelCapabilities): number {
     if (caps.speedScore) return caps.speedScore;
     if (model.includes('mini') || model.includes('haiku') || model.includes('flash')) return 95;
-    if (model.startsWith('ollama/')) return 80;
+    if (isLocalModel(model)) return 80;
     return caps.streaming ? 70 : 50;
   }
 
@@ -109,7 +109,7 @@ export class AutoRouter {
     if (model.includes('sonnet')) return 90;
     if (model.includes('gemini-3')) return 94;
     if (model.includes('gemini-2.5-pro')) return 88;
-    if (model.startsWith('ollama/')) return 65;
+    if (isLocalModel(model)) return 65;
     return Math.min(85, caps.maxContextTokens / 2000);
   }
 
@@ -158,6 +158,21 @@ export class AutoRouter {
         { providerName, model: 'openrouter/google/gemini-2.5-flash', weight: 0 },
         { providerName, model: 'openrouter/meta-llama/llama-3.3-70b-instruct', weight: 0 },
       ];
+    }
+
+    if (providerName === 'deepseek') {
+      return [
+        { providerName, model: 'deepseek/deepseek-reasoner', weight: 0 },
+        { providerName, model: 'deepseek/deepseek-chat', weight: 0 },
+      ];
+    }
+
+    if (providerName === 'lmstudio') {
+      return [{ providerName, model: 'lmstudio/local-model', weight: 0 }];
+    }
+
+    if (providerName === 'llamacpp') {
+      return [{ providerName, model: 'llamacpp/local-model', weight: 0 }];
     }
 
     return [];
@@ -222,6 +237,13 @@ export class AutoRouter {
     if (!snapshot) return 0;
     return snapshot.healthy ? snapshot.score / 10 : -100;
   }
+}
+
+function isLocalModel(model: string): boolean {
+  return model.startsWith('ollama/')
+    || model.startsWith('lmstudio/')
+    || model.startsWith('llamacpp/')
+    || model.startsWith('llama.cpp/');
 }
 
 export function routeDirectModel(model: string, ctx: RouterContext): RouteDecision {

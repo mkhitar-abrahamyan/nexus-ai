@@ -62,12 +62,14 @@ for (const specifier of optionalPeers) {
 }
 
 const imports = [
-  ['nexus-ai-pro', ['NexusAI', 'NexusProviderError', 'OpenAIProvider', 'AnthropicProvider', 'OllamaProvider']],
+  ['nexus-ai-pro', ['NexusAI', 'createNexus', 'createNexusConfig', 'NexusProviderError', 'OpenAIProvider', 'AnthropicProvider', 'OllamaProvider']],
   ['nexus-ai-pro/core', ['NexusAI']],
+  ['nexus-ai-pro/config', ['NexusConfigBuilder', 'createNexusConfig']],
   ['nexus-ai-pro/providers/openai', ['OpenAIProvider']],
   ['nexus-ai-pro/providers/anthropic', ['AnthropicProvider']],
   ['nexus-ai-pro/providers/errors', ['NexusProviderError']],
   ['nexus-ai-pro/providers/ollama', ['OllamaProvider']],
+  ['nexus-ai-pro/providers/deepseek', ['DeepSeekProvider']],
   ['nexus-ai-pro/cache/memory-cache', ['MemoryCache']],
   ['nexus-ai-pro/security', ['SecurityPipeline']],
   ['nexus-ai-pro/jobs/batch', ['runBatch']],

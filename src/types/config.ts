@@ -16,11 +16,19 @@ export interface OpenAIProviderConfig {
   apiKey: string;
   baseUrl?: string;
   organization?: string;
+  defaultHeaders?: Record<string, string>;
+  defaultQuery?: Record<string, string>;
+  providerName?: string;
+  modelPrefix?: string | string[];
+  isLocal?: boolean;
 }
 
 export interface AnthropicProviderConfig {
   apiKey: string;
   baseUrl?: string;
+  providerName?: string;
+  modelPrefix?: string | string[];
+  isLocal?: boolean;
 }
 
 export interface GoogleProviderConfig {
@@ -56,13 +64,50 @@ export interface OpenRouterProviderConfig {
   siteUrl?: string;
 }
 
+/** Configuration for the DeepSeek OpenAI-compatible provider. */
+export interface DeepSeekProviderConfig {
+  apiKey: string;
+  baseUrl?: string;
+}
+
+/** Configuration for Azure OpenAI deployment-scoped chat completions. */
+export interface AzureOpenAIProviderConfig {
+  apiKey: string;
+  endpoint: string;
+  deployment: string;
+  apiVersion?: string;
+  baseUrl?: string;
+  defaultHeaders?: Record<string, string>;
+  defaultQuery?: Record<string, string>;
+}
+
+/** Configuration for a local LM Studio OpenAI-compatible server. */
+export interface LMStudioProviderConfig {
+  baseUrl?: string;
+  apiKey?: string;
+  modelPrefix?: string | string[];
+}
+
+/** Configuration for a local llama.cpp OpenAI-compatible server. */
+export interface LlamaCppProviderConfig {
+  baseUrl?: string;
+  apiKey?: string;
+  modelPrefix?: string | string[];
+}
+
+/** Configuration for user-owned OpenAI- or Anthropic-compatible endpoints. */
 export interface CustomProviderConfig {
   name: string;
   baseUrl: string;
   apiKey?: string;
   format: 'openai' | 'anthropic';
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  modelPrefix?: string | string[];
+  isLocal?: boolean;
 }
 
+/** Provider configs that Nexus can register from the constructor. */
 export interface ProvidersConfig {
   openai?: OpenAIProviderConfig;
   anthropic?: AnthropicProviderConfig;
@@ -72,6 +117,10 @@ export interface ProvidersConfig {
   mistral?: MistralProviderConfig;
   cohere?: CohereProviderConfig;
   openrouter?: OpenRouterProviderConfig;
+  deepseek?: DeepSeekProviderConfig;
+  azureOpenAI?: AzureOpenAIProviderConfig;
+  lmstudio?: LMStudioProviderConfig;
+  llamaCpp?: LlamaCppProviderConfig;
   custom?: CustomProviderConfig[];
 }
 
@@ -117,6 +166,26 @@ export interface AuditLogEvent {
   provider?: string;
   timestamp: string;
   metadata?: Record<string, unknown>;
+}
+
+export type LogLevel = 'info' | 'warn' | 'error';
+
+export interface LogEvent {
+  level: LogLevel;
+  message: string;
+  timestamp: string;
+  data?: Record<string, unknown>;
+  error?: {
+    name?: string;
+    message: string;
+    stack?: string;
+  } | unknown;
+}
+
+/** Structured logger hook config. */
+export interface LoggerConfig {
+  sink?: (event: LogEvent) => void | Promise<void>;
+  console?: boolean;
 }
 
 export interface RetryConfig {
@@ -193,6 +262,7 @@ export interface NexusAIConfig {
   pipeline?: PipelineConfig;
   metrics?: MetricsConfig;
   health?: HealthConfig;
+  logger?: LoggerConfig;
   defaultModel?: string;
   timeout?: number;
   debug?: boolean;

@@ -49,6 +49,8 @@ Core runtime:
 - `ai.plan(...)`
 - `ai.batchComplete(...)`
 - `ai.createQueue(...)`
+- `createNexus(...)`
+- `createNexusConfig(...)`
 
 Provider adapters:
 
@@ -60,7 +62,18 @@ Provider adapters:
 - Groq
 - Mistral
 - Cohere
-- custom providers through `registerProvider(...)`
+- DeepSeek
+- Azure OpenAI
+- LM Studio
+- llama.cpp
+- custom providers through `providers.custom` or `registerProvider(...)`
+
+CLI:
+
+- `nexus scan`
+- `nexus models`
+- `nexus eval`
+- `nexus optimize`
 
 Pipeline layers:
 
@@ -74,6 +87,7 @@ Pipeline layers:
 - metrics and provider health
 - audit logs and rate limits
 - pipeline hooks and custom steps
+- structured logger hooks
 
 Supporting modules:
 
@@ -217,6 +231,14 @@ Run from the package root:
 cd nexus-ai
 npm install
 npm run build
+```
+
+Quick CLI checks after build:
+
+```bash
+node dist/cli.js models --provider deepseek
+node dist/cli.js scan src --no-fail
+node dist/cli.js optimize README.md --model gpt-5.4-mini
 ```
 
 Main test suite:

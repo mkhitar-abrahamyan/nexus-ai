@@ -14,7 +14,7 @@ Use the whole pipeline for production AI features, or turn pieces off when you o
 npm install nexus-ai-pro
 ```
 
-Install only the provider SDKs your app uses:
+Install only the provider SDKs your app uses. The OpenAI SDK also powers OpenAI-compatible adapters such as OpenRouter, Groq, Mistral, DeepSeek, Azure OpenAI, LM Studio, and llama.cpp.
 
 ```bash
 npm install openai @anthropic-ai/sdk ollama
@@ -25,33 +25,13 @@ The Google Gemini provider uses Node.js `fetch`, so it does not need an extra SD
 ## Quick Start
 
 ```ts
-import { NexusAI } from 'nexus-ai-pro';
+import { createNexus } from 'nexus-ai-pro';
 
-const ai = new NexusAI({
-  providers: {
-    openai: { apiKey: process.env.OPENAI_API_KEY! },
-    anthropic: { apiKey: process.env.ANTHROPIC_API_KEY! },
-    google: { apiKey: process.env.GOOGLE_API_KEY! },
-    ollama: { baseUrl: 'http://localhost:11434' },
-  },
-  routing: {
-    mode: 'auto',
-    strategy: 'quality',
-  },
+const ai = createNexus({
+  provider: 'openai',
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: 'gpt-5.4-mini',
   security: 'standard',
-  contextWindow: {
-    strategy: 'last-messages-with-summary',
-    lastMessages: 10,
-    summary: { model: 'openai/fast', maxTokens: 600 },
-  },
-  tokenOptimizer: {
-    densification: { enabled: true },
-    budget: {
-      enabled: true,
-      maxInputTokens: 8000,
-      onExceeded: 'densify',
-    },
-  },
 });
 
 const response = await ai.complete({
@@ -63,6 +43,24 @@ console.log(response.content);
 console.log(response.meta.providerUsed);
 console.log(response.meta.modelUsed);
 ```
+
+For a fuller typed config, use the builder:
+
+```ts
+import { createNexusConfig } from 'nexus-ai-pro';
+
+const ai = createNexusConfig()
+  .openai(process.env.OPENAI_API_KEY!)
+  .anthropic(process.env.ANTHROPIC_API_KEY!)
+  .deepseek(process.env.DEEPSEEK_API_KEY!)
+  .lmstudio({ baseUrl: 'http://localhost:1234/v1' })
+  .auto('quality')
+  .security('standard')
+  .retry({ enabled: true, maxRetries: 2 })
+  .create();
+```
+
+You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want full object-literal control.
 
 ## Why Use It
 
@@ -78,6 +76,24 @@ console.log(response.meta.modelUsed);
 - add tools, agents, RAG context, evals, batch jobs, and queues
 - keep TypeScript types around every request and response
 
+## CLI
+
+The package installs a `nexus` command:
+
+```bash
+nexus scan src --json
+nexus models --provider deepseek
+nexus optimize prompt.txt --model gpt-5.4-mini --max-input-tokens 4000
+nexus eval examples/cli-eval.json
+```
+
+CLI commands are intentionally thin wrappers around library modules:
+
+- `nexus scan` checks files for secrets, PII, and prompt-injection patterns.
+- `nexus models` lists the bundled model registry.
+- `nexus eval` runs JSON or JS eval cases.
+- `nexus optimize` previews token optimization for a request or prompt file.
+
 ## Core Concepts
 
 ### Providers and Routing
@@ -88,7 +104,10 @@ const ai = new NexusAI({
     openai: { apiKey: process.env.OPENAI_API_KEY! },
     anthropic: { apiKey: process.env.ANTHROPIC_API_KEY! },
     groq: { apiKey: process.env.GROQ_API_KEY! },
+    deepseek: { apiKey: process.env.DEEPSEEK_API_KEY! },
+    openrouter: { apiKey: process.env.OPENROUTER_API_KEY! },
     ollama: { baseUrl: 'http://localhost:11434' },
+    lmstudio: { baseUrl: 'http://localhost:1234/v1' },
   },
   routing: {
     mode: 'auto',
@@ -100,6 +119,22 @@ const ai = new NexusAI({
   },
 });
 ```
+
+First-class provider adapters:
+
+- OpenAI
+- Anthropic
+- Google Gemini
+- Ollama
+- OpenRouter
+- Groq
+- Mistral
+- Cohere
+- DeepSeek
+- Azure OpenAI
+- LM Studio
+- llama.cpp
+- custom OpenAI- or Anthropic-compatible endpoints through `providers.custom` or `registerProvider(...)`
 
 Routing modes:
 
@@ -589,6 +624,19 @@ console.log(ai.getPrometheusMetrics());
 console.log(await ai.checkProviders());
 ```
 
+Structured logging can be injected without replacing audit logs or metrics:
+
+```ts
+const ai = createNexusConfig()
+  .openai(process.env.OPENAI_API_KEY!)
+  .direct('gpt-5.4-mini')
+  .logger({
+    console: false,
+    sink: (event) => myLogger.info(event),
+  })
+  .create();
+```
+
 Production controls include:
 
 - request timeouts
@@ -599,6 +647,7 @@ Production controls include:
 - Prometheus metrics
 - OpenTelemetry metrics and trace export helpers
 - audit log sink
+- structured logger sink
 - rate limiting
 
 ## Import Surface
@@ -606,17 +655,19 @@ Production controls include:
 The root import is convenient:
 
 ```ts
-import { NexusAI } from 'nexus-ai-pro';
+import { NexusAI, createNexus, createNexusConfig } from 'nexus-ai-pro';
 ```
 
 Focused subpaths are available for smaller imports:
 
 ```ts
 import { NexusAI } from 'nexus-ai-pro/core';
+import { createNexusConfig } from 'nexus-ai-pro/config';
 import { TokenOptimizer } from 'nexus-ai-pro/optimizer';
 import { ContextWindowManager } from 'nexus-ai-pro/context';
 import { guardrailPolicy } from 'nexus-ai-pro/security';
 import { RedisCacheAdapter } from 'nexus-ai-pro/cache';
+import { DeepSeekProvider } from 'nexus-ai-pro/providers/deepseek';
 ```
 
 Provider SDKs are optional peer dependencies. The package is ESM-first and marked with `sideEffects: false`.
@@ -625,6 +676,9 @@ Provider SDKs are optional peer dependencies. The package is ESM-first and marke
 
 ```bash
 npm run example:minimal
+npm run example:create-nexus
+npm run example:config-builder
+npm run example:custom-provider
 npm run example:feature-flags
 npm run example:basic
 npm run example:security
@@ -640,6 +694,8 @@ Included example files cover:
 - persisted vector stores
 - classifier calibration
 - domain workflows
+- custom providers
+- import examples under `examples/exports`
 
 ## Test Commands
 

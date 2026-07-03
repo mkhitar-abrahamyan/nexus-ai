@@ -63,10 +63,14 @@ try {
 import {
   AnthropicProvider,
   BaseProvider,
+  AzureOpenAIProvider,
   CohereProvider,
   ContextWindowManager,
+  DeepSeekProvider,
   GoogleProvider,
   GroqProvider,
+  LMStudioProvider,
+  LlamaCppProvider,
   MemoryCache,
   MistralProvider,
   NexusAI,
@@ -77,10 +81,16 @@ import {
   LLMJudge,
   VoiceSession,
   VoiceManager,
+  createNexus,
+  createNexusConfig,
+  defineNexusConfig,
   type CreateCallRequest,
+  type CreateNexusOptions,
   type CompletionRequest,
   type ContextWindowConfig,
   type CostBudgetConfig,
+  type DeepSeekProviderConfig,
+  type LoggerConfig,
   type NexusAIConfig,
   type NexusResponse,
   type NexusStream,
@@ -100,6 +110,7 @@ import {
   type VoiceProvider,
   type VoiceSessionConfig,
 } from 'nexus-ai-pro';
+import { createNexusConfig as createSubpathNexusConfig } from 'nexus-ai-pro/config';
 import { OpenAIProvider } from 'nexus-ai-pro/providers/openai';
 import { NexusProviderError as SubpathProviderError } from 'nexus-ai-pro/providers/errors';
 import { MemoryCache as SubpathMemoryCache } from 'nexus-ai-pro/cache/memory-cache';
@@ -181,6 +192,20 @@ const providersConfig: ProvidersConfig = {
   mistral: { apiKey: 'test' },
   cohere: { apiKey: 'test' },
   openrouter: { apiKey: 'test', appName: 'consumer', siteUrl: 'https://example.com' },
+  deepseek: { apiKey: 'test' },
+  azureOpenAI: {
+    apiKey: 'test',
+    endpoint: 'https://example.openai.azure.com',
+    deployment: 'chat',
+  },
+  lmstudio: { baseUrl: 'http://localhost:1234/v1' },
+  llamaCpp: { baseUrl: 'http://localhost:8080/v1' },
+  custom: [{
+    name: 'custom-openai',
+    baseUrl: 'https://example.test/v1',
+    apiKey: 'test',
+    format: 'openai',
+  }],
 };
 const routingConfig: RoutingConfig = {
   mode: 'auto',
@@ -250,6 +275,28 @@ const ai = new NexusAI({
   routing: { mode: 'direct' },
   defaultModel: 'consumer/test',
 }).registerProvider('consumer', new ConsumerProvider());
+const simpleOptions: CreateNexusOptions = {
+  provider: 'openai',
+  apiKey: 'test',
+  model: 'gpt-5.4-mini',
+  security: 'off',
+};
+const simpleAi = createNexus(simpleOptions);
+const builderConfig = createNexusConfig()
+  .openai('test')
+  .deepseek({ apiKey: 'test' })
+  .lmstudio()
+  .custom({ name: 'custom-openai', baseUrl: 'https://example.test/v1', format: 'openai' })
+  .direct('custom-openai/model')
+  .security('off')
+  .build();
+const builtAi = createSubpathNexusConfig(builderConfig).create();
+const literalConfig = defineNexusConfig({
+  providers: { openai: { apiKey: 'test' } },
+  routing: { mode: 'direct' },
+  defaultModel: 'gpt-5.4-mini',
+});
+const literalAi = createNexus(literalConfig);
 
 const responsePromise: Promise<NexusResponse> = ai.complete(request);
 const exactCache = new MemoryCache<NexusResponse>();
@@ -267,6 +314,13 @@ const twilioTelephony = new TwilioTelephonyProvider({ accountSid: 'AC123', authT
 const llmJudge = new LLMJudge({ client: ai, model: 'consumer/test', rubric: 'Score correctness.' });
 const subpathJudge = new SubpathLLMJudge({ client: ai, model: 'consumer/test' });
 const openAiConfig: OpenAIProviderConfig = { apiKey: 'test', organization: 'org' };
+const deepSeekConfig: DeepSeekProviderConfig = { apiKey: 'test' };
+const loggerConfig: LoggerConfig = {
+  console: false,
+  sink: (event) => {
+    void event.level;
+  },
+};
 const provider = new OpenAIProvider({ apiKey: 'test' });
 const providerConstructors = [
   new OpenAIProvider(openAiConfig),
@@ -277,6 +331,14 @@ const providerConstructors = [
   new MistralProvider({ apiKey: 'test' }),
   new CohereProvider({ apiKey: 'test' }),
   new OpenRouterProvider({ apiKey: 'test', appName: 'consumer', siteUrl: 'https://example.com' }),
+  new DeepSeekProvider(deepSeekConfig),
+  new AzureOpenAIProvider({
+    apiKey: 'test',
+    endpoint: 'https://example.openai.azure.com',
+    deployment: 'chat',
+  }),
+  new LMStudioProvider({ baseUrl: 'http://localhost:1234/v1' }),
+  new LlamaCppProvider({ baseUrl: 'http://localhost:8080/v1' }),
 ];
 const providerName: string = provider.info.name;
 const error = new NexusProviderError({
@@ -310,6 +372,9 @@ const meta: ResponseMeta = {
 const doneChunk: StreamChunk = { type: 'done', meta };
 
 void responsePromise;
+void simpleAi;
+void builtAi;
+void literalAi;
 void exactCache;
 void subpathCache;
 void contextManager;
@@ -325,6 +390,7 @@ void twilioTelephony;
 void llmJudge;
 void subpathJudge;
 void aiConfig;
+void loggerConfig;
 void providerConstructors;
 void providerName;
 void error.retryable;

@@ -17,15 +17,15 @@ Most AI apps begin with one provider call. Then the app grows:
 - documents need RAG
 - production needs metrics, retries, health checks, and test fixtures
 
-`nexus-ai-pro` puts those pieces behind one main class: `NexusAI`.
+`nexus-ai-pro` puts those pieces behind one main class: `NexusAI`, plus a small `createNexus()` helper for beginner setups.
 
 You can use it lightly:
 
 ```ts
-const ai = new NexusAI({
-  providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } },
-  routing: { mode: 'direct' },
-  defaultModel: 'openai/fast',
+const ai = createNexus({
+  provider: 'openai',
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: 'openai/fast',
   security: 'off',
   tokenOptimizer: { enabled: false },
 });
@@ -91,8 +91,37 @@ Supported adapters:
 - Groq
 - Mistral
 - Cohere
+- DeepSeek
+- Azure OpenAI
+- LM Studio
+- llama.cpp
+- custom OpenAI- or Anthropic-compatible endpoints
 
 Provider SDKs are optional peer dependencies. Install only the SDKs your app uses.
+
+For typed setup without a large config object, use the builder:
+
+```ts
+const ai = createNexusConfig()
+  .openai(process.env.OPENAI_API_KEY!)
+  .deepseek(process.env.DEEPSEEK_API_KEY!)
+  .auto('quality')
+  .security('standard')
+  .create();
+```
+
+## CLI
+
+The package also installs `nexus`:
+
+```bash
+nexus scan src --json
+nexus models --provider openai
+nexus optimize prompt.txt --max-input-tokens 4000
+nexus eval examples/cli-eval.json
+```
+
+The CLI is intentionally small. It calls the same scanner, model registry, eval runner, and token optimizer that library users can import directly.
 
 ### Routing
 
@@ -363,12 +392,16 @@ const ai = new NexusAI({
   retry: { enabled: true, maxRetries: 2 },
   health: { enabled: true },
   metrics: { enabled: true },
+  logger: { console: false, sink: (event) => console.log(JSON.stringify(event)) },
 });
 ```
 
 ## Important Files
 
 - `src/core/nexus.ts` - main runtime
+- `src/core/create-nexus.ts` - beginner factory
+- `src/core/config-builder.ts` - fluent typed config builder
+- `src/cli.ts` - `nexus` command implementation
 - `src/providers/*` - provider adapters
 - `src/router/*` - routing and failover
 - `src/security/*` - guardrails
@@ -385,7 +418,7 @@ const ai = new NexusAI({
 
 ## Known Limitations
 
-- Voice is documented as a roadmap, not a finished runtime.
+- Voice, telephony, local models, and custom providers are optional layers; apps should enable only the pieces they use.
 - Audio/video preprocessing is limited.
 - Provider modality support differs and may require preprocessing.
 - Built-in model metadata is a routing convenience, not a pricing contract.

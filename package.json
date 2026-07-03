@@ -1,10 +1,13 @@
 {
   "name": "nexus-ai-pro",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "The Universal AI Pipeline for Node.js - one package, every model, every modality, with guardrails built in",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "nexus": "./dist/cli.js"
+  },
   "sideEffects": false,
   "exports": {
     ".": {
@@ -18,6 +21,10 @@
     "./streaming": {
       "types": "./dist/core/streaming.d.ts",
       "import": "./dist/core/streaming.js"
+    },
+    "./config": {
+      "types": "./dist/core/config-builder.d.ts",
+      "import": "./dist/core/config-builder.js"
     },
     "./providers": {
       "types": "./dist/providers/base.d.ts",
@@ -100,6 +107,9 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "example:minimal": "tsx examples/minimal.ts",
+    "example:create-nexus": "tsx examples/create-nexus.ts",
+    "example:config-builder": "tsx examples/config-builder.ts",
+    "example:custom-provider": "tsx examples/custom-provider.ts",
     "example:basic": "tsx examples/basic.ts",
     "example:feature-flags": "tsx examples/feature-flags.ts",
     "example:security": "tsx examples/security.ts",

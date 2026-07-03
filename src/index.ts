@@ -1,4 +1,15 @@
 export { NexusAI } from './core/nexus.js';
+export {
+  createNexus,
+  normalizeCreateNexusConfig,
+  type CreateNexusOptions,
+  type CreateNexusProvider,
+} from './core/create-nexus.js';
+export {
+  NexusConfigBuilder,
+  createNexusConfig,
+  defineNexusConfig,
+} from './core/config-builder.js';
 export { collectStream, mapStream, createTextStream } from './core/streaming.js';
 export { createNexusRouteHandler } from './next/route-handler.js';
 export {
@@ -134,6 +145,10 @@ export { OpenRouterProvider } from './providers/openrouter.js';
 export { GroqProvider } from './providers/groq.js';
 export { MistralProvider } from './providers/mistral.js';
 export { CohereProvider } from './providers/cohere.js';
+export { DeepSeekProvider } from './providers/deepseek.js';
+export { AzureOpenAIProvider } from './providers/azure-openai.js';
+export { LMStudioProvider } from './providers/lmstudio.js';
+export { LlamaCppProvider } from './providers/llamacpp.js';
 
 export { Router, FailoverExecutor, type RouteDecision, type RouterContext } from './router/index.js';
 export {
@@ -342,6 +357,10 @@ export type {
   MistralProviderConfig,
   CohereProviderConfig,
   CustomProviderConfig,
+  DeepSeekProviderConfig,
+  AzureOpenAIProviderConfig,
+  LMStudioProviderConfig,
+  LlamaCppProviderConfig,
   RoutingConfig,
   RoutingRule,
   RoutingStrategy,
@@ -350,6 +369,9 @@ export type {
   RetryConfig,
   CostBudgetConfig,
   AuditLogConfig,
+  LoggerConfig,
+  LogEvent,
+  LogLevel,
   RateLimitConfig,
 } from './types/config.js';
 

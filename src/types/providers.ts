@@ -495,6 +495,17 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'mistral/magistral-medium-2509': openAiCompatible('mistral', 'magistral-medium-1.2', ['text', 'vision'], 128000, 8192, 2, 5, 88, 70, '2025-09', 'stable', 'Reasoning model. Pricing varies by deployment; override costs in models.registry if needed.'),
   'mistral/mistral-moderation-2603': openAiCompatible('mistral', 'moderation', ['text'], 128000, 4096, 0, 0, 70, 92, '2026-03', 'stable', 'Moderation model, not intended for normal chat completions.'),
 
+  // DeepSeek
+  'deepseek/deepseek-chat': openAiCompatible('deepseek', 'deepseek-chat', ['text'], 64000, 8192, 0, 0, 82, 84, 'stable', 'stable', 'Pricing and limits vary by DeepSeek account; override costs in models.registry for exact estimates.'),
+  'deepseek/deepseek-reasoner': {
+    ...openAiCompatible('deepseek', 'deepseek-reasoner', ['text'], 64000, 8192, 0, 0, 86, 70, 'stable', 'stable', 'Reasoning model. Override costs in models.registry for exact estimates.'),
+    reasoning: true,
+  },
+
+  // Local OpenAI-compatible servers
+  'lmstudio/local-model': openAiCompatible('lmstudio', 'local', ['text'], 8192, 4096, 0, 0, 65, 75, 'local', 'stable', 'Placeholder for LM Studio. Use an explicit lmstudio/<loaded-model> name for direct routing.'),
+  'llamacpp/local-model': openAiCompatible('llamacpp', 'local', ['text'], 8192, 4096, 0, 0, 65, 75, 'local', 'stable', 'Placeholder for llama.cpp OpenAI-compatible server. Use an explicit llamacpp/<loaded-model> name for direct routing.'),
+
   // Cohere
   'cohere/command-a-03-2025': cohere('command-a', ['text'], 256000, 8000, 86, 80, '2025-03'),
   'cohere/command-a-reasoning-08-2025': cohere('command-a-reasoning', ['text'], 256000, 32000, 88, 68, '2025-08'),
@@ -532,6 +543,9 @@ export const MODEL_ALIASES: Record<string, string> = {
   'mistral/mistral-small-4': 'mistral/mistral-small-2603',
   'mistral/mistral-large-3': 'mistral/mistral-large-2512',
   'mistral/devstral-2': 'mistral/devstral-2512',
+  'deepseek/best': 'deepseek/deepseek-reasoner',
+  'deepseek/balanced': 'deepseek/deepseek-chat',
+  'deepseek/fast': 'deepseek/deepseek-chat',
   'cohere/best': 'cohere/command-a-03-2025',
   'cohere/reasoning': 'cohere/command-a-reasoning-08-2025',
   'cohere/vision': 'cohere/command-a-vision-07-2025',
@@ -576,7 +590,9 @@ export function resolveProvider(model: string): string | null {
   if (model.startsWith('gemini-')) return 'google';
   if (model.includes('/')) {
     const prefix = model.split('/')[0];
-    if (['ollama', 'google', 'groq', 'lmstudio', 'openrouter', 'together', 'deepseek', 'mistral', 'cohere'].includes(prefix)) return prefix;
+    if (prefix === 'azure') return 'azure-openai';
+    if (prefix === 'llama.cpp') return 'llamacpp';
+    if (['ollama', 'google', 'groq', 'lmstudio', 'llamacpp', 'azure-openai', 'openrouter', 'together', 'deepseek', 'mistral', 'cohere'].includes(prefix)) return prefix;
   }
   return null;
 }

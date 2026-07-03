@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 
 const imports = [
-  { specifier: 'nexus-ai-pro', exports: ['NexusAI', 'BaseProvider', 'NexusProviderError', 'Router'] },
+  { specifier: 'nexus-ai-pro', exports: ['NexusAI', 'createNexus', 'createNexusConfig', 'BaseProvider', 'NexusProviderError', 'Router'] },
   { specifier: 'nexus-ai-pro/core', exports: ['NexusAI'] },
   { specifier: 'nexus-ai-pro/streaming', exports: ['collectStream', 'createTextStream'] },
+  { specifier: 'nexus-ai-pro/config', exports: ['NexusConfigBuilder', 'createNexusConfig', 'defineNexusConfig'] },
   { specifier: 'nexus-ai-pro/providers', exports: ['BaseProvider', 'NexusProviderError'] },
   { specifier: 'nexus-ai-pro/providers/openai', exports: ['OpenAIProvider'] },
   { specifier: 'nexus-ai-pro/providers/anthropic', exports: ['AnthropicProvider'] },
@@ -14,6 +15,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/providers/groq', exports: ['GroqProvider'] },
   { specifier: 'nexus-ai-pro/providers/mistral', exports: ['MistralProvider'] },
   { specifier: 'nexus-ai-pro/providers/cohere', exports: ['CohereProvider'] },
+  { specifier: 'nexus-ai-pro/providers/deepseek', exports: ['DeepSeekProvider'] },
+  { specifier: 'nexus-ai-pro/providers/azure-openai', exports: ['AzureOpenAIProvider'] },
+  { specifier: 'nexus-ai-pro/providers/lmstudio', exports: ['LMStudioProvider'] },
+  { specifier: 'nexus-ai-pro/providers/llamacpp', exports: ['LlamaCppProvider'] },
   { specifier: 'nexus-ai-pro/security', exports: ['SecurityPipeline', 'NexusSecurityError'] },
   { specifier: 'nexus-ai-pro/optimizer', exports: ['TokenOptimizer', 'BudgetEnforcer'] },
   { specifier: 'nexus-ai-pro/context', exports: ['ContextWindowManager'] },

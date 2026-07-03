@@ -15,8 +15,12 @@ import {
   collectStream,
   completeWithSelfConsistency,
   ContextWindowManager,
+  createNexus,
+  createNexusConfig,
+  defineNexusConfig,
   createCacheKey,
   createTextStream,
+  normalizeCreateNexusConfig,
   selectGraphFacts,
   tool,
   withKnowledgeGraphContext,
@@ -232,6 +236,72 @@ class MockTelephonyProvider implements TelephonyProvider {
     return req.headers?.['x-test-signature'] === 'valid';
   }
 }
+
+test('createNexus supports beginner shorthand and env-style normalization', () => {
+  const normalized = normalizeCreateNexusConfig({
+    provider: 'deepseek',
+    apiKey: 'test-key',
+    model: 'deepseek/deepseek-chat',
+    security: 'off',
+  });
+
+  assert.equal(normalized.providers.deepseek?.apiKey, 'test-key');
+  assert.equal(normalized.defaultModel, 'deepseek/deepseek-chat');
+  assert.equal(normalized.routing?.mode, 'direct');
+
+  const ai = createNexus({
+    provider: 'deepseek',
+    apiKey: 'test-key',
+    model: 'deepseek/deepseek-chat',
+    security: 'off',
+  });
+  assert.deepEqual(ai.listProviders(), ['deepseek']);
+});
+
+test('NexusConfigBuilder builds typed config and registers custom endpoints', () => {
+  const config = createNexusConfig()
+    .openai('openai-key')
+    .deepseek('deepseek-key')
+    .lmstudio()
+    .custom({
+      name: 'local-openai',
+      baseUrl: 'http://localhost:1234/v1',
+      format: 'openai',
+      isLocal: true,
+    })
+    .direct('local-openai/local-model')
+    .security('off')
+    .retry({ enabled: true, maxRetries: 1 })
+    .build();
+
+  assert.equal(config.providers.openai?.apiKey, 'openai-key');
+  assert.equal(config.providers.deepseek?.apiKey, 'deepseek-key');
+  assert.equal(config.providers.lmstudio?.baseUrl, undefined);
+  assert.equal(config.providers.custom?.[0].name, 'local-openai');
+  assert.equal(config.defaultModel, 'local-openai/local-model');
+  assert.equal(config.retry?.enabled, true);
+
+  const ai = createNexusConfig(config).create();
+  assert.deepEqual(ai.listProviders(), ['openai', 'deepseek', 'lmstudio', 'local-openai']);
+});
+
+test('defineNexusConfig preserves object-literal configuration types', () => {
+  const config = defineNexusConfig({
+    providers: {
+      custom: [{
+        name: 'custom-anthropic',
+        baseUrl: 'https://example.test',
+        apiKey: 'test',
+        format: 'anthropic',
+      }],
+    },
+    routing: { mode: 'direct' },
+    defaultModel: 'custom-anthropic/claude-test',
+  });
+
+  const ai = new NexusAI(config);
+  assert.deepEqual(ai.listProviders(), ['custom-anthropic']);
+});
 
 test('routes direct auto requests to the configured default model', () => {
   const router = new Router();

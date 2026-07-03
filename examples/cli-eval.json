@@ -1,0 +1,16 @@
+[
+  {
+    "name": "tiny sanity check",
+    "request": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Say the word nexus."
+        }
+      ]
+    },
+    "contains": "nexus",
+    "match": "includes"
+  }
+]

@@ -34,6 +34,10 @@ import { OpenRouterProvider } from '../providers/openrouter.js';
 import { GroqProvider } from '../providers/groq.js';
 import { MistralProvider } from '../providers/mistral.js';
 import { CohereProvider } from '../providers/cohere.js';
+import { DeepSeekProvider } from '../providers/deepseek.js';
+import { AzureOpenAIProvider } from '../providers/azure-openai.js';
+import { LMStudioProvider } from '../providers/lmstudio.js';
+import { LlamaCppProvider } from '../providers/llamacpp.js';
 import { Router, FailoverExecutor } from '../router/index.js';
 import { Logger } from '../utils/logger.js';
 import { SecurityPipeline } from '../security/index.js';
@@ -66,6 +70,11 @@ import { JobQueue, type QueueOptions } from '../jobs/queue.js';
 import { EvalRunner, type EvalCase, type EvalRunResult } from '../evals/runner.js';
 import { summarizeVerifyFormat, type SummarizeVerifyFormatOptions, type WorkflowResult } from '../workflow/chains.js';
 
+/**
+ * Main runtime facade for provider routing, security, optimization, evals, voice, jobs, and observability.
+ *
+ * Use `new NexusAI(config)` when you want full control, or `createNexus()` for the beginner shorthand.
+ */
 export class NexusAI {
   private config: NexusAIConfig;
   private providers = new Map<string, BaseProvider>();
@@ -85,13 +94,18 @@ export class NexusAI {
   private health: ProviderHealthMonitor;
   private semanticCache: SemanticCache;
 
+  /**
+   * Creates a configured Nexus runtime.
+   *
+   * Provider SDKs are loaded lazily by each provider adapter, so unused providers do not add runtime work.
+   */
   constructor(config: NexusAIConfig) {
     this.config = {
       routing: { mode: 'auto', strategy: 'quality' },
       timeout: 60000,
       ...config,
     };
-    this.logger = new Logger(this.config.debug);
+    this.logger = new Logger(this.config.debug, this.config.logger);
     this.security = new SecurityPipeline(this.config.security || 'standard');
     this.contextWindow = new ContextWindowManager(this.config.contextWindow || {});
     this.voiceManager = new VoiceManager(this.config.voice || {});
@@ -111,6 +125,9 @@ export class NexusAI {
     this.registerConfiguredProviders();
   }
 
+  /**
+   * Runs a completion through the full configured pipeline and returns one normalized response.
+   */
   async complete(request: CompletionRequest): Promise<NexusResponse> {
     let context = createPipelineContext(request);
 
@@ -280,14 +297,23 @@ export class NexusAI {
     }
   }
 
+  /**
+   * Completes a request and verifies generated claims against provided context.
+   */
   async completeVerified(request: CompletionRequest, options: VerificationOptions): Promise<NexusResponse> {
     return completeVerified(this, request, options);
   }
 
+  /**
+   * Samples multiple completions and returns the most self-consistent answer.
+   */
   async completeConsistent(request: CompletionRequest, options: SelfConsistencyOptions = {}): Promise<NexusResponse> {
     return completeWithSelfConsistency(this, request, options);
   }
 
+  /**
+   * Previews routing, token usage, context fit, cost, and guardrail findings without calling a provider.
+   */
   plan(request: CompletionRequest): NexusPlan {
     const formattedRequest = this.hasResponseFormat(request)
       ? withResponseFormat(request, this.config.responseFormat)
@@ -343,6 +369,9 @@ export class NexusAI {
     };
   }
 
+  /**
+   * Streams a completion through the configured pipeline using normalized stream chunks.
+   */
   stream(request: CompletionRequest): NexusStream {
     if (this.isContextWindowEnabled()) {
       return this.streamWithContextWindow(request);
@@ -373,39 +402,66 @@ export class NexusAI {
     return this.isSecurityEnabled() ? protectStreamOutput(stream, this.security) : stream;
   }
 
+  /**
+   * Runs an agent loop with registered tools and iteration limits.
+   */
   async agent(config: AgentConfig): Promise<AgentResult> {
     const loop = new AgentLoop(this);
     return loop.run(config);
   }
 
+  /**
+   * Transcribes audio through a registered voice provider.
+   */
   async transcribe(request: TranscriptionRequest): Promise<TranscriptionResponse> {
     return this.voiceManager.transcribe(request);
   }
 
+  /**
+   * Synthesizes speech through a registered voice provider.
+   */
   async speak(request: SpeechRequest): Promise<SpeechResponse> {
     return this.voiceManager.speak(request);
   }
 
+  /**
+   * Runs one voice turn: optional transcription, completion, and optional speech synthesis.
+   */
   async voice(request: VoiceTurnRequest): Promise<VoiceTurnResponse> {
     return this.voiceManager.runTurn(request, this);
   }
 
+  /**
+   * Alias for `voice()` for apps that model calls as turns.
+   */
   async voiceTurn(request: VoiceTurnRequest): Promise<VoiceTurnResponse> {
     return this.voiceManager.runTurn(request, this);
   }
 
+  /**
+   * Creates a stateful voice session with transcript history, task prompts, and optional tools.
+   */
   createVoiceSession(config: VoiceSessionConfig): VoiceSession {
     return this.voiceManager.createSession(config, this);
   }
 
+  /**
+   * Creates an outbound call through a registered telephony provider.
+   */
   async createCall(request: CreateCallRequest): Promise<CreateCallResponse> {
     return this.telephonyManager.createCall(request);
   }
 
+  /**
+   * Creates a provider-specific webhook response such as TwiML.
+   */
   async createTelephonyResponse(request: TelephonyResponseRequest): Promise<TelephonyWebhookResponse> {
     return this.telephonyManager.createWebhookResponse(request);
   }
 
+  /**
+   * Validates a telephony webhook signature when the provider supports it.
+   */
   async validateTelephonyWebhook(request: TelephonyWebhookValidationRequest): Promise<boolean> {
     return this.telephonyManager.validateWebhook(request);
   }
@@ -423,16 +479,25 @@ export class NexusAI {
     return this.telephonyManager.formatAudioMessage(providerName, streamId, payload, options);
   }
 
+  /**
+   * Registers a custom text provider at runtime.
+   */
   registerProvider(name: string, provider: BaseProvider): this {
     this.providers.set(name, provider);
     return this;
   }
 
+  /**
+   * Registers a custom voice provider at runtime.
+   */
   registerVoiceProvider(name: string, provider: VoiceProvider): this {
     this.voiceManager.registerProvider(name, provider);
     return this;
   }
 
+  /**
+   * Registers a custom telephony provider at runtime.
+   */
   registerTelephonyProvider(name: string, provider: TelephonyProvider): this {
     this.telephonyManager.registerProvider(name, provider);
     return this;
@@ -450,6 +515,9 @@ export class NexusAI {
     return this.telephonyManager.hasProvider(name);
   }
 
+  /**
+   * Lists configured text providers.
+   */
   listProviders(): string[] {
     return [...this.providers.keys()];
   }
@@ -462,11 +530,17 @@ export class NexusAI {
     return this.telephonyManager.listProviders();
   }
 
+  /**
+   * Adds a custom pipeline step.
+   */
   use(step: PipelineStep): this {
     this.pipeline.use(step);
     return this;
   }
 
+  /**
+   * Runs multiple completion requests with optional concurrency control.
+   */
   async batchComplete(
     requests: CompletionRequest[],
     options: BatchOptions = {},
@@ -474,10 +548,16 @@ export class NexusAI {
     return runBatch(requests, (item) => this.complete(item), options);
   }
 
+  /**
+   * Creates an in-process job queue for completion requests.
+   */
   createQueue(options: QueueOptions = {}): JobQueue<CompletionRequest, NexusResponse> {
     return new JobQueue<CompletionRequest, NexusResponse>((payload) => this.complete(payload), options);
   }
 
+  /**
+   * Runs eval cases against this Nexus instance.
+   */
   runEvals(cases: EvalCase<NexusResponse>[]): Promise<EvalRunResult<NexusResponse>> {
     return new EvalRunner<NexusResponse>(this).run(cases);
   }
@@ -486,10 +566,16 @@ export class NexusAI {
     return summarizeVerifyFormat(this, options);
   }
 
+  /**
+   * Returns current provider health snapshots.
+   */
   getProviderHealth() {
     return this.health.snapshot();
   }
 
+  /**
+   * Calls each provider's health check and records the result.
+   */
   async checkProviders(): Promise<Array<{ providerName: string; ok: boolean; error?: string }>> {
     const results: Array<{ providerName: string; ok: boolean; error?: string }> = [];
     for (const [providerName, provider] of this.providers) {
@@ -511,14 +597,23 @@ export class NexusAI {
     return results;
   }
 
+  /**
+   * Returns an in-memory metrics snapshot.
+   */
   getMetricsSnapshot(): Record<string, unknown> {
     return this.metrics.snapshot();
   }
 
+  /**
+   * Returns Prometheus-formatted metrics when metrics are enabled.
+   */
   getPrometheusMetrics(): string {
     return this.metrics.toPrometheus();
   }
 
+  /**
+   * Clears exact and semantic caches.
+   */
   clearCache(): void {
     this.cache.clear();
     this.semanticCache.clear();
@@ -713,6 +808,22 @@ export class NexusAI {
       this.providers.set('openrouter', new OpenRouterProvider(providers.openrouter));
     }
 
+    if (providers.deepseek) {
+      this.providers.set('deepseek', new DeepSeekProvider(providers.deepseek));
+    }
+
+    if (providers.azureOpenAI) {
+      this.providers.set('azure-openai', new AzureOpenAIProvider(providers.azureOpenAI));
+    }
+
+    if (providers.lmstudio) {
+      this.providers.set('lmstudio', new LMStudioProvider(providers.lmstudio));
+    }
+
+    if (providers.llamaCpp) {
+      this.providers.set('llamacpp', new LlamaCppProvider(providers.llamaCpp));
+    }
+
     if (providers.groq) {
       this.providers.set('groq', new GroqProvider(providers.groq));
     }
@@ -723,6 +834,29 @@ export class NexusAI {
 
     if (providers.cohere) {
       this.providers.set('cohere', new CohereProvider(providers.cohere));
+    }
+
+    for (const custom of providers.custom || []) {
+      if (custom.format === 'anthropic') {
+        this.providers.set(custom.name, new AnthropicProvider({
+          apiKey: custom.apiKey || 'custom',
+          baseUrl: custom.baseUrl,
+          providerName: custom.name,
+          modelPrefix: custom.modelPrefix || custom.name,
+          isLocal: custom.isLocal,
+        }));
+        continue;
+      }
+
+      this.providers.set(custom.name, new OpenAIProvider({
+        apiKey: custom.apiKey || 'custom',
+        baseUrl: custom.baseUrl,
+        defaultHeaders: custom.headers,
+        defaultQuery: custom.query,
+        providerName: custom.name,
+        modelPrefix: custom.modelPrefix || custom.name,
+        isLocal: custom.isLocal,
+      }));
     }
   }
 

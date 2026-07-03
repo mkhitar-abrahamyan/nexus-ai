@@ -64,13 +64,17 @@ type AnthropicResponseContentBlock =
 type AnthropicStreamEvent = Record<string, unknown> & { type: string };
 
 export class AnthropicProvider extends BaseProvider {
-  readonly info: ProviderInfo = { name: 'anthropic', isLocal: false };
+  readonly info: ProviderInfo;
   private client?: AnthropicClient;
   private config: AnthropicProviderConfig;
 
   constructor(config: AnthropicProviderConfig) {
     super();
     this.config = config;
+    this.info = {
+      name: config.providerName || 'anthropic',
+      isLocal: config.isLocal ?? false,
+    };
   }
 
   private async getClient(): Promise<AnthropicClient> {
@@ -147,12 +151,13 @@ export class AnthropicProvider extends BaseProvider {
   }
 
   async complete(request: CompletionRequest): Promise<NexusResponse> {
+    const providerRequest = this.withProviderModel(request);
     try {
-      this.throwIfAborted(request);
+      this.throwIfAborted(providerRequest);
       const client = await this.getClient();
       const startTime = Date.now();
-      const params = this.createParams(request);
-      const result = await client.messages.create(params, this.requestOptions(request));
+      const params = this.createParams(providerRequest);
+      const result = await client.messages.create(params, this.requestOptions(providerRequest));
       const latency = Date.now() - startTime;
 
       let content = '';
@@ -177,7 +182,7 @@ export class AnthropicProvider extends BaseProvider {
         finishReason: result.stop_reason === 'tool_use' ? 'tool_calls' : 'stop',
         meta: {
           requestId: generateRequestId(),
-          providerUsed: 'anthropic',
+          providerUsed: this.info.name,
           modelUsed: result.model,
           latencyMs: latency,
           tokensInput: result.usage?.input_tokens || 0,
@@ -189,7 +194,7 @@ export class AnthropicProvider extends BaseProvider {
         },
       };
     } catch (error) {
-      throw this.normalizeProviderError(error, request);
+      throw this.normalizeProviderError(error, providerRequest);
     }
   }
 
@@ -198,13 +203,14 @@ export class AnthropicProvider extends BaseProvider {
 
     return this.createStream(async function* () {
       try {
-        self.throwIfAborted(request);
+        const providerRequest = self.withProviderModel(request);
+        self.throwIfAborted(providerRequest);
         const client = await self.getClient();
         const startTime = Date.now();
         const stream = client.messages.stream({
-          ...self.createParams(request),
+          ...self.createParams(providerRequest),
           stream: true,
-        }, self.requestOptions(request));
+        }, self.requestOptions(providerRequest));
 
         for await (const event of stream) {
           if (event.type === 'content_block_delta') {
@@ -219,8 +225,8 @@ export class AnthropicProvider extends BaseProvider {
               type: 'done',
               meta: {
                 requestId: generateRequestId(),
-                providerUsed: 'anthropic',
-                modelUsed: request.model,
+                providerUsed: self.info.name,
+                modelUsed: providerRequest.model,
                 latencyMs: Date.now() - startTime,
                 tokensInput: 0,
                 tokensOutput: 0,
@@ -233,7 +239,7 @@ export class AnthropicProvider extends BaseProvider {
           }
         }
       } catch (error) {
-        throw self.normalizeProviderError(error, request);
+        throw self.normalizeProviderError(error, self.withProviderModel(request));
       }
     }, request.signal);
   }
@@ -266,5 +272,23 @@ export class AnthropicProvider extends BaseProvider {
 
   private requestOptions(request: CompletionRequest): RequestOptions | undefined {
     return request.signal ? { signal: request.signal } : undefined;
+  }
+
+  private withProviderModel(request: CompletionRequest): CompletionRequest {
+    const model = this.stripConfiguredPrefix(request.model);
+    return model === request.model ? request : { ...request, model };
+  }
+
+  private stripConfiguredPrefix(model: string): string {
+    const prefixes = Array.isArray(this.config.modelPrefix)
+      ? this.config.modelPrefix
+      : this.config.modelPrefix ? [this.config.modelPrefix] : [];
+
+    for (const prefix of prefixes) {
+      const marker = `${prefix}/`;
+      if (model.startsWith(marker)) return model.slice(marker.length);
+    }
+
+    return model;
   }
 }
