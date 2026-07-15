@@ -1,12 +1,12 @@
 {
   "name": "nexus-ai-pro",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "The Universal AI Pipeline for Node.js - one package, every model, every modality, with guardrails built in",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "nexus": "./dist/cli.js"
+    "nexus": "dist/cli.js"
   },
   "sideEffects": false,
   "exports": {
@@ -130,11 +130,19 @@
     "ai",
     "llm",
     "openai",
+    "gpt-5",
+    "gpt-5.6",
+    "openai-responses",
+    "reasoning-models",
     "anthropic",
     "claude",
     "ollama",
+    "ai-agents",
+    "model-router",
     "router",
     "streaming",
+    "function-calling",
+    "vision",
     "multi-model",
     "security",
     "typescript",
@@ -146,14 +154,12 @@
     "api-keys",
     "token-scanner",
     "credentials",
-    "security",
     "github-security",
     "git-secrets",
     "pii",
     "prompt-injection",
     "ai-security",
     "llm-security",
-    "typescript",
     "cli",
     "devtools"
   ],
@@ -201,7 +207,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/mkhitar-abrahamyan/nexus-ai"
+    "url": "git+https://github.com/mkhitar-abrahamyan/nexus-ai.git"
   },
   "homepage": "https://www.npmjs.com/package/nexus-ai-pro",
   "bugs": {

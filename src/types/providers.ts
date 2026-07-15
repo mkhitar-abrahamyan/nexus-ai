@@ -1,7 +1,7 @@
 export type Modality = 'text' | 'vision' | 'audio' | 'video' | 'image' | 'pdf';
 export type ModelStatus = 'stable' | 'preview' | 'latest' | 'deprecated';
 export type ModelEndpoint = 'chat' | 'responses' | 'messages' | 'generateContent' | 'realtime';
-export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type RoutingModelPreference =
   | string
   | {
@@ -42,7 +42,7 @@ function model(capabilities: ModelCapabilities): ModelCapabilities {
 }
 
 const openaiReasoning: { efforts: ReasoningEffort[] } = {
-  efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+  efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
 };
 
 const gpt5 = (
@@ -202,7 +202,24 @@ const cohere = (
 });
 
 export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
-  // OpenAI - current GPT-5 family
+  // OpenAI - current GPT-5.6 family
+  'gpt-5.6-sol': {
+    ...gpt5('gpt-5.6', 1050000, 5, 30, 100, 78, '2026-07', '2026-02-16'),
+    endpoints: ['responses'],
+    notes: 'OpenAI flagship model for complex reasoning and coding.',
+  },
+  'gpt-5.6-terra': {
+    ...gpt5('gpt-5.6', 1050000, 2.5, 15, 98, 86, '2026-07', '2026-02-16'),
+    endpoints: ['responses'],
+    notes: 'OpenAI GPT-5.6 model balanced for intelligence and cost.',
+  },
+  'gpt-5.6-luna': {
+    ...gpt5('gpt-5.6', 1050000, 1, 6, 94, 96, '2026-07', '2026-02-16'),
+    endpoints: ['responses'],
+    notes: 'OpenAI GPT-5.6 model optimized for cost-sensitive, high-volume workloads.',
+  },
+
+  // OpenAI - GPT-5 family
   'gpt-5.5': gpt5('gpt-5.5', 1000000, 5, 30, 99, 82, '2026', '2025-12-01'),
   'gpt-5.5-pro': {
     ...gpt5('gpt-5.5', 1050000, 30, 180, 100, 55, '2026', '2025-12-01'),
@@ -243,6 +260,62 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   },
 
   // OpenAI - GPT-4 / reasoning legacy still commonly deployed
+  'gpt-4.5-preview': model({
+    provider: 'openai',
+    family: 'gpt-4.5',
+    modalities: ['text', 'vision'],
+    streaming: true,
+    toolCalling: true,
+    structuredOutputs: true,
+    jsonMode: true,
+    maxContextTokens: 128000,
+    maxOutputTokens: 16384,
+    costPer1kInput: 0.075,
+    costPer1kOutput: 0.150,
+    qualityScore: 92,
+    speedScore: 78,
+    release: '2025',
+    status: 'preview',
+    endpoints: ['chat', 'responses'],
+  }),
+  'o1': model({
+    provider: 'openai',
+    family: 'o-series',
+    modalities: ['text', 'vision'],
+    streaming: true,
+    toolCalling: true,
+    structuredOutputs: true,
+    jsonMode: true,
+    reasoning: { efforts: ['low', 'medium', 'high'] },
+    maxContextTokens: 200000,
+    maxOutputTokens: 100000,
+    costPer1kInput: 0.015,
+    costPer1kOutput: 0.060,
+    qualityScore: 88,
+    speedScore: 60,
+    release: '2024',
+    status: 'stable',
+    endpoints: ['chat', 'responses'],
+  }),
+  'o1-mini': model({
+    provider: 'openai',
+    family: 'o-series',
+    modalities: ['text'],
+    streaming: true,
+    toolCalling: true,
+    structuredOutputs: true,
+    jsonMode: true,
+    reasoning: { efforts: ['low', 'medium', 'high'] },
+    maxContextTokens: 128000,
+    maxOutputTokens: 65536,
+    costPer1kInput: 0.003,
+    costPer1kOutput: 0.012,
+    qualityScore: 82,
+    speedScore: 80,
+    release: '2024',
+    status: 'stable',
+    endpoints: ['chat', 'responses'],
+  }),
   'gpt-4.1': model({
     provider: 'openai',
     family: 'gpt-4.1',
@@ -424,6 +497,10 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   }),
 
   // Anthropic
+  'claude-sonnet-5-0': claude('claude-sonnet-5.0', 3, 15, 96, 88, 64000, '2026', '2026-06', 200000),
+  'claude-haiku-5-0': claude('claude-haiku-5.0', 1, 5, 88, 98, 64000, '2026', '2026-06', 200000),
+  'claude-opus-4-8': claude('claude-opus-4.8', 5, 25, 99, 74, 128000, '2026', '2026-06', 1000000),
+  'claude-fable-5-0': claude('claude-fable-5.0', 3, 15, 96, 92, 64000, '2026', '2026-06', 1000000),
   'claude-opus-4-7': claude('claude-opus-4.7', 5, 25, 99, 72, 128000, '2026', '2026-01', 1000000),
   'claude-opus-4-6': {
     ...claude('claude-opus-4.6', 5, 25, 98, 72, 128000, '2026', '2026-01', 1000000),
@@ -445,6 +522,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'claude-3-haiku-20240307': claude('claude-haiku-3', 0.25, 1.25, 68, 94, 4096, '2024-03-07', '2023-08'),
 
   // Google Gemini
+  'gemini-3.5-pro': gemini('gemini-3.5', 2000000, 1.25, 5, 98, 76, '2026', '2025-10', 'stable'),
+  'gemini-3.5-flash': gemini('gemini-3.5', 1048576, 0.1, 0.4, 90, 96, '2026', '2025-10', 'stable'),
   'gemini-3.1-pro-preview': gemini('gemini-3.1', 1048576, 2, 12, 97, 76, '2026-02', '2025-01', 'preview'),
   'gemini-3.1-pro-preview-customtools': gemini('gemini-3.1', 1048576, 2, 12, 97, 74, '2026-02', '2025-01', 'preview'),
   'gemini-3.1-flash-lite-preview': gemini('gemini-3.1', 1048576, 0.1, 0.4, 86, 98, '2026', '2025-01', 'preview'),
@@ -487,6 +566,10 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'groq/meta-llama/llama-prompt-guard-2-86m': openAiCompatible('groq', 'prompt-guard', ['text'], 512, 512, 0.04, 0.04, 58, 100, '2026', 'preview'),
 
   // Mistral AI
+  'mistral/ministral-3b': openAiCompatible('mistral', 'ministral-3b', ['text'], 128000, 8192, 0.04, 0.04, 75, 96, '2024-10', 'stable', 'Pricing varies by deployment; override costs in models.registry if needed.'),
+  'mistral/ministral-8b': openAiCompatible('mistral', 'ministral-8b', ['text'], 128000, 8192, 0.1, 0.1, 80, 94, '2024-10', 'stable', 'Pricing varies by deployment; override costs in models.registry if needed.'),
+  'mistral/pixtral-12b': openAiCompatible('mistral', 'pixtral-12b', ['text', 'vision'], 128000, 8192, 0.15, 0.15, 82, 92, '2024-09', 'stable', 'Pricing varies by deployment; override costs in models.registry if needed.'),
+  'mistral/pixtral-large-2411': openAiCompatible('mistral', 'pixtral-large-2411', ['text', 'vision'], 128000, 8192, 2, 6, 88, 76, '2024-11', 'stable', 'Pricing varies by deployment; override costs in models.registry if needed.'),
   'mistral/mistral-medium-3-5': openAiCompatible('mistral', 'mistral-medium-3.5', ['text', 'vision', 'pdf'], 256000, 8192, 1.5, 7.5, 90, 78, '2026-04'),
   'mistral/mistral-small-2603': openAiCompatible('mistral', 'mistral-small-4', ['text', 'vision'], 256000, 8192, 0.2, 0.6, 82, 92, '2026-03', 'stable', 'Pricing varies by deployment; override costs in models.registry if needed.'),
   'mistral/mistral-large-2512': openAiCompatible('mistral', 'mistral-large-3', ['text', 'vision'], 256000, 8192, 2, 6, 88, 76, '2025-12', 'stable', 'Pricing varies by deployment; override costs in models.registry if needed.'),
@@ -496,6 +579,11 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'mistral/mistral-moderation-2603': openAiCompatible('mistral', 'moderation', ['text'], 128000, 4096, 0, 0, 70, 92, '2026-03', 'stable', 'Moderation model, not intended for normal chat completions.'),
 
   // DeepSeek
+  'deepseek/deepseek-v3': openAiCompatible('deepseek', 'deepseek-v3', ['text'], 64000, 8192, 0.14, 0.28, 88, 86, 'stable', 'stable', 'Pricing and limits vary by DeepSeek account; override costs in models.registry for exact estimates.'),
+  'deepseek/deepseek-r1': {
+    ...openAiCompatible('deepseek', 'deepseek-r1', ['text'], 64000, 8192, 0.55, 2.19, 90, 72, 'stable', 'stable', 'Reasoning model. Override costs in models.registry for exact estimates.'),
+    reasoning: true,
+  },
   'deepseek/deepseek-chat': openAiCompatible('deepseek', 'deepseek-chat', ['text'], 64000, 8192, 0, 0, 82, 84, 'stable', 'stable', 'Pricing and limits vary by DeepSeek account; override costs in models.registry for exact estimates.'),
   'deepseek/deepseek-reasoner': {
     ...openAiCompatible('deepseek', 'deepseek-reasoner', ['text'], 64000, 8192, 0, 0, 86, 70, 'stable', 'stable', 'Reasoning model. Override costs in models.registry for exact estimates.'),
@@ -507,6 +595,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'llamacpp/local-model': openAiCompatible('llamacpp', 'local', ['text'], 8192, 4096, 0, 0, 65, 75, 'local', 'stable', 'Placeholder for llama.cpp OpenAI-compatible server. Use an explicit llamacpp/<loaded-model> name for direct routing.'),
 
   // Cohere
+  'cohere/command-r-plus': cohere('command-r-plus', ['text'], 128000, 4000, 84, 82, '2024'),
+  'cohere/command-r': cohere('command-r', ['text'], 128000, 4000, 78, 92, '2024'),
   'cohere/command-a-03-2025': cohere('command-a', ['text'], 256000, 8000, 86, 80, '2025-03'),
   'cohere/command-a-reasoning-08-2025': cohere('command-a-reasoning', ['text'], 256000, 32000, 88, 68, '2025-08'),
   'cohere/command-a-vision-07-2025': cohere('command-a-vision', ['text', 'vision'], 128000, 8000, 84, 78, '2025-07'),
@@ -518,28 +608,29 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
 };
 
 export const MODEL_ALIASES: Record<string, string> = {
-  'openai/best': 'gpt-5.5',
+  'gpt-5.6': 'gpt-5.6-sol',
+  'openai/best': 'gpt-5.6-sol',
   'openai/pro': 'gpt-5.5-pro',
-  'openai/balanced': 'gpt-5.4',
-  'openai/fast': 'gpt-5.4-mini',
-  'openai/cheap': 'gpt-5.4-nano',
-  'openai/coding': 'gpt-5.5',
+  'openai/balanced': 'gpt-5.6-terra',
+  'openai/fast': 'gpt-5.6-luna',
+  'openai/cheap': 'gpt-5.6-luna',
+  'openai/coding': 'gpt-5.6-sol',
   'openai/codex': 'gpt-5-codex',
-  'anthropic/best': 'claude-opus-4-7',
-  'anthropic/balanced': 'claude-sonnet-4-6',
-  'anthropic/fast': 'claude-haiku-4-5-20251001',
-  'google/best': 'gemini-3.1-pro-preview',
-  'google/balanced': 'gemini-2.5-pro',
-  'google/fast': 'gemini-3-flash-preview',
-  'google/cheap': 'gemini-2.5-flash-lite',
+  'anthropic/best': 'claude-opus-4-8',
+  'anthropic/balanced': 'claude-sonnet-5-0',
+  'anthropic/fast': 'claude-haiku-5-0',
+  'google/best': 'gemini-3.5-pro',
+  'google/balanced': 'gemini-3.5-pro',
+  'google/fast': 'gemini-3.5-flash',
+  'google/cheap': 'gemini-3.5-flash',
   'groq/best': 'groq/openai/gpt-oss-120b',
   'groq/fast': 'groq/openai/gpt-oss-20b',
   'groq/cheap': 'groq/llama-3.1-8b-instant',
   'groq/compound': 'groq/groq/compound',
-  'mistral/best': 'mistral/mistral-medium-3-5',
-  'mistral/balanced': 'mistral/mistral-large-2512',
-  'mistral/fast': 'mistral/mistral-small-2603',
-  'mistral/coding': 'mistral/devstral-2512',
+  'mistral/best': 'mistral/pixtral-large-2411',
+  'mistral/balanced': 'mistral/ministral-8b',
+  'mistral/fast': 'mistral/ministral-3b',
+  'mistral/coding': 'mistral/pixtral-12b',
   'mistral/mistral-small-4': 'mistral/mistral-small-2603',
   'mistral/mistral-large-3': 'mistral/mistral-large-2512',
   'mistral/devstral-2': 'mistral/devstral-2512',
@@ -550,6 +641,9 @@ export const MODEL_ALIASES: Record<string, string> = {
   'cohere/reasoning': 'cohere/command-a-reasoning-08-2025',
   'cohere/vision': 'cohere/command-a-vision-07-2025',
   'cohere/fast': 'cohere/command-r7b-12-2024',
+  'claude-opus-4.8': 'claude-opus-4-8',
+  'claude-fable-5.0': 'claude-fable-5-0',
+  'claude-fable-5': 'claude-fable-5-0',
   'claude-opus-4.7': 'claude-opus-4-7',
   'claude-opus-4-7-latest': 'claude-opus-4-7',
   'claude-opus-4.6': 'claude-opus-4-6',

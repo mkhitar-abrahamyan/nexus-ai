@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,18 +7,29 @@ const npmCli = process.env.npm_execpath;
 const npmCommand = npmCli ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm');
 const npmNeedsShell = !npmCli && process.platform === 'win32';
 const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
-const tempDir = mkdtempSync(path.join(tmpdir(), 'nexus-ai-clean-install-'));
+const tempParent = path.resolve(repoRoot, '..', '.tmp-nexus-ai-tests');
+mkdirSync(tempParent, { recursive: true });
+const tempRoot = mkdtempSync(path.join(tempParent, 'clean-install-'));
+const packDir = path.join(tempRoot, 'pack');
+const consumerDir = path.join(tempRoot, 'consumer');
+mkdirSync(packDir);
+mkdirSync(consumerDir);
 let keepTempDir = false;
+
+function npmEnv() {
+  return {
+    ...process.env,
+    npm_config_audit: 'false',
+    npm_config_fund: 'false',
+    npm_config_dry_run: 'false',
+  };
+}
 
 function run(command, args, cwd, options = {}) {
   execFileSync(command, args, {
     cwd,
     stdio: 'inherit',
-    env: {
-      ...process.env,
-      npm_config_audit: 'false',
-      npm_config_fund: 'false',
-    },
+    env: npmEnv(),
     ...options,
   });
 }
@@ -33,18 +43,18 @@ function runNpm(args, cwd, options = {}) {
 
 try {
   const packOutput = execFileSync(npmCommand, npmCli
-    ? [npmCli, 'pack', '--json', '--pack-destination', tempDir]
-    : ['pack', '--json', '--pack-destination', tempDir], {
+    ? [npmCli, 'pack', '--json', '--pack-destination', packDir]
+    : ['pack', '--json', '--pack-destination', packDir], {
     encoding: 'utf8',
     cwd: repoRoot,
-    env: process.env,
+    env: npmEnv(),
     shell: npmNeedsShell,
   });
   const [packed] = JSON.parse(packOutput);
-  const tarball = path.join(tempDir, packed.filename);
+  const tarball = path.join(packDir, packed.filename);
 
-  runNpm(['init', '-y'], tempDir);
-  runNpm(['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', tarball], tempDir);
+  runNpm(['init', '-y'], consumerDir);
+  runNpm(['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumerDir);
 
   const smokeScript = `
 import assert from 'node:assert/strict';
@@ -83,16 +93,16 @@ for (const [specifier, exportNames] of imports) {
   }
 }
 `;
-  const smokePath = path.join(tempDir, 'smoke.mjs');
+  const smokePath = path.join(consumerDir, 'smoke.mjs');
   writeFileSync(smokePath, smokeScript);
-  run(process.execPath, [smokePath], tempDir);
+  run(process.execPath, [smokePath], consumerDir);
   console.log('Clean production install smoke test passed.');
 } catch (error) {
   keepTempDir = true;
-  console.error(`Clean install fixture kept at ${tempDir}`);
+  console.error(`Clean install fixture kept at ${tempRoot}`);
   throw error;
 } finally {
   if (!keepTempDir) {
-    rmSync(tempDir, { recursive: true, force: true });
+    rmSync(tempRoot, { recursive: true, force: true });
   }
 }
