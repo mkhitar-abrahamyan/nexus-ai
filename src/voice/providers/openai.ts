@@ -75,7 +75,7 @@ export class OpenAIVoiceProvider implements VoiceProvider {
       };
     }
 
-    const raw = await response.json() as Record<string, unknown>;
+    const raw = (await response.json()) as Record<string, unknown>;
     return {
       text: typeof raw.text === 'string' ? raw.text : '',
       providerUsed: 'openai',
@@ -83,10 +83,12 @@ export class OpenAIVoiceProvider implements VoiceProvider {
       language: typeof raw.language === 'string' ? raw.language : undefined,
       durationSeconds: typeof raw.duration === 'number' ? raw.duration : undefined,
       segments: Array.isArray(raw.segments)
-        ? raw.segments.map((segment) => this.normalizeSegment(segment)).filter(Boolean) as TranscriptionResponse['segments']
+        ? (raw.segments
+            .map((segment) => this.normalizeSegment(segment))
+            .filter(Boolean) as TranscriptionResponse['segments'])
         : undefined,
       words: Array.isArray(raw.words)
-        ? raw.words.map((word) => this.normalizeWord(word)).filter(Boolean) as TranscriptionResponse['words']
+        ? (raw.words.map((word) => this.normalizeWord(word)).filter(Boolean) as TranscriptionResponse['words'])
         : undefined,
       raw,
     };

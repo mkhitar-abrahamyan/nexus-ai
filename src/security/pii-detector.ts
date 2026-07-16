@@ -48,11 +48,14 @@ export class PIIDetector {
       ...request,
       messages: request.messages.map((message) => ({
         ...message,
-        content: typeof message.content === 'string'
-          ? this.maskText(message.content, enabledTypes, maskChar, config.preserveFormat !== false)
-          : message.content.map((part) => part.type === 'text'
-              ? { ...part, text: this.maskText(part.text, enabledTypes, maskChar, config.preserveFormat !== false) }
-              : part),
+        content:
+          typeof message.content === 'string'
+            ? this.maskText(message.content, enabledTypes, maskChar, config.preserveFormat !== false)
+            : message.content.map((part) =>
+                part.type === 'text'
+                  ? { ...part, text: this.maskText(part.text, enabledTypes, maskChar, config.preserveFormat !== false) }
+                  : part,
+              ),
       })),
     };
   }

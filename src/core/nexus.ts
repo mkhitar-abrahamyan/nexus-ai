@@ -25,7 +25,7 @@ import type {
   TelephonyWebhookValidationRequest,
 } from '../types/telephony.js';
 import type { PipelineStep } from '../pipeline/types.js';
-import { BaseProvider } from '../providers/base.js';
+import type { BaseProvider } from '../providers/base.js';
 import { OpenAIProvider } from '../providers/openai.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
 import { GoogleProvider } from '../providers/google.js';
@@ -42,7 +42,7 @@ import { Router, FailoverExecutor } from '../router/index.js';
 import { Logger } from '../utils/logger.js';
 import { SecurityPipeline } from '../security/index.js';
 import { ContextWindowManager } from '../context/index.js';
-import { VoiceManager, VoiceSession } from '../voice/index.js';
+import { VoiceManager, type VoiceSession } from '../voice/index.js';
 import { TelephonyManager } from '../telephony/index.js';
 import { TokenOptimizer } from '../optimizer/index.js';
 import { AgentLoop } from '../agent/loop.js';
@@ -52,14 +52,8 @@ import { applyResponseFormat, withResponseFormat } from './response-format.js';
 import { protectStreamOutput } from './secure-stream.js';
 import { AuditLogger } from '../ops/audit-logger.js';
 import { RateLimiter } from '../ops/rate-limiter.js';
-import {
-  completeVerified,
-  type VerificationOptions,
-} from '../hallucination/verification.js';
-import {
-  completeWithSelfConsistency,
-  type SelfConsistencyOptions,
-} from '../hallucination/consistency.js';
+import { completeVerified, type VerificationOptions } from '../hallucination/verification.js';
+import { completeWithSelfConsistency, type SelfConsistencyOptions } from '../hallucination/consistency.js';
 import { assertWithinCostBudget, estimateCost } from '../optimizer/cost.js';
 import { PipelineRunner, createPipelineContext } from '../pipeline/pipeline.js';
 import { MetricsCollector } from '../ops/metrics.js';
@@ -117,7 +111,9 @@ export class NexusAI {
     this.metrics = new MetricsCollector(this.config.metrics || {});
     this.health = new ProviderHealthMonitor(this.config.health || {});
     this.semanticCache = new SemanticCache({
-      enabled: this.config.cache?.enabled && (this.config.cache.strategy === 'semantic' || this.config.cache.strategy === 'hybrid'),
+      enabled:
+        this.config.cache?.enabled &&
+        (this.config.cache.strategy === 'semantic' || this.config.cache.strategy === 'hybrid'),
       maxEntries: this.config.cache?.maxEntries,
       ttlSeconds: this.config.cache?.ttlSeconds,
       ...this.config.cache?.semantic,
@@ -136,13 +132,15 @@ export class NexusAI {
       this.rateLimiter.check(request, this.config.rateLimit);
 
       if (this.isAuditLogEnabled()) {
-        await this.pipeline.trace(context, 'auditLog', () => this.auditLogger.log({
-          type: 'request',
-          userId: request.userId,
-          model: request.model,
-          timestamp: new Date().toISOString(),
-          metadata: this.config.auditLog?.includeInput ? { request } : undefined,
-        }));
+        await this.pipeline.trace(context, 'auditLog', () =>
+          this.auditLogger.log({
+            type: 'request',
+            userId: request.userId,
+            model: request.model,
+            timestamp: new Date().toISOString(),
+            metadata: this.config.auditLog?.includeInput ? { request } : undefined,
+          }),
+        );
       }
 
       context = await this.pipeline.runHook('beforeInput', context);
@@ -215,12 +213,24 @@ export class NexusAI {
       const responseFormat = context.request.responseFormat || this.config.responseFormat;
       const cacheKey = createCacheKey({ request: context.request, responseFormat });
       if (this.isCacheEnabled()) {
-        const cached = await this.pipeline.trace(context, 'cacheLookup', () => this.getCachedResponse(cacheKey, context.request));
+        const cached = await this.pipeline.trace(context, 'cacheLookup', () =>
+          this.getCachedResponse(cacheKey, context.request),
+        );
         if (cached) {
-          const cachedResponse = this.attachTrace({
-            ...cached,
-            meta: { ...cached.meta, cacheHit: true },
-          }, this.pipeline.finish(context));
+          let cachedResponse = this.attachTrace(
+            {
+              ...cached,
+              meta: { ...cached.meta, cacheHit: true },
+            },
+            this.pipeline.finish(context),
+          );
+          if (this.isSecurityEnabled()) {
+            const outputResult = this.security.protectOutput(cachedResponse);
+            context.securityFindings.push(...outputResult.findings);
+            context.guardrailsApplied.push(...outputResult.guardrailsApplied);
+            cachedResponse = outputResult.value;
+            this.security.assertOutputSafe(outputResult);
+          }
           return cachedResponse;
         }
       }
@@ -238,54 +248,98 @@ export class NexusAI {
       context.response = response;
       context = await this.pipeline.runHook('afterProvider', context);
 
-      context.response!.meta.guardrailsApplied.push(...context.guardrailsApplied);
-      context.response!.meta.tokensSaved += optimizationResult.usage.savedTokens;
-      if (context.contextWindow) {
-        context.response!.meta.contextWindow = context.contextWindow.usage;
+      const providerResponse = context.response;
+      if (!providerResponse) {
+        throw new Error('The afterProvider pipeline hook removed the provider response.');
       }
-      context.response!.meta.routingDecision = {
+      providerResponse.meta.guardrailsApplied.push(...context.guardrailsApplied);
+      providerResponse.meta.tokensSaved += optimizationResult.usage.savedTokens;
+      if (context.contextWindow) {
+        providerResponse.meta.contextWindow = context.contextWindow.usage;
+      }
+      providerResponse.meta.routingDecision = {
         reason: decision.reason,
         fallbacksConsidered: decision.fallbacks.length,
       };
 
       if (this.isSecurityEnabled()) {
         const outputResult = await this.pipeline.trace(context, 'outputSecurity', () => {
-          return this.security.protectOutput(context.response!);
+          return this.security.protectOutput(providerResponse);
         });
+        context.securityFindings.push(...outputResult.findings);
+        context.guardrailsApplied.push(...outputResult.guardrailsApplied);
         context.response = outputResult.value;
+        this.security.assertOutputSafe(outputResult);
       }
 
       if (responseFormat && responseFormat.type !== 'text') {
+        const responseToFormat = context.response;
+        if (!responseToFormat) {
+          throw new Error('Output security did not produce a response.');
+        }
         const formattedResponse = await this.pipeline.trace(context, 'responseValidation', () => {
-          return applyResponseFormat(context.response!, responseFormat);
+          return applyResponseFormat(responseToFormat, responseFormat);
         });
         context.response = formattedResponse;
       }
 
       if (this.isCacheEnabled()) {
-        await this.pipeline.trace(context, 'cacheWrite', () => this.setCachedResponse(cacheKey, context.request, context.response!));
+        const responseToCache = context.response;
+        if (!responseToCache) {
+          throw new Error('Cannot cache an empty response.');
+        }
+        await this.pipeline.trace(context, 'cacheWrite', () =>
+          this.setCachedResponse(cacheKey, context.request, responseToCache),
+        );
       }
 
       context = await this.pipeline.runHook('beforeReturn', context);
-      const finalContext = this.pipeline.finish(context);
-      const finalResponse = this.attachTrace(context.response!, finalContext);
-
-      if (this.isAuditLogEnabled()) {
-        await this.pipeline.trace(finalContext, 'auditLog', () => this.auditLogger.log({
-          type: 'response',
-          requestId: finalResponse.meta.requestId,
-          userId: request.userId,
-          model: finalResponse.meta.modelUsed,
-          provider: finalResponse.meta.providerUsed,
-          timestamp: new Date().toISOString(),
-          metadata: this.config.auditLog?.includeOutput ? { response: finalResponse } : undefined,
-        }));
+      let responseToReturn = context.response;
+      if (!responseToReturn) {
+        throw new Error('The beforeReturn pipeline hook removed the response.');
       }
 
-      await this.metrics.recordResponse({
-        provider: finalResponse.meta.providerUsed,
-        model: finalResponse.meta.modelUsed,
-      }, finalResponse.meta.latencyMs, Number(finalResponse.meta.estimatedCost.replace('$', '')));
+      // beforeReturn is deliberately allowed to replace the response, so it is
+      // also the final trust boundary. Re-run output protection after the hook
+      // to prevent custom middleware from reintroducing blocked or sensitive
+      // content after the provider-output check above.
+      if (this.isSecurityEnabled()) {
+        const responseBeforeFinalSecurity = responseToReturn;
+        const outputResult = await this.pipeline.trace(context, 'finalOutputSecurity', () => {
+          return this.security.protectOutput(responseBeforeFinalSecurity);
+        });
+        context.securityFindings.push(...outputResult.findings);
+        context.guardrailsApplied.push(...outputResult.guardrailsApplied);
+        context.response = outputResult.value;
+        responseToReturn = outputResult.value;
+        this.security.assertOutputSafe(outputResult);
+      }
+
+      const finalContext = this.pipeline.finish(context);
+      const finalResponse = this.attachTrace(responseToReturn, finalContext);
+
+      if (this.isAuditLogEnabled()) {
+        await this.pipeline.trace(finalContext, 'auditLog', () =>
+          this.auditLogger.log({
+            type: 'response',
+            requestId: finalResponse.meta.requestId,
+            userId: request.userId,
+            model: finalResponse.meta.modelUsed,
+            provider: finalResponse.meta.providerUsed,
+            timestamp: new Date().toISOString(),
+            metadata: this.config.auditLog?.includeOutput ? { response: finalResponse } : undefined,
+          }),
+        );
+      }
+
+      await this.metrics.recordResponse(
+        {
+          provider: finalResponse.meta.providerUsed,
+          model: finalResponse.meta.modelUsed,
+        },
+        finalResponse.meta.latencyMs,
+        Number(finalResponse.meta.estimatedCost.replace('$', '')),
+      );
       for (const step of finalResponse.meta.pipeline?.steps || []) {
         await this.metrics.recordStep(step);
       }
@@ -399,7 +453,7 @@ export class NexusAI {
       onAttemptSuccess: (providerName, latencyMs) => this.health.recordSuccess(providerName, latencyMs),
       onAttemptFailure: (providerName, error) => this.health.recordFailure(providerName, error),
     });
-    return this.isSecurityEnabled() ? protectStreamOutput(stream, this.security) : stream;
+    return this.isSecurityEnabled() ? protectStreamOutput(stream, this.security, routedRequest.signal) : stream;
   }
 
   /**
@@ -466,7 +520,10 @@ export class NexusAI {
     return this.telephonyManager.validateWebhook(request);
   }
 
-  parseTelephonyMediaEvent(providerName: string, message: string | Record<string, unknown>): TelephonyMediaStreamEvent | undefined {
+  parseTelephonyMediaEvent(
+    providerName: string,
+    message: string | Record<string, unknown>,
+  ): TelephonyMediaStreamEvent | undefined {
     return this.telephonyManager.parseMediaStreamEvent(providerName, message);
   }
 
@@ -693,14 +750,16 @@ export class NexusAI {
         onAttemptSuccess: (providerName, latencyMs) => this.health.recordSuccess(providerName, latencyMs),
         onAttemptFailure: (providerName, error) => this.health.recordFailure(providerName, error),
       });
-      const securedStream = this.isSecurityEnabled() ? protectStreamOutput(stream, this.security) : stream;
+      const securedStream = this.isSecurityEnabled()
+        ? protectStreamOutput(stream, this.security, routedRequest.signal)
+        : stream;
       return this.attachContextWindowToStream(securedStream, contextWindowResult);
     };
 
     return {
       async *[Symbol.asyncIterator]() {
         if (aborted) return;
-        inner = inner || await create();
+        inner = inner || (await create());
         if (aborted) {
           inner.abort();
           return;
@@ -838,25 +897,31 @@ export class NexusAI {
 
     for (const custom of providers.custom || []) {
       if (custom.format === 'anthropic') {
-        this.providers.set(custom.name, new AnthropicProvider({
-          apiKey: custom.apiKey || 'custom',
-          baseUrl: custom.baseUrl,
-          providerName: custom.name,
-          modelPrefix: custom.modelPrefix || custom.name,
-          isLocal: custom.isLocal,
-        }));
+        this.providers.set(
+          custom.name,
+          new AnthropicProvider({
+            apiKey: custom.apiKey || 'custom',
+            baseUrl: custom.baseUrl,
+            providerName: custom.name,
+            modelPrefix: custom.modelPrefix || custom.name,
+            isLocal: custom.isLocal,
+          }),
+        );
         continue;
       }
 
-      this.providers.set(custom.name, new OpenAIProvider({
-        apiKey: custom.apiKey || 'custom',
-        baseUrl: custom.baseUrl,
-        defaultHeaders: custom.headers,
-        defaultQuery: custom.query,
-        providerName: custom.name,
-        modelPrefix: custom.modelPrefix || custom.name,
-        isLocal: custom.isLocal,
-      }));
+      this.providers.set(
+        custom.name,
+        new OpenAIProvider({
+          apiKey: custom.apiKey || 'custom',
+          baseUrl: custom.baseUrl,
+          defaultHeaders: custom.headers,
+          defaultQuery: custom.query,
+          providerName: custom.name,
+          modelPrefix: custom.modelPrefix || custom.name,
+          isLocal: custom.isLocal,
+        }),
+      );
     }
   }
 
@@ -881,12 +946,16 @@ export class NexusAI {
 
     if (this.config.cache.strategy === 'semantic') return undefined;
     if (this.config.cache.adapter) {
-      return await this.config.cache.adapter.get(cacheKey) as NexusResponse | undefined;
+      return (await this.config.cache.adapter.get(cacheKey)) as NexusResponse | undefined;
     }
     return this.cache.get(cacheKey);
   }
 
-  private async setCachedResponse(cacheKey: string, request: CompletionRequest, response: NexusResponse): Promise<void> {
+  private async setCachedResponse(
+    cacheKey: string,
+    request: CompletionRequest,
+    response: NexusResponse,
+  ): Promise<void> {
     if (!this.config.cache?.enabled) return;
     const ttl = this.config.cache.ttlSeconds || 300;
 
@@ -925,9 +994,6 @@ export class NexusAI {
   }
 
   private estimatedOutputTokens(request: CompletionRequest): number {
-    return request.estimatedOutputTokens
-      ?? this.config.costBudget?.estimatedOutputTokens
-      ?? request.maxTokens
-      ?? 1000;
+    return request.estimatedOutputTokens ?? this.config.costBudget?.estimatedOutputTokens ?? request.maxTokens ?? 1000;
   }
 }

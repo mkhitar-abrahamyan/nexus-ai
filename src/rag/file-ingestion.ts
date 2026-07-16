@@ -22,7 +22,9 @@ export async function ingestFilesAfterScan(
 ): Promise<FileIngestionResult> {
   const scan = scanUploads(files, options.scan);
   if (!scan.ok) {
-    throw new Error(`Upload scan failed: ${scan.findings.map((finding) => `${finding.fileName}: ${finding.message}`).join('; ')}`);
+    throw new Error(
+      `Upload scan failed: ${scan.findings.map((finding) => `${finding.fileName}: ${finding.message}`).join('; ')}`,
+    );
   }
 
   const documents: DocumentSource[] = [];
@@ -80,5 +82,7 @@ export function createOcrExtractor(
 
 function isTextMime(mimeType?: string): boolean {
   if (!mimeType) return true;
-  return mimeType.startsWith('text/') || ['application/json', 'application/xml', 'application/markdown'].includes(mimeType);
+  return (
+    mimeType.startsWith('text/') || ['application/json', 'application/xml', 'application/markdown'].includes(mimeType)
+  );
 }

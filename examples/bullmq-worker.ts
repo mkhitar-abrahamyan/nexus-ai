@@ -1,5 +1,5 @@
 import { Queue, Worker } from 'bullmq';
-import { NexusAI } from '../src/index.js';
+import { NexusAI } from 'nexus-ai-pro';
 
 // Optional example dependency install:
 // npm install bullmq ioredis
@@ -20,13 +20,17 @@ const ai = new NexusAI({
   routing: { mode: 'auto', strategy: 'privacy' },
 });
 
-new Worker(queueName, async (job) => {
-  const response = await ai.complete(job.data);
-  return {
-    content: response.content,
-    meta: response.meta,
-  };
-}, { connection });
+new Worker(
+  queueName,
+  async (job) => {
+    const response = await ai.complete(job.data);
+    return {
+      content: response.content,
+      meta: response.meta,
+    };
+  },
+  { connection },
+);
 
 const job = await queue.add('completion', {
   model: 'auto',

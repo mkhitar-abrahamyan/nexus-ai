@@ -43,7 +43,10 @@ export interface RedisLikeClient {
 }
 
 export class RedisCacheAdapter<T = unknown> implements CacheAdapter<T> {
-  constructor(private client: RedisLikeClient, private prefix = 'nexus-ai-pro:cache:') {}
+  constructor(
+    private client: RedisLikeClient,
+    private prefix = 'nexus-ai-pro:cache:',
+  ) {}
 
   async get(key: string): Promise<T | undefined> {
     const raw = await this.client.get(this.prefix + key);
@@ -70,8 +73,13 @@ export interface SQLiteLikeDatabase {
 }
 
 export class SQLiteCacheAdapter<T = unknown> implements CacheAdapter<T> {
-  constructor(private db: SQLiteLikeDatabase, private table = 'nexus_cache') {
-    this.db.exec?.(`CREATE TABLE IF NOT EXISTS ${table} (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at INTEGER NOT NULL)`);
+  constructor(
+    private db: SQLiteLikeDatabase,
+    private table = 'nexus_cache',
+  ) {
+    this.db.exec?.(
+      `CREATE TABLE IF NOT EXISTS ${table} (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
+    );
   }
 
   get(key: string): T | undefined {
@@ -87,9 +95,9 @@ export class SQLiteCacheAdapter<T = unknown> implements CacheAdapter<T> {
   }
 
   set(key: string, value: T, ttlSeconds = 300): void {
-    this.db.prepare(
-      `INSERT OR REPLACE INTO ${this.table} (key, value, expires_at) VALUES (?, ?, ?)`,
-    ).run?.(key, JSON.stringify(value), Date.now() + ttlSeconds * 1000);
+    this.db
+      .prepare(`INSERT OR REPLACE INTO ${this.table} (key, value, expires_at) VALUES (?, ?, ?)`)
+      .run?.(key, JSON.stringify(value), Date.now() + ttlSeconds * 1000);
   }
 
   delete(key: string): boolean {

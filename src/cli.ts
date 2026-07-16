@@ -7,6 +7,7 @@ import { EvalRunner, type EvalCase, type EvalClient } from './evals/runner.js';
 import { NexusAI } from './core/nexus.js';
 import { listKnownModels, listModelsForProvider, getModelCapabilities } from './models/registry.js';
 import { SecurityPipeline } from './security/index.js';
+import { redactSensitiveText } from './security/output-guard.js';
 import { UploadScanner, type UploadScanFinding } from './security/upload-scanner.js';
 import { TokenOptimizer } from './optimizer/index.js';
 import type { CompletionRequest } from './types/messages.js';
@@ -31,7 +32,7 @@ interface CliFinding {
 
 const DEFAULT_SCAN_MAX_BYTES = 1_000_000;
 const IGNORED_DIRS = new Set(['.git', 'node_modules', 'dist', 'coverage', '.next', '.turbo']);
-const BOOLEAN_FLAGS = new Set(['all', 'densify', 'fail', 'help', 'json', 'print']);
+const BOOLEAN_FLAGS = new Set(['all', 'densify', 'fail', 'help', 'json', 'print', 'reveal-values']);
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
@@ -61,6 +62,14 @@ async function main(): Promise<void> {
 }
 
 async function runScan({ positionals, flags }: ParsedArgs): Promise<void> {
+  const revealValues = flagBool(flags, 'reveal-values');
+  if (revealValues && flagBool(flags, 'json')) {
+    throw new Error('--reveal-values cannot be combined with --json because structured output is commonly persisted');
+  }
+  if (revealValues && !process.stdout.isTTY) {
+    throw new Error('--reveal-values requires an interactive terminal');
+  }
+
   const roots = positionals.length ? positionals : ['.'];
   const maxBytes = numberFlag(flags, 'max-bytes') ?? DEFAULT_SCAN_MAX_BYTES;
   const files = await collectFiles(roots, flagBool(flags, 'all'));
@@ -92,14 +101,18 @@ async function runScan({ positionals, flags }: ParsedArgs): Promise<void> {
   }
 
   const ok = !findings.some((finding) => finding.severity === 'high' || finding.severity === 'critical');
+  const displayedFindings = revealValues ? findings : findings.map(sanitizeCliFinding);
   if (flagBool(flags, 'json')) {
-    writeJson({ ok, scannedFiles: files.length, findings });
+    writeJson({ ok, scannedFiles: files.length, findings: displayedFindings });
   } else {
     console.log(`Scanned ${files.length} file${files.length === 1 ? '' : 's'}.`);
-    if (!findings.length) {
+    if (!displayedFindings.length) {
       console.log('No secrets, PII, or prompt-injection risks found.');
     } else {
-      for (const finding of findings) {
+      if (revealValues) {
+        console.error('WARNING: displaying raw sensitive finding values in this interactive terminal.');
+      }
+      for (const finding of displayedFindings) {
         const value = finding.value ? ` (${truncate(finding.value, 96)})` : '';
         console.log(`${finding.severity.toUpperCase()} ${finding.type} ${finding.file}: ${finding.message}${value}`);
       }
@@ -151,7 +164,9 @@ async function runOptimize({ positionals, flags }: ParsedArgs): Promise<void> {
     return;
   }
 
-  console.log(`Tokens: ${result.usage.beforeTokens} -> ${result.usage.afterTokens} (${result.usage.savedTokens} saved, ${result.usage.savedPercent}%).`);
+  console.log(
+    `Tokens: ${result.usage.beforeTokens} -> ${result.usage.afterTokens} (${result.usage.savedTokens} saved, ${result.usage.savedPercent}%).`,
+  );
   if (result.techniquesApplied.length) console.log(`Techniques: ${result.techniquesApplied.join(', ')}`);
   for (const warning of result.warnings) console.log(`WARN ${warning}`);
   if (flagBool(flags, 'print')) {
@@ -175,7 +190,9 @@ async function runEval({ positionals, flags }: ParsedArgs): Promise<void> {
   if (flagBool(flags, 'json')) {
     writeJson(result);
   } else {
-    console.log(`Eval ${result.passed ? 'passed' : 'failed'}: ${result.passedCount}/${result.total} passed in ${result.durationMs}ms.`);
+    console.log(
+      `Eval ${result.passed ? 'passed' : 'failed'}: ${result.passedCount}/${result.total} passed in ${result.durationMs}ms.`,
+    );
     for (const item of result.results) {
       const detail = item.error ? ` - ${item.error}` : '';
       console.log(`${item.passed ? 'PASS' : 'FAIL'} ${item.name}${detail}`);
@@ -187,7 +204,9 @@ async function runEval({ positionals, flags }: ParsedArgs): Promise<void> {
 
 function createClient(config: unknown): NexusAI {
   if (!isRecord(config)) {
-    throw new Error('Eval file must export { client } or { config, cases }. You can also set provider env vars such as OPENAI_API_KEY plus NEXUS_MODEL.');
+    throw new Error(
+      'Eval file must export { client } or { config, cases }. You can also set provider env vars such as OPENAI_API_KEY plus NEXUS_MODEL.',
+    );
   }
   return new NexusAI(config as unknown as NexusAIConfig);
 }
@@ -276,9 +295,7 @@ async function readRequest(file: string | undefined, flags: Flags): Promise<Comp
 }
 
 function isCompletionRequest(value: unknown): value is CompletionRequest {
-  return isRecord(value)
-    && typeof value.model === 'string'
-    && Array.isArray(value.messages);
+  return isRecord(value) && typeof value.model === 'string' && Array.isArray(value.messages);
 }
 
 async function loadEvalFile(file: string): Promise<unknown> {
@@ -340,6 +357,15 @@ function isUsefulCliFinding(finding: SecurityFinding): boolean {
   if (finding.type !== 'pii' || finding.metadata?.piiType !== 'phone') return true;
   const digits = finding.value?.replace(/\D/g, '') || '';
   return digits.length >= 10;
+}
+
+function sanitizeCliFinding(finding: CliFinding): CliFinding {
+  return {
+    ...finding,
+    file: redactSensitiveText(finding.file),
+    message: redactSensitiveText(finding.message),
+    value: finding.value === undefined ? undefined : '[REDACTED]',
+  };
 }
 
 function parseArgs(args: string[]): ParsedArgs {
@@ -423,10 +449,9 @@ function writeJson(value: unknown): void {
 }
 
 function printTable(rows: Array<Record<string, string>>, columns: string[]): void {
-  const widths = Object.fromEntries(columns.map((column) => [
-    column,
-    Math.max(column.length, ...rows.map((row) => row[column].length)),
-  ]));
+  const widths = Object.fromEntries(
+    columns.map((column) => [column, Math.max(column.length, ...rows.map((row) => row[column].length))]),
+  );
   console.log(columns.map((column) => column.padEnd(widths[column])).join('  '));
   console.log(columns.map((column) => '-'.repeat(widths[column])).join('  '));
   for (const row of rows) {
@@ -446,7 +471,7 @@ function printHelp(): void {
   console.log(`nexus-ai-pro CLI
 
 Usage:
-  nexus scan [paths...] [--json] [--max-bytes 1000000] [--no-fail]
+  nexus scan [paths...] [--json] [--max-bytes 1000000] [--no-fail] [--reveal-values]
   nexus models [--provider openai] [--json]
   nexus eval <eval.json|eval.mjs> [--json]
   nexus optimize [request.json|prompt.txt] [--model gpt-5-mini] [--max-input-tokens 4000] [--densify] [--json]
@@ -455,6 +480,7 @@ Eval files can export { cases, client } or { cases, config }. JSON cases may use
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(redactSensitiveText(message));
   process.exitCode = 1;
 });

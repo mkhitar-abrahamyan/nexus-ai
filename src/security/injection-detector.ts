@@ -2,12 +2,28 @@ import type { CompletionRequest, Message } from '../types/messages.js';
 import type { InjectionDetectionConfig, SecurityFinding } from '../types/security.js';
 
 const DEFAULT_PATTERNS: Array<{ pattern: RegExp; severity: SecurityFinding['severity']; label: string }> = [
-  { pattern: /ignore\s+(all\s+)?previous\s+instructions/i, severity: 'critical', label: 'ignore previous instructions' },
-  { pattern: /disregard\s+(all\s+)?(prior|previous)\s+instructions/i, severity: 'critical', label: 'disregard previous instructions' },
+  {
+    pattern: /ignore\s+(all\s+)?previous\s+instructions/i,
+    severity: 'critical',
+    label: 'ignore previous instructions',
+  },
+  {
+    pattern: /disregard\s+(all\s+)?(prior|previous)\s+instructions/i,
+    severity: 'critical',
+    label: 'disregard previous instructions',
+  },
   { pattern: /you\s+are\s+now\s+(dan|developer\s+mode|jailbreak)/i, severity: 'critical', label: 'role jailbreak' },
   { pattern: /reveal\s+(your\s+)?(system|developer)\s+prompt/i, severity: 'high', label: 'prompt exfiltration' },
-  { pattern: /print\s+(your\s+)?(hidden|internal)\s+instructions/i, severity: 'high', label: 'instruction exfiltration' },
-  { pattern: /act\s+as\s+if\s+you\s+have\s+no\s+(rules|restrictions|limitations)/i, severity: 'high', label: 'restriction bypass' },
+  {
+    pattern: /print\s+(your\s+)?(hidden|internal)\s+instructions/i,
+    severity: 'high',
+    label: 'instruction exfiltration',
+  },
+  {
+    pattern: /act\s+as\s+if\s+you\s+have\s+no\s+(rules|restrictions|limitations)/i,
+    severity: 'high',
+    label: 'restriction bypass',
+  },
   { pattern: /BEGIN\s+(SYSTEM|DEVELOPER|INSTRUCTIONS)/i, severity: 'medium', label: 'instruction block injection' },
   { pattern: /<\/?system>|<\/?developer>|<\/?instructions>/i, severity: 'medium', label: 'synthetic role tag' },
 ];
@@ -52,11 +68,12 @@ export class InjectionDetector {
       ...request,
       messages: request.messages.map((message) => ({
         ...message,
-        content: typeof message.content === 'string'
-          ? this.escapeInstructionLikeText(message.content)
-          : message.content.map((part) => part.type === 'text'
-              ? { ...part, text: this.escapeInstructionLikeText(part.text) }
-              : part),
+        content:
+          typeof message.content === 'string'
+            ? this.escapeInstructionLikeText(message.content)
+            : message.content.map((part) =>
+                part.type === 'text' ? { ...part, text: this.escapeInstructionLikeText(part.text) } : part,
+              ),
       })),
     };
   }

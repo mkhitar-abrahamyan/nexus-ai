@@ -65,7 +65,7 @@ export class CohereProvider extends BaseProvider {
         throw await createProviderHttpError('cohere', model, response);
       }
 
-      const result = await response.json() as CohereChatResponse;
+      const result = (await response.json()) as CohereChatResponse;
       const content = this.extractResponseText(result);
       const usage = result.usage?.tokens || result.usage || {};
       const inputTokens = usage.input_tokens || usage.prompt_tokens || 0;
@@ -144,6 +144,6 @@ export class CohereProvider extends BaseProvider {
   private estimateCost(model: string, inputTokens: number, outputTokens: number): string {
     const caps = KNOWN_MODELS[model] || KNOWN_MODELS[`cohere/${model}`];
     if (!caps) return '$0.00';
-    return `$${(inputTokens / 1000 * caps.costPer1kInput + outputTokens / 1000 * caps.costPer1kOutput).toFixed(4)}`;
+    return `$${((inputTokens / 1000) * caps.costPer1kInput + (outputTokens / 1000) * caps.costPer1kOutput).toFixed(4)}`;
   }
 }

@@ -22,26 +22,25 @@ const videoContentSchema = z.object({
   source: z.record(z.unknown()),
 });
 
-const contentPartSchema = z.union([
-  textContentSchema,
-  imageContentSchema,
-  audioContentSchema,
-  videoContentSchema,
-]);
+const contentPartSchema = z.union([textContentSchema, imageContentSchema, audioContentSchema, videoContentSchema]);
 
 const messageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant', 'tool']),
   content: z.union([z.string(), z.array(contentPartSchema)]),
   name: z.string().optional(),
   toolCallId: z.string().optional(),
-  toolCalls: z.array(z.object({
-    id: z.string(),
-    type: z.literal('function'),
-    function: z.object({
-      name: z.string(),
-      arguments: z.string(),
-    }),
-  })).optional(),
+  toolCalls: z
+    .array(
+      z.object({
+        id: z.string(),
+        type: z.literal('function'),
+        function: z.object({
+          name: z.string(),
+          arguments: z.string(),
+        }),
+      }),
+    )
+    .optional(),
 });
 
 const toolDefinitionSchema = z.object({

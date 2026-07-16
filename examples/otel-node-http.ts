@@ -1,10 +1,11 @@
+import { metrics, trace } from '@opentelemetry/api';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { ConsoleSpanExporter } from '@opentelemetry/sdk-trace-node';
 import { PeriodicExportingMetricReader, ConsoleMetricExporter } from '@opentelemetry/sdk-metrics';
-import { NexusAI, OpenTelemetryMetricsSink, OpenTelemetryTraceExporter } from '../src/index.js';
+import { NexusAI, OpenTelemetryMetricsSink, OpenTelemetryTraceExporter } from 'nexus-ai-pro';
 
 // Optional example dependency install:
-// npm install @opentelemetry/sdk-node @opentelemetry/sdk-trace-node @opentelemetry/sdk-metrics
+// npm install @opentelemetry/api @opentelemetry/sdk-node @opentelemetry/sdk-trace-node @opentelemetry/sdk-metrics
 
 const sdk = new NodeSDK({
   traceExporter: new ConsoleSpanExporter(),
@@ -15,8 +16,8 @@ const sdk = new NodeSDK({
 
 await sdk.start();
 
-const meter = sdk['_meterProvider'].getMeter('nexus-ai-pro-example');
-const tracer = sdk['_tracerProvider'].getTracer('nexus-ai-pro-example');
+const meter = metrics.getMeter('nexus-ai-pro-example');
+const tracer = trace.getTracer('nexus-ai-pro-example');
 
 const ai = new NexusAI({
   providers: {

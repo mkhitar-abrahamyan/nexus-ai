@@ -1,11 +1,7 @@
 import type { CompletionRequest, Message, ToolDefinition } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
 import { generateRequestId } from '../utils/ids.js';
-import {
-  createAbortProviderError,
-  toNexusProviderError,
-  type NexusProviderErrorOptions,
-} from './errors.js';
+import { createAbortProviderError, type NexusProviderErrorOptions, toNexusProviderError } from './errors.js';
 
 export interface ProviderInfo {
   name: string;
@@ -45,12 +41,13 @@ export abstract class BaseProvider {
   protected extractTextContent(messages: Message[]): Array<{ role: string; content: string }> {
     return messages.map((msg) => ({
       role: msg.role,
-      content: typeof msg.content === 'string'
-        ? msg.content
-        : msg.content
-            .filter((p) => p.type === 'text')
-            .map((p) => (p as { type: 'text'; text: string }).text)
-            .join('\n'),
+      content:
+        typeof msg.content === 'string'
+          ? msg.content
+          : msg.content
+              .filter((p) => p.type === 'text')
+              .map((p) => (p as { type: 'text'; text: string }).text)
+              .join('\n'),
     }));
   }
 
@@ -86,47 +83,105 @@ export abstract class BaseProvider {
 
   protected createStream(generator: () => AsyncGenerator<StreamChunk>, signal?: AbortSignal): NexusStream {
     let aborted = false;
-    const abort = () => {
-      aborted = true;
-    };
-
-    if (signal) {
-      if (signal.aborted) aborted = true;
-      else signal.addEventListener('abort', abort, { once: true });
-    }
+    let listening = false;
+    const activeGenerators = new Set<AsyncGenerator<StreamChunk>>();
+    const closingGenerators = new Map<AsyncGenerator<StreamChunk>, Promise<IteratorResult<StreamChunk>>>();
 
     const cleanup = () => {
+      if (!listening) return;
       signal?.removeEventListener('abort', abort);
+      listening = false;
     };
+
+    const finishGenerator = (gen: AsyncGenerator<StreamChunk>) => {
+      activeGenerators.delete(gen);
+      closingGenerators.delete(gen);
+      if (activeGenerators.size === 0) cleanup();
+    };
+
+    const closeGenerator = (gen: AsyncGenerator<StreamChunk>): Promise<IteratorResult<StreamChunk>> => {
+      const closing = closingGenerators.get(gen);
+      if (closing) return closing;
+
+      const close = (async () => {
+        try {
+          return await gen.return(undefined);
+        } finally {
+          finishGenerator(gen);
+        }
+      })();
+      closingGenerators.set(gen, close);
+      return close;
+    };
+
+    const closeActiveGenerators = () => {
+      for (const gen of activeGenerators) {
+        void closeGenerator(gen).catch(() => {
+          // abort() cannot report asynchronous cleanup failures.
+        });
+      }
+    };
+
+    const abort = () => {
+      aborted = true;
+      cleanup();
+      closeActiveGenerators();
+    };
+
+    const listenForAbort = () => {
+      if (!signal || listening || aborted) return;
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      signal.addEventListener('abort', abort, { once: true });
+      listening = true;
+    };
+
+    listenForAbort();
 
     const stream: NexusStream = {
       [Symbol.asyncIterator]() {
         const gen = generator();
+        activeGenerators.add(gen);
+        listenForAbort();
         return {
           async next() {
             if (aborted || signal?.aborted) {
-              cleanup();
+              await closeGenerator(gen);
               return { done: true, value: undefined as unknown as StreamChunk };
             }
-            const result = await gen.next();
-            if (result.done) cleanup();
-            return result;
+            try {
+              const result = await gen.next();
+              if (result.done) finishGenerator(gen);
+              return result;
+            } catch (error) {
+              finishGenerator(gen);
+              throw error;
+            }
           },
           async return() {
             aborted = true;
             cleanup();
-            return { done: true, value: undefined as unknown as StreamChunk };
+            closeActiveGenerators();
+            return closeGenerator(gen);
           },
           async throw(e: unknown) {
             aborted = true;
             cleanup();
-            return gen.throw(e);
+            try {
+              const result = await gen.throw(e);
+              if (result.done) finishGenerator(gen);
+              return result;
+            } catch (error) {
+              finishGenerator(gen);
+              throw error;
+            }
           },
         };
       },
       abort() {
-        aborted = true;
-        cleanup();
+        abort();
       },
     };
 

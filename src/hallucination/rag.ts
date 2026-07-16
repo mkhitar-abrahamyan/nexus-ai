@@ -19,15 +19,18 @@ export interface RagOptions {
 export function withRagContext(request: CompletionRequest, options: RagOptions): CompletionRequest {
   const chunks = options.chunks.slice(0, options.maxChunks || options.chunks.length);
   const unknownAnswer = options.unknownAnswer || "I don't know based on the provided context.";
-  const citationInstruction = options.requireCitations !== false
-    ? 'Cite sources for factual claims using the chunk ids in square brackets, for example [doc-1].'
-    : 'Use only the provided context for factual claims.';
+  const citationInstruction =
+    options.requireCitations !== false
+      ? 'Cite sources for factual claims using the chunk ids in square brackets, for example [doc-1].'
+      : 'Use only the provided context for factual claims.';
 
-  const context = chunks.map((chunk, index) => {
-    const id = chunk.id || `chunk-${index + 1}`;
-    const source = chunk.source ? ` source=${chunk.source}` : '';
-    return `[${id}${source}]\n${chunk.content}`;
-  }).join('\n\n');
+  const context = chunks
+    .map((chunk, index) => {
+      const id = chunk.id || `chunk-${index + 1}`;
+      const source = chunk.source ? ` source=${chunk.source}` : '';
+      return `[${id}${source}]\n${chunk.content}`;
+    })
+    .join('\n\n');
 
   const systemMessage: Message = {
     role: 'system',

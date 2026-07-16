@@ -1,13 +1,16 @@
+import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const npmCli = process.env.npm_execpath;
-const npmCommand = npmCli ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm');
+const npmCommand = npmCli ? process.execPath : process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npmNeedsShell = !npmCli && process.platform === 'win32';
 const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const npmCache = path.join(repoRoot, '.tmp-nexus-ai-tests', 'npm-cache');
 const tempParent = path.resolve(repoRoot, '..', '.tmp-nexus-ai-tests');
+mkdirSync(npmCache, { recursive: true });
 mkdirSync(tempParent, { recursive: true });
 const tempRoot = mkdtempSync(path.join(tempParent, 'clean-install-'));
 const packDir = path.join(tempRoot, 'pack');
@@ -20,7 +23,11 @@ function npmEnv() {
   return {
     ...process.env,
     npm_config_audit: 'false',
+    npm_config_cache: npmCache,
+    npm_config_fetch_retries: '1',
+    npm_config_fetch_timeout: '30000',
     npm_config_fund: 'false',
+    npm_config_prefer_offline: 'true',
     npm_config_dry_run: 'false',
   };
 }
@@ -42,15 +49,31 @@ function runNpm(args, cwd, options = {}) {
 }
 
 try {
-  const packOutput = execFileSync(npmCommand, npmCli
-    ? [npmCli, 'pack', '--json', '--pack-destination', packDir]
-    : ['pack', '--json', '--pack-destination', packDir], {
-    encoding: 'utf8',
-    cwd: repoRoot,
-    env: npmEnv(),
-    shell: npmNeedsShell,
-  });
+  const packOutput = execFileSync(
+    npmCommand,
+    npmCli
+      ? [npmCli, 'pack', '--json', '--pack-destination', packDir]
+      : ['pack', '--json', '--pack-destination', packDir],
+    {
+      encoding: 'utf8',
+      cwd: repoRoot,
+      env: npmEnv(),
+      shell: npmNeedsShell,
+    },
+  );
   const [packed] = JSON.parse(packOutput);
+  const packedPaths = new Set(packed.files.map((file) => file.path));
+  assert.ok(packed.size < 200_000, `packed tarball should stay below 200 kB, received ${packed.size}`);
+  for (const requiredPath of ['README.md', 'ROADMAP.md', 'SECURITY.md', 'dist/index.js', 'dist/index.d.ts']) {
+    assert.ok(packedPaths.has(requiredPath), `packed tarball should include ${requiredPath}`);
+  }
+  for (const packedPath of packedPaths) {
+    assert.equal(
+      /^(?:assets|examples|src|tests)\//.test(packedPath),
+      false,
+      `packed tarball should not include repository-only file ${packedPath}`,
+    );
+  }
   const tarball = path.join(packDir, packed.filename);
 
   runNpm(['init', '-y'], consumerDir);
@@ -96,6 +119,8 @@ for (const [specifier, exportNames] of imports) {
   const smokePath = path.join(consumerDir, 'smoke.mjs');
   writeFileSync(smokePath, smokeScript);
   run(process.execPath, [smokePath], consumerDir);
+
+  runNpm(['exec', '--offline', '--', 'nexus', 'help'], consumerDir);
   console.log('Clean production install smoke test passed.');
 } catch (error) {
   keepTempDir = true;

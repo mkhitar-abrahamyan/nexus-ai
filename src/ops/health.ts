@@ -36,9 +36,7 @@ export class ProviderHealthMonitor {
     const state = this.state(providerName);
     state.successes += 1;
     state.consecutiveFailures = 0;
-    state.avgLatencyMs = state.avgLatencyMs
-      ? state.avgLatencyMs * 0.7 + latencyMs * 0.3
-      : latencyMs;
+    state.avgLatencyMs = state.avgLatencyMs ? state.avgLatencyMs * 0.7 + latencyMs * 0.3 : latencyMs;
     state.lastCheckedAt = new Date().toISOString();
   }
 

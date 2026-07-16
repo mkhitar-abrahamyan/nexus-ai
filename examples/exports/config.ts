@@ -1,8 +1,4 @@
-import {
-  NexusConfigBuilder,
-  createNexusConfig,
-  defineNexusConfig,
-} from 'nexus-ai-pro/config';
+import { NexusConfigBuilder, createNexusConfig, defineNexusConfig } from 'nexus-ai-pro/config';
 
 const config = createNexusConfig()
   .openai(process.env.OPENAI_API_KEY || 'dev-key')

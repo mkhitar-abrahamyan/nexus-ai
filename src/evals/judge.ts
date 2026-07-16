@@ -187,9 +187,7 @@ function parseJsonObject(content: string): Record<string, unknown> {
 
   try {
     const parsed = JSON.parse(unfenced);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }

@@ -61,7 +61,11 @@ export class UploadScanner {
         });
       }
 
-      if (this.options.allowedMimeTypes?.length && file.mimeType && !this.options.allowedMimeTypes.includes(file.mimeType)) {
+      if (
+        this.options.allowedMimeTypes?.length &&
+        file.mimeType &&
+        !this.options.allowedMimeTypes.includes(file.mimeType)
+      ) {
         findings.push({
           fileName: file.name,
           severity: 'high',

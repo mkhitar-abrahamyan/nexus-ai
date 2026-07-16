@@ -1,7 +1,10 @@
 import type { LoggerConfig, LogEvent, LogLevel } from '../types/config.js';
 
 export class Logger {
-  constructor(private debug: boolean = false, private config: LoggerConfig = {}) {}
+  constructor(
+    private debug: boolean = false,
+    private config: LoggerConfig = {},
+  ) {}
 
   info(msg: string, data?: Record<string, unknown>): void {
     this.emit('info', msg, data);
@@ -40,13 +43,19 @@ export class Logger {
       if (result && typeof (result as Promise<void>).catch === 'function') {
         void (result as Promise<void>).catch((sinkError) => {
           if (this.config.console !== false) {
-            console.warn('[nexus-ai-pro] WARN: logger sink failed', sinkError instanceof Error ? sinkError.message : sinkError);
+            console.warn(
+              '[nexus-ai-pro] WARN: logger sink failed',
+              sinkError instanceof Error ? sinkError.message : sinkError,
+            );
           }
         });
       }
     } catch (sinkError) {
       if (this.config.console !== false) {
-        console.warn('[nexus-ai-pro] WARN: logger sink failed', sinkError instanceof Error ? sinkError.message : sinkError);
+        console.warn(
+          '[nexus-ai-pro] WARN: logger sink failed',
+          sinkError instanceof Error ? sinkError.message : sinkError,
+        );
       }
     }
   }

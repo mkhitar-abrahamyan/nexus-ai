@@ -71,9 +71,8 @@ export async function calculateEvalMetrics(input: MetricInputs): Promise<EvalMet
     quality: {
       exactMatch: input.expected === undefined ? undefined : exactMatch(input.actual, input.expected),
       f1: input.expected === undefined ? undefined : f1Score(input.actual, input.expected),
-      semanticSimilarity: input.expected === undefined
-        ? undefined
-        : await semanticSimilarity(input.actual, input.expected, embed),
+      semanticSimilarity:
+        input.expected === undefined ? undefined : await semanticSimilarity(input.actual, input.expected, embed),
       passAtK: input.passedCandidates ? passAtK(input.passedCandidates) : undefined,
       perplexity: input.tokenLogProbs ? perplexity(input.tokenLogProbs) : undefined,
     },
@@ -87,12 +86,14 @@ export async function calculateEvalMetrics(input: MetricInputs): Promise<EvalMet
     },
     rag: {
       faithfulness: input.contexts?.length ? faithfulness(input.actual, input.contexts) : undefined,
-      contextualPrecision: input.retrievedChunks && input.relevantChunkIds
-        ? contextualPrecision(input.retrievedChunks, input.relevantChunkIds)
-        : undefined,
-      contextualRecall: input.retrievedChunks && input.relevantChunkIds
-        ? contextualRecall(input.retrievedChunks, input.relevantChunkIds)
-        : undefined,
+      contextualPrecision:
+        input.retrievedChunks && input.relevantChunkIds
+          ? contextualPrecision(input.retrievedChunks, input.relevantChunkIds)
+          : undefined,
+      contextualRecall:
+        input.retrievedChunks && input.relevantChunkIds
+          ? contextualRecall(input.retrievedChunks, input.relevantChunkIds)
+          : undefined,
       answerRelevancy: input.query ? await semanticSimilarity(input.actual, input.query, embed) : undefined,
     },
     safety: {
@@ -100,7 +101,8 @@ export async function calculateEvalMetrics(input: MetricInputs): Promise<EvalMet
       toxicityScore: toxicityScore(input.actual),
       biasScore: biasScore(input.actual),
       policyAdherence: input.policy ? policyAdherence(input.actual, input.policy) : undefined,
-      refusalRate: input.policy?.safePrompt === undefined ? undefined : refusalRate(input.actual, input.policy.safePrompt),
+      refusalRate:
+        input.policy?.safePrompt === undefined ? undefined : refusalRate(input.actual, input.policy.safePrompt),
     },
   };
 }
@@ -127,10 +129,14 @@ export function f1Score(actual: string, expected: string): number {
 
   const precision = truePositive / actualTerms.length;
   const recall = truePositive / expectedTerms.length;
-  return precision + recall === 0 ? 0 : 2 * precision * recall / (precision + recall);
+  return precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
 }
 
-export async function semanticSimilarity(a: string, b: string, embed: EmbeddingProvider = createHashEmbeddings): Promise<number> {
+export async function semanticSimilarity(
+  a: string,
+  b: string,
+  embed: EmbeddingProvider = createHashEmbeddings,
+): Promise<number> {
   const [aEmbedding, bEmbedding] = await embed([a, b]);
   return cosineSimilarity(aEmbedding, bEmbedding);
 }
@@ -195,10 +201,7 @@ export function biasScore(text: string): number {
   return biasPatterns.some((pattern) => pattern.test(text)) ? 1 : 0;
 }
 
-export function policyAdherence(
-  text: string,
-  policy: { forbiddenTerms?: string[]; requiredTerms?: string[] },
-): number {
+export function policyAdherence(text: string, policy: { forbiddenTerms?: string[]; requiredTerms?: string[] }): number {
   const normalized = text.toLowerCase();
   const forbiddenHits = (policy.forbiddenTerms || []).filter((term) => normalized.includes(term.toLowerCase())).length;
   const requiredTerms = policy.requiredTerms || [];

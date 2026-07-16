@@ -20,8 +20,8 @@ export function estimateCost(input: CostEstimateInput): CostEstimate {
   const resolved = resolveModel(input.model, input.config);
   const caps = resolved.capabilities;
   const outputTokens = input.outputTokens ?? 0;
-  const inputCost = caps ? input.inputTokens / 1000 * caps.costPer1kInput : 0;
-  const outputCost = caps ? outputTokens / 1000 * caps.costPer1kOutput : 0;
+  const inputCost = caps ? (input.inputTokens / 1000) * caps.costPer1kInput : 0;
+  const outputCost = caps ? (outputTokens / 1000) * caps.costPer1kOutput : 0;
   const totalCost = inputCost + outputCost;
 
   return {

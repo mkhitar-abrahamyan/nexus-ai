@@ -31,14 +31,19 @@ export async function completeWithSelfConsistency(
     samples,
     Math.max(1, Number.isFinite(requestedConcurrency) ? Math.floor(requestedConcurrency) : 2),
   );
-  const sampleRequests = Array.from({ length: samples }, () => withFactualDefaults({
-      ...request,
-      temperature: options.temperature ?? request.temperature ?? 0.2,
-      topP: options.topP ?? request.topP ?? 0.3,
-    }, {
-      requireUnknownFallback: true,
-      chainOfThought: 'private',
-    }));
+  const sampleRequests = Array.from({ length: samples }, () =>
+    withFactualDefaults(
+      {
+        ...request,
+        temperature: options.temperature ?? request.temperature ?? 0.2,
+        topP: options.topP ?? request.topP ?? 0.3,
+      },
+      {
+        requireUnknownFallback: true,
+        chainOfThought: 'private',
+      },
+    ),
+  );
   const { candidates, failures } = await completeSamples(client, sampleRequests, maxConcurrency);
 
   if (candidates.length === 0) {
@@ -48,9 +53,7 @@ export async function completeWithSelfConsistency(
     );
   }
 
-  const selected = options.judge
-    ? await options.judge(candidates)
-    : selectMostConsistent(candidates);
+  const selected = options.judge ? await options.judge(candidates) : selectMostConsistent(candidates);
 
   const guardrailsApplied = [...selected.meta.guardrailsApplied, 'self-consistency'];
   if (failures.length > 0) {

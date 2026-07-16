@@ -41,7 +41,10 @@ export class VoiceManager {
   }
 
   async transcribe(request: TranscriptionRequest): Promise<TranscriptionResponse> {
-    const provider = this.resolveProvider('transcription', request.provider || this.config.defaultTranscriptionProvider);
+    const provider = this.resolveProvider(
+      'transcription',
+      request.provider || this.config.defaultTranscriptionProvider,
+    );
     if (!provider.transcribe) throw new VoiceCapabilityError(provider.info.name, 'transcription');
 
     try {
@@ -73,15 +76,14 @@ export class VoiceManager {
   }
 
   async runTurn(request: VoiceTurnRequest, client: VoiceCompletionClient): Promise<VoiceTurnResponse> {
-    const transcript = request.transcript !== undefined
-      ? undefined
-      : await this.requireTranscription(request);
+    const transcript = request.transcript !== undefined ? undefined : await this.requireTranscription(request);
     const transcriptText = request.transcript ?? transcript?.text ?? '';
     const completion = this.withTranscript(request.completion, transcriptText, request.transcriptMessage);
     const response = await client.complete(completion);
-    const speech = request.speech === undefined || request.speech === false
-      ? undefined
-      : await this.speak({ ...request.speech, text: response.content });
+    const speech =
+      request.speech === undefined || request.speech === false
+        ? undefined
+        : await this.speak({ ...request.speech, text: response.content });
 
     return {
       transcript,
@@ -128,10 +130,7 @@ export class VoiceManager {
     };
   }
 
-  private resolveProvider(
-    capability: 'transcription' | 'speech',
-    preferred?: string,
-  ): VoiceProvider {
+  private resolveProvider(capability: 'transcription' | 'speech', preferred?: string): VoiceProvider {
     if (preferred) {
       const provider = this.providers.get(preferred);
       if (!provider) throw new VoiceProviderError(`Voice provider "${preferred}" is not registered`, preferred);

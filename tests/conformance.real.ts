@@ -122,7 +122,9 @@ for (const item of providers) {
   allResults.push(...results);
 }
 
-const failed = allResults.filter((result) => !result.completeOk || result.streamOk === false || result.healthOk === false);
+const failed = allResults.filter(
+  (result) => !result.completeOk || result.streamOk === false || result.healthOk === false,
+);
 console.log(JSON.stringify(allResults, null, 2));
 
 if (failed.length) process.exit(1);

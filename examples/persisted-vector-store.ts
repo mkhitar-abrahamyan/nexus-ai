@@ -1,23 +1,21 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import {
-  MemoryVectorStore,
-  createOpenAIEmbeddingProvider,
-  ingestDocuments,
-  type VectorDocument,
-} from '../src/index.js';
+import { MemoryVectorStore, createOpenAIEmbeddingProvider, ingestDocuments, type VectorDocument } from 'nexus-ai-pro';
 
 const path = './vector-store.json';
 
-const documents = ingestDocuments([
+const documents = ingestDocuments(
+  [
+    {
+      id: 'readme',
+      source: 'README.md',
+      text: 'nexus-ai-pro supports RAG, routing, security, workflows, and eval metrics.',
+    },
+  ],
   {
-    id: 'readme',
-    source: 'README.md',
-    text: 'nexus-ai-pro supports RAG, routing, security, workflows, and eval metrics.',
+    chunkSize: 500,
+    overlap: 50,
   },
-], {
-  chunkSize: 500,
-  overlap: 50,
-});
+);
 
 const embed = process.env.OPENAI_API_KEY
   ? createOpenAIEmbeddingProvider({ apiKey: process.env.OPENAI_API_KEY })

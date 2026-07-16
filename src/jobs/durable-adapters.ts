@@ -15,7 +15,10 @@ export interface RedisQueueLikeClient {
 }
 
 export class RedisQueueAdapter<TPayload = unknown> implements DurableQueueAdapter<TPayload> {
-  constructor(private client: RedisQueueLikeClient, private prefix = 'nexus-ai-pro:queue:') {}
+  constructor(
+    private client: RedisQueueLikeClient,
+    private prefix = 'nexus-ai-pro:queue:',
+  ) {}
 
   async enqueue(queueName: string, job: QueueJob<TPayload>): Promise<void> {
     await this.client.hset(this.jobsKey(queueName), job.id, JSON.stringify(job));
@@ -24,7 +27,7 @@ export class RedisQueueAdapter<TPayload = unknown> implements DurableQueueAdapte
 
   async get(queueName: string, id: string): Promise<QueueJob<TPayload> | undefined> {
     const raw = await this.client.hget(this.jobsKey(queueName), id);
-    return raw ? JSON.parse(raw) as QueueJob<TPayload> : undefined;
+    return raw ? (JSON.parse(raw) as QueueJob<TPayload>) : undefined;
   }
 
   async update(queueName: string, job: QueueJob<TPayload>): Promise<void> {
@@ -46,8 +49,14 @@ export class RedisQueueAdapter<TPayload = unknown> implements DurableQueueAdapte
 }
 
 export interface BullMQLikeQueue<TPayload = unknown> {
-  add(name: string, data: TPayload, options?: Record<string, unknown>): Promise<{ id?: string | number }> | { id?: string | number };
-  getJob(id: string): Promise<{ id: string | number; data: TPayload; returnvalue?: unknown; failedReason?: string } | null>;
+  add(
+    name: string,
+    data: TPayload,
+    options?: Record<string, unknown>,
+  ): Promise<{ id?: string | number }> | { id?: string | number };
+  getJob(
+    id: string,
+  ): Promise<{ id: string | number; data: TPayload; returnvalue?: unknown; failedReason?: string } | null>;
 }
 
 export class BullMQQueueAdapter<TPayload = unknown> {

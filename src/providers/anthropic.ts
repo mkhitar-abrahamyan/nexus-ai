@@ -188,7 +188,7 @@ export class AnthropicProvider extends BaseProvider {
           tokensInput: result.usage?.input_tokens || 0,
           tokensOutput: result.usage?.output_tokens || 0,
           tokensSaved: 0,
-          estimatedCost: `$${((result.usage?.input_tokens || 0) / 1000 * 0.003 + (result.usage?.output_tokens || 0) / 1000 * 0.015).toFixed(4)}`,
+          estimatedCost: `$${(((result.usage?.input_tokens || 0) / 1000) * 0.003 + ((result.usage?.output_tokens || 0) / 1000) * 0.015).toFixed(4)}`,
           cacheHit: false,
           guardrailsApplied: [],
         },
@@ -207,10 +207,13 @@ export class AnthropicProvider extends BaseProvider {
         self.throwIfAborted(providerRequest);
         const client = await self.getClient();
         const startTime = Date.now();
-        const stream = client.messages.stream({
-          ...self.createParams(providerRequest),
-          stream: true,
-        }, self.requestOptions(providerRequest));
+        const stream = client.messages.stream(
+          {
+            ...self.createParams(providerRequest),
+            stream: true,
+          },
+          self.requestOptions(providerRequest),
+        );
 
         for await (const event of stream) {
           if (event.type === 'content_block_delta') {
@@ -282,7 +285,9 @@ export class AnthropicProvider extends BaseProvider {
   private stripConfiguredPrefix(model: string): string {
     const prefixes = Array.isArray(this.config.modelPrefix)
       ? this.config.modelPrefix
-      : this.config.modelPrefix ? [this.config.modelPrefix] : [];
+      : this.config.modelPrefix
+        ? [this.config.modelPrefix]
+        : [];
 
     for (const prefix of prefixes) {
       const marker = `${prefix}/`;

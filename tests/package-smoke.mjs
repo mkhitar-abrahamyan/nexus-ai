@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 
 const imports = [
-  { specifier: 'nexus-ai-pro', exports: ['NexusAI', 'createNexus', 'createNexusConfig', 'BaseProvider', 'NexusProviderError', 'Router'] },
+  {
+    specifier: 'nexus-ai-pro',
+    exports: ['NexusAI', 'createNexus', 'createNexusConfig', 'BaseProvider', 'NexusProviderError', 'Router'],
+  },
   { specifier: 'nexus-ai-pro/core', exports: ['NexusAI'] },
   { specifier: 'nexus-ai-pro/streaming', exports: ['collectStream', 'createTextStream'] },
   { specifier: 'nexus-ai-pro/config', exports: ['NexusConfigBuilder', 'createNexusConfig', 'defineNexusConfig'] },
   { specifier: 'nexus-ai-pro/providers', exports: ['BaseProvider', 'NexusProviderError'] },
+  { specifier: 'nexus-ai-pro/providers/base', exports: ['BaseProvider', 'NexusProviderError'] },
   { specifier: 'nexus-ai-pro/providers/openai', exports: ['OpenAIProvider'] },
   { specifier: 'nexus-ai-pro/providers/anthropic', exports: ['AnthropicProvider'] },
   { specifier: 'nexus-ai-pro/providers/errors', exports: ['NexusProviderError'] },
@@ -19,6 +23,7 @@ const imports = [
   { specifier: 'nexus-ai-pro/providers/azure-openai', exports: ['AzureOpenAIProvider'] },
   { specifier: 'nexus-ai-pro/providers/lmstudio', exports: ['LMStudioProvider'] },
   { specifier: 'nexus-ai-pro/providers/llamacpp', exports: ['LlamaCppProvider'] },
+  { specifier: 'nexus-ai-pro/providers/type-guards', exports: ['isRecord', 'getString'] },
   { specifier: 'nexus-ai-pro/security', exports: ['SecurityPipeline', 'NexusSecurityError'] },
   { specifier: 'nexus-ai-pro/optimizer', exports: ['TokenOptimizer', 'BudgetEnforcer'] },
   { specifier: 'nexus-ai-pro/context', exports: ['ContextWindowManager'] },
@@ -28,6 +33,7 @@ const imports = [
   { specifier: 'nexus-ai-pro/telephony', exports: ['TelephonyManager', 'createVoiceTwiML'] },
   { specifier: 'nexus-ai-pro/telephony/twilio', exports: ['TwilioTelephonyProvider'] },
   { specifier: 'nexus-ai-pro/cache', exports: ['MemoryCacheAdapter'] },
+  { specifier: 'nexus-ai-pro/cache/adapters', exports: ['MemoryCacheAdapter'] },
   { specifier: 'nexus-ai-pro/cache/memory-cache', exports: ['MemoryCache', 'createCacheKey'] },
   { specifier: 'nexus-ai-pro/cache/semantic-cache', exports: ['SemanticCache'] },
   { specifier: 'nexus-ai-pro/models', exports: ['getModelRegistry', 'resolveModel'] },

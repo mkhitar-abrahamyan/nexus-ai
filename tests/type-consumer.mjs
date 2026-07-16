@@ -4,10 +4,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const npmCli = process.env.npm_execpath;
-const npmCommand = npmCli ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm');
+const npmCommand = npmCli ? process.execPath : process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npmNeedsShell = !npmCli && process.platform === 'win32';
 const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const npmCache = path.join(repoRoot, '.tmp-nexus-ai-tests', 'npm-cache');
 const tempParent = path.resolve(repoRoot, '..', '.tmp-nexus-ai-tests');
+mkdirSync(npmCache, { recursive: true });
 mkdirSync(tempParent, { recursive: true });
 const tempRoot = mkdtempSync(path.join(tempParent, 'type-consumer-'));
 const packDir = path.join(tempRoot, 'pack');
@@ -20,7 +22,11 @@ function npmEnv() {
   return {
     ...process.env,
     npm_config_audit: 'false',
+    npm_config_cache: npmCache,
+    npm_config_fetch_retries: '1',
+    npm_config_fetch_timeout: '30000',
     npm_config_fund: 'false',
+    npm_config_prefer_offline: 'true',
     npm_config_dry_run: 'false',
   };
 }
@@ -42,34 +48,47 @@ function runNpm(args, cwd, options = {}) {
 }
 
 try {
-  const packOutput = execFileSync(npmCommand, npmCli
-    ? [npmCli, 'pack', '--json', '--pack-destination', packDir]
-    : ['pack', '--json', '--pack-destination', packDir], {
-    encoding: 'utf8',
-    cwd: repoRoot,
-    env: npmEnv(),
-    shell: npmNeedsShell,
-  });
+  const packOutput = execFileSync(
+    npmCommand,
+    npmCli
+      ? [npmCli, 'pack', '--json', '--pack-destination', packDir]
+      : ['pack', '--json', '--pack-destination', packDir],
+    {
+      encoding: 'utf8',
+      cwd: repoRoot,
+      env: npmEnv(),
+      shell: npmNeedsShell,
+    },
+  );
   const [packed] = JSON.parse(packOutput);
   const tarball = path.join(packDir, packed.filename);
 
   runNpm(['init', '-y'], consumerDir);
   runNpm(['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumerDir);
 
-  writeFileSync(path.join(consumerDir, 'tsconfig.json'), JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'NodeNext',
-      moduleResolution: 'NodeNext',
-      strict: true,
-      noEmit: true,
-      skipLibCheck: false,
-      types: ['node'],
-    },
-    include: ['index.ts'],
-  }, null, 2));
+  writeFileSync(
+    path.join(consumerDir, 'tsconfig.json'),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'NodeNext',
+          moduleResolution: 'NodeNext',
+          strict: true,
+          noEmit: true,
+          skipLibCheck: false,
+          types: ['node'],
+        },
+        include: ['index.ts'],
+      },
+      null,
+      2,
+    ),
+  );
 
-  writeFileSync(path.join(consumerDir, 'index.ts'), `
+  writeFileSync(
+    path.join(consumerDir, 'index.ts'),
+    `
 import {
   AnthropicProvider,
   BaseProvider,
@@ -407,7 +426,8 @@ void error.retryable;
 void subpathError.category;
 void toolCall;
 void doneChunk;
-`);
+`,
+  );
 
   const tsc = path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc');
   run(process.execPath, [tsc, '-p', consumerDir], consumerDir);

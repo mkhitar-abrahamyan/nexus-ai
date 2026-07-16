@@ -62,8 +62,8 @@ export function toNexusProviderError(
 
   const status = context.status ?? extractStatus(error);
   const category = context.category ?? categorizeProviderError(error, status);
-  const message = context.message
-    || `${context.provider} request failed: ${error instanceof Error ? error.message : String(error)}`;
+  const message =
+    context.message || `${context.provider} request failed: ${error instanceof Error ? error.message : String(error)}`;
 
   return new NexusProviderError({
     provider: context.provider,
@@ -76,11 +76,7 @@ export function toNexusProviderError(
   });
 }
 
-export function createAbortProviderError(
-  provider: string,
-  model: string,
-  cause?: unknown,
-): NexusProviderError {
+export function createAbortProviderError(provider: string, model: string, cause?: unknown): NexusProviderError {
   return new NexusProviderError({
     provider,
     model,
@@ -91,11 +87,7 @@ export function createAbortProviderError(
   });
 }
 
-export function createTimeoutProviderError(
-  provider: string,
-  model: string,
-  timeoutMs: number,
-): NexusProviderError {
+export function createTimeoutProviderError(provider: string, model: string, timeoutMs: number): NexusProviderError {
   return new NexusProviderError({
     provider,
     model,
@@ -113,21 +105,23 @@ export function categorizeProviderError(error: unknown, status?: number): NexusP
   if (isAbortError(error)) return 'abort';
 
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  const code = typeof error === 'object' && error && 'code' in error
-    ? String((error as { code?: unknown }).code).toLowerCase()
-    : '';
+  const code =
+    typeof error === 'object' && error && 'code' in error
+      ? String((error as { code?: unknown }).code).toLowerCase()
+      : '';
 
   if (message.includes('timed out') || message.includes('timeout') || code === 'etimedout') return 'timeout';
   if (message.includes('429') || message.includes('rate limit')) return 'rate-limit';
-  if (message.includes('500') || message.includes('502') || message.includes('503') || message.includes('504')) return 'server-error';
+  if (message.includes('500') || message.includes('502') || message.includes('503') || message.includes('504'))
+    return 'server-error';
   if (message.includes('invalid json') || message.includes('unexpected token')) return 'bad-response';
   if (
-    message.includes('network')
-    || message.includes('fetch failed')
-    || message.includes('econnreset')
-    || message.includes('enotfound')
-    || code === 'econnreset'
-    || code === 'enotfound'
+    message.includes('network') ||
+    message.includes('fetch failed') ||
+    message.includes('econnreset') ||
+    message.includes('enotfound') ||
+    code === 'econnreset' ||
+    code === 'enotfound'
   ) {
     return 'network';
   }
@@ -137,7 +131,8 @@ export function categorizeProviderError(error: unknown, status?: number): NexusP
 
 export function isRetryableProviderError(category: NexusProviderErrorCategory, status?: number): boolean {
   if (category === 'abort' || category === 'auth' || category === 'bad-response') return false;
-  if (category === 'timeout' || category === 'rate-limit' || category === 'server-error' || category === 'network') return true;
+  if (category === 'timeout' || category === 'rate-limit' || category === 'server-error' || category === 'network')
+    return true;
   return Boolean(status && status >= 500);
 }
 
@@ -152,8 +147,8 @@ export function isAbortError(error: unknown): boolean {
 
 function extractStatus(error: unknown): number | undefined {
   if (!error || typeof error !== 'object') return undefined;
-  const value = (error as { status?: unknown; statusCode?: unknown }).status
-    ?? (error as { statusCode?: unknown }).statusCode;
+  const value =
+    (error as { status?: unknown; statusCode?: unknown }).status ?? (error as { statusCode?: unknown }).statusCode;
   return typeof value === 'number' ? value : undefined;
 }
 

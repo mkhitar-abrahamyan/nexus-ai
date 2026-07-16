@@ -74,7 +74,7 @@ export class GoogleProvider extends BaseProvider {
           tokensOutput: outputTokens,
           tokensSaved: 0,
           estimatedCost: caps
-            ? `$${(inputTokens / 1000 * caps.costPer1kInput + outputTokens / 1000 * caps.costPer1kOutput).toFixed(4)}`
+            ? `$${((inputTokens / 1000) * caps.costPer1kInput + (outputTokens / 1000) * caps.costPer1kOutput).toFixed(4)}`
             : '$0.00',
           cacheHit: false,
           guardrailsApplied: [],
@@ -153,7 +153,11 @@ export class GoogleProvider extends BaseProvider {
 
   private async generate(model: string, request: CompletionRequest, stream: false): Promise<GeminiGenerateResponse>;
   private async generate(model: string, request: CompletionRequest, stream: true): Promise<Response>;
-  private async generate(model: string, request: CompletionRequest, stream: boolean): Promise<GeminiGenerateResponse | Response> {
+  private async generate(
+    model: string,
+    request: CompletionRequest,
+    stream: boolean,
+  ): Promise<GeminiGenerateResponse | Response> {
     const endpoint = stream ? 'streamGenerateContent' : 'generateContent';
     const url = `${this.baseUrl()}/models/${encodeURIComponent(model)}:${endpoint}?key=${encodeURIComponent(this.config.apiKey)}${stream ? '&alt=sse' : ''}`;
     const body = JSON.stringify(this.createBody(request));
@@ -168,7 +172,7 @@ export class GoogleProvider extends BaseProvider {
       throw await createProviderHttpError('google', model, response);
     }
 
-    return stream ? response : await response.json() as GeminiGenerateResponse;
+    return stream ? response : ((await response.json()) as GeminiGenerateResponse);
   }
 
   private createBody(request: CompletionRequest): Record<string, unknown> {
@@ -195,7 +199,10 @@ export class GoogleProvider extends BaseProvider {
     };
   }
 
-  private formatMessages(messages: Message[]): { systemInstruction?: { parts: GeminiContentPart[] }; contents: GeminiContent[] } {
+  private formatMessages(messages: Message[]): {
+    systemInstruction?: { parts: GeminiContentPart[] };
+    contents: GeminiContent[];
+  } {
     const systemParts: GeminiContentPart[] = [];
     const contents: GeminiContent[] = [];
 
@@ -249,13 +256,15 @@ export class GoogleProvider extends BaseProvider {
 
   private formatToolsGoogle(tools?: CompletionRequest['tools']): unknown[] | undefined {
     if (!tools?.length) return undefined;
-    return [{
-      functionDeclarations: tools.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters,
-      })),
-    }];
+    return [
+      {
+        functionDeclarations: tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        })),
+      },
+    ];
   }
 
   private extractText(content: GeminiContent | undefined): string {

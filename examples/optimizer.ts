@@ -26,7 +26,7 @@ const request = {
         - why it matters in order to reduce costs
         - how prompt densification works
 
-      Please make sure that the final answer is concise.`
+      Please make sure that the final answer is concise.`,
     },
   ],
 };

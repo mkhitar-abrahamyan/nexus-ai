@@ -38,12 +38,9 @@ export function withKnowledgeGraphContext(
   options: KnowledgeGraphOptions,
 ): CompletionRequest {
   const unknownAnswer = options.unknownAnswer || "I don't know based on the provided graph.";
-  const facts = selectGraphFacts(
-    options.graph,
-    options.query || latestUserText(request),
-    options.maxEdges || 20,
-    { includeFallbackFacts: options.includeFallbackFacts },
-  );
+  const facts = selectGraphFacts(options.graph, options.query || latestUserText(request), options.maxEdges || 20, {
+    includeFallbackFacts: options.includeFallbackFacts,
+  });
   const systemMessage: Message = {
     role: 'system',
     content: [
@@ -78,20 +75,16 @@ export function selectGraphFacts(
   options: SelectGraphFactsOptions = {},
 ): string[] {
   const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const queryTerms = new Set((query.toLowerCase().match(/[a-z0-9_'-]{2,}/g) || []));
+  const queryTerms = new Set(query.toLowerCase().match(/[a-z0-9_'-]{2,}/g) || []);
   const includeFallbackFacts = options.includeFallbackFacts === true;
 
   return graph.edges
     .map((edge) => {
       const from = nodesById.get(edge.from);
       const to = nodesById.get(edge.to);
-      const text = [
-        from?.label || edge.from,
-        edge.relation,
-        to?.label || edge.to,
-        edge.evidence,
-        edge.source,
-      ].filter(Boolean).join(' ');
+      const text = [from?.label || edge.from, edge.relation, to?.label || edge.to, edge.evidence, edge.source]
+        .filter(Boolean)
+        .join(' ');
       const score = scoreText(text, queryTerms);
       return { edge, from, to, score };
     })

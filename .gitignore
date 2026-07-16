@@ -5,6 +5,7 @@ coverage/
 .turbo/
 .cache/
 .tmp/
+.tmp-nexus-ai-tests/
 .DS_Store
 Thumbs.db
 *.log

@@ -77,9 +77,7 @@ export class ContextWindowManager {
     const split = this.splitMessages(request.messages);
     const olderAndRecent = this.selectMessages(request, split, strategy);
     const shouldSummarize = this.shouldSummarize(strategy) && olderAndRecent.older.length > 0 && this.summaryEnabled();
-    const summary = shouldSummarize
-      ? this.createLocalSummary(request, olderAndRecent.older)
-      : undefined;
+    const summary = shouldSummarize ? this.createLocalSummary(request, olderAndRecent.older) : undefined;
 
     return this.resultFromSelection(request, strategy, split, olderAndRecent.recent, olderAndRecent.older, summary);
   }
@@ -94,18 +92,16 @@ export class ContextWindowManager {
   ): ContextWindowResult<CompletionRequest> {
     const beforeTokens = this.tokenizer.estimateRequestTokens(request);
     const summaryMessage = summary ? this.summaryMessage(summary.text) : undefined;
-    const messages = [
-      ...split.system,
-      ...(summaryMessage ? [summaryMessage] : []),
-      ...recent,
-    ];
+    const messages = [...split.system, ...(summaryMessage ? [summaryMessage] : []), ...recent];
     const value = { ...request, messages };
     const afterTokens = this.tokenizer.estimateRequestTokens(value);
     const summaryTokens = summaryMessage ? this.tokenizer.estimateMessageTokens(summaryMessage) : 0;
     const warnings: string[] = [];
 
     if (this.config.maxInputTokens && afterTokens > this.config.maxInputTokens) {
-      warnings.push(`Context window result is ${afterTokens} estimated tokens, above maxInputTokens ${this.config.maxInputTokens}`);
+      warnings.push(
+        `Context window result is ${afterTokens} estimated tokens, above maxInputTokens ${this.config.maxInputTokens}`,
+      );
     }
 
     const techniquesApplied: string[] = [];
@@ -170,7 +166,7 @@ export class ContextWindowManager {
     if (!maxInputTokens) return this.selectByCount(split);
 
     const reserve = reserveForSummary
-      ? this.config.summaryReserveTokens ?? this.summaryConfig().maxTokens ?? DEFAULT_SUMMARY_TOKENS
+      ? (this.config.summaryReserveTokens ?? this.summaryConfig().maxTokens ?? DEFAULT_SUMMARY_TOKENS)
       : 0;
     const targetTokens = Math.max(1, maxInputTokens - reserve);
     const recent: Message[] = [];
@@ -292,10 +288,11 @@ export class ContextWindowManager {
     if (strategy !== 'auto') return strategy;
 
     const split = this.splitMessages(request.messages);
-    const maxMessagesExceeded = this.config.lastMessages !== undefined
-      && split.conversation.length > this.config.lastMessages;
-    const maxTokensExceeded = this.config.maxInputTokens !== undefined
-      && this.tokenizer.estimateRequestTokens(request) > this.config.maxInputTokens;
+    const maxMessagesExceeded =
+      this.config.lastMessages !== undefined && split.conversation.length > this.config.lastMessages;
+    const maxTokensExceeded =
+      this.config.maxInputTokens !== undefined &&
+      this.tokenizer.estimateRequestTokens(request) > this.config.maxInputTokens;
 
     if (!maxMessagesExceeded && !maxTokensExceeded) return 'last-messages';
     if (this.summaryEnabled()) {
@@ -326,7 +323,10 @@ export class ContextWindowManager {
     return this.config.summary || {};
   }
 
-  private identity(request: CompletionRequest, strategy: ContextWindowStrategy): ContextWindowResult<CompletionRequest> {
+  private identity(
+    request: CompletionRequest,
+    strategy: ContextWindowStrategy,
+  ): ContextWindowResult<CompletionRequest> {
     const tokens = this.tokenizer.estimateRequestTokens(request);
     const usage: ContextWindowUsage = {
       strategy,
@@ -351,9 +351,11 @@ export class ContextWindowManager {
   }
 
   private serializeMessages(messages: Message[]): string {
-    return messages.map((message, index) => {
-      return `Message ${index + 1} (${message.role}):\n${this.messageText(message)}`;
-    }).join('\n\n');
+    return messages
+      .map((message, index) => {
+        return `Message ${index + 1} (${message.role}):\n${this.messageText(message)}`;
+      })
+      .join('\n\n');
   }
 
   private messageText(message: Message): string {

@@ -2,20 +2,34 @@ import type { CompletionRequest, Message } from '../types/messages.js';
 import type { SecurityConfig, SecurityFinding, SecurityResult } from '../types/security.js';
 
 const SECRET_PATTERNS: Array<{ pattern: RegExp; label: string; severity: SecurityFinding['severity'] }> = [
-  { pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, label: 'private key', severity: 'critical' },
+  {
+    pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+    label: 'private key',
+    severity: 'critical',
+  },
   { pattern: /\bAKIA[0-9A-Z]{16}\b/g, label: 'aws access key', severity: 'critical' },
   { pattern: /\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{16,}\b/g, label: 'payment secret key', severity: 'critical' },
   { pattern: /\bgh[pousr]_[A-Za-z0-9_]{30,}\b/g, label: 'github token', severity: 'critical' },
   { pattern: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/g, label: 'slack token', severity: 'critical' },
   { pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g, label: 'google api key', severity: 'critical' },
   { pattern: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, label: 'jwt token', severity: 'high' },
-  { pattern: /(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=]\s*['"][^'"]{8,}['"]/gi, label: 'secret assignment', severity: 'critical' },
+  {
+    pattern: /(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=]\s*['"][^'"]{8,}['"]/gi,
+    label: 'secret assignment',
+    severity: 'critical',
+  },
 ];
 
 const SUSPICIOUS_URL_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.169\.254)(?:[:/]|$)/gi, label: 'local or metadata URL' },
+  {
+    pattern: /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.169\.254)(?:[:/]|$)/gi,
+    label: 'local or metadata URL',
+  },
   { pattern: /https?:\/\/[^\s]*\.(?:onion)(?:[:/]|$)/gi, label: 'onion URL' },
-  { pattern: /https?:\/\/[^\s]*(?:token|secret|password|apikey|api_key)=[^\s]+/gi, label: 'URL containing secret-like query' },
+  {
+    pattern: /https?:\/\/[^\s]*(?:token|secret|password|apikey|api_key)=[^\s]+/gi,
+    label: 'URL containing secret-like query',
+  },
 ];
 
 export class InputGuard {
@@ -26,7 +40,10 @@ export class InputGuard {
 
     const maxContentLength = config.input?.maxContentLength;
     if (maxContentLength) {
-      const totalLength = request.messages.reduce((sum, message) => sum + this.extractText(message).join('\n').length, 0);
+      const totalLength = request.messages.reduce(
+        (sum, message) => sum + this.extractText(message).join('\n').length,
+        0,
+      );
       guardrailsApplied.push('input-length-check');
       if (totalLength > maxContentLength) {
         findings.push({
@@ -41,7 +58,14 @@ export class InputGuard {
 
     if (config.input?.secrets?.enabled !== false) {
       const action = config.input?.secrets?.action || 'block';
-      safeRequest = this.inspectAndMaybeMask(safeRequest, SECRET_PATTERNS, 'secret', action, findings, guardrailsApplied);
+      safeRequest = this.inspectAndMaybeMask(
+        safeRequest,
+        SECRET_PATTERNS,
+        'secret',
+        action,
+        findings,
+        guardrailsApplied,
+      );
     }
 
     if (config.input?.urls?.enabled !== false) {
@@ -50,13 +74,15 @@ export class InputGuard {
         for (const text of this.extractText(message)) {
           for (const { pattern, label } of SUSPICIOUS_URL_PATTERNS) {
             const matches = text.match(pattern) || [];
-            matches.forEach((value) => findings.push({
-              type: 'url-risk',
-              severity: 'high',
-              message: `Suspicious URL detected: ${label}`,
-              path: `messages.${index}.content`,
-              value,
-            }));
+            for (const value of matches) {
+              findings.push({
+                type: 'url-risk',
+                severity: 'high',
+                message: `Suspicious URL detected: ${label}`,
+                path: `messages.${index}.content`,
+                value,
+              });
+            }
           }
         }
       });
@@ -113,11 +139,12 @@ export class InputGuard {
       ...request,
       messages: request.messages.map((message, index) => ({
         ...message,
-        content: typeof message.content === 'string'
-          ? maskText(message.content, `messages.${index}.content`)
-          : message.content.map((part) => part.type === 'text'
-              ? { ...part, text: maskText(part.text, `messages.${index}.content`) }
-              : part),
+        content:
+          typeof message.content === 'string'
+            ? maskText(message.content, `messages.${index}.content`)
+            : message.content.map((part) =>
+                part.type === 'text' ? { ...part, text: maskText(part.text, `messages.${index}.content`) } : part,
+              ),
       })),
     };
   }

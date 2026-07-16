@@ -25,9 +25,7 @@ export function ingestDocuments(documents: DocumentSource[], options: IngestionO
   const overlap = Math.min(options.overlap || 150, Math.max(0, chunkSize - 1));
 
   for (const [docIndex, doc] of documents.entries()) {
-    const sections = options.splitOnMarkdownHeadings
-      ? splitMarkdownSections(doc.text)
-      : [doc.text];
+    const sections = options.splitOnMarkdownHeadings ? splitMarkdownSections(doc.text) : [doc.text];
 
     for (const [sectionIndex, section] of sections.entries()) {
       let start = 0;
@@ -67,6 +65,9 @@ export function ingestText(text: string, options: IngestionOptions & { source?: 
 }
 
 function splitMarkdownSections(text: string): string[] {
-  const sections = text.split(/(?=^#{1,6}\s+)/m).map((section) => section.trim()).filter(Boolean);
+  const sections = text
+    .split(/(?=^#{1,6}\s+)/m)
+    .map((section) => section.trim())
+    .filter(Boolean);
   return sections.length ? sections : [text];
 }

@@ -17,7 +17,9 @@ export function withFactualDefaults(request: CompletionRequest, options: Factual
     'Do not invent facts, citations, APIs, prices, dates, versions, or capabilities.',
     options.chainOfThought === 'brief' ? 'Show a brief reasoning summary.' : '',
     options.chainOfThought === 'private' ? 'Think step by step internally, but only provide the final answer.' : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const exampleMessages: Message[] = (options.examples || []).flatMap((example) => [
     { role: 'user' as const, content: example.input },
@@ -28,11 +30,7 @@ export function withFactualDefaults(request: CompletionRequest, options: Factual
     ...request,
     temperature: request.temperature ?? options.temperature ?? 0,
     topP: request.topP ?? options.topP ?? 0.1,
-    messages: [
-      { role: 'system', content: instructions },
-      ...exampleMessages,
-      ...request.messages,
-    ],
+    messages: [{ role: 'system', content: instructions }, ...exampleMessages, ...request.messages],
   };
 }
 

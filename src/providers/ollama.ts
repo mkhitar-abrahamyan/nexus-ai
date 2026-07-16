@@ -57,12 +57,13 @@ export class OllamaProvider extends BaseProvider {
   private formatMessages(messages: Message[]): OllamaMessage[] {
     return messages.map((msg) => ({
       role: msg.role,
-      content: typeof msg.content === 'string'
-        ? msg.content
-        : msg.content
-            .filter((part) => part.type === 'text')
-            .map((part) => part.text)
-            .join('\n'),
+      content:
+        typeof msg.content === 'string'
+          ? msg.content
+          : msg.content
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text)
+              .join('\n'),
     }));
   }
 

@@ -5,6 +5,7 @@ import path from 'node:path';
 
 const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+const packageLock = JSON.parse(readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'));
 const root = await import('nexus-ai-pro');
 
 const expectedRootExports = [
@@ -160,7 +161,21 @@ const expectedSubpaths = [
   './streaming',
   './config',
   './providers',
-  './providers/*',
+  './providers/anthropic',
+  './providers/azure-openai',
+  './providers/base',
+  './providers/cohere',
+  './providers/deepseek',
+  './providers/errors',
+  './providers/google',
+  './providers/groq',
+  './providers/llamacpp',
+  './providers/lmstudio',
+  './providers/mistral',
+  './providers/ollama',
+  './providers/openai',
+  './providers/openrouter',
+  './providers/type-guards',
   './security',
   './optimizer',
   './context',
@@ -170,13 +185,17 @@ const expectedSubpaths = [
   './telephony',
   './telephony/twilio',
   './cache',
-  './cache/*',
+  './cache/adapters',
+  './cache/memory-cache',
+  './cache/semantic-cache',
   './models',
   './rag',
   './evals',
   './evals/judge',
   './jobs',
-  './jobs/*',
+  './jobs/batch',
+  './jobs/durable-adapters',
+  './jobs/queue',
   './workflows',
 ];
 
@@ -190,8 +209,16 @@ for (const subpath of expectedSubpaths) {
   assert.equal(packageJson.exports[subpath].types.endsWith('.d.ts'), true, `${subpath} should expose declarations`);
 }
 
+assert.deepEqual(Object.keys(packageJson.exports).sort(), expectedSubpaths.sort());
+assert.equal(
+  Object.keys(packageJson.exports).some((subpath) => subpath.includes('*')),
+  false,
+);
+
 assert.equal(packageJson.type, 'module');
 assert.equal(packageJson.sideEffects, false);
-assert.equal(packageJson.engines.node, '>=18.0.0');
+assert.equal(packageJson.engines.node, '>=22.0.0');
+assert.equal(packageLock.version, packageJson.version);
+assert.equal(packageLock.packages[''].version, packageJson.version);
 
 console.log('API contract test passed.');

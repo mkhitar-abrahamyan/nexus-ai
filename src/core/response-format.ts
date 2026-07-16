@@ -1,3 +1,5 @@
+import { Ajv, type ErrorObject, type ValidateFunction } from 'ajv';
+import addFormatsModule, { type FormatsPlugin } from 'ajv-formats';
 import { z } from 'zod';
 import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
@@ -9,6 +11,15 @@ export class ResponseFormatError extends Error {
     this.name = 'ResponseFormatError';
   }
 }
+
+const jsonSchemaValidator = new Ajv({
+  allErrors: true,
+  strict: true,
+  allowUnionTypes: true,
+});
+const addFormats = addFormatsModule as unknown as FormatsPlugin;
+addFormats(jsonSchemaValidator);
+const compiledSchemas = new WeakMap<Record<string, unknown>, ValidateFunction>();
 
 export function applyResponseFormat(response: NexusResponse, config?: ResponseFormatConfig): NexusResponse {
   if (!config || config.type === 'text') return response;
@@ -28,9 +39,11 @@ export function applyResponseFormat(response: NexusResponse, config?: ResponseFo
         throw new ResponseFormatError(`Model output failed JSON schema validation: ${result.error.message}`);
       }
     } else {
-      const errors = validateJsonSchemaLike(parsed, config.schema);
-      if (errors.length) {
-        throw new ResponseFormatError(`Model output failed JSON schema validation: ${errors.join('; ')}`);
+      const validate = compileJsonSchema(config.schema);
+      if (!validate(parsed)) {
+        throw new ResponseFormatError(
+          `Model output failed JSON schema validation: ${formatJsonSchemaErrors(validate.errors)}`,
+        );
       }
     }
   }
@@ -46,9 +59,10 @@ export function withResponseFormat(request: CompletionRequest, config?: Response
     schema: responseFormat.schema,
   };
 
-  const schemaInstruction = responseFormat.type === 'json_schema' && responseFormat.schema
-    ? `The JSON must match this schema description: ${JSON.stringify(responseFormat.schema)}`
-    : 'Use a stable object shape with explicit keys.';
+  const schemaInstruction =
+    responseFormat.type === 'json_schema' && responseFormat.schema
+      ? `The JSON must match this schema description: ${JSON.stringify(responseFormat.schema)}`
+      : 'Use a stable object shape with explicit keys.';
 
   const systemMessage: Message = {
     role: 'system',
@@ -75,68 +89,25 @@ function isZodShape(schema: Record<string, unknown>): boolean {
   });
 }
 
-function validateJsonSchemaLike(value: unknown, schema: Record<string, unknown>, path = '$'): string[] {
-  const errors: string[] = [];
-  const type = schema.type;
+function compileJsonSchema(schema: Record<string, unknown>): ValidateFunction {
+  const cached = compiledSchemas.get(schema);
+  if (cached) return cached;
 
-  if (typeof type === 'string' && !matchesJsonType(value, type)) {
-    errors.push(`${path} expected ${type}`);
-    return errors;
+  try {
+    const validate = jsonSchemaValidator.compile(schema);
+    compiledSchemas.set(schema, validate);
+    return validate;
+  } catch (error) {
+    throw new ResponseFormatError(`Invalid JSON schema: ${error instanceof Error ? error.message : String(error)}`);
   }
-
-  if (type === 'object' || schema.properties) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      errors.push(`${path} expected object`);
-      return errors;
-    }
-
-    const objectValue = value as Record<string, unknown>;
-    const required = Array.isArray(schema.required) ? schema.required : [];
-    for (const key of required) {
-      if (typeof key === 'string' && !(key in objectValue)) {
-        errors.push(`${path}.${key} is required`);
-      }
-    }
-
-    const properties = schema.properties;
-    if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
-      for (const [key, childSchema] of Object.entries(properties as Record<string, unknown>)) {
-        if (key in objectValue && childSchema && typeof childSchema === 'object' && !Array.isArray(childSchema)) {
-          errors.push(...validateJsonSchemaLike(
-            objectValue[key],
-            childSchema as Record<string, unknown>,
-            `${path}.${key}`,
-          ));
-        }
-      }
-    }
-  }
-
-  if (type === 'array' && Array.isArray(value) && schema.items && typeof schema.items === 'object') {
-    value.forEach((item, index) => {
-      errors.push(...validateJsonSchemaLike(item, schema.items as Record<string, unknown>, `${path}[${index}]`));
-    });
-  }
-
-  return errors;
 }
 
-function matchesJsonType(value: unknown, type: string): boolean {
-  switch (type) {
-    case 'object':
-      return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-    case 'array':
-      return Array.isArray(value);
-    case 'string':
-      return typeof value === 'string';
-    case 'number':
-    case 'integer':
-      return typeof value === 'number' && Number.isFinite(value) && (type === 'number' || Number.isInteger(value));
-    case 'boolean':
-      return typeof value === 'boolean';
-    case 'null':
-      return value === null;
-    default:
-      return true;
-  }
+function formatJsonSchemaErrors(errors: ErrorObject[] | null | undefined): string {
+  if (!errors?.length) return 'schema validation failed';
+  return errors
+    .map((error) => {
+      const path = error.instancePath ? `$${error.instancePath}` : '$';
+      return `${path} ${error.message || error.keyword}`;
+    })
+    .join('; ');
 }

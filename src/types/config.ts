@@ -155,6 +155,12 @@ export interface AuditLogConfig {
   enabled?: boolean;
   includeInput?: boolean;
   includeOutput?: boolean;
+  /**
+   * Preserve raw credentials and personal data in audit events.
+   * Enable only for an access-controlled sink with an appropriate retention policy.
+   * @default false
+   */
+  includeSensitiveData?: boolean;
   sink?: (event: AuditLogEvent) => void | Promise<void>;
 }
 
@@ -175,11 +181,13 @@ export interface LogEvent {
   message: string;
   timestamp: string;
   data?: Record<string, unknown>;
-  error?: {
-    name?: string;
-    message: string;
-    stack?: string;
-  } | unknown;
+  error?:
+    | {
+        name?: string;
+        message: string;
+        stack?: string;
+      }
+    | unknown;
 }
 
 /** Structured logger hook config. */

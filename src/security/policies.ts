@@ -1,11 +1,6 @@
 import type { SecurityConfig } from '../types/security.js';
 
-export type GuardrailPolicyName =
-  | 'owasp-llm'
-  | 'pii-safe'
-  | 'rag-grounded'
-  | 'tool-safe'
-  | 'enterprise-strict';
+export type GuardrailPolicyName = 'owasp-llm' | 'pii-safe' | 'rag-grounded' | 'tool-safe' | 'enterprise-strict';
 
 export const GUARDRAIL_POLICIES: Record<GuardrailPolicyName, SecurityConfig> = {
   'owasp-llm': {

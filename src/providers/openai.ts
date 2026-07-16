@@ -47,9 +47,7 @@ interface OpenAIChatMessage {
   content: string | OpenAIChatContentPart[];
 }
 
-type OpenAIChatContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } };
+type OpenAIChatContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
 
 interface OpenAIChatCompletion {
   model: string;
@@ -225,10 +223,13 @@ export class OpenAIProvider extends BaseProvider {
 
         const client = await self.getClient();
         const startTime = Date.now();
-        const stream = await client.chat.completions.create({
-          ...self.createChatParams(providerRequest),
-          stream: true,
-        }, self.requestOptions(providerRequest));
+        const stream = await client.chat.completions.create(
+          {
+            ...self.createChatParams(providerRequest),
+            stream: true,
+          },
+          self.requestOptions(providerRequest),
+        );
 
         const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
 
@@ -243,10 +244,11 @@ export class OpenAIProvider extends BaseProvider {
 
           for (const toolCall of asArray(delta.tool_calls)) {
             const index = thisToolCallIndex(toolCall, toolCallBuffers.size);
-            if (!toolCallBuffers.has(index)) {
-              toolCallBuffers.set(index, { id: '', name: '', args: '' });
+            let buffer = toolCallBuffers.get(index);
+            if (!buffer) {
+              buffer = { id: '', name: '', args: '' };
+              toolCallBuffers.set(index, buffer);
             }
-            const buffer = toolCallBuffers.get(index)!;
             const fn = getRecord(toolCall, 'function');
             const id = getString(toolCall, 'id');
             if (id) buffer.id = id;
@@ -300,11 +302,16 @@ export class OpenAIProvider extends BaseProvider {
 
   private mapFinishReason(reason: string | null | undefined): NexusResponse['finishReason'] {
     switch (reason) {
-      case 'stop': return 'stop';
-      case 'tool_calls': return 'tool_calls';
-      case 'length': return 'length';
-      case 'content_filter': return 'content_filter';
-      default: return 'stop';
+      case 'stop':
+        return 'stop';
+      case 'tool_calls':
+        return 'tool_calls';
+      case 'length':
+        return 'length';
+      case 'content_filter':
+        return 'content_filter';
+      default:
+        return 'stop';
     }
   }
 
@@ -312,7 +319,9 @@ export class OpenAIProvider extends BaseProvider {
     const client = await this.getClient();
     const responses = client.responses;
     if (!responses?.create) {
-      throw new Error(`Model "${request.model}" requires the OpenAI Responses API, but the installed openai SDK does not expose client.responses.create. Upgrade the openai package.`);
+      throw new Error(
+        `Model "${request.model}" requires the OpenAI Responses API, but the installed openai SDK does not expose client.responses.create. Upgrade the openai package.`,
+      );
     }
 
     const startTime = Date.now();
@@ -334,14 +343,19 @@ export class OpenAIProvider extends BaseProvider {
     const client = await this.getClient();
     const responses = client.responses;
     if (!responses?.create) {
-      throw new Error(`Model "${request.model}" requires the OpenAI Responses API, but the installed openai SDK does not expose client.responses.create. Upgrade the openai package.`);
+      throw new Error(
+        `Model "${request.model}" requires the OpenAI Responses API, but the installed openai SDK does not expose client.responses.create. Upgrade the openai package.`,
+      );
     }
 
     const startTime = Date.now();
-    const stream = await responses.create({
-      ...this.createResponsesParams(request),
-      stream: true,
-    }, this.requestOptions(request));
+    const stream = await responses.create(
+      {
+        ...this.createResponsesParams(request),
+        stream: true,
+      },
+      this.requestOptions(request),
+    );
     const toolCallBuffers = new Map<string, { id: string; name: string; args: string }>();
 
     for await (const event of stream) {
@@ -356,7 +370,8 @@ export class OpenAIProvider extends BaseProvider {
         case 'response.output_item.done': {
           const item = event.item;
           if (this.isResponseFunctionCall(item)) {
-            const key = item.id || item.call_id || getString(event, 'item_id') || String(getNumber(event, 'output_index'));
+            const key =
+              item.id || item.call_id || getString(event, 'item_id') || String(getNumber(event, 'output_index'));
             toolCallBuffers.set(key, {
               id: item.call_id || item.id || key,
               name: item.name || '',
@@ -468,17 +483,19 @@ export class OpenAIProvider extends BaseProvider {
   }
 
   private extractChatToolCalls(toolCalls: unknown[] | undefined): ToolCall[] | undefined {
-    const normalized = asArray(toolCalls).map((toolCall) => {
-      const fn = getRecord(toolCall, 'function');
-      return {
-        id: getString(toolCall, 'id'),
-        type: 'function' as const,
-        function: {
-          name: getString(fn, 'name'),
-          arguments: getString(fn, 'arguments'),
-        },
-      };
-    }).filter((toolCall) => toolCall.id && toolCall.function.name);
+    const normalized = asArray(toolCalls)
+      .map((toolCall) => {
+        const fn = getRecord(toolCall, 'function');
+        return {
+          id: getString(toolCall, 'id'),
+          type: 'function' as const,
+          function: {
+            name: getString(fn, 'name'),
+            arguments: getString(fn, 'arguments'),
+          },
+        };
+      })
+      .filter((toolCall) => toolCall.id && toolCall.function.name);
 
     return normalized.length ? normalized : undefined;
   }
@@ -521,12 +538,7 @@ export class OpenAIProvider extends BaseProvider {
     return 'stop';
   }
 
-  private createMeta(
-    model: string,
-    latencyMs: number,
-    inputTokens = 0,
-    outputTokens = 0,
-  ): NexusResponse['meta'] {
+  private createMeta(model: string, latencyMs: number, inputTokens = 0, outputTokens = 0): NexusResponse['meta'] {
     return {
       requestId: generateRequestId(),
       providerUsed: this.info.name,
@@ -544,7 +556,7 @@ export class OpenAIProvider extends BaseProvider {
   private estimateCost(model: string, inputTokens: number, outputTokens: number): string {
     const caps = KNOWN_MODELS[model];
     if (!caps) return '$0.00';
-    return `$${(inputTokens / 1000 * caps.costPer1kInput + outputTokens / 1000 * caps.costPer1kOutput).toFixed(4)}`;
+    return `$${((inputTokens / 1000) * caps.costPer1kInput + (outputTokens / 1000) * caps.costPer1kOutput).toFixed(4)}`;
   }
 
   private requestOptions(request: CompletionRequest): RequestOptions | undefined {
@@ -559,7 +571,9 @@ export class OpenAIProvider extends BaseProvider {
   private stripConfiguredPrefix(model: string): string {
     const prefixes = Array.isArray(this.config.modelPrefix)
       ? this.config.modelPrefix
-      : this.config.modelPrefix ? [this.config.modelPrefix] : [];
+      : this.config.modelPrefix
+        ? [this.config.modelPrefix]
+        : [];
 
     for (const prefix of prefixes) {
       const marker = `${prefix}/`;

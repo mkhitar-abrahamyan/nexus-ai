@@ -3,15 +3,19 @@ import type { SecurityConfig, SecurityFinding, SecurityLevel, SecurityResult } f
 import { SchemaValidator } from './schema-validator.js';
 import { InjectionDetector } from './injection-detector.js';
 import { PIIDetector } from './pii-detector.js';
-import { OutputGuard } from './output-guard.js';
+import { OutputGuard, redactSensitiveText } from './output-guard.js';
 import { InputGuard } from './input-guard.js';
 import type { NexusResponse } from '../types/response.js';
 import { SemanticInjectionClassifier } from './semantic-injection-classifier.js';
 
 export class NexusSecurityError extends Error {
-  constructor(public findings: SecurityFinding[]) {
-    super(`NexusAI security blocked request: ${findings.map((f) => f.message).join('; ')}`);
+  public readonly findings: SecurityFinding[];
+
+  constructor(findings: SecurityFinding[], target: 'request' | 'output' = 'request') {
+    const safeFindings = findings.map(sanitizeFindingForError);
+    super(`NexusAI security blocked ${target}: ${safeFindings.map((finding) => finding.message).join('; ')}`);
     this.name = 'NexusSecurityError';
+    this.findings = safeFindings;
   }
 }
 
@@ -54,7 +58,8 @@ export class SecurityPipeline {
 
       if (injectionConfig.semantic?.enabled) {
         // Semantic classifier uses dependency-free hash embeddings unless a custom classifier is used directly.
-        const classifier = this.semanticInjectionClassifier || new SemanticInjectionClassifier(injectionConfig.semantic);
+        const classifier =
+          this.semanticInjectionClassifier || new SemanticInjectionClassifier(injectionConfig.semantic);
         this.semanticInjectionClassifier = classifier;
         const semanticFindings = classifier.detectSync(safeRequest);
         findings.push(...semanticFindings);
@@ -92,7 +97,18 @@ export class SecurityPipeline {
 
   assertSafe(result: SecurityResult<CompletionRequest>): void {
     if (!result.ok) {
-      throw new NexusSecurityError(result.findings.filter((finding) => finding.severity === 'critical' || finding.severity === 'high'));
+      throw new NexusSecurityError(
+        result.findings.filter((finding) => finding.severity === 'critical' || finding.severity === 'high'),
+      );
+    }
+  }
+
+  assertOutputSafe(result: SecurityResult<NexusResponse>): void {
+    if (!result.ok) {
+      throw new NexusSecurityError(
+        result.findings.filter((finding) => finding.severity === 'critical' || finding.severity === 'high'),
+        'output',
+      );
     }
   }
 
@@ -163,17 +179,32 @@ export class SecurityPipeline {
     return level === 'standard' || level === 'strict' || level === 'paranoid';
   }
 
-  private getBlockingFindings(findings: SecurityFinding[], level: SecurityLevel, config: SecurityConfig): SecurityFinding[] {
-    const injectionAction = config.input?.injectionDetection?.onDetection || (level === 'strict' || level === 'paranoid' ? 'block' : 'flag');
+  private getBlockingFindings(
+    findings: SecurityFinding[],
+    level: SecurityLevel,
+    config: SecurityConfig,
+  ): SecurityFinding[] {
+    const injectionAction =
+      config.input?.injectionDetection?.onDetection || (level === 'strict' || level === 'paranoid' ? 'block' : 'flag');
     const piiAction = config.input?.pii?.action || (level === 'paranoid' ? 'block' : 'flag');
 
     return findings.filter((finding) => {
       if (finding.type === 'schema') return true;
-      if (finding.type === 'prompt-injection') return injectionAction === 'block' && (finding.severity === 'critical' || finding.severity === 'high');
-      if (finding.type === 'pii') return piiAction === 'block' && (finding.severity === 'critical' || finding.severity === 'high');
+      if (finding.type === 'prompt-injection')
+        return injectionAction === 'block' && (finding.severity === 'critical' || finding.severity === 'high');
+      if (finding.type === 'pii')
+        return piiAction === 'block' && (finding.severity === 'critical' || finding.severity === 'high');
       if (finding.type === 'content-length') return finding.severity === 'high' || finding.severity === 'critical';
-      if (finding.type === 'secret') return (config.input?.secrets?.action || 'block') === 'block' && (finding.severity === 'critical' || finding.severity === 'high');
-      if (finding.type === 'url-risk') return (config.input?.urls?.action || 'flag') === 'block' && (finding.severity === 'critical' || finding.severity === 'high');
+      if (finding.type === 'secret')
+        return (
+          (config.input?.secrets?.action || 'block') === 'block' &&
+          (finding.severity === 'critical' || finding.severity === 'high')
+        );
+      if (finding.type === 'url-risk')
+        return (
+          (config.input?.urls?.action || 'flag') === 'block' &&
+          (finding.severity === 'critical' || finding.severity === 'high')
+        );
       if (finding.type === 'tool-policy') return true;
       return false;
     });
@@ -186,3 +217,41 @@ export { PIIDetector } from './pii-detector.js';
 export { OutputGuard } from './output-guard.js';
 export { InputGuard } from './input-guard.js';
 export { SemanticInjectionClassifier } from './semantic-injection-classifier.js';
+
+function sanitizeFindingForError(finding: SecurityFinding): SecurityFinding {
+  return {
+    ...finding,
+    message: redactSensitiveText(finding.message),
+    value: finding.value === undefined ? undefined : '[REDACTED]',
+    metadata: finding.metadata ? (sanitizeMetadata(finding.metadata) as Record<string, unknown>) : undefined,
+  };
+}
+
+function sanitizeMetadata(value: unknown, key?: string, seen = new WeakSet<object>()): unknown {
+  if (typeof value === 'string') {
+    if (key && isSensitiveMetadataKey(key)) {
+      return '[REDACTED]';
+    }
+    return redactSensitiveText(value);
+  }
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[CIRCULAR]';
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeMetadata(item, key, seen));
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([childKey, childValue]) => [childKey, sanitizeMetadata(childValue, childKey, seen)]),
+  );
+}
+
+function isSensitiveMetadataKey(key: string): boolean {
+  const normalized = key.replace(/[-_]/g, '').toLowerCase();
+  return (
+    normalized === 'value' ||
+    /(?:secret|password|credential|apikey|token)$/.test(normalized) ||
+    /^(?:authorization|proxyauthorization|cookie|setcookie)$/.test(normalized)
+  );
+}

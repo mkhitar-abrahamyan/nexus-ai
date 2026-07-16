@@ -1,5 +1,4 @@
 import type { CompletionRequest } from '../types/messages.js';
-import type { NexusResponse } from '../types/response.js';
 import type { WorkflowClient, WorkflowResult, WorkflowStepResult } from './chains.js';
 import { withFactualDefaults } from '../hallucination/factual.js';
 
@@ -31,16 +30,20 @@ export async function supportTriageWorkflow(
 ): Promise<WorkflowResult> {
   return singleStepWorkflow(client, 'support-triage', {
     model: options.model,
-    messages: [{
-      role: 'user',
-      content: [
-        'Triage this support request.',
-        'Return severity, category, likely cause, next best action, and a customer-safe reply.',
-        options.customerTier ? `Customer tier: ${options.customerTier}` : '',
-        contextBlock(options.context),
-        `Request:\n${options.input}`,
-      ].filter(Boolean).join('\n\n'),
-    }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          'Triage this support request.',
+          'Return severity, category, likely cause, next best action, and a customer-safe reply.',
+          options.customerTier ? `Customer tier: ${options.customerTier}` : '',
+          contextBlock(options.context),
+          `Request:\n${options.input}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      },
+    ],
     responseFormat: {
       type: 'json_schema',
       schema: objectSchema(['severity', 'category', 'nextAction', 'reply']),
@@ -54,16 +57,20 @@ export async function salesQualificationWorkflow(
 ): Promise<WorkflowResult> {
   return singleStepWorkflow(client, 'sales-qualification', {
     model: options.model,
-    messages: [{
-      role: 'user',
-      content: [
-        'Qualify this sales lead.',
-        'Return fitScore, painPoints, objections, recommendedOffer, and followUpEmail.',
-        options.product ? `Product: ${options.product}` : '',
-        contextBlock(options.context),
-        `Lead notes:\n${options.input}`,
-      ].filter(Boolean).join('\n\n'),
-    }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          'Qualify this sales lead.',
+          'Return fitScore, painPoints, objections, recommendedOffer, and followUpEmail.',
+          options.product ? `Product: ${options.product}` : '',
+          contextBlock(options.context),
+          `Lead notes:\n${options.input}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      },
+    ],
     responseFormat: {
       type: 'json_schema',
       schema: objectSchema(['fitScore', 'painPoints', 'recommendedOffer', 'followUpEmail']),
@@ -75,23 +82,34 @@ export async function legalReviewWorkflow(
   client: WorkflowClient,
   options: LegalReviewWorkflowOptions,
 ): Promise<WorkflowResult> {
-  return singleStepWorkflow(client, 'legal-review', withFactualDefaults({
-    model: options.model,
-    messages: [{
-      role: 'user',
-      content: [
-        'Review this text for legal risk. Do not provide legal advice.',
-        'Return risks, missingClauses, suggestedQuestions, and safeSummary.',
-        options.jurisdiction ? `Jurisdiction: ${options.jurisdiction}` : '',
-        contextBlock(options.context),
-        `Text:\n${options.input}`,
-      ].filter(Boolean).join('\n\n'),
-    }],
-    responseFormat: {
-      type: 'json_schema',
-      schema: objectSchema(['risks', 'suggestedQuestions', 'safeSummary']),
-    },
-  }, { requireUnknownFallback: true, chainOfThought: 'private' }));
+  return singleStepWorkflow(
+    client,
+    'legal-review',
+    withFactualDefaults(
+      {
+        model: options.model,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              'Review this text for legal risk. Do not provide legal advice.',
+              'Return risks, missingClauses, suggestedQuestions, and safeSummary.',
+              options.jurisdiction ? `Jurisdiction: ${options.jurisdiction}` : '',
+              contextBlock(options.context),
+              `Text:\n${options.input}`,
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+          },
+        ],
+        responseFormat: {
+          type: 'json_schema',
+          schema: objectSchema(['risks', 'suggestedQuestions', 'safeSummary']),
+        },
+      },
+      { requireUnknownFallback: true, chainOfThought: 'private' },
+    ),
+  );
 }
 
 export async function codeReviewWorkflow(
@@ -100,16 +118,20 @@ export async function codeReviewWorkflow(
 ): Promise<WorkflowResult> {
   return singleStepWorkflow(client, 'code-review', {
     model: options.model,
-    messages: [{
-      role: 'user',
-      content: [
-        'Review this code for bugs, security risks, performance issues, and missing tests.',
-        'Return findings ordered by severity with file/line references when available.',
-        options.language ? `Language: ${options.language}` : '',
-        contextBlock(options.context),
-        `Code:\n${options.input}`,
-      ].filter(Boolean).join('\n\n'),
-    }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          'Review this code for bugs, security risks, performance issues, and missing tests.',
+          'Return findings ordered by severity with file/line references when available.',
+          options.language ? `Language: ${options.language}` : '',
+          contextBlock(options.context),
+          `Code:\n${options.input}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      },
+    ],
     responseFormat: {
       type: 'json_schema',
       schema: objectSchema(['findings', 'riskLevel', 'testSuggestions']),

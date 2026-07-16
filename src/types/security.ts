@@ -4,13 +4,7 @@ export type SecurityPreset = 'developer' | 'startup' | 'enterprise' | 'healthcar
 
 export type SecurityAction = 'allow' | 'block' | 'mask' | 'flag';
 
-export type PIIType =
-  | 'email'
-  | 'phone'
-  | 'credit-card'
-  | 'ip-address'
-  | 'aws-key'
-  | 'private-key';
+export type PIIType = 'email' | 'phone' | 'credit-card' | 'ip-address' | 'aws-key' | 'private-key';
 
 export interface InjectionDetectionConfig {
   enabled?: boolean;
@@ -92,7 +86,18 @@ export interface SecurityConfig {
 }
 
 export interface SecurityFinding {
-  type: 'schema' | 'prompt-injection' | 'pii' | 'content-length' | 'secret' | 'url-risk' | 'tool-policy' | 'moderation' | 'dlp' | 'topic' | 'grounding';
+  type:
+    | 'schema'
+    | 'prompt-injection'
+    | 'pii'
+    | 'content-length'
+    | 'secret'
+    | 'url-risk'
+    | 'tool-policy'
+    | 'moderation'
+    | 'dlp'
+    | 'topic'
+    | 'grounding';
   severity: 'low' | 'medium' | 'high' | 'critical';
   message: string;
   path?: string;

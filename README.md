@@ -7,12 +7,15 @@ Use the whole pipeline for production AI features, or turn pieces off when you o
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
 - Full technical notes and manual test cases: [NEXUS.md](./NEXUS.md)
+- Planned image generation and infrastructure work: [ROADMAP.md](./ROADMAP.md)
 
 ## Install
 
 ```bash
 npm install nexus-ai-pro
 ```
+
+Requires Node.js 22 or newer. `nexus-ai-pro` is ESM-only: use `import` from an ES module rather than CommonJS `require()`.
 
 Install only the provider SDKs your app uses. The OpenAI SDK also powers OpenAI-compatible adapters such as OpenRouter, Groq, Mistral, DeepSeek, Azure OpenAI, LM Studio, and llama.cpp.
 
@@ -245,6 +248,12 @@ for await (const chunk of stream) {
 ```
 
 All providers normalize streaming chunks to `text`, `tool_call`, `done`, or `error`.
+
+When security is enabled, output streams are correctness-first: Nexus buffers and validates the
+complete output before yielding any chunk, up to 1 MiB or 100,000 chunks. This prevents secrets,
+PII, and blocked phrases split across provider chunks from leaking partially, at the cost of
+token-by-token latency. `security: 'off'` preserves immediate streaming when that trade-off is
+explicitly acceptable for the application.
 
 ### Tools and Agents
 
@@ -559,6 +568,12 @@ Useful helpers:
 - URL and tool allowlist checks
 - reusable policies through `guardrailPolicy(...)`
 - `hardenPrompt(...)` for clearly delimiting untrusted input
+- `createFetchUrlTool(...)` with DNS pinning, redirect validation, private-network blocking, and
+  bounded response reads
+
+CLI scans and audit records redact detected values by default. `nexus scan --reveal-values` is
+restricted to an interactive terminal; raw audit data requires both `includeSensitiveData: true`
+and an explicit custom sink.
 
 ## Caching, Jobs, and Evals
 
@@ -670,7 +685,7 @@ import { RedisCacheAdapter } from 'nexus-ai-pro/cache';
 import { DeepSeekProvider } from 'nexus-ai-pro/providers/deepseek';
 ```
 
-Provider SDKs are optional peer dependencies. The package is ESM-first and marked with `sideEffects: false`.
+Provider SDKs are optional peer dependencies. The package is ESM-only, supports Node.js 22+, and is marked with `sideEffects: false`. Only the entry points listed in the package export map are public; deep imports into `dist` or `src` are unsupported.
 
 ## Examples
 
@@ -686,7 +701,7 @@ npm run example:optimizer
 npm run example:agent
 ```
 
-Included example files cover:
+Repository example files cover:
 
 - OpenTelemetry with Node HTTP and Express
 - BullMQ workers
@@ -701,18 +716,26 @@ Included example files cover:
 
 ```bash
 npm install
-npm run build
-npm test
-npm run test:types
-npm run test:clean-install
-npm run test:conformance:mock
+npm run check
+npm run check:release
 ```
+
+`check` runs formatting and lint gates, source/test/example type checks, the build, unit and mock
+conformance tests, coverage thresholds, package import checks, and an external type-consumer test.
+`check:release` additionally verifies the dry-run tarball and a clean packed-package install.
 
 Real provider conformance is opt-in:
 
 ```bash
 npm run test:conformance:real
 ```
+
+## Roadmap
+
+The next recommended feature family is first-class image generation and editing through a
+provider-neutral `ImageManager`, portable asset types, durable operation handles, visual safety,
+asset storage, and media-specific evaluations. The design and prioritized infrastructure backlog
+are in [ROADMAP.md](./ROADMAP.md).
 
 ## Production Notes
 

@@ -45,8 +45,9 @@ export async function runProviderConformance(
 ): Promise<ProviderConformanceResult[]> {
   const fixtureModel = options.model || 'auto';
   const shouldBuildCustomFixtures = Boolean(options.model || options.testJson === false || options.testTools);
-  const fixtures = options.fixtures
-    || (shouldBuildCustomFixtures
+  const fixtures =
+    options.fixtures ||
+    (shouldBuildCustomFixtures
       ? baseFixtures(fixtureModel, {
           json: options.testJson !== false,
           tools: options.testTools === true,
@@ -173,8 +174,10 @@ function baseFixtures(model: string, options: { json?: boolean; tools?: boolean 
         ],
       },
       validate: (response) => {
-        return Array.isArray(response.toolCalls)
-          && response.toolCalls.some((toolCall) => toolCall.function.name === 'lookup');
+        return (
+          Array.isArray(response.toolCalls) &&
+          response.toolCalls.some((toolCall) => toolCall.function.name === 'lookup')
+        );
       },
     });
   }

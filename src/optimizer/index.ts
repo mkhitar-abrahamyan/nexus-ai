@@ -35,11 +35,9 @@ export class TokenOptimizer {
     const preBudget = this.budget.check(value, budgetConfig);
     warnings.push(...preBudget.warnings);
 
-    const shouldDensify = this.config.densification?.enabled !== false && (
-      this.config.densification?.enabled === true ||
-      budgetConfig.onExceeded === 'densify' ||
-      preBudget.exceeded
-    );
+    const shouldDensify =
+      this.config.densification?.enabled !== false &&
+      (this.config.densification?.enabled === true || budgetConfig.onExceeded === 'densify' || preBudget.exceeded);
 
     if (shouldDensify) {
       const densified = this.densifier.densifyRequest(value, this.config.densification);

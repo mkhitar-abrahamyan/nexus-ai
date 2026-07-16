@@ -57,10 +57,7 @@ export class TelephonyManager {
   }
 
   async createWebhookResponse(request: TelephonyResponseRequest): Promise<TelephonyWebhookResponse> {
-    const provider = this.resolveProvider(
-      'createWebhookResponse',
-      request.provider || this.config.defaultProvider,
-    );
+    const provider = this.resolveProvider('createWebhookResponse', request.provider || this.config.defaultProvider);
     if (!provider.createWebhookResponse) throw new TelephonyCapabilityError(provider.info.name, 'webhook responses');
 
     try {
@@ -81,7 +78,10 @@ export class TelephonyManager {
     return provider.validateWebhook(request);
   }
 
-  parseMediaStreamEvent(providerName: string, message: string | Record<string, unknown>): TelephonyMediaStreamEvent | undefined {
+  parseMediaStreamEvent(
+    providerName: string,
+    message: string | Record<string, unknown>,
+  ): TelephonyMediaStreamEvent | undefined {
     const provider = this.resolveProvider('parseMediaStreamEvent', providerName);
     if (!provider.parseMediaStreamEvent) throw new TelephonyCapabilityError(provider.info.name, 'media stream parsing');
     return provider.parseMediaStreamEvent(message);

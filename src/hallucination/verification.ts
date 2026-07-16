@@ -36,50 +36,54 @@ export async function completeVerified(
   request: CompletionRequest,
   options: VerificationOptions,
 ): Promise<NexusResponse> {
-  const initial = await client.complete(withFactualDefaults(request, {
-    requireUnknownFallback: true,
-    unknownAnswer: options.unknownAnswer || "I don't know.",
-    chainOfThought: 'private',
-  }));
+  const initial = await client.complete(
+    withFactualDefaults(request, {
+      requireUnknownFallback: true,
+      unknownAnswer: options.unknownAnswer || "I don't know.",
+      chainOfThought: 'private',
+    }),
+  );
   const report = await verifyAgainstContext(initial.content, options);
 
   if (report.ok || options.repair === false) {
     return attachVerification(initial, report);
   }
 
-  const repaired = await client.complete(withFactualDefaults({
-    ...request,
-    messages: [
-      ...request.messages,
+  const repaired = await client.complete(
+    withFactualDefaults(
       {
-        role: 'assistant',
-        content: initial.content,
+        ...request,
+        messages: [
+          ...request.messages,
+          {
+            role: 'assistant',
+            content: initial.content,
+          },
+          {
+            role: 'user',
+            content: [
+              'Revise the answer so every factual claim is supported by the context.',
+              `If unsupported, answer exactly: "${options.unknownAnswer || "I don't know."}"`,
+              'Unsupported claims:',
+              ...report.unsupported.map((fact) => `- ${fact.text}`),
+              'Context:',
+              ...options.context.map((item, index) => `[context-${index + 1}] ${item}`),
+            ].join('\n'),
+          },
+        ],
       },
       {
-        role: 'user',
-        content: [
-          'Revise the answer so every factual claim is supported by the context.',
-          `If unsupported, answer exactly: "${options.unknownAnswer || "I don't know."}"`,
-          'Unsupported claims:',
-          ...report.unsupported.map((fact) => `- ${fact.text}`),
-          'Context:',
-          ...options.context.map((item, index) => `[context-${index + 1}] ${item}`),
-        ].join('\n'),
+        requireUnknownFallback: true,
+        unknownAnswer: options.unknownAnswer || "I don't know.",
+        chainOfThought: 'private',
       },
-    ],
-  }, {
-    requireUnknownFallback: true,
-    unknownAnswer: options.unknownAnswer || "I don't know.",
-    chainOfThought: 'private',
-  }));
+    ),
+  );
 
   return attachVerification(repaired, await verifyAgainstContext(repaired.content, options));
 }
 
-export async function verifyAgainstContext(
-  answer: string,
-  options: VerificationOptions,
-): Promise<VerificationReport> {
+export async function verifyAgainstContext(answer: string, options: VerificationOptions): Promise<VerificationReport> {
   const context = options.context.join('\n');
   const facts = extractFacts(answer);
 
@@ -87,16 +91,16 @@ export async function verifyAgainstContext(
     return { ok: true, facts: [], unsupported: [], supportRatio: 1 };
   }
 
-  const checked = await Promise.all(facts.map(async (fact) => {
-    const result = options.nli
-      ? await options.nli.verify(fact, context)
-      : lexicalEntailment(fact, context);
-    return {
-      text: fact,
-      supported: result.entailed,
-      score: result.score,
-    };
-  }));
+  const checked = await Promise.all(
+    facts.map(async (fact) => {
+      const result = options.nli ? await options.nli.verify(fact, context) : lexicalEntailment(fact, context);
+      return {
+        text: fact,
+        supported: result.entailed,
+        score: result.score,
+      };
+    }),
+  );
 
   const supported = checked.filter((fact) => fact.supported).length;
   const supportRatio = supported / checked.length;
@@ -135,14 +139,39 @@ export function lexicalEntailment(claim: string, context: string): { entailed: b
 
 function importantTerms(text: string): string[] {
   const stop = new Set([
-    'about', 'after', 'also', 'because', 'before', 'being', 'could', 'from',
-    'have', 'into', 'only', 'over', 'than', 'that', 'their', 'there', 'these',
-    'this', 'those', 'through', 'under', 'using', 'were', 'when', 'where',
-    'which', 'while', 'with', 'would', 'your',
+    'about',
+    'after',
+    'also',
+    'because',
+    'before',
+    'being',
+    'could',
+    'from',
+    'have',
+    'into',
+    'only',
+    'over',
+    'than',
+    'that',
+    'their',
+    'there',
+    'these',
+    'this',
+    'those',
+    'through',
+    'under',
+    'using',
+    'were',
+    'when',
+    'where',
+    'which',
+    'while',
+    'with',
+    'would',
+    'your',
   ]);
 
-  return (text.toLowerCase().match(/[a-z0-9_'-]{3,}/g) || [])
-    .filter((term) => !stop.has(term));
+  return (text.toLowerCase().match(/[a-z0-9_'-]{3,}/g) || []).filter((term) => !stop.has(term));
 }
 
 function attachVerification(response: NexusResponse, report: VerificationReport): NexusResponse {

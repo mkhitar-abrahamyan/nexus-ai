@@ -66,13 +66,9 @@ export class EvalRunner<Response = unknown> {
           throw new Error(`Eval case "${testCase.name}" requires assert or judge`);
         }
         const assertPassed = testCase.assert ? await testCase.assert(response) : true;
-        const judgment = testCase.judge
-          ? normalizeJudgment(await testCase.judge(response, testCase))
-          : undefined;
+        const judgment = testCase.judge ? normalizeJudgment(await testCase.judge(response, testCase)) : undefined;
         const passed = assertPassed && (judgment?.passed ?? true);
-        const metrics = testCase.metrics
-          ? await calculateEvalMetrics(await testCase.metrics(response))
-          : undefined;
+        const metrics = testCase.metrics ? await calculateEvalMetrics(await testCase.metrics(response)) : undefined;
         results.push({
           name: testCase.name,
           passed,

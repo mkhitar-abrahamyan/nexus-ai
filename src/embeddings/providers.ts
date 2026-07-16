@@ -33,7 +33,7 @@ export function createOpenAIEmbeddingProvider(options: OpenAIEmbeddingOptions): 
       }),
     });
     if (!response.ok) throw new Error(`OpenAI embeddings failed: ${response.status} ${await response.text()}`);
-    const result = await response.json() as { data: Array<{ embedding: number[] }> };
+    const result = (await response.json()) as { data: Array<{ embedding: number[] }> };
     return result.data.map((item) => item.embedding);
   };
 }
@@ -42,18 +42,21 @@ export function createGeminiEmbeddingProvider(options: GeminiEmbeddingOptions): 
   return async (texts) => {
     const model = options.model || 'text-embedding-004';
     const baseUrl = (options.baseUrl || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, '');
-    const response = await fetch(`${baseUrl}/models/${encodeURIComponent(model)}:batchEmbedContents?key=${encodeURIComponent(options.apiKey)}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        requests: texts.map((text) => ({
-          model: `models/${model}`,
-          content: { parts: [{ text }] },
-        })),
-      }),
-    });
+    const response = await fetch(
+      `${baseUrl}/models/${encodeURIComponent(model)}:batchEmbedContents?key=${encodeURIComponent(options.apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          requests: texts.map((text) => ({
+            model: `models/${model}`,
+            content: { parts: [{ text }] },
+          })),
+        }),
+      },
+    );
     if (!response.ok) throw new Error(`Gemini embeddings failed: ${response.status} ${await response.text()}`);
-    const result = await response.json() as { embeddings: Array<{ values: number[] }> };
+    const result = (await response.json()) as { embeddings: Array<{ values: number[] }> };
     return result.embeddings.map((item) => item.values);
   };
 }
@@ -74,7 +77,7 @@ export function createCohereEmbeddingProvider(options: CohereEmbeddingOptions): 
       }),
     });
     if (!response.ok) throw new Error(`Cohere embeddings failed: ${response.status} ${await response.text()}`);
-    const result = await response.json() as { embeddings: { float: number[][] } | number[][] };
+    const result = (await response.json()) as { embeddings: { float: number[][] } | number[][] };
     return Array.isArray(result.embeddings) ? result.embeddings : result.embeddings.float;
   };
 }

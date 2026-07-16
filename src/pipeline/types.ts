@@ -5,12 +5,7 @@ import type { ContextWindowResult } from '../types/context-window.js';
 import type { OptimizationResult } from '../types/optimizer.js';
 import type { SecurityFinding } from '../types/security.js';
 
-export type PipelineHookName =
-  | 'beforeInput'
-  | 'afterSecurity'
-  | 'beforeProvider'
-  | 'afterProvider'
-  | 'beforeReturn';
+export type PipelineHookName = 'beforeInput' | 'afterSecurity' | 'beforeProvider' | 'afterProvider' | 'beforeReturn';
 
 export type PipelineStepName =
   | PipelineHookName
@@ -60,7 +55,12 @@ export interface PipelineContext {
 
 export type PipelineMiddleware = (
   context: PipelineContext,
-) => void | PipelineContext | CompletionRequest | NexusResponse | Promise<void | PipelineContext | CompletionRequest | NexusResponse>;
+) =>
+  | undefined
+  | PipelineContext
+  | CompletionRequest
+  | NexusResponse
+  | Promise<undefined | PipelineContext | CompletionRequest | NexusResponse>;
 
 export interface PipelineStep {
   name: PipelineStepName;

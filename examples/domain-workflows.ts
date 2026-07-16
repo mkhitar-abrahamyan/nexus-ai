@@ -4,7 +4,7 @@ import {
   salesQualificationWorkflow,
   legalReviewWorkflow,
   codeReviewWorkflow,
-} from '../src/index.js';
+} from 'nexus-ai-pro';
 
 const ai = new NexusAI({
   providers: {
@@ -13,26 +13,34 @@ const ai = new NexusAI({
   routing: { mode: 'auto', strategy: 'privacy' },
 });
 
-console.log(await supportTriageWorkflow(ai, {
-  model: 'auto',
-  input: 'Customer cannot log in after enabling SSO.',
-  customerTier: 'enterprise',
-}));
+console.log(
+  await supportTriageWorkflow(ai, {
+    model: 'auto',
+    input: 'Customer cannot log in after enabling SSO.',
+    customerTier: 'enterprise',
+  }),
+);
 
-console.log(await salesQualificationWorkflow(ai, {
-  model: 'auto',
-  input: 'Lead needs secure AI routing for a healthcare app.',
-  product: 'nexus-ai-pro',
-}));
+console.log(
+  await salesQualificationWorkflow(ai, {
+    model: 'auto',
+    input: 'Lead needs secure AI routing for a healthcare app.',
+    product: 'nexus-ai-pro',
+  }),
+);
 
-console.log(await legalReviewWorkflow(ai, {
-  model: 'auto',
-  input: 'Draft contract clause text...',
-  jurisdiction: 'US',
-}));
+console.log(
+  await legalReviewWorkflow(ai, {
+    model: 'auto',
+    input: 'Draft contract clause text...',
+    jurisdiction: 'US',
+  }),
+);
 
-console.log(await codeReviewWorkflow(ai, {
-  model: 'auto',
-  input: 'function add(a,b){ return a-b }',
-  language: 'JavaScript',
-}));
+console.log(
+  await codeReviewWorkflow(ai, {
+    model: 'auto',
+    input: 'function add(a,b){ return a-b }',
+    language: 'JavaScript',
+  }),
+);

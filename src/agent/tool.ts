@@ -19,7 +19,9 @@ export class ToolExecutor {
   private tools = new Map<string, ToolDefinition>();
 
   constructor(tools: ToolDefinition[] = []) {
-    tools.forEach((toolDefinition) => this.register(toolDefinition));
+    for (const toolDefinition of tools) {
+      this.register(toolDefinition);
+    }
   }
 
   register(toolDefinition: ToolDefinition): this {

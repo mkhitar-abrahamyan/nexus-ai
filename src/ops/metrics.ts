@@ -39,11 +39,16 @@ export class InMemoryMetrics implements MetricsSink {
   snapshot(): Record<string, unknown> {
     return {
       counters: Object.fromEntries(this.counters),
-      histograms: Object.fromEntries([...this.histograms].map(([key, values]) => [key, {
-        count: values.length,
-        avg: values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : 0,
-        max: values.length ? Math.max(...values) : 0,
-      }])),
+      histograms: Object.fromEntries(
+        [...this.histograms].map(([key, values]) => [
+          key,
+          {
+            count: values.length,
+            avg: values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : 0,
+            max: values.length ? Math.max(...values) : 0,
+          },
+        ]),
+      ),
       gauges: Object.fromEntries(this.gauges),
     };
   }

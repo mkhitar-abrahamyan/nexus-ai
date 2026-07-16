@@ -1,7 +1,7 @@
 {
   "name": "nexus-ai-pro",
-  "version": "0.8.1",
-  "description": "The Universal AI Pipeline for Node.js - one package, every model, every modality, with guardrails built in",
+  "version": "0.9.0",
+  "description": "A typed multi-provider AI pipeline for Node.js with routing, streaming, tools, and guardrails",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -30,9 +30,65 @@
       "types": "./dist/providers/base.d.ts",
       "import": "./dist/providers/base.js"
     },
-    "./providers/*": {
-      "types": "./dist/providers/*.d.ts",
-      "import": "./dist/providers/*.js"
+    "./providers/anthropic": {
+      "types": "./dist/providers/anthropic.d.ts",
+      "import": "./dist/providers/anthropic.js"
+    },
+    "./providers/azure-openai": {
+      "types": "./dist/providers/azure-openai.d.ts",
+      "import": "./dist/providers/azure-openai.js"
+    },
+    "./providers/base": {
+      "types": "./dist/providers/base.d.ts",
+      "import": "./dist/providers/base.js"
+    },
+    "./providers/cohere": {
+      "types": "./dist/providers/cohere.d.ts",
+      "import": "./dist/providers/cohere.js"
+    },
+    "./providers/deepseek": {
+      "types": "./dist/providers/deepseek.d.ts",
+      "import": "./dist/providers/deepseek.js"
+    },
+    "./providers/errors": {
+      "types": "./dist/providers/errors.d.ts",
+      "import": "./dist/providers/errors.js"
+    },
+    "./providers/google": {
+      "types": "./dist/providers/google.d.ts",
+      "import": "./dist/providers/google.js"
+    },
+    "./providers/groq": {
+      "types": "./dist/providers/groq.d.ts",
+      "import": "./dist/providers/groq.js"
+    },
+    "./providers/llamacpp": {
+      "types": "./dist/providers/llamacpp.d.ts",
+      "import": "./dist/providers/llamacpp.js"
+    },
+    "./providers/lmstudio": {
+      "types": "./dist/providers/lmstudio.d.ts",
+      "import": "./dist/providers/lmstudio.js"
+    },
+    "./providers/mistral": {
+      "types": "./dist/providers/mistral.d.ts",
+      "import": "./dist/providers/mistral.js"
+    },
+    "./providers/ollama": {
+      "types": "./dist/providers/ollama.d.ts",
+      "import": "./dist/providers/ollama.js"
+    },
+    "./providers/openai": {
+      "types": "./dist/providers/openai.d.ts",
+      "import": "./dist/providers/openai.js"
+    },
+    "./providers/openrouter": {
+      "types": "./dist/providers/openrouter.d.ts",
+      "import": "./dist/providers/openrouter.js"
+    },
+    "./providers/type-guards": {
+      "types": "./dist/providers/type-guards.d.ts",
+      "import": "./dist/providers/type-guards.js"
     },
     "./security": {
       "types": "./dist/security/index.d.ts",
@@ -70,9 +126,17 @@
       "types": "./dist/cache/adapters.d.ts",
       "import": "./dist/cache/adapters.js"
     },
-    "./cache/*": {
-      "types": "./dist/cache/*.d.ts",
-      "import": "./dist/cache/*.js"
+    "./cache/adapters": {
+      "types": "./dist/cache/adapters.d.ts",
+      "import": "./dist/cache/adapters.js"
+    },
+    "./cache/memory-cache": {
+      "types": "./dist/cache/memory-cache.d.ts",
+      "import": "./dist/cache/memory-cache.js"
+    },
+    "./cache/semantic-cache": {
+      "types": "./dist/cache/semantic-cache.d.ts",
+      "import": "./dist/cache/semantic-cache.js"
     },
     "./models": {
       "types": "./dist/models/registry.d.ts",
@@ -94,9 +158,17 @@
       "types": "./dist/jobs/queue.d.ts",
       "import": "./dist/jobs/queue.js"
     },
-    "./jobs/*": {
-      "types": "./dist/jobs/*.d.ts",
-      "import": "./dist/jobs/*.js"
+    "./jobs/batch": {
+      "types": "./dist/jobs/batch.d.ts",
+      "import": "./dist/jobs/batch.js"
+    },
+    "./jobs/durable-adapters": {
+      "types": "./dist/jobs/durable-adapters.d.ts",
+      "import": "./dist/jobs/durable-adapters.js"
+    },
+    "./jobs/queue": {
+      "types": "./dist/jobs/queue.d.ts",
+      "import": "./dist/jobs/queue.js"
     },
     "./workflows": {
       "types": "./dist/workflow/chains.d.ts",
@@ -104,6 +176,8 @@
     }
   },
   "scripts": {
+    "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "prebuild": "npm run clean",
     "build": "tsc",
     "dev": "tsc --watch",
     "example:minimal": "tsx examples/minimal.ts",
@@ -115,64 +189,58 @@
     "example:security": "tsx examples/security.ts",
     "example:optimizer": "tsx examples/optimizer.ts",
     "example:agent": "tsx examples/agent.ts",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
+    "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
     "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:smoke && npm run test:api && npm run test:types",
-    "test:unit": "tsx tests/unit.ts",
+    "test:unit": "node --import tsx --test tests/unit.ts tests/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-lines=70 --test-coverage-branches=60 --test-coverage-functions=60 tests/unit.ts tests/*.test.ts",
     "test:smoke": "node tests/package-smoke.mjs",
     "test:api": "node tests/api-contract.mjs",
     "test:types": "node tests/type-consumer.mjs",
     "test:clean-install": "node tests/clean-install.mjs",
     "test:conformance:mock": "tsx tests/conformance.mock.ts",
     "test:conformance:real": "tsx tests/conformance.real.ts",
-    "pack:dry-run": "npm pack --dry-run",
-    "prepublishOnly": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:smoke && npm run test:api && npm run test:types && npm run pack:dry-run && npm run test:clean-install"
+    "pack:dry-run": "npm pack --dry-run --cache .tmp-nexus-ai-tests/npm-cache",
+    "check": "npm run format:check && npm run lint && npm test && npm run typecheck:tests && npm run typecheck:examples && npm run test:coverage",
+    "check:release": "npm run check && npm run pack:dry-run && npm run test:clean-install",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check:release"
   },
   "keywords": [
     "ai",
     "llm",
     "openai",
-    "gpt-5",
-    "gpt-5.6",
-    "openai-responses",
-    "reasoning-models",
     "anthropic",
     "claude",
     "ollama",
     "ai-agents",
     "model-router",
-    "router",
     "streaming",
     "function-calling",
     "vision",
     "multi-model",
+    "rag",
+    "evals",
     "security",
     "typescript",
-    "secret-scanner",
-    "secret-scanning",
-    "secret-scrubber",
-    "leak-prevention",
-    "api-key",
-    "api-keys",
-    "token-scanner",
-    "credentials",
-    "github-security",
-    "git-secrets",
-    "pii",
-    "prompt-injection",
-    "ai-security",
-    "llm-security",
-    "cli",
-    "devtools"
+    "nodejs"
   ],
   "author": "Mkhitar Abrahamyan <mkhitar.abrahamyan99@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@types/node": "^20.14.0",
+    "@types/node": "^22.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "zod": "^3.23.0"
   },
   "peerDependencies": {
-    "@anthropic-ai/sdk": ">=0.24.0",
-    "ollama": ">=0.5.0",
-    "openai": ">=4.0.0"
+    "@anthropic-ai/sdk": ">=0.30.0 <1",
+    "ollama": ">=0.5.6 <1",
+    "openai": ">=4.52.0 <5"
   },
   "peerDependenciesMeta": {
     "openai": {
@@ -187,30 +255,46 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
+    "@biomejs/biome": "^2.3.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/sdk-metrics": "^2.1.0",
+    "@opentelemetry/sdk-node": "^0.220.0",
+    "@opentelemetry/sdk-trace-node": "^2.1.0",
+    "@types/express": "^5.0.3",
+    "bullmq": "^5.63.0",
+    "express": "^5.1.0",
     "ollama": "^0.5.6",
     "openai": "^4.52.0",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
+  "packageManager": "npm@11.14.0",
   "files": [
     "dist",
-    "examples",
-    "assets",
     "README.md",
     "API_STABILITY.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "ROADMAP.md",
     "LICENSE",
-    "NEXUS.md",
-    "EXPLANATION.md"
+    "NEXUS.md"
   ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mkhitar-abrahamyan/nexus-ai.git"
   },
-  "homepage": "https://www.npmjs.com/package/nexus-ai-pro",
+  "homepage": "https://github.com/mkhitar-abrahamyan/nexus-ai#readme",
   "bugs": {
     "url": "https://github.com/mkhitar-abrahamyan/nexus-ai/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }

@@ -12,7 +12,10 @@ export interface OpenTelemetryLikeTracer {
 }
 
 export class OpenTelemetryTraceExporter {
-  constructor(private tracer: OpenTelemetryLikeTracer, private spanPrefix = 'nexus-ai-pro') {}
+  constructor(
+    private tracer: OpenTelemetryLikeTracer,
+    private spanPrefix = 'nexus-ai-pro',
+  ) {}
 
   exportTrace(trace: PipelineTrace, attributes: Record<string, string | number | boolean> = {}): void {
     const root = this.tracer.startSpan(`${this.spanPrefix}.pipeline`, {

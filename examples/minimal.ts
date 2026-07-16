@@ -3,9 +3,7 @@ import { NexusAI } from 'nexus-ai-pro';
 async function main() {
   const ai = new NexusAI({
     providers: {
-      openai: process.env.OPENAI_API_KEY
-        ? { apiKey: process.env.OPENAI_API_KEY }
-        : undefined,
+      openai: process.env.OPENAI_API_KEY ? { apiKey: process.env.OPENAI_API_KEY } : undefined,
       ollama: { baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434' },
     },
     routing: {
@@ -31,9 +29,7 @@ async function main() {
 
   const response = await ai.complete({
     model: 'auto',
-    messages: [
-      { role: 'user', content: 'Explain nexus-ai-pro in one sentence.' },
-    ],
+    messages: [{ role: 'user', content: 'Explain nexus-ai-pro in one sentence.' }],
   });
 
   console.log(response.content);

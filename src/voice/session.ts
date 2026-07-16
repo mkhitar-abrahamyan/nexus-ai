@@ -49,9 +49,7 @@ export class VoiceSession {
   }
 
   async handleTurn(input: VoiceSessionTurnInput = {}): Promise<VoiceSessionTurnResponse> {
-    const transcript = input.transcript === undefined
-      ? await this.transcribeInput(input)
-      : undefined;
+    const transcript = input.transcript === undefined ? await this.transcribeInput(input) : undefined;
     const transcriptText = input.transcript ?? transcript?.text ?? '';
     const selectedTasks = await this.selectTaskPrompts(transcriptText, input);
     const tools = this.selectTools(selectedTasks, input.tools);
@@ -105,9 +103,10 @@ export class VoiceSession {
     selectedTasks: VoiceTaskPrompt[],
   ): Promise<NexusResponse> {
     const executor = new ToolExecutor(tools);
-    const maxIterations = Math.max(1, input.completion?.metadata?.voiceMaxToolIterations as number
-      || this.config.maxToolIterations
-      || 4);
+    const maxIterations = Math.max(
+      1,
+      (input.completion?.metadata?.voiceMaxToolIterations as number) || this.config.maxToolIterations || 4,
+    );
     let response: NexusResponse | undefined;
 
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -253,17 +252,15 @@ export class VoiceSession {
   }
 
   private taskTexts(task: VoiceTaskPrompt): string[] {
-    const parts = [
-      ...this.texts(task.prompt),
-      ...this.texts(task.instructions),
-    ];
+    const parts = [...this.texts(task.prompt), ...this.texts(task.instructions)];
     if (!parts.length) return [];
     return [`Task "${task.name}":\n${parts.join('\n\n')}`];
   }
 
   private createTranscriptMessage(transcript: string, input: VoiceSessionTurnInput): Message {
     const config = this.config.transcriptMessage;
-    const completionConfig = input.completion?.metadata?.voiceTranscriptMessage as VoiceSessionConfig['transcriptMessage'];
+    const completionConfig = input.completion?.metadata
+      ?.voiceTranscriptMessage as VoiceSessionConfig['transcriptMessage'];
     const merged = completionConfig || config;
     const template = merged?.template || '{{transcript}}';
 
@@ -281,9 +278,7 @@ export class VoiceSession {
   private parseToolArgs(raw: string): Record<string, unknown> {
     try {
       const parsed = JSON.parse(raw || '{}');
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
     } catch {
       return {};
     }

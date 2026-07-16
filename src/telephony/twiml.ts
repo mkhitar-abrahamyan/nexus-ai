@@ -18,9 +18,15 @@ export function createVoiceTwiML(request: TelephonyResponseRequest): string {
   if (request.stream) body.push(createStream(request.stream));
 
   if (request.redirectUrl) {
-    body.push(tag('Redirect', {
-      ...(request.redirectMethod ? { method: request.redirectMethod } : {}),
-    }, escapeXml(request.redirectUrl)));
+    body.push(
+      tag(
+        'Redirect',
+        {
+          ...(request.redirectMethod ? { method: request.redirectMethod } : {}),
+        },
+        escapeXml(request.redirectUrl),
+      ),
+    );
   }
 
   if (request.hangup) body.push(emptyTag('Hangup'));
@@ -30,16 +36,20 @@ export function createVoiceTwiML(request: TelephonyResponseRequest): string {
 
 function createGather(gather: TelephonyGatherConfig): string {
   const prompts = (gather.prompts || []).map((prompt) => tag('Say', {}, escapeXml(prompt))).join('');
-  return tag('Gather', {
-    ...(gather.input?.length ? { input: gather.input.join(' ') } : {}),
-    ...(gather.actionUrl ? { action: gather.actionUrl } : {}),
-    ...(gather.method ? { method: gather.method } : {}),
-    ...(gather.timeoutSeconds !== undefined ? { timeout: String(gather.timeoutSeconds) } : {}),
-    ...(gather.speechTimeout !== undefined ? { speechTimeout: String(gather.speechTimeout) } : {}),
-    ...(gather.language ? { language: gather.language } : {}),
-    ...(gather.finishOnKey ? { finishOnKey: gather.finishOnKey } : {}),
-    ...(gather.numDigits !== undefined ? { numDigits: String(gather.numDigits) } : {}),
-  }, prompts);
+  return tag(
+    'Gather',
+    {
+      ...(gather.input?.length ? { input: gather.input.join(' ') } : {}),
+      ...(gather.actionUrl ? { action: gather.actionUrl } : {}),
+      ...(gather.method ? { method: gather.method } : {}),
+      ...(gather.timeoutSeconds !== undefined ? { timeout: String(gather.timeoutSeconds) } : {}),
+      ...(gather.speechTimeout !== undefined ? { speechTimeout: String(gather.speechTimeout) } : {}),
+      ...(gather.language ? { language: gather.language } : {}),
+      ...(gather.finishOnKey ? { finishOnKey: gather.finishOnKey } : {}),
+      ...(gather.numDigits !== undefined ? { numDigits: String(gather.numDigits) } : {}),
+    },
+    prompts,
+  );
 }
 
 function createStream(stream: TelephonyStreamConfig): string {

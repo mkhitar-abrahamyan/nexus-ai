@@ -49,9 +49,12 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     if (request.webhookMethod) body.set('Method', request.webhookMethod);
     if (request.twiml) body.set('Twiml', request.twiml);
     if (!request.webhookUrl && !request.twiml && request.mediaStreamUrl) {
-      body.set('Twiml', createVoiceTwiML({
-        stream: { url: request.mediaStreamUrl, mode: 'bidirectional' },
-      }));
+      body.set(
+        'Twiml',
+        createVoiceTwiML({
+          stream: { url: request.mediaStreamUrl, mode: 'bidirectional' },
+        }),
+      );
     }
     if (request.applicationSid) body.set('ApplicationSid', request.applicationSid);
     if (request.statusCallbackUrl) body.set('StatusCallback', request.statusCallbackUrl);
@@ -82,7 +85,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       throw new TelephonyProviderError(`Twilio call request failed: ${response.status} ${message}`, 'twilio');
     }
 
-    const raw = await response.json() as TwilioPayload;
+    const raw = (await response.json()) as TwilioPayload;
     return {
       callId: stringValue(raw.sid) || '',
       providerUsed: 'twilio',
@@ -112,13 +115,18 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     if (!signature || !request.url) return false;
 
     const params = collectParams(request);
-    const payload = request.url + Object.keys(params).sort().map((key) => `${key}${params[key]}`).join('');
+    const payload =
+      request.url +
+      Object.keys(params)
+        .sort()
+        .map((key) => `${key}${params[key]}`)
+        .join('');
     const expected = createHmac('sha1', token).update(payload).digest('base64');
     return safeEqual(signature, expected);
   }
 
   parseMediaStreamEvent(message: string | Record<string, unknown>): TelephonyMediaStreamEvent | undefined {
-    const data = typeof message === 'string' ? JSON.parse(message) as TwilioPayload : message;
+    const data = typeof message === 'string' ? (JSON.parse(message) as TwilioPayload) : message;
     const event = stringValue(data.event);
     const streamSid = stringValue(data.streamSid) || stringValue(data.stream_id) || '';
 
@@ -204,11 +212,12 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     options: { event?: 'media' | 'mark' | 'clear'; markName?: string } = {},
   ): TelephonyOutboundAudioMessage {
     const event = options.event || 'media';
-    const body = event === 'media'
-      ? JSON.stringify({ event: 'media', streamSid: streamId, media: { payload } })
-      : event === 'mark'
-        ? JSON.stringify({ event: 'mark', streamSid: streamId, mark: { name: options.markName || payload } })
-        : JSON.stringify({ event: 'clear', streamSid: streamId });
+    const body =
+      event === 'media'
+        ? JSON.stringify({ event: 'media', streamSid: streamId, media: { payload } })
+        : event === 'mark'
+          ? JSON.stringify({ event: 'mark', streamSid: streamId, mark: { name: options.markName || payload } })
+          : JSON.stringify({ event: 'clear', streamSid: streamId });
 
     return { event, streamId, body };
   }
@@ -270,14 +279,14 @@ function header(headers: TelephonyWebhookValidationRequest['headers'] = {}, name
 
 function normalizeStatus(status: string | undefined): TelephonyCallStatus {
   if (
-    status === 'queued'
-    || status === 'ringing'
-    || status === 'in-progress'
-    || status === 'completed'
-    || status === 'busy'
-    || status === 'failed'
-    || status === 'no-answer'
-    || status === 'canceled'
+    status === 'queued' ||
+    status === 'ringing' ||
+    status === 'in-progress' ||
+    status === 'completed' ||
+    status === 'busy' ||
+    status === 'failed' ||
+    status === 'no-answer' ||
+    status === 'canceled'
   ) {
     return status;
   }
@@ -304,7 +313,7 @@ function numberValue(value: unknown): number | undefined {
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function stringRecord(value: unknown): Record<string, string> | undefined {

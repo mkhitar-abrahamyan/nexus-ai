@@ -53,6 +53,6 @@ export class GroqProvider extends OpenAIProvider {
   private estimateProviderCost(model: string, inputTokens: number, outputTokens: number): string {
     const caps = KNOWN_MODELS[model];
     if (!caps) return '$0.00';
-    return `$${(inputTokens / 1000 * caps.costPer1kInput + outputTokens / 1000 * caps.costPer1kOutput).toFixed(4)}`;
+    return `$${((inputTokens / 1000) * caps.costPer1kInput + (outputTokens / 1000) * caps.costPer1kOutput).toFixed(4)}`;
   }
 }

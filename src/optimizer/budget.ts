@@ -3,7 +3,10 @@ import type { BudgetConfig } from '../types/optimizer.js';
 import { Tokenizer } from '../utils/tokenizer.js';
 
 export class TokenBudgetError extends Error {
-  constructor(public tokens: number, public maxTokens: number) {
+  constructor(
+    public tokens: number,
+    public maxTokens: number,
+  ) {
     super(`Token budget exceeded: ${tokens} tokens > ${maxTokens} max tokens`);
     this.name = 'TokenBudgetError';
   }
@@ -12,7 +15,10 @@ export class TokenBudgetError extends Error {
 export class BudgetEnforcer {
   constructor(private tokenizer = new Tokenizer()) {}
 
-  check(request: CompletionRequest, config: BudgetConfig = {}): { warnings: string[]; exceeded: boolean; tokens: number } {
+  check(
+    request: CompletionRequest,
+    config: BudgetConfig = {},
+  ): { warnings: string[]; exceeded: boolean; tokens: number } {
     if (config.enabled === false || !config.maxInputTokens) {
       return { warnings: [], exceeded: false, tokens: this.tokenizer.estimateRequestTokens(request) };
     }

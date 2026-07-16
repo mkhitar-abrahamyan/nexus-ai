@@ -64,23 +64,35 @@ export async function summarizeVerifyFormat(
   options: SummarizeVerifyFormatOptions,
 ): Promise<WorkflowResult> {
   const steps: WorkflowStepResult[] = [];
-  const summary = await client.complete(withFactualDefaults({
-    model: options.model,
-    messages: [
-      { role: 'user', content: `${options.summaryInstruction || 'Summarize the following content clearly.'}\n\n${options.input}` },
-    ],
-  }, { chainOfThought: 'private' }));
+  const summary = await client.complete(
+    withFactualDefaults(
+      {
+        model: options.model,
+        messages: [
+          {
+            role: 'user',
+            content: `${options.summaryInstruction || 'Summarize the following content clearly.'}\n\n${options.input}`,
+          },
+        ],
+      },
+      { chainOfThought: 'private' },
+    ),
+  );
   steps.push({ step: 'summarize', response: summary });
 
   const verified = options.verifyContext?.length
-    ? await completeVerified(client, {
-      model: options.model,
-      messages: [{ role: 'user', content: summary.content }],
-      responseFormat: toRequestResponseFormat(options.responseFormat),
-    }, {
-      context: options.verifyContext,
-      repair: true,
-    } satisfies VerificationOptions)
+    ? await completeVerified(
+        client,
+        {
+          model: options.model,
+          messages: [{ role: 'user', content: summary.content }],
+          responseFormat: toRequestResponseFormat(options.responseFormat),
+        },
+        {
+          context: options.verifyContext,
+          repair: true,
+        } satisfies VerificationOptions,
+      )
     : summary;
   steps.push({ step: 'verify', response: verified });
 
@@ -104,13 +116,16 @@ export async function summarizeVerifyFormat(
 }
 
 export async function ragAnswer(client: WorkflowClient, options: RagAnswerOptions): Promise<WorkflowResult> {
-  const request = withRagContext({
-    model: options.model,
-    messages: [{ role: 'user', content: options.question }],
-  }, {
-    chunks: options.chunks,
-    requireCitations: true,
-  });
+  const request = withRagContext(
+    {
+      model: options.model,
+      messages: [{ role: 'user', content: options.question }],
+    },
+    {
+      chunks: options.chunks,
+      requireCitations: true,
+    },
+  );
 
   const response = options.verify
     ? await completeVerified(client, request, { context: options.chunks.map((chunk) => chunk.content), repair: true })
@@ -123,13 +138,18 @@ export async function ragAnswer(client: WorkflowClient, options: RagAnswerOption
   };
 }
 
-export async function extractStructured(client: WorkflowClient, options: ExtractStructuredOptions): Promise<WorkflowResult> {
+export async function extractStructured(
+  client: WorkflowClient,
+  options: ExtractStructuredOptions,
+): Promise<WorkflowResult> {
   const response = await client.complete({
     model: options.model,
-    messages: [{
-      role: 'user',
-      content: `${options.instruction || 'Extract the requested structured data from the input.'}\n\n${options.input}`,
-    }],
+    messages: [
+      {
+        role: 'user',
+        content: `${options.instruction || 'Extract the requested structured data from the input.'}\n\n${options.input}`,
+      },
+    ],
     responseFormat: {
       type: 'json_schema',
       schema: options.schema,
@@ -142,14 +162,16 @@ export async function extractStructured(client: WorkflowClient, options: Extract
 export async function classifyRoute(client: WorkflowClient, options: ClassifyRouteOptions): Promise<WorkflowResult> {
   const response = await client.complete({
     model: options.model,
-    messages: [{
-      role: 'user',
-      content: [
-        options.instruction || 'Classify the input into exactly one label.',
-        `Labels: ${options.labels.join(', ')}`,
-        `Input: ${options.input}`,
-      ].join('\n'),
-    }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          options.instruction || 'Classify the input into exactly one label.',
+          `Labels: ${options.labels.join(', ')}`,
+          `Input: ${options.input}`,
+        ].join('\n'),
+      },
+    ],
     temperature: 0,
     responseFormat: {
       type: 'json_schema',
@@ -168,18 +190,27 @@ export async function classifyRoute(client: WorkflowClient, options: ClassifyRou
 }
 
 export async function compareAndDecide(client: WorkflowClient, options: CompareOptions): Promise<WorkflowResult> {
-  const response = await client.complete(withFactualDefaults({
-    model: options.model,
-    messages: [{
-      role: 'user',
-      content: [
-        'Compare the options and choose the best one.',
-        `Input: ${options.input}`,
-        `Options:\n${options.options.map((item, index) => `${index + 1}. ${item}`).join('\n')}`,
-        options.criteria?.length ? `Criteria: ${options.criteria.join(', ')}` : '',
-      ].filter(Boolean).join('\n\n'),
-    }],
-  }, { chainOfThought: 'private' }));
+  const response = await client.complete(
+    withFactualDefaults(
+      {
+        model: options.model,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              'Compare the options and choose the best one.',
+              `Input: ${options.input}`,
+              `Options:\n${options.options.map((item, index) => `${index + 1}. ${item}`).join('\n')}`,
+              options.criteria?.length ? `Criteria: ${options.criteria.join(', ')}` : '',
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+          },
+        ],
+      },
+      { chainOfThought: 'private' },
+    ),
+  );
 
   return { content: response.content, response, steps: [{ step: 'compare-and-decide', response }] };
 }

@@ -1,5 +1,5 @@
 import type { RouterContext, RouteDecision } from './types.js';
-import type { NexusAIConfig, RoutingStrategy } from '../types/config.js';
+import type { NexusAIConfig } from '../types/config.js';
 import type { ModelCapabilities, RoutingModelPreference } from '../types/providers.js';
 import { getModelRegistry, listModelsForProvider, resolveModel } from '../models/registry.js';
 
@@ -16,7 +16,10 @@ export class AutoRouter {
     const strategy = ctx.config.routing?.strategy || 'quality';
     const candidates = this.getCandidates(ctx).map((candidate) => ({
       ...candidate,
-      score: this.score(candidate.model, strategy, ctx.config) + candidate.weight + this.healthScore(candidate.providerName, ctx),
+      score:
+        this.score(candidate.model, strategy, ctx.config) +
+        candidate.weight +
+        this.healthScore(candidate.providerName, ctx),
       reason: `auto route by ${strategy} score`,
     }));
 
@@ -61,8 +64,7 @@ export class AutoRouter {
     }
 
     return candidates.filter((candidate) => {
-      return this.isAllowed(candidate.model, ctx.config)
-        && this.matchesRequirements(candidate.model, ctx.config);
+      return this.isAllowed(candidate.model, ctx.config) && this.matchesRequirements(candidate.model, ctx.config);
     });
   }
 
@@ -120,9 +122,11 @@ export class AutoRouter {
   ): Array<Omit<Candidate, 'score' | 'reason'>> {
     if (preferences?.length) {
       return preferences
-        .map((preference) => typeof preference === 'string'
-          ? { model: preference, weight: 0 }
-          : { model: preference.model, weight: preference.weight || 0 })
+        .map((preference) =>
+          typeof preference === 'string'
+            ? { model: preference, weight: 0 }
+            : { model: preference.model, weight: preference.weight || 0 },
+        )
         .map((preference) => {
           const resolved = resolveModel(preference.model, config);
           return {
@@ -196,12 +200,15 @@ export class AutoRouter {
 
     if (requirements.streaming !== undefined && caps.streaming !== requirements.streaming) return false;
     if (requirements.toolCalling !== undefined && caps.toolCalling !== requirements.toolCalling) return false;
-    if (requirements.structuredOutputs !== undefined && caps.structuredOutputs !== requirements.structuredOutputs) return false;
+    if (requirements.structuredOutputs !== undefined && caps.structuredOutputs !== requirements.structuredOutputs)
+      return false;
     if (requirements.jsonMode !== undefined && caps.jsonMode !== requirements.jsonMode) return false;
     if (requirements.reasoning !== undefined && Boolean(caps.reasoning) !== requirements.reasoning) return false;
     if (requirements.minContextTokens && caps.maxContextTokens < requirements.minContextTokens) return false;
-    if (requirements.maxInputCostPer1k !== undefined && caps.costPer1kInput > requirements.maxInputCostPer1k) return false;
-    if (requirements.maxOutputCostPer1k !== undefined && caps.costPer1kOutput > requirements.maxOutputCostPer1k) return false;
+    if (requirements.maxInputCostPer1k !== undefined && caps.costPer1kInput > requirements.maxInputCostPer1k)
+      return false;
+    if (requirements.maxOutputCostPer1k !== undefined && caps.costPer1kOutput > requirements.maxOutputCostPer1k)
+      return false;
     if (requirements.statuses?.length && caps.status && !requirements.statuses.includes(caps.status)) return false;
     if (requirements.modalities?.length) {
       for (const modality of requirements.modalities) {
@@ -215,9 +222,14 @@ export class AutoRouter {
   private matchesModelPattern(model: string, pattern: string): boolean {
     if (pattern === model) return true;
     if (!pattern.includes('*')) return false;
-    const regex = new RegExp(`^${pattern.split('*').map((part) => {
-      return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }).join('.*')}$`);
+    const regex = new RegExp(
+      `^${pattern
+        .split('*')
+        .map((part) => {
+          return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        })
+        .join('.*')}$`,
+    );
     return regex.test(model);
   }
 
@@ -240,10 +252,12 @@ export class AutoRouter {
 }
 
 function isLocalModel(model: string): boolean {
-  return model.startsWith('ollama/')
-    || model.startsWith('lmstudio/')
-    || model.startsWith('llamacpp/')
-    || model.startsWith('llama.cpp/');
+  return (
+    model.startsWith('ollama/') ||
+    model.startsWith('lmstudio/') ||
+    model.startsWith('llamacpp/') ||
+    model.startsWith('llama.cpp/')
+  );
 }
 
 export function routeDirectModel(model: string, ctx: RouterContext): RouteDecision {
