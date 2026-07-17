@@ -16,6 +16,8 @@ npm install nexus-ai-pro
 ```
 
 Requires Node.js 22 or newer. `nexus-ai-pro` is ESM-only: use `import` from an ES module rather than CommonJS `require()`.
+The main Nexus pipeline is Node-oriented; the isolated realtime subpaths use portable structural
+interfaces and can be bundled for modern browsers.
 
 Install only the provider SDKs your app uses. The OpenAI SDK also powers OpenAI-compatible adapters such as OpenRouter, Groq, Mistral, DeepSeek, Azure OpenAI, LM Studio, and llama.cpp.
 
@@ -24,6 +26,8 @@ npm install openai @anthropic-ai/sdk ollama
 ```
 
 The Google Gemini provider uses Node.js `fetch`, so it does not need an extra SDK.
+Realtime transports use injected or platform WebRTC, WebSocket, and `fetch` interfaces and do not
+require the OpenAI SDK.
 
 ## Quick Start
 
@@ -77,6 +81,7 @@ You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want f
 - estimate tokens and cost before provider calls
 - cache exact or semantically similar prompts
 - add tools, agents, RAG context, evals, batch jobs, and queues
+- build persistent realtime voice agents with interruption, live tools, and normalized conversation state
 - keep TypeScript types around every request and response
 
 ## CLI
@@ -469,7 +474,210 @@ ai.registerVoiceProvider('private-voice', {
 });
 ```
 
-Low-level realtime transport adapters are still future work; the current voice layer covers transcription, speech generation, full request/response voice turns, and stateful voice sessions with tool calls.
+`VoiceSession` remains the batch-oriented path: each turn is transcription -> completion/tools -> optional
+speech. For a persistent connection with live microphone audio, streamed remote audio, barge-in, and
+provider events, use the separate realtime entry points below. Neither API replaces the other.
+
+## Realtime Voice Agents
+
+Realtime is opt-in and is not re-exported from the package root or from `nexus-ai-pro/voice`:
+
+```ts
+import {
+  createRealtimeAgent,
+  defineTool,
+  OpenAIRealtimeProvider,
+} from 'nexus-ai-pro/realtime';
+```
+
+The framework-independent session normalizes connection, speech, transcript, response, tool,
+interruption, error, conversation, and metrics events while retaining provider events when configured.
+The browser and server transports use structural platform interfaces, so the realtime core does not
+require React, a DOM shim, or an OpenAI SDK.
+
+### Browser WebRTC
+
+Give the browser a same-origin `sessionEndpoint`; never put a permanent provider API key in browser
+code. The endpoint receives the SDP offer and returns the SDP answer while your server owns the
+provider key and authoritative session configuration.
+
+```ts
+type BookingInput = { startTime: string; endTime: string; timezone: string };
+
+const createBooking = defineTool({
+  name: 'create_calendar_booking',
+  description: 'Create a calendar booking after the user confirms it.',
+  parameters: {
+    type: 'object',
+    properties: {
+      startTime: { type: 'string', format: 'date-time' },
+      endTime: { type: 'string', format: 'date-time' },
+      timezone: { type: 'string' },
+    },
+    required: ['startTime', 'endTime', 'timezone'],
+    additionalProperties: false,
+  },
+  requiresConfirmation: true,
+  execute: async (input: BookingInput, context) =>
+    calendar.create(input, { idempotencyKey: context.idempotencyKey, signal: context.signal }),
+});
+
+const provider = new OpenAIRealtimeProvider({
+  sessionEndpoint: '/api/realtime/session',
+});
+
+const agent = createRealtimeAgent({
+  provider,
+  model: 'gpt-realtime',
+  modalities: ['audio', 'text'],
+  instructions: 'Check availability before booking. Never write without confirmation.',
+  tools: [createBooking],
+  voice: {
+    transport: 'webrtc',
+    voice: 'alloy',
+    turnDetection: { type: 'server_vad', silenceDurationMs: 450 },
+    interruption: {
+      enabled: true,
+      cancelResponse: true,
+      truncateUnheardAudio: true,
+    },
+  },
+  toolExecution: { mode: 'automatic', timeoutMs: 8_000, maxParallelCalls: 3 },
+  reconnect: { enabled: true, maxAttempts: 3, initialDelayMs: 500 },
+  conversation: { captureTranscripts: true, captureToolCalls: true, maxRawEvents: 2_000 },
+  security: {
+    maxSessionDurationMs: 30 * 60_000,
+    maxAudioDurationMs: 20 * 60_000,
+    toolAllowlist: ['create_calendar_booking'],
+  },
+  telemetry: {
+    includeTranscripts: false,
+    estimateCost: (usage) => pricing.estimateRealtime(usage),
+  },
+});
+
+agent.on('tool.confirmation.required', ({ call }) => {
+  const approved = window.confirm(`Create booking requested by ${call.name}?`);
+  agent.confirmTool(call.callId, approved);
+});
+
+agent.on('metrics', (metrics) => {
+  console.log('speech end -> first audio', metrics.speechEndToFirstAudioMs);
+});
+
+const audioElement = document.querySelector<HTMLAudioElement>('#assistant-audio')!;
+await agent.connect({ microphone: true, audioElement });
+```
+
+WebRTC attaches the selected microphone track directly to the peer connection and assigns the remote
+media stream to `audioElement`. Browsers still require HTTPS (or localhost), user permission, and often
+a user gesture before audio playback. `sendAudio()` is intended for transports that accept binary
+chunks; normal WebRTC microphone use should stay on the media track.
+
+WebRTC first-audio timing uses the provider's `output_audio_buffer.started` event. WebSocket playback
+remains application-owned, so its player must call `markAudioPlayed()` as described below.
+
+A minimal server endpoint can use the focused server helper:
+
+```ts
+import { createOpenAIRealtimeCall } from 'nexus-ai-pro/realtime/openai-server';
+
+export async function POST(request: Request) {
+  const answerSdp = await createOpenAIRealtimeCall(await request.text(), {
+    apiKey: process.env.OPENAI_API_KEY!,
+    model: 'gpt-realtime',
+    session: {
+      instructions: 'You are a concise scheduling assistant.',
+      max_output_tokens: 1_024,
+    },
+  }, request.signal);
+
+  return new Response(answerSdp, { headers: { 'content-type': 'application/sdp' } });
+}
+```
+
+Authenticate that endpoint, authorize the tenant and requested tools, apply origin/CSRF and rate-limit
+controls, and keep its accepted session options allowlisted. The client must not choose arbitrary tools,
+instructions, limits, or credentials.
+
+### Server WebSocket
+
+Server-to-server agents can inject their WebSocket implementation and keep provider authorization in
+request headers. The package deliberately does not force a WebSocket dependency:
+
+```ts
+import {
+  OpenAIWebSocketTransport,
+  type OpenAIWebSocketFactory,
+} from 'nexus-ai-pro/realtime/openai-websocket';
+import { createRealtimeSession } from 'nexus-ai-pro/realtime/session';
+
+const webSocketFactory: OpenAIWebSocketFactory = (url, { headers, protocols }) =>
+  serverWebSocketClient.connect(url, { headers, protocols });
+
+const session = createRealtimeSession({
+  provider: 'openai',
+  model: 'gpt-realtime',
+  transport: new OpenAIWebSocketTransport({
+    apiKey: process.env.OPENAI_API_KEY!,
+    webSocketFactory,
+  }),
+  modalities: ['audio', 'text'],
+  reconnect: { enabled: true, maxAttempts: 3 },
+  connection: {
+    remoteAudioSink: (audio) => audioPlayer.enqueue(audio.data),
+  },
+});
+
+await session.connect();
+```
+
+When an application plays WebSocket audio itself, call `session.markAudioPlayed()` when the first bytes
+actually reach playback. That makes the primary latency metric—user speech ended to first assistant
+audio played—represent user experience rather than network receipt.
+
+The global browser WebSocket path accepts only an ephemeral token. Supplying a permanent API key to a
+browser adapter is rejected; use an injected server factory or an ephemeral-token provider instead.
+
+### Interruption, tools, state, and exports
+
+With interruption enabled, a `speech.started` event can stop local playback, cancel the active response,
+and, for WebSocket playback with a known position, truncate unheard assistant audio. Applications can
+also call `session.interrupt('manual')`.
+
+Realtime tools support structural `parse`, `safeParse`, or `validate` schemas, execution timeouts,
+bounded parallelism, safe-tool retries, duplicate call suppression, idempotency keys, allowlists, and
+write confirmation. A tool marked `safe: true` can also opt into cross-call caching with `cache: true`
+or `{ ttlMs, key }` when `toolExecution.cache` supplies a structural cache adapter; cache failures are
+ignored unless `cacheFailureMode: 'fail'` is configured. `requiresConfirmation` does not replace server
+authorization: re-check identity, permissions, business invariants, and idempotency in the tool
+implementation.
+
+Session state is available as immutable snapshots and four export formats:
+
+```ts
+const json = session.export('json');
+const providerEvents = session.export('openai-events');
+const transcript = session.export('text');
+const analytics = session.export('analytics');
+
+session.on('conversation.updated', (snapshot) => conversationStore.save(snapshot));
+session.on('error', (error) => telemetry.recordException(error));
+```
+
+`json` contains normalized user/assistant speech, text messages, tool calls/results, interruptions,
+errors, and latency/usage metrics. `openai-events` returns retained raw provider events; it is useful for
+diagnostics and replay but follows the upstream provider schema. Disable transcript/raw-event retention
+for sensitive workloads. `piiHook` redacts normalized conversation/event text, but deliberately does not
+rewrite raw provider exports. Telemetry transcript fields are redacted by default; `includeTranscripts`
+must be explicitly enabled. `estimateCost` accepts an application-owned pricing callback so model price
+changes are not hard-coded into the package. The built-in limits and telemetry hooks are local controls,
+not a durable session store, distributed rate limiter, or authorization system.
+
+Focused public imports are available for `realtime`, `realtime/session`, `realtime/tools`,
+`realtime/conversation`, `realtime/openai-webrtc`, `realtime/openai-websocket`,
+`realtime/openai-server`, and `realtime/mock`. The deterministic mock is suitable for tests and demos;
+see [`examples/realtime-scheduling.ts`](./examples/realtime-scheduling.ts).
 
 ## Phone Number Telephony
 
@@ -598,6 +806,7 @@ Available runtime helpers:
 - Redis and BullMQ queue adapters
 - eval runner with quality, operations, RAG, safety metrics, and optional LLM-as-judge scoring
 - voice sessions for multi-turn calls with conditional task prompts and app tools
+- realtime sessions with WebRTC/WebSocket transports, interruption, tools, metrics, and conversation exports
 - workflow templates for RAG answers, extraction, classification, comparison, support, sales, legal review, and code review
 
 Use a plain assertion for small evals, or add an LLM judge when a rubric is more useful than exact matching:
@@ -683,6 +892,8 @@ import { ContextWindowManager } from 'nexus-ai-pro/context';
 import { guardrailPolicy } from 'nexus-ai-pro/security';
 import { RedisCacheAdapter } from 'nexus-ai-pro/cache';
 import { DeepSeekProvider } from 'nexus-ai-pro/providers/deepseek';
+import { createRealtimeSession } from 'nexus-ai-pro/realtime/session';
+import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
 ```
 
 Provider SDKs are optional peer dependencies. The package is ESM-only, supports Node.js 22+, and is marked with `sideEffects: false`. Only the entry points listed in the package export map are public; deep imports into `dist` or `src` are unsupported.
@@ -699,6 +910,8 @@ npm run example:basic
 npm run example:security
 npm run example:optimizer
 npm run example:agent
+npm run build && npx tsx examples/realtime-scheduling.ts
+npx tsc -p tsconfig.examples.browser.json
 ```
 
 Repository example files cover:
@@ -710,6 +923,7 @@ Repository example files cover:
 - classifier calibration
 - domain workflows
 - custom providers
+- deterministic realtime scheduling with tools, confirmation, metrics, and conversation exports
 - import examples under `examples/exports`
 
 ## Test Commands

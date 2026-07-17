@@ -182,6 +182,14 @@ const expectedSubpaths = [
   './voice',
   './voice/openai',
   './voice/session',
+  './realtime',
+  './realtime/session',
+  './realtime/tools',
+  './realtime/conversation',
+  './realtime/openai-webrtc',
+  './realtime/openai-websocket',
+  './realtime/openai-server',
+  './realtime/mock',
   './telephony',
   './telephony/twilio',
   './cache',
@@ -213,6 +221,22 @@ assert.deepEqual(Object.keys(packageJson.exports).sort(), expectedSubpaths.sort(
 assert.equal(
   Object.keys(packageJson.exports).some((subpath) => subpath.includes('*')),
   false,
+);
+
+for (const realtimeExport of [
+  'RealtimeSession',
+  'createRealtimeSession',
+  'OpenAIWebRTCTransport',
+  'OpenAIWebSocketTransport',
+]) {
+  assert.equal(realtimeExport in root, false, `${realtimeExport} should remain opt-in through realtime subpaths`);
+}
+
+const rootSource = readFileSync(path.join(repoRoot, 'dist', 'index.js'), 'utf8');
+assert.equal(
+  /(?:from|import\s*)\s*['"].*\/realtime\//.test(rootSource),
+  false,
+  'root import graph should exclude realtime',
 );
 
 assert.equal(packageJson.type, 'module');

@@ -3,6 +3,39 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
+## Delivered in the current development line: realtime voice foundation
+
+The first native realtime milestone is implemented as an opt-in package family rather than as another
+`complete()` mode or an eager dependency of `NexusAI`:
+
+- persistent provider-neutral `RealtimeSession` and higher-level `createRealtimeAgent()` APIs;
+- OpenAI WebRTC for browser microphone/remote-media connections and WebSocket for server agents;
+- structural, injectable browser/server interfaces plus a deterministic mock transport;
+- normalized speech, transcript, text, response, tool, interruption, error, conversation, metrics, and
+  retained raw-provider events;
+- barge-in, response cancellation, optional unheard-audio truncation, reconnect backoff, and cancellation;
+- typed/validated tools with automatic or manual execution, confirmation, timeouts, bounded parallelism,
+  safe retries, opt-in read caching, duplicate suppression, allowlists, and idempotency keys;
+- normalized JSON conversation state and OpenAI-event, text, and analytics exports;
+- server-owned SDP/client-secret helpers, retention controls, PII hooks, session/audio limits, and
+  OpenTelemetry-compatible hooks.
+
+Current limitations are intentional and should remain visible:
+
+- OpenAI is the only native realtime provider; provider-neutral contracts have not yet been validated
+  against a second wire protocol.
+- The package supplies framework-independent transports, not React hooks, UI/audio-player components,
+  mobile SDK wrappers, SIP, or a telephone gateway.
+- WebRTC requires application-owned HTTPS session negotiation and browser permission/autoplay handling.
+  WebSocket consumers are responsible for audio capture/playback and for injecting a server socket
+  implementation when authenticated headers are required.
+- Conversation snapshots and exports are in memory. Durable storage, distributed deduplication,
+  cross-process session recovery, and provider-state replay remain application responsibilities.
+- Compatibility/load validation across Safari, iOS Safari, Firefox, Android Chrome, long conversations,
+  and large concurrent session counts is still required before making broad production-scale claims.
+- Realtime video tracks, SIP transports, durable cost accounting beyond the configurable local estimate,
+  and a published latency benchmark methodology remain follow-on work.
+
 ## Recommended next release: first-class image generation
 
 Image generation should be a separate operation family rather than another variation of
@@ -164,7 +197,8 @@ code should only perform the provider call and normalize its result.
 
 1. True mixed text/asset outputs and tool results that pass asset references without base64 JSON.
 2. OCR, captioning, visual question answering, image embeddings, and visual moderation.
-3. Realtime voice/video sessions with interruption handling, turn detection, and live tool calls.
+3. Realtime follow-ons: a second provider, SIP/video transports, durable recovery, browser compatibility
+   automation, and published latency/load benchmarks. The native voice foundation is delivered above.
 4. Video generation through the same asynchronous operation, job, and asset contracts.
 5. Media search and RAG using image embeddings.
 6. MCP client/server adapters with asset and tool interoperability.
@@ -185,4 +219,3 @@ code should only perform the provider call and normalize its result.
 6. Add true multimodal outputs and media evaluation.
 7. Promote the media API only after packed-package tests, provider conformance, and image evals
    cover the supported capability matrix.
-

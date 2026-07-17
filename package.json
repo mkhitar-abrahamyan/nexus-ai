@@ -114,6 +114,38 @@
       "types": "./dist/voice/session.d.ts",
       "import": "./dist/voice/session.js"
     },
+    "./realtime": {
+      "types": "./dist/realtime/index.d.ts",
+      "import": "./dist/realtime/index.js"
+    },
+    "./realtime/session": {
+      "types": "./dist/realtime/session.d.ts",
+      "import": "./dist/realtime/session.js"
+    },
+    "./realtime/tools": {
+      "types": "./dist/realtime/tools.d.ts",
+      "import": "./dist/realtime/tools.js"
+    },
+    "./realtime/conversation": {
+      "types": "./dist/realtime/conversation.d.ts",
+      "import": "./dist/realtime/conversation.js"
+    },
+    "./realtime/openai-webrtc": {
+      "types": "./dist/realtime/openai-webrtc.transport.d.ts",
+      "import": "./dist/realtime/openai-webrtc.transport.js"
+    },
+    "./realtime/openai-websocket": {
+      "types": "./dist/realtime/openai-websocket.transport.d.ts",
+      "import": "./dist/realtime/openai-websocket.transport.js"
+    },
+    "./realtime/openai-server": {
+      "types": "./dist/realtime/openai-server.d.ts",
+      "import": "./dist/realtime/openai-server.js"
+    },
+    "./realtime/mock": {
+      "types": "./dist/realtime/mock.transport.d.ts",
+      "import": "./dist/realtime/mock.transport.js"
+    },
     "./telephony": {
       "types": "./dist/telephony/index.d.ts",
       "import": "./dist/telephony/index.js"
@@ -189,12 +221,14 @@
     "example:security": "tsx examples/security.ts",
     "example:optimizer": "tsx examples/optimizer.ts",
     "example:agent": "tsx examples/agent.ts",
+    "example:realtime": "tsx examples/realtime-scheduling.ts",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
     "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
+    "typecheck:examples:browser": "tsc -p tsconfig.examples.browser.json --noEmit",
     "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:smoke && npm run test:api && npm run test:types",
     "test:unit": "node --import tsx --test tests/unit.ts tests/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-lines=70 --test-coverage-branches=60 --test-coverage-functions=60 tests/unit.ts tests/*.test.ts",
@@ -205,7 +239,7 @@
     "test:conformance:mock": "tsx tests/conformance.mock.ts",
     "test:conformance:real": "tsx tests/conformance.real.ts",
     "pack:dry-run": "npm pack --dry-run --cache .tmp-nexus-ai-tests/npm-cache",
-    "check": "npm run format:check && npm run lint && npm test && npm run typecheck:tests && npm run typecheck:examples && npm run test:coverage",
+    "check": "npm run format:check && npm run lint && npm test && npm run typecheck:tests && npm run typecheck:examples && npm run typecheck:examples:browser && npm run test:coverage",
     "check:release": "npm run check && npm run pack:dry-run && npm run test:clean-install",
     "prepack": "npm run build",
     "prepublishOnly": "npm run check:release"

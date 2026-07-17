@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "sourceMap": false,
+    "declaration": false,
+    "baseUrl": ".",
+    "paths": {
+      "nexus-ai-pro/realtime/mock": ["./src/realtime/mock.transport.ts"],
+      "nexus-ai-pro/realtime/session": ["./src/realtime/session.ts"],
+      "nexus-ai-pro/realtime/tools": ["./src/realtime/tools.ts"]
+    }
+  },
+  "include": ["src/realtime/**/*.ts", "examples/realtime-scheduling.ts"],
+  "exclude": ["node_modules", "dist"]
+}

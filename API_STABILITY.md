@@ -25,6 +25,29 @@ Source files, `dist` file paths, examples, test helpers that are not exported, a
 
 The package is ESM-only and supports Node.js 22 or newer. CommonJS `require()` and deep imports into `dist` or `src` are not supported.
 
+## Realtime API stage
+
+The opt-in `nexus-ai-pro/realtime` family is public in the current development line. This includes the
+explicit `realtime/session`, `realtime/tools`, `realtime/conversation`, `realtime/openai-webrtc`,
+`realtime/openai-websocket`, `realtime/openai-server`, and `realtime/mock` subpaths. Its exported symbols,
+normalized event names, configuration fields, and conversation/export shapes follow the same patch
+compatibility rules as the rest of the package.
+
+The realtime surface is still pre-1.0. Provider-specific wire events returned by `openai-events`, values
+under `raw`, SDP/ICE behavior, and upstream model or voice availability are controlled by the provider
+and are not normalized compatibility guarantees. New normalized event variants or optional metrics may
+be added in a minor release. A necessary incompatible change during 0.x will be documented in a minor
+release with migration guidance.
+
+Platform interfaces for WebRTC and WebSocket are structural so applications can inject browser, server,
+mobile, or test adapters without a framework dependency. A documented structural member is public;
+private transport internals and unexported protocol helpers are not.
+
+`VoiceSession` and `RealtimeSession` are independent public APIs. `VoiceSession` remains a batch,
+turn-oriented transcription/completion/speech workflow. `RealtimeSession` owns a persistent transport,
+live events, interruption, and normalized realtime conversation state. Neither is a compatibility alias
+for the other.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. During the 0.x series, removal will not normally occur earlier than the next minor release. After 1.0, removals will be reserved for major releases, except when an urgent security issue requires otherwise.

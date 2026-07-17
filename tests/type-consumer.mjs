@@ -77,6 +77,7 @@ try {
           strict: true,
           noEmit: true,
           skipLibCheck: false,
+          lib: ['ES2022'],
           types: ['node'],
         },
         include: ['index.ts'],
@@ -150,6 +151,23 @@ import { VoiceSession as SubpathVoiceSession } from 'nexus-ai-pro/voice/session'
 import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/telephony';
 import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
+import {
+  MockRealtimeTransport,
+  OpenAIRealtimeProvider,
+  createRealtimeAgent,
+  createRealtimeSession,
+  defineTool as defineRealtimeTool,
+  type RealtimeConversation,
+  type RealtimeEvent,
+  type RealtimeToolCall,
+} from 'nexus-ai-pro/realtime';
+import { RealtimeSession as SubpathRealtimeSession } from 'nexus-ai-pro/realtime/session';
+import { RealtimeToolExecutor } from 'nexus-ai-pro/realtime/tools';
+import { createRealtimeConversation } from 'nexus-ai-pro/realtime/conversation';
+import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
+import { OpenAIWebSocketTransport } from 'nexus-ai-pro/realtime/openai-websocket';
+import { createOpenAIRealtimeSessionEndpoint } from 'nexus-ai-pro/realtime/openai-server';
+import { MockRealtimeTransport as DirectMockRealtimeTransport } from 'nexus-ai-pro/realtime/mock';
 
 class ConsumerProvider extends BaseProvider {
   readonly info = { name: 'consumer', isLocal: true };
@@ -206,6 +224,63 @@ const telephonyProvider: TelephonyProvider = {
 };
 
 const controller = new AbortController();
+const realtimeTool = defineRealtimeTool({
+  name: 'check_availability',
+  description: 'Check availability for a date.',
+  parameters: {
+    type: 'object',
+    properties: { date: { type: 'string' } },
+    required: ['date'],
+  },
+  execute: async (input: { date: string }, context) => ({
+    available: Boolean(input.date),
+    idempotencyKey: context.idempotencyKey,
+  }),
+  safe: true,
+});
+const realtimeTransport = new MockRealtimeTransport({ autoPlay: false });
+const realtimeSession = createRealtimeSession({
+  model: 'gpt-realtime',
+  transport: realtimeTransport,
+  tools: [realtimeTool],
+  interruption: { enabled: true, truncateUnheardAudio: true },
+});
+const directRealtimeSession: SubpathRealtimeSession = realtimeSession;
+const realtimeProvider = new OpenAIRealtimeProvider({ sessionEndpoint: '/api/realtime/session' });
+const realtimeAgent = createRealtimeAgent({
+  provider: realtimeProvider,
+  model: 'gpt-realtime',
+  tools: [realtimeTool],
+  voice: { transport: realtimeTransport, turnDetection: { type: 'server_vad' }, interruption: true },
+});
+const realtimeConversation: RealtimeConversation = createRealtimeConversation({
+  provider: 'openai',
+  model: 'gpt-realtime',
+});
+const realtimeToolCall: RealtimeToolCall = {
+  callId: 'call_1',
+  name: 'check_availability',
+  arguments: { date: '2026-07-17' },
+  idempotencyKey: 'idem_1',
+};
+const realtimeExecutor = new RealtimeToolExecutor([realtimeTool], {
+  sessionId: 'session_1',
+  signal: controller.signal,
+});
+const realtimeWebRTC = new OpenAIWebRTCTransport({ sessionEndpoint: '/api/realtime/session' });
+const realtimeWebSocket = new OpenAIWebSocketTransport({ ephemeralToken: 'ephemeral' });
+const directMockRealtime = new DirectMockRealtimeTransport();
+const realtimeEndpoint = createOpenAIRealtimeSessionEndpoint({
+  apiKey: 'server-only',
+  model: 'gpt-realtime',
+});
+const unsubscribeRealtime = realtimeSession.on('conversation.updated', (snapshot) => {
+  const conversationId: string = snapshot.id;
+  void conversationId;
+});
+realtimeSession.on('speech.started', (event: Extract<RealtimeEvent, { type: 'speech.started' }>) => {
+  void event.timestamp;
+});
 const request: CompletionRequest = {
   model: 'auto',
   messages: [{ role: 'user', content: 'hello' }],
@@ -426,11 +501,55 @@ void error.retryable;
 void subpathError.category;
 void toolCall;
 void doneChunk;
+void directRealtimeSession;
+void realtimeAgent;
+void realtimeConversation;
+void realtimeToolCall;
+void realtimeExecutor;
+void realtimeWebRTC;
+void realtimeWebSocket;
+void directMockRealtime;
+void realtimeEndpoint;
+void unsubscribeRealtime;
 `,
   );
 
   const tsc = path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc');
   run(process.execPath, [tsc, '-p', consumerDir], consumerDir);
+  writeFileSync(
+    path.join(consumerDir, 'tsconfig.browser.json'),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'NodeNext',
+          moduleResolution: 'NodeNext',
+          strict: true,
+          noEmit: true,
+          skipLibCheck: false,
+          lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+          types: [],
+        },
+        include: ['browser.ts'],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    path.join(consumerDir, 'browser.ts'),
+    `
+import { createRealtimeSession } from 'nexus-ai-pro/realtime/session';
+import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
+
+const transport = new OpenAIWebRTCTransport({ sessionEndpoint: '/api/realtime/session' });
+const session = createRealtimeSession({ model: 'gpt-realtime', transport });
+const audioElement = document.createElement('audio');
+const connection: Promise<void> = session.connect({ audioElement, microphone: true });
+void connection;
+`,
+  );
+  run(process.execPath, [tsc, '-p', path.join(consumerDir, 'tsconfig.browser.json')], consumerDir);
   console.log('TypeScript consumer compile test passed.');
 } catch (error) {
   keepTempDir = true;

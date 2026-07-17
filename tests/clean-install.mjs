@@ -64,7 +64,15 @@ try {
   const [packed] = JSON.parse(packOutput);
   const packedPaths = new Set(packed.files.map((file) => file.path));
   assert.ok(packed.size < 200_000, `packed tarball should stay below 200 kB, received ${packed.size}`);
-  for (const requiredPath of ['README.md', 'ROADMAP.md', 'SECURITY.md', 'dist/index.js', 'dist/index.d.ts']) {
+  for (const requiredPath of [
+    'README.md',
+    'ROADMAP.md',
+    'SECURITY.md',
+    'dist/index.js',
+    'dist/index.d.ts',
+    'dist/realtime/index.js',
+    'dist/realtime/index.d.ts',
+  ]) {
     assert.ok(packedPaths.has(requiredPath), `packed tarball should include ${requiredPath}`);
   }
   for (const packedPath of packedPaths) {
@@ -105,6 +113,9 @@ const imports = [
   ['nexus-ai-pro/providers/deepseek', ['DeepSeekProvider']],
   ['nexus-ai-pro/cache/memory-cache', ['MemoryCache']],
   ['nexus-ai-pro/security', ['SecurityPipeline']],
+  ['nexus-ai-pro/realtime', ['RealtimeSession', 'createRealtimeAgent', 'MockRealtimeTransport']],
+  ['nexus-ai-pro/realtime/openai-webrtc', ['OpenAIWebRTCTransport']],
+  ['nexus-ai-pro/realtime/openai-websocket', ['OpenAIWebSocketTransport']],
   ['nexus-ai-pro/jobs/batch', ['runBatch']],
   ['nexus-ai-pro/workflows', ['ragAnswer']],
 ];
