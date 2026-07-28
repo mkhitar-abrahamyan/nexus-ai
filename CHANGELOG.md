@@ -1,8 +1,26 @@
 # Changelog
 
-Notable changes to this project are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use semantic versioning while accounting for the pre-1.0 stability policy.
+Notable changes to this project are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use semantic versioning.
 
 ## [Unreleased]
+
+### Added
+
+- An experimental provider-neutral image operation family with portable asset locations,
+  `ImageManager`, generation/editing, strict capability negotiation, runtime provider registration,
+  visual-safety hooks, and cancellable local operation handles.
+- Opt-in `images`, `images/assets`, `images/mock`, and `images/openai` subpaths with a deterministic
+  mock provider and an OpenAI Image API adapter for one-shot generation and reference-based editing.
+- An image-provider conformance harness covering normalized assets, metadata, generation, editing, and
+  pre-aborted calls.
+- A bounded tenant-isolated `MemoryAssetStore` with retention, defensive byte copies, computed SHA-256
+  checksums, capacity enforcement, and optional HTTP(S) signing.
+
+### Changed
+
+- Reconciled the changelog and API stability policy with the tagged 1.0.0 release.
+
+## [1.0.0] - 2026-07-17
 
 ### Added
 
@@ -55,5 +73,6 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/releases/tag/v1.0.0
 [0.9.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/releases/tag/v0.9.0

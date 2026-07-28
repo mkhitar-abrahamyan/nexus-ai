@@ -30,6 +30,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/voice', exports: ['VoiceManager', 'VoiceProviderError', 'VoiceSession'] },
   { specifier: 'nexus-ai-pro/voice/openai', exports: ['OpenAIVoiceProvider'] },
   { specifier: 'nexus-ai-pro/voice/session', exports: ['VoiceSession'] },
+  { specifier: 'nexus-ai-pro/images', exports: ['ImageManager', 'ImageProviderError'] },
+  { specifier: 'nexus-ai-pro/images/assets', exports: ['MemoryAssetStore', 'AssetStoreCapacityError'] },
+  { specifier: 'nexus-ai-pro/images/mock', exports: ['MockImageProvider'] },
+  { specifier: 'nexus-ai-pro/images/openai', exports: ['OpenAIImageProvider', 'OpenAIImageProviderError'] },
   {
     specifier: 'nexus-ai-pro/realtime',
     exports: [

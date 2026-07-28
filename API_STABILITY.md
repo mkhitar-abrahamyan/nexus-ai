@@ -1,10 +1,13 @@
 # API Stability Policy
 
-This policy describes compatibility guarantees for `nexus-ai-pro` beginning with version 0.9.0.
+This policy describes compatibility guarantees for `nexus-ai-pro`. The 1.x compatibility guarantees
+apply beginning with version 1.0.0.
 
 ## Release stages
 
-The package is pre-1.0. Minor releases may contain breaking changes when they are necessary, but those changes will be called out in the changelog with migration guidance. Patch releases are intended to remain backward compatible.
+The package follows semantic versioning. Within the 1.x line, incompatible changes to stable public
+APIs require a major release. Minor releases may add backward-compatible features, and patch releases
+are intended to remain backward compatible.
 
 The following surfaces are public and covered by this policy:
 
@@ -33,11 +36,12 @@ explicit `realtime/session`, `realtime/tools`, `realtime/conversation`, `realtim
 normalized event names, configuration fields, and conversation/export shapes follow the same patch
 compatibility rules as the rest of the package.
 
-The realtime surface is still pre-1.0. Provider-specific wire events returned by `openai-events`, values
+The realtime surface follows the 1.x compatibility rules for its normalized public API. Provider-specific
+wire events returned by `openai-events`, values
 under `raw`, SDP/ICE behavior, and upstream model or voice availability are controlled by the provider
 and are not normalized compatibility guarantees. New normalized event variants or optional metrics may
-be added in a minor release. A necessary incompatible change during 0.x will be documented in a minor
-release with migration guidance.
+be added in a minor release. Incompatible normalized API changes require a major release unless an urgent
+security fix makes preserving the old behavior unsafe.
 
 Platform interfaces for WebRTC and WebSocket are structural so applications can inject browser, server,
 mobile, or test adapters without a framework dependency. A documented structural member is public;
@@ -48,8 +52,22 @@ turn-oriented transcription/completion/speech workflow. `RealtimeSession` owns a
 live events, interruption, and normalized realtime conversation state. Neither is a compatibility alias
 for the other.
 
+## Image API stage
+
+The `nexus-ai-pro/images` family is experimental in production-readiness, but published normalized
+types, manager methods, operation events, and explicit subpath exports still follow the 1.x semantic
+versioning rules. The experimental label does not permit an incompatible minor or patch release.
+
+Provider payloads under `raw`, provider-specific error metadata, temporary delivery URLs, upstream model
+availability, and generative output are not normalized compatibility guarantees. The current local
+operation handle is process-bound and does not promise durable recovery, distributed cancellation, or
+exactly-once provider execution. Those capabilities will use additive adapters and contracts when added.
+`MemoryAssetStore` is likewise process-local and does not promise cross-process durability or shared
+tenant state.
+
 ## Deprecation process
 
-Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. During the 0.x series, removal will not normally occur earlier than the next minor release. After 1.0, removals will be reserved for major releases, except when an urgent security issue requires otherwise.
+Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals
+are reserved for major releases, except when an urgent security issue requires otherwise.
 
 Report accidental compatibility regressions through the project issue tracker. Security issues should follow [SECURITY.md](./SECURITY.md).

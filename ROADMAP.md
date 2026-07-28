@@ -36,7 +36,23 @@ Current limitations are intentional and should remain visible:
 - Realtime video tracks, SIP transports, durable cost accounting beyond the configurable local estimate,
   and a published latency benchmark methodology remain follow-on work.
 
-## Recommended next release: first-class image generation
+## Current next-release work: first-class image generation
+
+The experimental foundation is now implemented in the current development line:
+
+- portable byte, URL, and stored asset locations plus image request/result, usage, safety, provenance,
+  provider-call context, and operation-handle types;
+- a provider-neutral `ImageManager` with generation, editing, provider registration, strict capability
+  negotiation, visual-safety hooks, and cancellable in-process submissions;
+- a deterministic network-free mock and a parallel image-provider conformance harness;
+- an opt-in OpenAI Image API adapter for one-shot generation and reference-based editing;
+- a bounded tenant-aware in-memory asset store with retention, defensive byte copies, computed SHA-256
+  checksums, capacity rejection, and optional signed-URL integration.
+
+This surface remains experimental. OpenAI masks are intentionally disabled until a transformer can
+verify dimensions and convert neutral mask polarity into provider alpha semantics. Durable operations,
+filesystem/S3-compatible asset stores, a second cloud provider, ComfyUI, and media evaluation are still
+required before promotion.
 
 Image generation should be a separate operation family rather than another variation of
 `complete()`. Text completions and generated assets have different request shapes, response

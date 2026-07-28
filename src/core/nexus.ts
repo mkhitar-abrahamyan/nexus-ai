@@ -14,6 +14,7 @@ import type {
   VoiceTurnRequest,
   VoiceTurnResponse,
 } from '../types/voice.js';
+import type { ImageProvider } from '../types/images.js';
 import type {
   CreateCallRequest,
   CreateCallResponse,
@@ -43,6 +44,7 @@ import { Logger } from '../utils/logger.js';
 import { SecurityPipeline } from '../security/index.js';
 import { ContextWindowManager } from '../context/index.js';
 import { VoiceManager, type VoiceSession } from '../voice/index.js';
+import { ImageManager } from '../images/manager.js';
 import { TelephonyManager } from '../telephony/index.js';
 import { TokenOptimizer } from '../optimizer/index.js';
 import { AgentLoop } from '../agent/loop.js';
@@ -70,6 +72,9 @@ import { summarizeVerifyFormat, type SummarizeVerifyFormatOptions, type Workflow
  * Use `new NexusAI(config)` when you want full control, or `createNexus()` for the beginner shorthand.
  */
 export class NexusAI {
+  /** Provider-neutral image generation and editing operations. */
+  readonly images: ImageManager;
+
   private config: NexusAIConfig;
   private providers = new Map<string, BaseProvider>();
   private router = new Router();
@@ -103,6 +108,7 @@ export class NexusAI {
     this.security = new SecurityPipeline(this.config.security || 'standard');
     this.contextWindow = new ContextWindowManager(this.config.contextWindow || {});
     this.voiceManager = new VoiceManager(this.config.voice || {});
+    this.images = new ImageManager(this.config.images || {});
     this.telephonyManager = new TelephonyManager(this.config.telephony || {});
     this.optimizer = new TokenOptimizer(this.config.tokenOptimizer || {});
     this.cache = new MemoryCache<NexusResponse>(this.config.cache?.maxEntries || 500);
@@ -553,6 +559,14 @@ export class NexusAI {
   }
 
   /**
+   * Registers a custom image provider at runtime.
+   */
+  registerImageProvider(name: string, provider: ImageProvider): this {
+    this.images.registerImageProvider(name, provider);
+    return this;
+  }
+
+  /**
    * Registers a custom telephony provider at runtime.
    */
   registerTelephonyProvider(name: string, provider: TelephonyProvider): this {
@@ -568,6 +582,10 @@ export class NexusAI {
     return this.voiceManager.hasProvider(name);
   }
 
+  hasImageProvider(name: string): boolean {
+    return this.images.hasImageProvider(name);
+  }
+
   hasTelephonyProvider(name: string): boolean {
     return this.telephonyManager.hasProvider(name);
   }
@@ -581,6 +599,10 @@ export class NexusAI {
 
   listVoiceProviders(): string[] {
     return this.voiceManager.listProviders();
+  }
+
+  listImageProviders(): string[] {
+    return this.images.listImageProviders();
   }
 
   listTelephonyProviders(): string[] {

@@ -26,6 +26,7 @@ import type {
   RoutingStrategy,
 } from '../types/config.js';
 import type { ContextWindowConfig } from '../types/context-window.js';
+import type { ImageConfig } from '../types/images.js';
 import type { SecurityConfig, SecurityLevel } from '../types/security.js';
 import type { TokenOptimizerConfig } from '../types/optimizer.js';
 import type { PipelineConfig } from '../pipeline/types.js';
@@ -149,6 +150,12 @@ export class NexusConfigBuilder {
   /** Sets context-window compaction behavior. */
   contextWindow(config: ContextWindowConfig): this {
     this.config.contextWindow = config;
+    return this;
+  }
+
+  /** Sets image-provider defaults and registrations. */
+  images(config: ImageConfig): this {
+    this.config.images = config;
     return this;
   }
 

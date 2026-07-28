@@ -25,9 +25,12 @@ const expectedRootExports = [
   'GUARDRAIL_POLICIES',
   'GoogleProvider',
   'GroqProvider',
+  'IMAGE_PROVIDER_CONFORMANCE_FIXTURES',
   'InMemoryMetrics',
   'InputGuard',
   'InjectionDetector',
+  'ImageManager',
+  'ImageProviderError',
   'JobQueue',
   'KNOWN_MODELS',
   'LMStudioProvider',
@@ -136,6 +139,7 @@ const expectedRootExports = [
   'resolveModelAlias',
   'resolveProvider',
   'runBatch',
+  'runImageProviderConformance',
   'runProviderConformance',
   'salesQualificationWorkflow',
   'scanUploads',
@@ -182,6 +186,10 @@ const expectedSubpaths = [
   './voice',
   './voice/openai',
   './voice/session',
+  './images',
+  './images/assets',
+  './images/mock',
+  './images/openai',
   './realtime',
   './realtime/session',
   './realtime/tools',
@@ -232,11 +240,24 @@ for (const realtimeExport of [
   assert.equal(realtimeExport in root, false, `${realtimeExport} should remain opt-in through realtime subpaths`);
 }
 
+for (const imageIntegrationExport of ['MockImageProvider', 'OpenAIImageProvider', 'MemoryAssetStore']) {
+  assert.equal(
+    imageIntegrationExport in root,
+    false,
+    `${imageIntegrationExport} should remain opt-in through image subpaths`,
+  );
+}
+
 const rootSource = readFileSync(path.join(repoRoot, 'dist', 'index.js'), 'utf8');
 assert.equal(
   /(?:from|import\s*)\s*['"].*\/realtime\//.test(rootSource),
   false,
   'root import graph should exclude realtime',
+);
+assert.equal(
+  /(?:from|import\s*)\s*['"].*\/images\/(?:assets|mock|openai)/.test(rootSource),
+  false,
+  'root import graph should exclude optional image integrations',
 );
 
 assert.equal(packageJson.type, 'module');

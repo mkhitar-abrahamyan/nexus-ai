@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A typed multi-provider AI pipeline for Node.js with routing, streaming, tools, and guardrails",
   "type": "module",
   "main": "dist/index.js",
@@ -113,6 +113,22 @@
     "./voice/session": {
       "types": "./dist/voice/session.d.ts",
       "import": "./dist/voice/session.js"
+    },
+    "./images": {
+      "types": "./dist/images/index.d.ts",
+      "import": "./dist/images/index.js"
+    },
+    "./images/assets": {
+      "types": "./dist/images/assets.d.ts",
+      "import": "./dist/images/assets.js"
+    },
+    "./images/mock": {
+      "types": "./dist/images/mock.d.ts",
+      "import": "./dist/images/mock.js"
+    },
+    "./images/openai": {
+      "types": "./dist/images/openai.d.ts",
+      "import": "./dist/images/openai.js"
     },
     "./realtime": {
       "types": "./dist/realtime/index.d.ts",
@@ -257,6 +273,8 @@
     "function-calling",
     "vision",
     "multi-model",
+    "image-generation",
+    "multimodal",
     "rag",
     "evals",
     "security",

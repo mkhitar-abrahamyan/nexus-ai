@@ -45,6 +45,17 @@ export {
   type VoiceSessionCompletionClient,
   type VoiceSessionRuntime,
 } from './voice/index.js';
+export { ImageManager } from './images/manager.js';
+export {
+  ImageCapabilityError,
+  ImageError,
+  ImageOperationCancelledError,
+  ImageProviderError,
+  ImageProviderNotFoundError,
+  ImageProviderResponseError,
+  ImageSafetyError,
+  ImageValidationError,
+} from './images/errors.js';
 export {
   TelephonyManager,
   TelephonyProviderError,
@@ -315,6 +326,15 @@ export {
   type ProviderConformanceResult,
 } from './testing/provider-conformance.js';
 export {
+  IMAGE_PROVIDER_CONFORMANCE_FIXTURES,
+  runImageProviderConformance,
+  type ImageEditProviderConformanceCase,
+  type ImageGenerateProviderConformanceCase,
+  type ImageProviderConformanceCase,
+  type ImageProviderConformanceOptions,
+  type ImageProviderConformanceResult,
+} from './testing/image-provider-conformance.js';
+export {
   OpenTelemetryTraceExporter,
   type OpenTelemetryLikeSpan,
   type OpenTelemetryLikeTracer,
@@ -411,6 +431,62 @@ export type {
   VoiceTurnRequest,
   VoiceTurnResponse,
 } from './types/voice.js';
+
+export type {
+  AssetBytesLocation,
+  AssetChecksum,
+  AssetDescriptor,
+  AssetInput,
+  AssetLocation,
+  AssetLocationKind,
+  AssetProvenance,
+  AssetStoredLocation,
+  AssetUrlLocation,
+  ImageBackground,
+  ImageConfig,
+  ImageDelivery,
+  ImageDimensions,
+  ImageEditRequest,
+  ImageGenerateRequest,
+  ImageManagerConfig,
+  ImageMaskInput,
+  ImageOperation,
+  ImageOperationSubmission,
+  ImageOutputFormat,
+  ImageProvider,
+  ImageProviderCallContext,
+  ImageProviderCapabilities,
+  ImageProviderInfo,
+  ImageQuality,
+  ImageRequestBase,
+  ImageResult,
+  ImageSafetyContext,
+  ImageSafetyPolicy,
+  ImageWarning,
+  MediaSafetyFinding,
+  MediaUsage,
+  OperationErrorDescriptor,
+  OperationEvent,
+  OperationEventBase,
+  OperationHandle,
+  OperationMeta,
+  OperationStatus,
+} from './types/images.js';
+
+export type {
+  AssetCapacityConstraint,
+  AssetPutOptions,
+  AssetSignOptions,
+  AssetSigner,
+  AssetSignerContext,
+  AssetStat,
+  AssetStore,
+  AssetStoreResult,
+  ByteAssetDescriptor,
+  ByteAssetInput,
+  MemoryAssetStoreOptions,
+  MemoryAssetStoreSnapshot,
+} from './images/assets.js';
 
 export type {
   CreateCallRequest,

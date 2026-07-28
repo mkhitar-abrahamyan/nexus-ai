@@ -7,7 +7,7 @@ Use the whole pipeline for production AI features, or turn pieces off when you o
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
 - Full technical notes and manual test cases: [NEXUS.md](./NEXUS.md)
-- Planned image generation and infrastructure work: [ROADMAP.md](./ROADMAP.md)
+- Image generation status and remaining infrastructure work: [ROADMAP.md](./ROADMAP.md)
 
 ## Install
 
@@ -306,6 +306,63 @@ const response = await ai.completeVerified(
   },
 );
 ```
+
+## Image Generation and Editing (Experimental)
+
+Image operations use a separate provider-neutral manager because generated assets have different
+capabilities, delivery modes, safety checks, and lifecycles from text completions.
+
+```ts
+import { NexusAI } from 'nexus-ai-pro';
+import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
+
+const openaiImages = new OpenAIImageProvider({
+  apiKey: process.env.OPENAI_API_KEY!,
+});
+
+const mediaAi = new NexusAI({
+  providers: {},
+  images: {
+    defaultProvider: 'openai',
+    providers: { openai: openaiImages },
+  },
+});
+
+const image = await mediaAi.images.generate({
+  model: 'auto',
+  prompt: 'A clean product photograph of a red mechanical keyboard',
+  dimensions: { width: 1536, height: 1024 },
+  quality: 'high',
+  delivery: { kind: 'bytes', format: 'png' },
+});
+
+console.log(image.assets[0]?.location);
+```
+
+`ImageProvider` is independent from completion providers. Explicit options are negotiated against the
+selected provider's declared capabilities, so unsupported formats, delivery kinds, masks, seeds, or
+dimensions fail before a provider call. The OpenAI adapter supports one-shot generation and
+reference-based editing through byte assets. Masked OpenAI edits remain disabled until a transformer can
+verify dimensions and convert the neutral mask contract to OpenAI's alpha-channel semantics.
+
+Use `submit()` for a cancellable local operation handle with replayable lifecycle events:
+
+```ts
+const operation = mediaAi.images.submit('generate', {
+  prompt: 'A minimal blue geometric poster',
+  delivery: { kind: 'bytes', format: 'png' },
+});
+
+for await (const event of operation.events()) {
+  console.log(event.type);
+}
+```
+
+For deterministic tests, register `MockImageProvider` from `nexus-ai-pro/images/mock`. The current
+`submit()` handle is in-process; durable leases, recovery, distributed deduplication, and webhooks remain
+future infrastructure work. `nexus-ai-pro/images/assets` includes a bounded, tenant-isolated
+`MemoryAssetStore` for local development and single-process workloads; it computes SHA-256 checksums,
+copies bytes at its boundaries, enforces retention and capacity, and never silently evicts live assets.
 
 ## Voice Integrations
 
@@ -892,6 +949,10 @@ import { ContextWindowManager } from 'nexus-ai-pro/context';
 import { guardrailPolicy } from 'nexus-ai-pro/security';
 import { RedisCacheAdapter } from 'nexus-ai-pro/cache';
 import { DeepSeekProvider } from 'nexus-ai-pro/providers/deepseek';
+import { ImageManager } from 'nexus-ai-pro/images';
+import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
+import { MockImageProvider } from 'nexus-ai-pro/images/mock';
+import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
 import { createRealtimeSession } from 'nexus-ai-pro/realtime/session';
 import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
 ```
@@ -946,10 +1007,10 @@ npm run test:conformance:real
 
 ## Roadmap
 
-The next recommended feature family is first-class image generation and editing through a
-provider-neutral `ImageManager`, portable asset types, durable operation handles, visual safety,
-asset storage, and media-specific evaluations. The design and prioritized infrastructure backlog
-are in [ROADMAP.md](./ROADMAP.md).
+The experimental image foundation now includes portable asset types, `ImageManager`, provider
+capability negotiation, local operation handles, visual-safety hooks, deterministic conformance, and an
+opt-in OpenAI adapter. Durable operations, production asset storage, additional providers, and
+media-specific evaluations remain planned in [ROADMAP.md](./ROADMAP.md).
 
 ## Production Notes
 

@@ -99,6 +99,7 @@ import {
   DeepSeekProvider,
   GoogleProvider,
   GroqProvider,
+  ImageManager,
   LMStudioProvider,
   LlamaCppProvider,
   MemoryCache,
@@ -116,10 +117,15 @@ import {
   defineNexusConfig,
   type CreateCallRequest,
   type CreateNexusOptions,
+  type AssetStore,
   type CompletionRequest,
   type ContextWindowConfig,
   type CostBudgetConfig,
   type DeepSeekProviderConfig,
+  type ImageConfig,
+  type ImageGenerateRequest,
+  type ImageProvider,
+  type ImageResult,
   type LoggerConfig,
   type NexusAIConfig,
   type NexusResponse,
@@ -148,6 +154,10 @@ import { ContextWindowManager as SubpathContextWindowManager } from 'nexus-ai-pr
 import { VoiceManager as SubpathVoiceManager } from 'nexus-ai-pro/voice';
 import { OpenAIVoiceProvider } from 'nexus-ai-pro/voice/openai';
 import { VoiceSession as SubpathVoiceSession } from 'nexus-ai-pro/voice/session';
+import { ImageManager as SubpathImageManager } from 'nexus-ai-pro/images';
+import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
+import { MockImageProvider } from 'nexus-ai-pro/images/mock';
+import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
 import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/telephony';
 import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
@@ -358,6 +368,16 @@ const voiceSessionConfig: VoiceSessionConfig = {
   toolSelection: 'task',
   speech: { provider: 'consumer-voice', format: 'mp3' },
 };
+const mockImageProvider: ImageProvider = new MockImageProvider({ model: 'mock-image-v1' });
+const imageConfig: ImageConfig = {
+  defaultProvider: 'mock',
+  providers: { mock: mockImageProvider },
+};
+const imageRequest: ImageGenerateRequest = {
+  model: 'auto',
+  prompt: 'A blue square.',
+  delivery: { kind: 'bytes', format: 'png' },
+};
 const telephonyConfig: TelephonyConfig = {
   defaultProvider: 'consumer-phone',
   providers: { 'consumer-phone': telephonyProvider },
@@ -369,6 +389,7 @@ const aiConfig: NexusAIConfig = {
   costBudget: costBudgetConfig,
   contextWindow: contextWindowConfig,
   voice: voiceConfig,
+  images: imageConfig,
   telephony: telephonyConfig,
   defaultModel: 'consumer/test',
   security: 'off',
@@ -378,7 +399,9 @@ const ai = new NexusAI({
   providers: {},
   routing: { mode: 'direct' },
   defaultModel: 'consumer/test',
-}).registerProvider('consumer', new ConsumerProvider());
+})
+  .registerProvider('consumer', new ConsumerProvider())
+  .registerImageProvider('mock', mockImageProvider);
 const simpleOptions: CreateNexusOptions = {
   provider: 'openai',
   apiKey: 'test',
@@ -391,6 +414,7 @@ const builderConfig = createNexusConfig()
   .deepseek({ apiKey: 'test' })
   .lmstudio()
   .custom({ name: 'custom-openai', baseUrl: 'https://example.test/v1', format: 'openai' })
+  .images(imageConfig)
   .direct('custom-openai/model')
   .security('off')
   .build();
@@ -412,6 +436,11 @@ const subpathVoiceManager = new SubpathVoiceManager(voiceConfig);
 const voiceSession: VoiceSession = ai.createVoiceSession(voiceSessionConfig);
 const subpathVoiceSession = new SubpathVoiceSession(voiceSessionConfig, subpathVoiceManager, ai);
 const openAiVoice = new OpenAIVoiceProvider({ apiKey: 'test' });
+const imageManager = new ImageManager(imageConfig);
+const subpathImageManager = new SubpathImageManager(imageConfig);
+const openAiImages = new OpenAIImageProvider({ apiKey: 'test' });
+const imageResult: Promise<ImageResult> = ai.images.generate(imageRequest);
+const assetStore: AssetStore = new MemoryAssetStore({ maxEntries: 10, maxTotalBytes: 1_000_000 });
 const telephonyManager = new TelephonyManager(telephonyConfig);
 const subpathTelephonyManager = new SubpathTelephonyManager(telephonyConfig);
 const twilioTelephony = new TwilioTelephonyProvider({ accountSid: 'AC123', authToken: 'test' });
@@ -488,6 +517,11 @@ void subpathVoiceManager;
 void voiceSession;
 void subpathVoiceSession;
 void openAiVoice;
+void imageManager;
+void subpathImageManager;
+void openAiImages;
+void imageResult;
+void assetStore;
 void telephonyManager;
 void subpathTelephonyManager;
 void twilioTelephony;

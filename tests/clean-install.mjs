@@ -15,6 +15,8 @@ mkdirSync(tempParent, { recursive: true });
 const tempRoot = mkdtempSync(path.join(tempParent, 'clean-install-'));
 const packDir = path.join(tempRoot, 'pack');
 const consumerDir = path.join(tempRoot, 'consumer');
+const MAX_PACKED_BYTES = 225_000;
+const MAX_UNPACKED_BYTES = 1_000_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
@@ -63,13 +65,24 @@ try {
   );
   const [packed] = JSON.parse(packOutput);
   const packedPaths = new Set(packed.files.map((file) => file.path));
-  assert.ok(packed.size < 200_000, `packed tarball should stay below 200 kB, received ${packed.size}`);
+  assert.ok(
+    packed.size < MAX_PACKED_BYTES,
+    `packed tarball should stay below ${MAX_PACKED_BYTES} bytes, received ${packed.size}`,
+  );
+  assert.ok(
+    packed.unpackedSize < MAX_UNPACKED_BYTES,
+    `unpacked package should stay below ${MAX_UNPACKED_BYTES} bytes, received ${packed.unpackedSize}`,
+  );
   for (const requiredPath of [
     'README.md',
     'ROADMAP.md',
     'SECURITY.md',
     'dist/index.js',
     'dist/index.d.ts',
+    'dist/images/index.js',
+    'dist/images/index.d.ts',
+    'dist/images/openai.js',
+    'dist/images/openai.d.ts',
     'dist/realtime/index.js',
     'dist/realtime/index.d.ts',
   ]) {
@@ -113,6 +126,10 @@ const imports = [
   ['nexus-ai-pro/providers/deepseek', ['DeepSeekProvider']],
   ['nexus-ai-pro/cache/memory-cache', ['MemoryCache']],
   ['nexus-ai-pro/security', ['SecurityPipeline']],
+  ['nexus-ai-pro/images', ['ImageManager']],
+  ['nexus-ai-pro/images/assets', ['MemoryAssetStore']],
+  ['nexus-ai-pro/images/mock', ['MockImageProvider']],
+  ['nexus-ai-pro/images/openai', ['OpenAIImageProvider']],
   ['nexus-ai-pro/realtime', ['RealtimeSession', 'createRealtimeAgent', 'MockRealtimeTransport']],
   ['nexus-ai-pro/realtime/openai-webrtc', ['OpenAIWebRTCTransport']],
   ['nexus-ai-pro/realtime/openai-websocket', ['OpenAIWebSocketTransport']],
