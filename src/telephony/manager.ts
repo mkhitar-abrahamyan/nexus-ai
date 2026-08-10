@@ -1,13 +1,20 @@
 import type {
   CreateCallRequest,
   CreateCallResponse,
+  EndCallRequest,
+  GetCallRequest,
+  ListPhoneNumbersRequest,
+  TelephonyCallDetails,
   TelephonyConfig,
   TelephonyMediaStreamEvent,
   TelephonyOutboundAudioMessage,
+  TelephonyPhoneNumber,
   TelephonyProvider,
   TelephonyResponseRequest,
+  TelephonyStatusCallback,
   TelephonyWebhookResponse,
   TelephonyWebhookValidationRequest,
+  UpdatePhoneNumberRequest,
 } from '../types/telephony.js';
 import { TelephonyCapabilityError, TelephonyProviderError } from './errors.js';
 
@@ -16,7 +23,12 @@ type TelephonyCapability =
   | 'createWebhookResponse'
   | 'validateWebhook'
   | 'parseMediaStreamEvent'
-  | 'formatAudioMessage';
+  | 'formatAudioMessage'
+  | 'getCall'
+  | 'endCall'
+  | 'parseStatusCallback'
+  | 'listPhoneNumbers'
+  | 'updatePhoneNumber';
 
 export class TelephonyManager {
   private providers = new Map<string, TelephonyProvider>();
@@ -76,6 +88,81 @@ export class TelephonyManager {
     const provider = this.resolveProvider('validateWebhook', request.provider || this.config.defaultProvider);
     if (!provider.validateWebhook) throw new TelephonyCapabilityError(provider.info.name, 'webhook validation');
     return provider.validateWebhook(request);
+  }
+
+  async getCall(request: GetCallRequest): Promise<TelephonyCallDetails> {
+    const provider = this.resolveProvider('getCall', request.provider || this.config.defaultProvider);
+    if (!provider.getCall) throw new TelephonyCapabilityError(provider.info.name, 'call lookup');
+
+    try {
+      return await provider.getCall(request);
+    } catch (error) {
+      if (error instanceof TelephonyProviderError) throw error;
+      throw new TelephonyProviderError(
+        `Telephony call lookup failed for provider "${provider.info.name}"`,
+        provider.info.name,
+        error,
+      );
+    }
+  }
+
+  async endCall(request: EndCallRequest): Promise<TelephonyCallDetails> {
+    const provider = this.resolveProvider('endCall', request.provider || this.config.defaultProvider);
+    if (!provider.endCall) throw new TelephonyCapabilityError(provider.info.name, 'call control');
+
+    try {
+      return await provider.endCall(request);
+    } catch (error) {
+      if (error instanceof TelephonyProviderError) throw error;
+      throw new TelephonyProviderError(
+        `Telephony call hangup failed for provider "${provider.info.name}"`,
+        provider.info.name,
+        error,
+      );
+    }
+  }
+
+  parseStatusCallback(
+    providerName: string,
+    body: string | URLSearchParams | Record<string, string | number | boolean | undefined>,
+  ): TelephonyStatusCallback | undefined {
+    const provider = this.resolveProvider('parseStatusCallback', providerName);
+    if (!provider.parseStatusCallback) {
+      throw new TelephonyCapabilityError(provider.info.name, 'status callback parsing');
+    }
+    return provider.parseStatusCallback(body);
+  }
+
+  async listPhoneNumbers(request: ListPhoneNumbersRequest = {}): Promise<TelephonyPhoneNumber[]> {
+    const provider = this.resolveProvider('listPhoneNumbers', request.provider || this.config.defaultProvider);
+    if (!provider.listPhoneNumbers) throw new TelephonyCapabilityError(provider.info.name, 'phone number listing');
+
+    try {
+      return await provider.listPhoneNumbers(request);
+    } catch (error) {
+      if (error instanceof TelephonyProviderError) throw error;
+      throw new TelephonyProviderError(
+        `Telephony phone number listing failed for provider "${provider.info.name}"`,
+        provider.info.name,
+        error,
+      );
+    }
+  }
+
+  async updatePhoneNumber(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber> {
+    const provider = this.resolveProvider('updatePhoneNumber', request.provider || this.config.defaultProvider);
+    if (!provider.updatePhoneNumber) throw new TelephonyCapabilityError(provider.info.name, 'phone number updates');
+
+    try {
+      return await provider.updatePhoneNumber(request);
+    } catch (error) {
+      if (error instanceof TelephonyProviderError) throw error;
+      throw new TelephonyProviderError(
+        `Telephony phone number update failed for provider "${provider.info.name}"`,
+        provider.info.name,
+        error,
+      );
+    }
   }
 
   parseMediaStreamEvent(

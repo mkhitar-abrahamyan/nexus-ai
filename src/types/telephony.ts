@@ -25,6 +25,8 @@ export interface TelephonyProviderInfo {
     mediaStreams?: boolean;
     bidirectionalStreams?: boolean;
     webhookValidation?: boolean;
+    callControl?: boolean;
+    phoneNumbers?: boolean;
   };
 }
 
@@ -99,6 +101,93 @@ export interface CreateCallResponse {
   to: string;
   from: string;
   raw?: unknown;
+}
+
+export interface GetCallRequest {
+  provider?: string;
+  callId: string;
+  signal?: AbortSignal;
+}
+
+export interface EndCallRequest {
+  provider?: string;
+  callId: string;
+  /** Provider-side end state. `completed` hangs up; `canceled` drops a call that has not been answered. */
+  status?: 'completed' | 'canceled';
+  signal?: AbortSignal;
+}
+
+/**
+ * A call as the provider currently reports it. `durationSeconds` is the field billing should meter on;
+ * it is only populated once the provider considers the call finished.
+ */
+export interface TelephonyCallDetails {
+  callId: string;
+  providerUsed: string;
+  status: TelephonyCallStatus;
+  direction?: TelephonyCallDirection;
+  from?: string;
+  to?: string;
+  durationSeconds?: number;
+  startedAt?: string;
+  endedAt?: string;
+  price?: number;
+  priceUnit?: string;
+  raw?: unknown;
+}
+
+/**
+ * A parsed provider status webhook. Apps that meter usage should prefer this over media-stream
+ * lifecycle events, because it is the provider's authoritative record of how long the call ran.
+ */
+export interface TelephonyStatusCallback {
+  providerUsed: string;
+  callId: string;
+  status: TelephonyCallStatus;
+  direction?: TelephonyCallDirection;
+  from?: string;
+  to?: string;
+  durationSeconds?: number;
+  endedReason?: string;
+  raw?: unknown;
+}
+
+export interface TelephonyPhoneNumber {
+  /** Provider-side identifier used to update the number (Twilio: the IncomingPhoneNumber SID). */
+  id: string;
+  providerUsed: string;
+  phoneNumber: string;
+  friendlyName?: string;
+  voiceUrl?: string;
+  voiceMethod?: TelephonyHttpMethod;
+  statusCallbackUrl?: string;
+  statusCallbackMethod?: TelephonyHttpMethod;
+  capabilities?: {
+    voice?: boolean;
+    sms?: boolean;
+    mms?: boolean;
+  };
+  raw?: unknown;
+}
+
+export interface ListPhoneNumbersRequest {
+  provider?: string;
+  /** Filter to an exact number in E.164 form. */
+  phoneNumber?: string;
+  pageSize?: number;
+  signal?: AbortSignal;
+}
+
+export interface UpdatePhoneNumberRequest {
+  provider?: string;
+  /** Provider-side identifier from {@link TelephonyPhoneNumber.id}. */
+  id: string;
+  friendlyName?: string;
+  voiceUrl?: string;
+  voiceMethod?: TelephonyHttpMethod;
+  statusCallbackUrl?: string;
+  statusCallbackMethod?: TelephonyHttpMethod;
+  signal?: AbortSignal;
 }
 
 export interface TelephonyWebhookValidationRequest {
@@ -199,6 +288,13 @@ export interface TelephonyProvider {
     payload: string,
     options?: { event?: 'media' | 'mark' | 'clear'; markName?: string },
   ): TelephonyOutboundAudioMessage;
+  getCall?(request: GetCallRequest): Promise<TelephonyCallDetails>;
+  endCall?(request: EndCallRequest): Promise<TelephonyCallDetails>;
+  parseStatusCallback?(
+    body: string | URLSearchParams | Record<string, string | number | boolean | undefined>,
+  ): TelephonyStatusCallback | undefined;
+  listPhoneNumbers?(request?: ListPhoneNumbersRequest): Promise<TelephonyPhoneNumber[]>;
+  updatePhoneNumber?(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber>;
 }
 
 export interface TelephonyConfig {

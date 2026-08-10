@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-cjs/
 coverage/
 .nyc_output/
 .turbo/

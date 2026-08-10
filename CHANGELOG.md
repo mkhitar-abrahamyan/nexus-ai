@@ -4,6 +4,31 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-10
+
+### Added
+
+- A `telephony/realtime-bridge` subpath joining a provider media stream to a realtime session:
+  inbound-only caller audio forwarding, outbound audio framing in emission order, barge-in that clears
+  provider-queued audio before cancelling the response, playback marks that resolve
+  `markAudioPlayed()`, stream lifecycle, and custom stream parameters for tenant routing.
+- `twilioRealtimeAudioOptions()` pinning both directions to 8 kHz G.711 mu-law so telephony audio
+  reaches the model without transcoding.
+- Call control and usage metering on `TelephonyProvider` and the Twilio adapter: `getCall`, `endCall`,
+  and `parseStatusCallback`, surfaced on `NexusAI` as `getCall`, `endCall`, and
+  `parseTelephonyStatusCallback`. Status callbacks carry the authoritative billable call duration.
+- Phone-number management on `TelephonyProvider` and the Twilio adapter: `listPhoneNumbers` and
+  `updatePhoneNumber`, so an app can point a number at its own voice webhook and status callback.
+
+### Changed
+
+- The package now ships parallel ESM and CommonJS builds. Every export subpath gained a `require`
+  condition, so NestJS and other `"module": "commonjs"` consumers can load it without a dynamic-import
+  shim. Types stay shared between both builds, and the packed-size guards were raised to account for the
+  duplicated JS payload.
+
+## [1.1.0] - 2026-07-28
+
 ### Added
 
 - An experimental provider-neutral image operation family with portable asset locations,

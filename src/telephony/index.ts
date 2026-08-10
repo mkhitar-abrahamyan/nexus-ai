@@ -1,10 +1,16 @@
 export { TelephonyManager } from './manager.js';
 export { TelephonyProviderError, TelephonyCapabilityError } from './errors.js';
 export { createVoiceTwiML } from './twiml.js';
+export { createTelephonyRealtimeBridge, twilioRealtimeAudioOptions } from './realtime-bridge.js';
+export type { TelephonyRealtimeBridge, TelephonyRealtimeBridgeOptions } from './realtime-bridge.js';
 export type {
   CreateCallRequest,
   CreateCallResponse,
+  EndCallRequest,
+  GetCallRequest,
+  ListPhoneNumbersRequest,
   TelephonyAudioEncoding,
+  TelephonyCallDetails,
   TelephonyCallDirection,
   TelephonyCallStatus,
   TelephonyConfig,
@@ -16,14 +22,17 @@ export type {
   TelephonyMediaEvent,
   TelephonyMediaStreamEvent,
   TelephonyOutboundAudioMessage,
+  TelephonyPhoneNumber,
   TelephonyProvider,
   TelephonyProviderInfo,
   TelephonyResponseRequest,
   TelephonyStartEvent,
+  TelephonyStatusCallback,
   TelephonyStopEvent,
   TelephonyStreamConfig,
   TelephonyStreamMode,
   TelephonyStreamTrack,
   TelephonyWebhookResponse,
   TelephonyWebhookValidationRequest,
+  UpdatePhoneNumberRequest,
 } from '../types/telephony.js';

@@ -199,6 +199,7 @@ const expectedSubpaths = [
   './realtime/openai-server',
   './realtime/mock',
   './telephony',
+  './telephony/realtime-bridge',
   './telephony/twilio',
   './cache',
   './cache/adapters',

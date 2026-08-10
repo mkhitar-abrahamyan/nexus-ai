@@ -2,14 +2,23 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type {
   CreateCallRequest,
   CreateCallResponse,
+  EndCallRequest,
+  GetCallRequest,
+  ListPhoneNumbersRequest,
+  TelephonyCallDetails,
+  TelephonyCallDirection,
   TelephonyCallStatus,
+  TelephonyHttpMethod,
   TelephonyMediaStreamEvent,
   TelephonyOutboundAudioMessage,
+  TelephonyPhoneNumber,
   TelephonyProvider,
   TelephonyProviderInfo,
   TelephonyResponseRequest,
+  TelephonyStatusCallback,
   TelephonyWebhookResponse,
   TelephonyWebhookValidationRequest,
+  UpdatePhoneNumberRequest,
 } from '../../types/telephony.js';
 import { TelephonyProviderError } from '../errors.js';
 import { createVoiceTwiML } from '../twiml.js';
@@ -33,14 +42,14 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       mediaStreams: true,
       bidirectionalStreams: true,
       webhookValidation: true,
+      callControl: true,
+      phoneNumbers: true,
     },
   };
 
   constructor(private config: TwilioTelephonyProviderConfig = {}) {}
 
   async createCall(request: CreateCallRequest): Promise<CreateCallResponse> {
-    const accountSid = this.requireConfig('accountSid');
-    const authToken = this.requireConfig('authToken');
     const body = new URLSearchParams();
 
     body.set('To', request.to);
@@ -70,22 +79,13 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       );
     }
 
-    const response = await this.fetchImpl()(`${this.baseUrl()}/Accounts/${accountSid}/Calls.json`, {
+    const raw = await this.request('/Calls.json', {
       method: 'POST',
       body,
-      headers: {
-        authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
-        'content-type': 'application/x-www-form-urlencoded',
-      },
       signal: request.signal,
+      errorPrefix: 'Twilio call request failed',
     });
 
-    if (!response.ok) {
-      const message = await response.text().catch(() => response.statusText);
-      throw new TelephonyProviderError(`Twilio call request failed: ${response.status} ${message}`, 'twilio');
-    }
-
-    const raw = (await response.json()) as TwilioPayload;
     return {
       callId: stringValue(raw.sid) || '',
       providerUsed: 'twilio',
@@ -123,6 +123,90 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
         .join('');
     const expected = createHmac('sha1', token).update(payload).digest('base64');
     return safeEqual(signature, expected);
+  }
+
+  async getCall(request: GetCallRequest): Promise<TelephonyCallDetails> {
+    const raw = await this.request(`/Calls/${encodeURIComponent(request.callId)}.json`, {
+      method: 'GET',
+      signal: request.signal,
+      errorPrefix: 'Twilio call lookup failed',
+    });
+    return this.toCallDetails(raw, request.callId);
+  }
+
+  async endCall(request: EndCallRequest): Promise<TelephonyCallDetails> {
+    const body = new URLSearchParams();
+    body.set('Status', request.status || 'completed');
+
+    const raw = await this.request(`/Calls/${encodeURIComponent(request.callId)}.json`, {
+      method: 'POST',
+      body,
+      signal: request.signal,
+      errorPrefix: 'Twilio call hangup failed',
+    });
+    return this.toCallDetails(raw, request.callId);
+  }
+
+  parseStatusCallback(
+    body: string | URLSearchParams | Record<string, string | number | boolean | undefined>,
+  ): TelephonyStatusCallback | undefined {
+    const params = toParamRecord(body);
+    const callId = params.CallSid || params.callSid || params.sid;
+    if (!callId) return undefined;
+
+    // Twilio sends CallDuration on completed-call callbacks and Duration on recording callbacks.
+    const durationSeconds = numberValue(params.CallDuration ?? params.Duration ?? params.duration);
+
+    return {
+      providerUsed: 'twilio',
+      callId,
+      status: normalizeStatus(params.CallStatus || params.status),
+      direction: normalizeDirection(params.Direction || params.direction),
+      from: params.From || params.from,
+      to: params.To || params.to,
+      durationSeconds,
+      // Twilio only sets SipResponseCode/ErrorCode when a call failed to complete normally.
+      endedReason: params.ErrorCode || params.SipResponseCode || undefined,
+      raw: params,
+    };
+  }
+
+  async listPhoneNumbers(request: ListPhoneNumbersRequest = {}): Promise<TelephonyPhoneNumber[]> {
+    const query = new URLSearchParams();
+    if (request.phoneNumber) query.set('PhoneNumber', request.phoneNumber);
+    if (request.pageSize !== undefined) query.set('PageSize', String(request.pageSize));
+    const suffix = query.size ? `?${query.toString()}` : '';
+
+    const raw = await this.request(`/IncomingPhoneNumbers.json${suffix}`, {
+      method: 'GET',
+      signal: request.signal,
+      errorPrefix: 'Twilio phone number lookup failed',
+    });
+
+    const list = raw.incoming_phone_numbers;
+    if (!Array.isArray(list)) return [];
+    return list.map((entry) => this.toPhoneNumber(objectValue(entry)));
+  }
+
+  async updatePhoneNumber(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber> {
+    const body = new URLSearchParams();
+    if (request.friendlyName !== undefined) body.set('FriendlyName', request.friendlyName);
+    if (request.voiceUrl !== undefined) body.set('VoiceUrl', request.voiceUrl);
+    if (request.voiceMethod !== undefined) body.set('VoiceMethod', request.voiceMethod);
+    if (request.statusCallbackUrl !== undefined) body.set('StatusCallback', request.statusCallbackUrl);
+    if (request.statusCallbackMethod !== undefined) body.set('StatusCallbackMethod', request.statusCallbackMethod);
+
+    if (!body.size) {
+      throw new TelephonyProviderError('Twilio phone number update requires at least one field to change', 'twilio');
+    }
+
+    const raw = await this.request(`/IncomingPhoneNumbers/${encodeURIComponent(request.id)}.json`, {
+      method: 'POST',
+      body,
+      signal: request.signal,
+      errorPrefix: 'Twilio phone number update failed',
+    });
+    return this.toPhoneNumber(raw);
   }
 
   parseMediaStreamEvent(message: string | Record<string, unknown>): TelephonyMediaStreamEvent | undefined {
@@ -222,6 +306,68 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     return { event, streamId, body };
   }
 
+  private async request(
+    path: string,
+    options: { method: 'GET' | 'POST'; body?: URLSearchParams; signal?: AbortSignal; errorPrefix: string },
+  ): Promise<TwilioPayload> {
+    const accountSid = this.requireConfig('accountSid');
+    const authToken = this.requireConfig('authToken');
+
+    const response = await this.fetchImpl()(`${this.baseUrl()}/Accounts/${accountSid}${path}`, {
+      method: options.method,
+      body: options.body,
+      headers: {
+        authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+        ...(options.body ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
+      },
+      signal: options.signal,
+    });
+
+    if (!response.ok) {
+      const message = await response.text().catch(() => response.statusText);
+      throw new TelephonyProviderError(`${options.errorPrefix}: ${response.status} ${message}`, 'twilio');
+    }
+
+    return (await response.json()) as TwilioPayload;
+  }
+
+  private toCallDetails(raw: TwilioPayload, fallbackCallId: string): TelephonyCallDetails {
+    return {
+      callId: stringValue(raw.sid) || fallbackCallId,
+      providerUsed: 'twilio',
+      status: normalizeStatus(stringValue(raw.status)),
+      direction: normalizeDirection(stringValue(raw.direction)),
+      from: stringValue(raw.from),
+      to: stringValue(raw.to),
+      durationSeconds: numberValue(raw.duration),
+      startedAt: stringValue(raw.start_time),
+      endedAt: stringValue(raw.end_time),
+      price: numberValue(raw.price),
+      priceUnit: stringValue(raw.price_unit),
+      raw,
+    };
+  }
+
+  private toPhoneNumber(raw: TwilioPayload): TelephonyPhoneNumber {
+    const capabilities = objectValue(raw.capabilities);
+    return {
+      id: stringValue(raw.sid) || '',
+      providerUsed: 'twilio',
+      phoneNumber: stringValue(raw.phone_number) || '',
+      friendlyName: stringValue(raw.friendly_name),
+      voiceUrl: stringValue(raw.voice_url),
+      voiceMethod: normalizeHttpMethod(stringValue(raw.voice_method)),
+      statusCallbackUrl: stringValue(raw.status_callback),
+      statusCallbackMethod: normalizeHttpMethod(stringValue(raw.status_callback_method)),
+      capabilities: {
+        voice: capabilities.voice === true,
+        sms: capabilities.sms === true,
+        mms: capabilities.mms === true,
+      },
+      raw,
+    };
+  }
+
   private requireConfig(key: 'accountSid' | 'authToken'): string {
     const value = this.config[key];
     if (!value) throw new TelephonyProviderError(`Twilio ${key} is required for outbound calls`, 'twilio');
@@ -291,6 +437,35 @@ function normalizeStatus(status: string | undefined): TelephonyCallStatus {
     return status;
   }
   return 'unknown';
+}
+
+function normalizeDirection(direction: string | undefined): TelephonyCallDirection | undefined {
+  if (!direction) return undefined;
+  // Twilio reports outbound calls as `outbound-api` or `outbound-dial` depending on how they started.
+  return direction.startsWith('outbound') ? 'outbound' : 'inbound';
+}
+
+function normalizeHttpMethod(method: string | undefined): TelephonyHttpMethod | undefined {
+  if (!method) return undefined;
+  return method.toUpperCase() === 'GET' ? 'GET' : 'POST';
+}
+
+function toParamRecord(
+  body: string | URLSearchParams | Record<string, string | number | boolean | undefined>,
+): Record<string, string> {
+  const params: Record<string, string> = {};
+
+  if (body instanceof URLSearchParams) {
+    for (const [key, value] of body.entries()) params[key] = value;
+  } else if (typeof body === 'string') {
+    for (const [key, value] of new URLSearchParams(body).entries()) params[key] = value;
+  } else if (body && typeof body === 'object') {
+    for (const [key, value] of Object.entries(body)) {
+      if (value !== undefined) params[key] = String(value);
+    }
+  }
+
+  return params;
 }
 
 function normalizeTrack(track: string | undefined): 'inbound' | 'outbound' | 'both' {

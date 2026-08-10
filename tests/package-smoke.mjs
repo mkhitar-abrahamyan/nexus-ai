@@ -58,7 +58,14 @@ const imports = [
     exports: ['createOpenAIRealtimeCall', 'createOpenAIRealtimeClientSecret'],
   },
   { specifier: 'nexus-ai-pro/realtime/mock', exports: ['MockRealtimeTransport'] },
-  { specifier: 'nexus-ai-pro/telephony', exports: ['TelephonyManager', 'createVoiceTwiML'] },
+  {
+    specifier: 'nexus-ai-pro/telephony',
+    exports: ['TelephonyManager', 'createVoiceTwiML', 'createTelephonyRealtimeBridge'],
+  },
+  {
+    specifier: 'nexus-ai-pro/telephony/realtime-bridge',
+    exports: ['createTelephonyRealtimeBridge', 'twilioRealtimeAudioOptions'],
+  },
   { specifier: 'nexus-ai-pro/telephony/twilio', exports: ['TwilioTelephonyProvider'] },
   { specifier: 'nexus-ai-pro/cache', exports: ['MemoryCacheAdapter'] },
   { specifier: 'nexus-ai-pro/cache/adapters', exports: ['MemoryCacheAdapter'] },
@@ -81,4 +88,17 @@ for (const item of imports) {
     assert.ok(exportName in module, `${item.specifier} should export ${exportName}`);
   }
   console.log(`ok - ${item.specifier}`);
+}
+
+// The package is authored as ESM but ships a CommonJS build so require()-based consumers
+// (NestJS and other tsc "module": "commonjs" apps) can load it without a dynamic import shim.
+const { createRequire } = await import('node:module');
+const require = createRequire(import.meta.url);
+
+for (const item of imports) {
+  const module = require(item.specifier);
+  for (const exportName of item.exports) {
+    assert.ok(exportName in module, `require("${item.specifier}") should export ${exportName}`);
+  }
+  console.log(`ok - require(${item.specifier})`);
 }

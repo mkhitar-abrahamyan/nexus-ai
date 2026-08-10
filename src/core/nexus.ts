@@ -18,12 +18,19 @@ import type { ImageProvider } from '../types/images.js';
 import type {
   CreateCallRequest,
   CreateCallResponse,
+  EndCallRequest,
+  GetCallRequest,
+  ListPhoneNumbersRequest,
+  TelephonyCallDetails,
   TelephonyMediaStreamEvent,
   TelephonyOutboundAudioMessage,
+  TelephonyPhoneNumber,
   TelephonyProvider,
   TelephonyResponseRequest,
+  TelephonyStatusCallback,
   TelephonyWebhookResponse,
   TelephonyWebhookValidationRequest,
+  UpdatePhoneNumberRequest,
 } from '../types/telephony.js';
 import type { PipelineStep } from '../pipeline/types.js';
 import type { BaseProvider } from '../providers/base.js';
@@ -540,6 +547,45 @@ export class NexusAI {
     options?: { event?: 'media' | 'mark' | 'clear'; markName?: string },
   ): TelephonyOutboundAudioMessage {
     return this.telephonyManager.formatAudioMessage(providerName, streamId, payload, options);
+  }
+
+  /**
+   * Reads a call's current provider-side state, including the duration usage metering bills on.
+   */
+  async getCall(request: GetCallRequest): Promise<TelephonyCallDetails> {
+    return this.telephonyManager.getCall(request);
+  }
+
+  /**
+   * Hangs up a live call through the provider's call-control API.
+   */
+  async endCall(request: EndCallRequest): Promise<TelephonyCallDetails> {
+    return this.telephonyManager.endCall(request);
+  }
+
+  /**
+   * Parses a provider status webhook into a normalized record. Prefer this over media-stream
+   * lifecycle events when metering usage.
+   */
+  parseTelephonyStatusCallback(
+    providerName: string,
+    body: string | URLSearchParams | Record<string, string | number | boolean | undefined>,
+  ): TelephonyStatusCallback | undefined {
+    return this.telephonyManager.parseStatusCallback(providerName, body);
+  }
+
+  /**
+   * Lists phone numbers owned by the provider account.
+   */
+  async listPhoneNumbers(request?: ListPhoneNumbersRequest): Promise<TelephonyPhoneNumber[]> {
+    return this.telephonyManager.listPhoneNumbers(request);
+  }
+
+  /**
+   * Points a phone number at a voice webhook and/or status callback.
+   */
+  async updatePhoneNumber(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber> {
+    return this.telephonyManager.updatePhoneNumber(request);
   }
 
   /**

@@ -1,9 +1,9 @@
 {
   "name": "nexus-ai-pro",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A typed multi-provider AI pipeline for Node.js with routing, streaming, tools, and guardrails",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist-cjs/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "nexus": "dist/cli.js"
@@ -12,221 +12,279 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist-cjs/index.js"
     },
     "./core": {
       "types": "./dist/core/nexus.d.ts",
-      "import": "./dist/core/nexus.js"
+      "import": "./dist/core/nexus.js",
+      "require": "./dist-cjs/core/nexus.js"
     },
     "./streaming": {
       "types": "./dist/core/streaming.d.ts",
-      "import": "./dist/core/streaming.js"
+      "import": "./dist/core/streaming.js",
+      "require": "./dist-cjs/core/streaming.js"
     },
     "./config": {
       "types": "./dist/core/config-builder.d.ts",
-      "import": "./dist/core/config-builder.js"
+      "import": "./dist/core/config-builder.js",
+      "require": "./dist-cjs/core/config-builder.js"
     },
     "./providers": {
       "types": "./dist/providers/base.d.ts",
-      "import": "./dist/providers/base.js"
+      "import": "./dist/providers/base.js",
+      "require": "./dist-cjs/providers/base.js"
     },
     "./providers/anthropic": {
       "types": "./dist/providers/anthropic.d.ts",
-      "import": "./dist/providers/anthropic.js"
+      "import": "./dist/providers/anthropic.js",
+      "require": "./dist-cjs/providers/anthropic.js"
     },
     "./providers/azure-openai": {
       "types": "./dist/providers/azure-openai.d.ts",
-      "import": "./dist/providers/azure-openai.js"
+      "import": "./dist/providers/azure-openai.js",
+      "require": "./dist-cjs/providers/azure-openai.js"
     },
     "./providers/base": {
       "types": "./dist/providers/base.d.ts",
-      "import": "./dist/providers/base.js"
+      "import": "./dist/providers/base.js",
+      "require": "./dist-cjs/providers/base.js"
     },
     "./providers/cohere": {
       "types": "./dist/providers/cohere.d.ts",
-      "import": "./dist/providers/cohere.js"
+      "import": "./dist/providers/cohere.js",
+      "require": "./dist-cjs/providers/cohere.js"
     },
     "./providers/deepseek": {
       "types": "./dist/providers/deepseek.d.ts",
-      "import": "./dist/providers/deepseek.js"
+      "import": "./dist/providers/deepseek.js",
+      "require": "./dist-cjs/providers/deepseek.js"
     },
     "./providers/errors": {
       "types": "./dist/providers/errors.d.ts",
-      "import": "./dist/providers/errors.js"
+      "import": "./dist/providers/errors.js",
+      "require": "./dist-cjs/providers/errors.js"
     },
     "./providers/google": {
       "types": "./dist/providers/google.d.ts",
-      "import": "./dist/providers/google.js"
+      "import": "./dist/providers/google.js",
+      "require": "./dist-cjs/providers/google.js"
     },
     "./providers/groq": {
       "types": "./dist/providers/groq.d.ts",
-      "import": "./dist/providers/groq.js"
+      "import": "./dist/providers/groq.js",
+      "require": "./dist-cjs/providers/groq.js"
     },
     "./providers/llamacpp": {
       "types": "./dist/providers/llamacpp.d.ts",
-      "import": "./dist/providers/llamacpp.js"
+      "import": "./dist/providers/llamacpp.js",
+      "require": "./dist-cjs/providers/llamacpp.js"
     },
     "./providers/lmstudio": {
       "types": "./dist/providers/lmstudio.d.ts",
-      "import": "./dist/providers/lmstudio.js"
+      "import": "./dist/providers/lmstudio.js",
+      "require": "./dist-cjs/providers/lmstudio.js"
     },
     "./providers/mistral": {
       "types": "./dist/providers/mistral.d.ts",
-      "import": "./dist/providers/mistral.js"
+      "import": "./dist/providers/mistral.js",
+      "require": "./dist-cjs/providers/mistral.js"
     },
     "./providers/ollama": {
       "types": "./dist/providers/ollama.d.ts",
-      "import": "./dist/providers/ollama.js"
+      "import": "./dist/providers/ollama.js",
+      "require": "./dist-cjs/providers/ollama.js"
     },
     "./providers/openai": {
       "types": "./dist/providers/openai.d.ts",
-      "import": "./dist/providers/openai.js"
+      "import": "./dist/providers/openai.js",
+      "require": "./dist-cjs/providers/openai.js"
     },
     "./providers/openrouter": {
       "types": "./dist/providers/openrouter.d.ts",
-      "import": "./dist/providers/openrouter.js"
+      "import": "./dist/providers/openrouter.js",
+      "require": "./dist-cjs/providers/openrouter.js"
     },
     "./providers/type-guards": {
       "types": "./dist/providers/type-guards.d.ts",
-      "import": "./dist/providers/type-guards.js"
+      "import": "./dist/providers/type-guards.js",
+      "require": "./dist-cjs/providers/type-guards.js"
     },
     "./security": {
       "types": "./dist/security/index.d.ts",
-      "import": "./dist/security/index.js"
+      "import": "./dist/security/index.js",
+      "require": "./dist-cjs/security/index.js"
     },
     "./optimizer": {
       "types": "./dist/optimizer/index.d.ts",
-      "import": "./dist/optimizer/index.js"
+      "import": "./dist/optimizer/index.js",
+      "require": "./dist-cjs/optimizer/index.js"
     },
     "./context": {
       "types": "./dist/context/index.d.ts",
-      "import": "./dist/context/index.js"
+      "import": "./dist/context/index.js",
+      "require": "./dist-cjs/context/index.js"
     },
     "./voice": {
       "types": "./dist/voice/index.d.ts",
-      "import": "./dist/voice/index.js"
+      "import": "./dist/voice/index.js",
+      "require": "./dist-cjs/voice/index.js"
     },
     "./voice/openai": {
       "types": "./dist/voice/providers/openai.d.ts",
-      "import": "./dist/voice/providers/openai.js"
+      "import": "./dist/voice/providers/openai.js",
+      "require": "./dist-cjs/voice/providers/openai.js"
     },
     "./voice/session": {
       "types": "./dist/voice/session.d.ts",
-      "import": "./dist/voice/session.js"
+      "import": "./dist/voice/session.js",
+      "require": "./dist-cjs/voice/session.js"
     },
     "./images": {
       "types": "./dist/images/index.d.ts",
-      "import": "./dist/images/index.js"
+      "import": "./dist/images/index.js",
+      "require": "./dist-cjs/images/index.js"
     },
     "./images/assets": {
       "types": "./dist/images/assets.d.ts",
-      "import": "./dist/images/assets.js"
+      "import": "./dist/images/assets.js",
+      "require": "./dist-cjs/images/assets.js"
     },
     "./images/mock": {
       "types": "./dist/images/mock.d.ts",
-      "import": "./dist/images/mock.js"
+      "import": "./dist/images/mock.js",
+      "require": "./dist-cjs/images/mock.js"
     },
     "./images/openai": {
       "types": "./dist/images/openai.d.ts",
-      "import": "./dist/images/openai.js"
+      "import": "./dist/images/openai.js",
+      "require": "./dist-cjs/images/openai.js"
     },
     "./realtime": {
       "types": "./dist/realtime/index.d.ts",
-      "import": "./dist/realtime/index.js"
+      "import": "./dist/realtime/index.js",
+      "require": "./dist-cjs/realtime/index.js"
     },
     "./realtime/session": {
       "types": "./dist/realtime/session.d.ts",
-      "import": "./dist/realtime/session.js"
+      "import": "./dist/realtime/session.js",
+      "require": "./dist-cjs/realtime/session.js"
     },
     "./realtime/tools": {
       "types": "./dist/realtime/tools.d.ts",
-      "import": "./dist/realtime/tools.js"
+      "import": "./dist/realtime/tools.js",
+      "require": "./dist-cjs/realtime/tools.js"
     },
     "./realtime/conversation": {
       "types": "./dist/realtime/conversation.d.ts",
-      "import": "./dist/realtime/conversation.js"
+      "import": "./dist/realtime/conversation.js",
+      "require": "./dist-cjs/realtime/conversation.js"
     },
     "./realtime/openai-webrtc": {
       "types": "./dist/realtime/openai-webrtc.transport.d.ts",
-      "import": "./dist/realtime/openai-webrtc.transport.js"
+      "import": "./dist/realtime/openai-webrtc.transport.js",
+      "require": "./dist-cjs/realtime/openai-webrtc.transport.js"
     },
     "./realtime/openai-websocket": {
       "types": "./dist/realtime/openai-websocket.transport.d.ts",
-      "import": "./dist/realtime/openai-websocket.transport.js"
+      "import": "./dist/realtime/openai-websocket.transport.js",
+      "require": "./dist-cjs/realtime/openai-websocket.transport.js"
     },
     "./realtime/openai-server": {
       "types": "./dist/realtime/openai-server.d.ts",
-      "import": "./dist/realtime/openai-server.js"
+      "import": "./dist/realtime/openai-server.js",
+      "require": "./dist-cjs/realtime/openai-server.js"
     },
     "./realtime/mock": {
       "types": "./dist/realtime/mock.transport.d.ts",
-      "import": "./dist/realtime/mock.transport.js"
+      "import": "./dist/realtime/mock.transport.js",
+      "require": "./dist-cjs/realtime/mock.transport.js"
     },
     "./telephony": {
       "types": "./dist/telephony/index.d.ts",
-      "import": "./dist/telephony/index.js"
+      "import": "./dist/telephony/index.js",
+      "require": "./dist-cjs/telephony/index.js"
+    },
+    "./telephony/realtime-bridge": {
+      "types": "./dist/telephony/realtime-bridge.d.ts",
+      "import": "./dist/telephony/realtime-bridge.js",
+      "require": "./dist-cjs/telephony/realtime-bridge.js"
     },
     "./telephony/twilio": {
       "types": "./dist/telephony/providers/twilio.d.ts",
-      "import": "./dist/telephony/providers/twilio.js"
+      "import": "./dist/telephony/providers/twilio.js",
+      "require": "./dist-cjs/telephony/providers/twilio.js"
     },
     "./cache": {
       "types": "./dist/cache/adapters.d.ts",
-      "import": "./dist/cache/adapters.js"
+      "import": "./dist/cache/adapters.js",
+      "require": "./dist-cjs/cache/adapters.js"
     },
     "./cache/adapters": {
       "types": "./dist/cache/adapters.d.ts",
-      "import": "./dist/cache/adapters.js"
+      "import": "./dist/cache/adapters.js",
+      "require": "./dist-cjs/cache/adapters.js"
     },
     "./cache/memory-cache": {
       "types": "./dist/cache/memory-cache.d.ts",
-      "import": "./dist/cache/memory-cache.js"
+      "import": "./dist/cache/memory-cache.js",
+      "require": "./dist-cjs/cache/memory-cache.js"
     },
     "./cache/semantic-cache": {
       "types": "./dist/cache/semantic-cache.d.ts",
-      "import": "./dist/cache/semantic-cache.js"
+      "import": "./dist/cache/semantic-cache.js",
+      "require": "./dist-cjs/cache/semantic-cache.js"
     },
     "./models": {
       "types": "./dist/models/registry.d.ts",
-      "import": "./dist/models/registry.js"
+      "import": "./dist/models/registry.js",
+      "require": "./dist-cjs/models/registry.js"
     },
     "./rag": {
       "types": "./dist/rag/ingestion.d.ts",
-      "import": "./dist/rag/ingestion.js"
+      "import": "./dist/rag/ingestion.js",
+      "require": "./dist-cjs/rag/ingestion.js"
     },
     "./evals": {
       "types": "./dist/evals/index.d.ts",
-      "import": "./dist/evals/index.js"
+      "import": "./dist/evals/index.js",
+      "require": "./dist-cjs/evals/index.js"
     },
     "./evals/judge": {
       "types": "./dist/evals/judge.d.ts",
-      "import": "./dist/evals/judge.js"
+      "import": "./dist/evals/judge.js",
+      "require": "./dist-cjs/evals/judge.js"
     },
     "./jobs": {
       "types": "./dist/jobs/queue.d.ts",
-      "import": "./dist/jobs/queue.js"
+      "import": "./dist/jobs/queue.js",
+      "require": "./dist-cjs/jobs/queue.js"
     },
     "./jobs/batch": {
       "types": "./dist/jobs/batch.d.ts",
-      "import": "./dist/jobs/batch.js"
+      "import": "./dist/jobs/batch.js",
+      "require": "./dist-cjs/jobs/batch.js"
     },
     "./jobs/durable-adapters": {
       "types": "./dist/jobs/durable-adapters.d.ts",
-      "import": "./dist/jobs/durable-adapters.js"
+      "import": "./dist/jobs/durable-adapters.js",
+      "require": "./dist-cjs/jobs/durable-adapters.js"
     },
     "./jobs/queue": {
       "types": "./dist/jobs/queue.d.ts",
-      "import": "./dist/jobs/queue.js"
+      "import": "./dist/jobs/queue.js",
+      "require": "./dist-cjs/jobs/queue.js"
     },
     "./workflows": {
       "types": "./dist/workflow/chains.d.ts",
-      "import": "./dist/workflow/chains.js"
+      "import": "./dist/workflow/chains.js",
+      "require": "./dist-cjs/workflow/chains.js"
     }
   },
   "scripts": {
-    "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "clean": "node --eval \"for (const dir of ['dist', 'dist-cjs']) require('node:fs').rmSync(dir, { recursive: true, force: true })\"",
     "prebuild": "npm run clean",
-    "build": "tsc",
+    "build": "npm run build:esm && npm run build:cjs",
     "dev": "tsc --watch",
     "example:minimal": "tsx examples/minimal.ts",
     "example:create-nexus": "tsx examples/create-nexus.ts",
@@ -258,7 +316,9 @@
     "check": "npm run format:check && npm run lint && npm test && npm run typecheck:tests && npm run typecheck:examples && npm run typecheck:examples:browser && npm run test:coverage",
     "check:release": "npm run check && npm run pack:dry-run && npm run test:clean-install",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run check:release"
+    "prepublishOnly": "npm run check:release",
+    "build:esm": "tsc",
+    "build:cjs": "tsc -p tsconfig.cjs.json && node scripts/finalize-cjs.mjs"
   },
   "keywords": [
     "ai",
@@ -326,6 +386,7 @@
   "packageManager": "npm@11.14.0",
   "files": [
     "dist",
+    "dist-cjs",
     "README.md",
     "API_STABILITY.md",
     "CHANGELOG.md",
@@ -348,5 +409,6 @@
   },
   "overrides": {
     "esbuild": "^0.28.1"
-  }
+  },
+  "module": "dist/index.js"
 }

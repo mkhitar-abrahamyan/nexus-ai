@@ -15,7 +15,9 @@ Use the whole pipeline for production AI features, or turn pieces off when you o
 npm install nexus-ai-pro
 ```
 
-Requires Node.js 22 or newer. `nexus-ai-pro` is ESM-only: use `import` from an ES module rather than CommonJS `require()`.
+Requires Node.js 22 or newer. The package is authored as ESM and ships both an ESM and a CommonJS build,
+so `import` and `require()` both work — including from NestJS and other apps compiled with
+`"module": "commonjs"`. Types are shared between both builds.
 The main Nexus pipeline is Node-oriented; the isolated realtime subpaths use portable structural
 interfaces and can be bundled for modern browsers.
 
@@ -791,6 +793,80 @@ const call = await ai.createCall({
 
 For smaller apps, skip Twilio entirely and register your own `TelephonyProvider`.
 
+### Phone Agents: Bridging a Call to a Realtime Session
+
+A phone agent needs the telephony media stream and a realtime session joined together. The bridge owns
+that audio path — caller audio in, assistant audio out, barge-in, playback marks, and stream lifecycle —
+while session configuration, tools, and authorization stay in application code.
+
+```ts
+import { createTelephonyRealtimeBridge, twilioRealtimeAudioOptions } from 'nexus-ai-pro/telephony/realtime-bridge';
+import { OpenAIWebSocketTransport } from 'nexus-ai-pro/realtime/openai-websocket';
+import { createRealtimeSession } from 'nexus-ai-pro/realtime/session';
+
+// One socket per call, from your WebSocket server.
+function handleCallSocket(socket: AppWebSocket) {
+  const session = createRealtimeSession({
+    provider: 'openai',
+    model: 'gpt-realtime',
+    transport: new OpenAIWebSocketTransport({ apiKey: process.env.OPENAI_API_KEY!, webSocketFactory }),
+    modalities: ['audio'],
+    instructions: 'You are a scheduling assistant.',
+    tools: [checkAvailability, createBooking],
+    // Telephony audio is 8 kHz G.711 mu-law; this passes it through untranscoded.
+    audio: twilioRealtimeAudioOptions({ output: { voice: 'alloy' } }),
+  });
+
+  const bridge = createTelephonyRealtimeBridge({
+    session,
+    telephony,
+    send: (message) => socket.send(message.body),
+    onStart: (event) => logger.info(`call ${event.callId} started for ${event.parameters?.tenant}`),
+    onStop: () => persistTranscript(session.export('json')),
+    onError: (error) => logger.error(error),
+  });
+
+  socket.on('message', (raw) => bridge.handleMessage(String(raw)));
+  socket.on('close', () => bridge.close());
+}
+```
+
+The bridge feeds only inbound caller audio to the model, so an echoed outbound track never loops back.
+On caller speech it clears audio already queued at the provider and cancels the in-flight response, which
+is what stops the assistant talking over an interruption. Custom `<Parameter>` values from the stream
+instruction are exposed as `bridge.parameters` for tenant and worker routing.
+
+Pass `bargeIn: false` to keep queued audio playing, `autoConnect: false` to connect the session yourself,
+and `await bridge.flush()` when you need outstanding sends to settle.
+
+### Call Control and Usage Metering
+
+Meter billable time from the provider's own record rather than from stream lifecycle events, which do not
+account for ring time or provider-side teardown:
+
+```ts
+// From your status webhook.
+const status = ai.parseTelephonyStatusCallback('twilio', requestBody);
+if (status?.status === 'completed') {
+  await usage.recordCallMinutes({ callId: status.callId, seconds: status.durationSeconds ?? 0 });
+}
+
+// Or read it directly, and hang up from a tool.
+const details = await ai.getCall({ callId });
+await ai.endCall({ callId });
+```
+
+### Pointing a Number at Your Webhook
+
+```ts
+const [number] = await ai.listPhoneNumbers({ phoneNumber: '+15557650000' });
+await ai.updatePhoneNumber({
+  id: number.id,
+  voiceUrl: 'https://api.example.com/voice/incoming',
+  statusCallbackUrl: 'https://api.example.com/voice/status',
+});
+```
+
 ## Security
 
 Security is enabled by default with `standard` mode.
@@ -955,9 +1031,12 @@ import { MockImageProvider } from 'nexus-ai-pro/images/mock';
 import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
 import { createRealtimeSession } from 'nexus-ai-pro/realtime/session';
 import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
+import { TelephonyManager } from 'nexus-ai-pro/telephony';
+import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
+import { createTelephonyRealtimeBridge } from 'nexus-ai-pro/telephony/realtime-bridge';
 ```
 
-Provider SDKs are optional peer dependencies. The package is ESM-only, supports Node.js 22+, and is marked with `sideEffects: false`. Only the entry points listed in the package export map are public; deep imports into `dist` or `src` are unsupported.
+Provider SDKs are optional peer dependencies. The package ships ESM and CommonJS builds, supports Node.js 22+, and is marked with `sideEffects: false`. Only the entry points listed in the package export map are public; deep imports into `dist`, `dist-cjs`, or `src` are unsupported.
 
 ## Examples
 

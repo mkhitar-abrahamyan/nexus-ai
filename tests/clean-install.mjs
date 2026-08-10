@@ -15,8 +15,9 @@ mkdirSync(tempParent, { recursive: true });
 const tempRoot = mkdtempSync(path.join(tempParent, 'clean-install-'));
 const packDir = path.join(tempRoot, 'pack');
 const consumerDir = path.join(tempRoot, 'consumer');
-const MAX_PACKED_BYTES = 225_000;
-const MAX_UNPACKED_BYTES = 1_000_000;
+// The package ships parallel ESM and CommonJS builds, so the JS payload is carried twice.
+const MAX_PACKED_BYTES = 320_000;
+const MAX_UNPACKED_BYTES = 2_000_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
@@ -85,6 +86,12 @@ try {
     'dist/images/openai.d.ts',
     'dist/realtime/index.js',
     'dist/realtime/index.d.ts',
+    'dist/telephony/realtime-bridge.js',
+    'dist/telephony/realtime-bridge.d.ts',
+    'dist-cjs/package.json',
+    'dist-cjs/index.js',
+    'dist-cjs/realtime/index.js',
+    'dist-cjs/telephony/realtime-bridge.js',
   ]) {
     assert.ok(packedPaths.has(requiredPath), `packed tarball should include ${requiredPath}`);
   }
