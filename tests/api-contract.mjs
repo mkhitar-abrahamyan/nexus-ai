@@ -222,8 +222,24 @@ for (const exportName of expectedRootExports) {
 
 for (const subpath of expectedSubpaths) {
   assert.ok(subpath in packageJson.exports, `package exports should include ${subpath}`);
-  assert.equal(packageJson.exports[subpath].import.endsWith('.js'), true, `${subpath} should expose ESM import`);
-  assert.equal(packageJson.exports[subpath].types.endsWith('.d.ts'), true, `${subpath} should expose declarations`);
+  const entry = packageJson.exports[subpath];
+
+  assert.equal(entry.import.default.endsWith('.js'), true, `${subpath} should expose ESM import`);
+  assert.equal(entry.import.types.endsWith('.d.ts'), true, `${subpath} should expose ESM declarations`);
+  assert.equal(entry.require.default.endsWith('.js'), true, `${subpath} should expose a CommonJS require`);
+  assert.equal(entry.require.types.endsWith('.d.ts'), true, `${subpath} should expose CommonJS declarations`);
+
+  // Each condition must resolve to its own build, or TypeScript reports TS1479 when a CommonJS
+  // consumer requires the package and lands on ESM declarations.
+  assert.equal(entry.import.default.startsWith('./dist/'), true, `${subpath} ESM import should use dist`);
+  assert.equal(entry.require.default.startsWith('./dist-cjs/'), true, `${subpath} require should use dist-cjs`);
+  assert.equal(entry.require.types.startsWith('./dist-cjs/'), true, `${subpath} require types should use dist-cjs`);
+
+  // moduleResolution "node10" ignores "exports", so subpath types come from typesVersions instead.
+  if (subpath !== '.') {
+    const bare = subpath.replace(/^\.\//, '');
+    assert.ok(packageJson.typesVersions['*'][bare], `typesVersions should map ${bare} for node10 resolution`);
+  }
 }
 
 assert.deepEqual(Object.keys(packageJson.exports).sort(), expectedSubpaths.sort());

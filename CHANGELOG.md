@@ -4,6 +4,18 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-10
+
+### Fixed
+
+- TypeScript consumers of the CommonJS build no longer resolve ESM declarations. The CommonJS build
+  now emits its own `.d.ts` files, and each export subpath carries per-condition types, so `require()`
+  resolves CommonJS declarations instead of reporting TS1479 against the ESM ones.
+- Subpath types are discoverable under `moduleResolution: "node10"`, which ignores `exports` and is
+  still the default for NestJS projects. A `typesVersions` map now points each subpath at its
+  CommonJS declarations, so `nexus-ai-pro/telephony` and friends type-check without a consumer having
+  to migrate its `tsconfig.json` to `node16`.
+
 ## [1.2.0] - 2026-08-10
 
 ### Added
