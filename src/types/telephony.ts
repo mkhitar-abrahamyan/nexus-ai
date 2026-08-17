@@ -162,6 +162,11 @@ export interface TelephonyPhoneNumber {
   voiceMethod?: TelephonyHttpMethod;
   statusCallbackUrl?: string;
   statusCallbackMethod?: TelephonyHttpMethod;
+  /** Where the provider currently posts inbound SMS for this number. */
+  smsUrl?: string;
+  smsMethod?: TelephonyHttpMethod;
+  smsFallbackUrl?: string;
+  smsFallbackMethod?: TelephonyHttpMethod;
   capabilities?: {
     voice?: boolean;
     sms?: boolean;
@@ -185,8 +190,20 @@ export interface UpdatePhoneNumberRequest {
   friendlyName?: string;
   voiceUrl?: string;
   voiceMethod?: TelephonyHttpMethod;
+  /**
+   * Where the provider posts call status events.
+   *
+   * This covers the voice leg only. Message delivery receipts are requested per message when
+   * sending, rather than being configured on the number.
+   */
   statusCallbackUrl?: string;
   statusCallbackMethod?: TelephonyHttpMethod;
+  /** Where the provider posts inbound SMS sent to this number. */
+  smsUrl?: string;
+  smsMethod?: TelephonyHttpMethod;
+  /** Used by the provider when {@link smsUrl} errors or times out. */
+  smsFallbackUrl?: string;
+  smsFallbackMethod?: TelephonyHttpMethod;
   signal?: AbortSignal;
 }
 

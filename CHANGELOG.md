@@ -4,6 +4,16 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- SMS routing on `updatePhoneNumber`. `UpdatePhoneNumberRequest` now carries `smsUrl`, `smsMethod`,
+  `smsFallbackUrl`, and `smsFallbackMethod`, and the Twilio provider maps them to `SmsUrl`,
+  `SmsMethod`, `SmsFallbackUrl`, and `SmsFallbackMethod`. Only the voice leg could be repointed
+  before, so an application holding SMS-enabled numbers had to drop to the provider SDK to say where
+  inbound messages should be delivered.
+- `TelephonyPhoneNumber` reports the number's current `smsUrl`, `smsMethod`, `smsFallbackUrl`, and
+  `smsFallbackMethod`, so message routing can be verified the same way voice routing already is.
+
 ## [1.2.1] - 2026-08-10
 
 ### Fixed

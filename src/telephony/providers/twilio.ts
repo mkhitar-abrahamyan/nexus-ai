@@ -195,6 +195,10 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     if (request.voiceMethod !== undefined) body.set('VoiceMethod', request.voiceMethod);
     if (request.statusCallbackUrl !== undefined) body.set('StatusCallback', request.statusCallbackUrl);
     if (request.statusCallbackMethod !== undefined) body.set('StatusCallbackMethod', request.statusCallbackMethod);
+    if (request.smsUrl !== undefined) body.set('SmsUrl', request.smsUrl);
+    if (request.smsMethod !== undefined) body.set('SmsMethod', request.smsMethod);
+    if (request.smsFallbackUrl !== undefined) body.set('SmsFallbackUrl', request.smsFallbackUrl);
+    if (request.smsFallbackMethod !== undefined) body.set('SmsFallbackMethod', request.smsFallbackMethod);
 
     if (!body.size) {
       throw new TelephonyProviderError('Twilio phone number update requires at least one field to change', 'twilio');
@@ -359,6 +363,10 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       voiceMethod: normalizeHttpMethod(stringValue(raw.voice_method)),
       statusCallbackUrl: stringValue(raw.status_callback),
       statusCallbackMethod: normalizeHttpMethod(stringValue(raw.status_callback_method)),
+      smsUrl: stringValue(raw.sms_url),
+      smsMethod: normalizeHttpMethod(stringValue(raw.sms_method)),
+      smsFallbackUrl: stringValue(raw.sms_fallback_url),
+      smsFallbackMethod: normalizeHttpMethod(stringValue(raw.sms_fallback_method)),
       capabilities: {
         voice: capabilities.voice === true,
         sms: capabilities.sms === true,

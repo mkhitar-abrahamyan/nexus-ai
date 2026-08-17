@@ -130,6 +130,65 @@ test('Twilio provider rejects an empty phone number update', async () => {
   await assert.rejects(() => provider.updatePhoneNumber({ id: 'PN123' }), /at least one field/);
 });
 
+test('Twilio provider routes SMS as well as voice on a phone number', async () => {
+  const requests: Array<{ url: string; body?: unknown }> = [];
+  const provider = new TwilioTelephonyProvider({
+    accountSid: 'AC123',
+    authToken: 'secret',
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), body: init?.body });
+      return jsonResponse({
+        sid: 'PN123',
+        phone_number: '+15557650000',
+        voice_url: 'https://api.example.com/voice/incoming',
+        sms_url: 'https://api.example.com/twilio/sms',
+        sms_method: 'post',
+        sms_fallback_url: 'https://api.example.com/twilio/sms-fallback',
+        sms_fallback_method: 'POST',
+        capabilities: { voice: true, sms: true, mms: false },
+      });
+    },
+  });
+
+  const updated = await provider.updatePhoneNumber({
+    id: 'PN123',
+    smsUrl: 'https://api.example.com/twilio/sms',
+    smsMethod: 'POST',
+    smsFallbackUrl: 'https://api.example.com/twilio/sms-fallback',
+    smsFallbackMethod: 'POST',
+  });
+
+  const body = requests[0].body as URLSearchParams;
+  assert.equal(body.get('SmsUrl'), 'https://api.example.com/twilio/sms');
+  assert.equal(body.get('SmsMethod'), 'POST');
+  assert.equal(body.get('SmsFallbackUrl'), 'https://api.example.com/twilio/sms-fallback');
+  assert.equal(body.get('SmsFallbackMethod'), 'POST');
+
+  assert.equal(updated.smsUrl, 'https://api.example.com/twilio/sms');
+  assert.equal(updated.smsMethod, 'POST', 'lowercase provider methods are normalized');
+  assert.equal(updated.smsFallbackUrl, 'https://api.example.com/twilio/sms-fallback');
+  assert.equal(updated.capabilities?.sms, true);
+});
+
+test('Twilio provider repoints SMS without disturbing voice routing', async () => {
+  const requests: Array<{ body?: unknown }> = [];
+  const provider = new TwilioTelephonyProvider({
+    accountSid: 'AC123',
+    authToken: 'secret',
+    fetch: async (_url, init) => {
+      requests.push({ body: init?.body });
+      return jsonResponse({ sid: 'PN123', phone_number: '+15557650000' });
+    },
+  });
+
+  await provider.updatePhoneNumber({ id: 'PN123', smsUrl: 'https://api.example.com/twilio/sms' });
+
+  const body = requests[0].body as URLSearchParams;
+  assert.equal(body.get('SmsUrl'), 'https://api.example.com/twilio/sms');
+  assert.equal(body.get('VoiceUrl'), null, 'fields left unset are not sent to the provider');
+  assert.equal(body.get('StatusCallback'), null);
+});
+
 test('telephony manager reports missing call-control capability', async () => {
   const manager = new TelephonyManager({
     defaultProvider: 'bare',
