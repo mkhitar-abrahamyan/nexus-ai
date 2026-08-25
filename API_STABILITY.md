@@ -26,7 +26,48 @@ Source files, `dist` file paths, examples, test helpers that are not exported, a
 - Security fixes may tighten validation or blocking behavior in a patch release when preserving the old behavior would leave users exposed.
 - Provider behavior can change when an upstream API changes; Nexus will preserve its normalized request and response contracts where possible.
 
-The package is ESM-only and supports Node.js 22 or newer. CommonJS `require()` and deep imports into `dist` or `src` are not supported.
+## Module formats
+
+Since 1.2.0 the package ships parallel ESM and CommonJS builds and supports Node.js 22 or newer.
+Both are covered by this policy:
+
+- every export subpath carries `import` and `require` conditions, each resolving to its own build and
+  its own declarations, so a CommonJS consumer never lands on ESM declarations;
+- `typesVersions` maps each subpath to its CommonJS declarations, so subpath types resolve under
+  `moduleResolution: "node10"` without a consumer migrating its `tsconfig.json`;
+- dropping either build, or removing a subpath from either condition, requires a major release.
+
+Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
+one of its explicit subpaths.
+
+## Capability negotiation stage
+
+`negotiateCompletionRequest()`, `NexusCapabilityError`, `CapabilityPolicy`, `CapabilityWarning`, and
+the `nexus-ai-pro/capabilities` subpath are public and follow the 1.x rules.
+
+Which options a given model accepts is registry data, not a compatibility guarantee. A model's
+declared capabilities, cache lifetimes, reasoning effort levels, and prices can change in a minor
+release when a provider changes its lineup, and new normalized warning entries may be added. What is
+guaranteed is the behavior of each policy: `strict` throws before the provider call, `warn` records a
+warning and continues, `off` sends the request unchanged, and an option a model does not mention is
+always passed through rather than refused.
+
+`ResponseMeta.usage` and `ResponseMeta.cost` are public normalized shapes. Reported token counts and
+prices originate with the provider or with bundled defaults and are not compatibility guarantees;
+`cost.basis` distinguishes the two. `ResponseMeta.estimatedCost` is deprecated in favor of
+`cost.amount` and will be removed in the next major release.
+
+## Telephony API stage
+
+The `nexus-ai-pro/telephony`, `telephony/twilio`, and `telephony/realtime-bridge` subpaths are public
+and follow the 1.x rules. This covers `TelephonyManager`, the `TelephonyProvider` contract, the
+normalized call, media-stream, status-callback, and phone-number types, the TwiML helpers, and the
+realtime bridge.
+
+Provider payloads under `raw`, TwiML markup details beyond the documented helper options, webhook
+signature formats, upstream call-status vocabularies, and carrier behavior are controlled by the
+provider and are not normalized guarantees. `TelephonyProvider` methods are optional by design, so a
+provider adapter may implement any subset; adding a new optional method is a minor change.
 
 ## Realtime API stage
 

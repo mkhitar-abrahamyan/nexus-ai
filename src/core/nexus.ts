@@ -64,6 +64,8 @@ import { RateLimiter } from '../ops/rate-limiter.js';
 import { completeVerified, type VerificationOptions } from '../hallucination/verification.js';
 import { completeWithSelfConsistency, type SelfConsistencyOptions } from '../hallucination/consistency.js';
 import { assertWithinCostBudget, estimateCost } from '../optimizer/cost.js';
+import { negotiateCompletionRequest } from '../capabilities/negotiate.js';
+import { costAmount, ensureUsageAndCost } from './usage.js';
 import { PipelineRunner, createPipelineContext } from '../pipeline/pipeline.js';
 import { MetricsCollector } from '../ops/metrics.js';
 import { ProviderHealthMonitor } from '../ops/health.js';
@@ -215,7 +217,23 @@ export class NexusAI {
       });
       context.route = decision;
       this.logger.info('route decision', decision as unknown as Record<string, unknown>);
-      context.request = { ...context.request, model: resolveModel(decision.model, this.config).model };
+
+      // Capabilities can only be checked once routing has chosen the concrete model. Negotiation is
+      // synchronous and returns the same request object when there is nothing to change, so it is
+      // run inline and only traced when it actually altered the request.
+      const routedModel = resolveModel(decision.model, this.config);
+      context.request = { ...context.request, model: routedModel.model };
+      const negotiation = negotiateCompletionRequest(context.request, routedModel.capabilities, {
+        policy: this.config.capabilities?.policy,
+        provider: routedModel.providerName || undefined,
+      });
+      context.request = negotiation.value;
+      if (negotiation.warnings.length) {
+        context.metadata.capabilityWarnings = negotiation.warnings;
+        await this.pipeline.trace(context, 'capabilityNegotiation', () => undefined, {
+          warnings: negotiation.warnings.length,
+        });
+      }
 
       if (this.isCostBudgetEnabled(context.request)) {
         await this.pipeline.trace(context, 'costBudget', () => {
@@ -267,6 +285,12 @@ export class NexusAI {
       }
       providerResponse.meta.guardrailsApplied.push(...context.guardrailsApplied);
       providerResponse.meta.tokensSaved += optimizationResult.usage.savedTokens;
+      // A custom provider may not populate the structured fields, so they are filled in here and
+      // every response carries the same usage and cost shape.
+      ensureUsageAndCost(providerResponse.meta, this.config);
+      if (negotiation.warnings.length) {
+        providerResponse.meta.capabilityWarnings = negotiation.warnings;
+      }
       if (context.contextWindow) {
         providerResponse.meta.contextWindow = context.contextWindow.usage;
       }
@@ -351,7 +375,7 @@ export class NexusAI {
           model: finalResponse.meta.modelUsed,
         },
         finalResponse.meta.latencyMs,
-        Number(finalResponse.meta.estimatedCost.replace('$', '')),
+        costAmount(finalResponse.meta),
       );
       for (const step of finalResponse.meta.pipeline?.steps || []) {
         await this.metrics.recordStep(step);
@@ -403,10 +427,20 @@ export class NexusAI {
       config: this.config,
     });
     const maxContextTokens = resolved.capabilities?.maxContextTokens;
+    // Planning is the "check before you spend" call, so it reports capability problems here rather
+    // than letting them surface as a dropped option mid-request. It never throws: a plan under a
+    // strict policy should still describe the request instead of failing.
+    const capability = negotiateCompletionRequest(securityResult.value, resolved.capabilities, {
+      policy: 'warn',
+      provider: resolved.providerName || undefined,
+    });
     const warnings = [
       ...(contextWindowResult?.warnings || []),
       ...optimizationResult.warnings,
       ...securityResult.findings.map((finding) => finding.message),
+      ...capability.warnings.map(
+        (warning) => `${warning.feature} was ${warning.action} for ${resolved.model}: ${warning.reason}`,
+      ),
     ];
 
     if (maxContextTokens && optimizationResult.usage.afterTokens + outputTokens > maxContextTokens) {
@@ -459,7 +493,12 @@ export class NexusAI {
       ...(decision as unknown as Record<string, unknown>),
       tokensSaved: optimizationResult.usage.savedTokens,
     });
-    const routedRequest = { ...securityResult.value, model: resolveModel(decision.model, this.config).model };
+    const routedModel = resolveModel(decision.model, this.config);
+    const routedRequest = negotiateCompletionRequest(
+      { ...securityResult.value, model: routedModel.model },
+      routedModel.capabilities,
+      { policy: this.config.capabilities?.policy, provider: routedModel.providerName || undefined },
+    ).value;
     const stream = this.failover.stream(routedRequest, decision, this.providers, {
       timeoutMs: this.config.timeout,
       retry: this.config.retry,

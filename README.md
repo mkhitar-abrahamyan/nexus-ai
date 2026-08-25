@@ -239,7 +239,112 @@ console.log(plan.fitsContext);
 console.log(plan.warnings);
 ```
 
-`plan()` does not call a provider. It estimates route, token use, context fit, cost, guardrail findings, and warnings.
+`plan()` does not call a provider. It estimates route, token use, context fit, cost, guardrail findings, and warnings, including any option the routed model cannot honor.
+
+### Reasoning
+
+```ts
+const response = await ai.complete({
+  model: 'auto',
+  messages: [{ role: 'user', content: 'Find the bug in this migration plan.' }],
+  reasoning: { effort: 'high', summary: 'auto' },
+});
+
+console.log(response.meta.usage?.reasoningTokens);
+```
+
+`effort` is the portable control. It maps to OpenAI `reasoning_effort` and the Responses `reasoning`
+field, Anthropic extended thinking, and Gemini `thinkingConfig`. Use `reasoning.maxTokens` when you
+want to set a thinking budget directly instead of by level.
+
+Requesting a summary emits `reasoning` stream chunks, which stay separate from visible output:
+
+```ts
+for await (const chunk of ai.stream({ model: 'auto', messages, reasoning: { summary: 'auto' } })) {
+  if (chunk.type === 'reasoning') process.stderr.write(chunk.content ?? '');
+  if (chunk.type === 'text') process.stdout.write(chunk.content ?? '');
+}
+```
+
+### Prompt Caching
+
+Providers charge far less for a prompt prefix they have already processed. `mode: 'auto'` is the
+default and reports whatever the provider reused on its own. `mode: 'explicit'` sends caller-placed
+breakpoints to providers that accept them, such as Anthropic:
+
+```ts
+const response = await ai.complete({
+  model: 'anthropic/best',
+  cache: { mode: 'explicit', ttl: '1h' },
+  messages: [
+    { role: 'system', content: longPolicyDocument, cache: true },
+    { role: 'user', content: 'Does clause 14 apply here?' },
+  ],
+});
+
+console.log(response.meta.usage?.cachedReadTokens);
+console.log(response.meta.cost?.amount);
+```
+
+Mark the end of the stable prefix, not every message. A provider caps how many breakpoints it
+accepts (Anthropic allows four); when there are more marks than slots, the deepest ones are kept,
+because a deeper breakpoint caches strictly more of the prompt.
+
+### Usage and Cost
+
+Every response carries a numeric cost and a full token breakdown:
+
+```ts
+const { usage, cost } = response.meta;
+
+console.log(usage?.inputTokens);        // billed at the standard input rate
+console.log(usage?.cachedReadTokens);   // served from the provider cache
+console.log(usage?.cachedWriteTokens);  // written into the provider cache
+console.log(usage?.reasoningTokens);    // share of output spent on reasoning
+console.log(cost?.amount, cost?.currency, cost?.basis);
+```
+
+`meta.tokensInput` keeps its original meaning of every prompt token, cached or not.
+`meta.estimatedCost` is deprecated in favor of `cost.amount`. Bundled prices are defaults, not
+financial truth; override them with `models.registry`, or adjust cache rates with
+`models.cachePricing`.
+
+### Capability Negotiation
+
+Requests are reconciled against the routed model before the provider is called:
+
+```ts
+const ai = new NexusAI({
+  providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } },
+  capabilities: { policy: 'warn' }, // 'strict' | 'warn' (default) | 'off'
+});
+
+const response = await ai.complete({ model: 'auto', messages, seed: 7 });
+console.log(response.meta.capabilityWarnings);
+```
+
+- `strict` throws a `NexusCapabilityError` before spending anything.
+- `warn` drops or clamps the option and records it on `meta.capabilityWarnings`.
+- `off` sends the request exactly as written.
+
+An option a model does not declare is always passed through — absence means the registry does not
+know, not that the provider refuses — so a model you register yourself is never restricted by fields
+it omits. Set `capabilityPolicy: 'off'` on a single request to reach a provider feature that is
+newer than the bundled registry.
+
+Registry provenance is inspectable, and a release check can fail on stale data:
+
+```ts
+import { describeModel, assertRegistryFreshness } from 'nexus-ai-pro';
+
+console.log(describeModel('anthropic/best'));
+// { model: 'claude-opus-4-8', verifiedAt: '…', alias: { stage: 'stable', floating: true }, … }
+
+assertRegistryFreshness({ maxAgeDays: 120 });
+```
+
+A `floating` alias resolves by intent rather than to a pinned model, so its target can change between
+releases. Pin the resolved model when a run has to be reproducible.
 
 ### Streaming
 
@@ -254,7 +359,9 @@ for await (const chunk of stream) {
 }
 ```
 
-All providers normalize streaming chunks to `text`, `tool_call`, `done`, or `error`.
+All providers normalize streaming chunks to `text`, `reasoning`, `tool_call`, `done`, or `error`.
+Reasoning summaries only arrive when the request asks for them, so a consumer that switches on
+`chunk.type` keeps receiving visible output only.
 
 When security is enabled, output streams are correctness-first: Nexus buffers and validates the
 complete output before yielding any chunk, up to 1 MiB or 100,000 chunks. This prevents secrets,
@@ -1022,6 +1129,7 @@ import { NexusAI } from 'nexus-ai-pro/core';
 import { createNexusConfig } from 'nexus-ai-pro/config';
 import { TokenOptimizer } from 'nexus-ai-pro/optimizer';
 import { ContextWindowManager } from 'nexus-ai-pro/context';
+import { negotiateCompletionRequest } from 'nexus-ai-pro/capabilities';
 import { guardrailPolicy } from 'nexus-ai-pro/security';
 import { RedisCacheAdapter } from 'nexus-ai-pro/cache';
 import { DeepSeekProvider } from 'nexus-ai-pro/providers/deepseek';
@@ -1086,10 +1194,12 @@ npm run test:conformance:real
 
 ## Roadmap
 
-The experimental image foundation now includes portable asset types, `ImageManager`, provider
-capability negotiation, local operation handles, visual-safety hooks, deterministic conformance, and an
-opt-in OpenAI adapter. Durable operations, production asset storage, additional providers, and
-media-specific evaluations remain planned in [ROADMAP.md](./ROADMAP.md).
+1.4.0 closed the completion-request gap: prompt caching, reasoning controls, tool and sampling
+controls, structured usage with numeric cost, and capability negotiation with registry provenance.
+
+Next is durable execution — an operation state machine, provider batch APIs, distributed rate
+limiting and circuit breaking, first-class embeddings, and filesystem/S3 asset stores — followed by
+image portability and promotion out of experimental. See [ROADMAP.md](./ROADMAP.md).
 
 ## Production Notes
 

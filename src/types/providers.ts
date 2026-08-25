@@ -9,6 +9,31 @@ export type RoutingModelPreference =
       weight?: number;
     };
 
+/** Lifetime of a provider-side prompt cache entry. */
+export type CacheTtl = '5m' | '1h';
+
+/**
+ * How a model supports prompt caching.
+ *
+ * `explicit` means the provider accepts caller-placed cache breakpoints. When it is false the
+ * provider may still cache automatically; only caller control is unavailable.
+ */
+export interface PromptCachingCapability {
+  explicit?: boolean;
+  ttls?: CacheTtl[];
+  /** Smallest prefix the provider will cache, in tokens. Shorter breakpoints are dropped. */
+  minTokens?: number;
+  /** Maximum number of caller-placed breakpoints the provider accepts. */
+  maxBreakpoints?: number;
+}
+
+/**
+ * Declared model behavior.
+ *
+ * Capability negotiation treats an omitted field as *unknown* and lets the request through, so
+ * models registered by an application are never restricted by fields they do not declare. Only an
+ * explicit `false`, or a value outside a declared constraint, is refused or dropped.
+ */
 export interface ModelCapabilities {
   provider?: string;
   family?: string;
@@ -17,19 +42,70 @@ export interface ModelCapabilities {
   toolCalling: boolean;
   structuredOutputs?: boolean;
   jsonMode?: boolean;
-  reasoning?: boolean | { efforts?: ReasoningEffort[] };
+  reasoning?: boolean | { efforts?: ReasoningEffort[]; maxTokens?: number };
+  promptCaching?: boolean | PromptCachingCapability;
+  toolChoice?: boolean;
+  parallelToolCalls?: boolean;
+  seed?: boolean;
+  topK?: boolean;
+  penalties?: boolean;
   maxContextTokens: number;
   maxOutputTokens?: number;
   costPer1kInput: number;
   costPer1kOutput: number;
+  /** Price of a cached-prefix read. Falls back to a provider default multiplier when omitted. */
+  costPer1kCachedInput?: number;
+  /** Price of writing a cache entry. Falls back to a provider default multiplier when omitted. */
+  costPer1kCacheWrite?: number;
   qualityScore?: number;
   speedScore?: number;
   release?: string;
   knowledgeCutoff?: string;
   status?: ModelStatus;
   endpoints?: ModelEndpoint[];
+  /** ISO date this entry was last checked against provider documentation. */
+  verifiedAt?: string;
+  /** Where this entry was verified against. */
+  source?: string;
   notes?: string;
 }
+
+/** Publication stage of a model alias. */
+export type AliasStage = 'stable' | 'preview' | 'deprecated';
+
+export interface AliasMetadata {
+  stage: AliasStage;
+  /** ISO date this alias target was last checked. */
+  verifiedAt?: string;
+  /** True when the alias target can change between releases, so runs are not reproducible. */
+  floating?: boolean;
+  /** Alias to migrate to when this one is deprecated. */
+  replacement?: string;
+  note?: string;
+}
+
+/**
+ * Default provenance for bundled registry entries that do not carry their own `verifiedAt`.
+ *
+ * Bundled pricing and context metadata are defaults, not financial truth. Override them through
+ * `models.registry` when exact numbers matter.
+ */
+export const REGISTRY_PROVENANCE = {
+  verifiedAt: '2026-08-25',
+  source: 'provider documentation',
+} as const;
+
+/**
+ * Fallback cache pricing as a multiple of the standard input rate, applied when a model does not
+ * declare `costPer1kCachedInput` or `costPer1kCacheWrite`. Applications can override per model
+ * through `models.registry`, or globally through `models.cachePricing`.
+ */
+export const DEFAULT_CACHE_PRICING: Record<string, { read: number; write: number; writeLong?: number }> = {
+  anthropic: { read: 0.1, write: 1.25, writeLong: 2 },
+  openai: { read: 0.1, write: 1 },
+  google: { read: 0.25, write: 1 },
+  deepseek: { read: 0.1, write: 1 },
+};
 
 export interface ProviderCapabilities {
   name: string;
@@ -64,10 +140,19 @@ const gpt5 = (
     structuredOutputs: true,
     jsonMode: true,
     reasoning: openaiReasoning,
+    // OpenAI caches long prompt prefixes automatically; callers cannot place breakpoints.
+    promptCaching: { explicit: false, ttls: ['5m'] },
+    toolChoice: true,
+    parallelToolCalls: true,
+    // The OpenAI API has no top-k control; local OpenAI-compatible servers usually do.
+    topK: false,
+    seed: true,
+    penalties: true,
     maxContextTokens,
     maxOutputTokens: 128000,
     costPer1kInput: inputPerMillion / 1000,
     costPer1kOutput: outputPerMillion / 1000,
+    costPer1kCachedInput: (inputPerMillion * 0.1) / 1000,
     qualityScore,
     speedScore,
     release,
@@ -75,6 +160,17 @@ const gpt5 = (
     status: 'stable',
     endpoints: ['chat', 'responses'],
   });
+
+const anthropicEfforts: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * Every Claude release from 3.7 onward supports extended thinking.
+ *
+ * The version is read from the end of the family name rather than matched by substring, which
+ * previously reported the Claude 5 line as non-reasoning because its name contains no "4".
+ */
+const claudeSupportsThinking = (family: string): boolean =>
+  Number.parseFloat(family.match(/(\d+(?:\.\d+)?)$/)?.[1] || '0') >= 3.7;
 
 const claude = (
   family: string,
@@ -95,11 +191,23 @@ const claude = (
     toolCalling: true,
     structuredOutputs: false,
     jsonMode: false,
-    reasoning: family.includes('4') || family.includes('3.7'),
+    // The thinking budget has to leave room for visible output inside the same limit.
+    reasoning: claudeSupportsThinking(family)
+      ? { efforts: anthropicEfforts, maxTokens: Math.floor(maxOutputTokens * 0.75) }
+      : false,
+    // Anthropic accepts caller-placed cache breakpoints, capped at four per request.
+    promptCaching: { explicit: true, ttls: ['5m', '1h'], minTokens: 1024, maxBreakpoints: 4 },
+    toolChoice: true,
+    parallelToolCalls: true,
+    topK: true,
+    penalties: false,
+    seed: false,
     maxContextTokens,
     maxOutputTokens,
     costPer1kInput: inputPerMillion / 1000,
     costPer1kOutput: outputPerMillion / 1000,
+    costPer1kCachedInput: (inputPerMillion * 0.1) / 1000,
+    costPer1kCacheWrite: (inputPerMillion * 1.25) / 1000,
     qualityScore,
     speedScore,
     release,
@@ -128,10 +236,17 @@ const gemini = (
     structuredOutputs: true,
     jsonMode: true,
     reasoning: true,
+    // Gemini caches implicitly; explicit control uses the separate cachedContents resource.
+    promptCaching: { explicit: false, ttls: ['5m', '1h'] },
+    toolChoice: true,
+    topK: true,
+    seed: true,
+    penalties: true,
     maxContextTokens,
     maxOutputTokens: 65536,
     costPer1kInput: inputPerMillion / 1000,
     costPer1kOutput: outputPerMillion / 1000,
+    costPer1kCachedInput: (inputPerMillion * 0.25) / 1000,
     qualityScore,
     speedScore,
     release,
@@ -167,6 +282,10 @@ const openAiCompatible = (
       family.includes('gpt-oss') ||
       family.includes('magistral') ||
       family.includes('gemini-3'),
+    toolChoice: true,
+    parallelToolCalls: true,
+    seed: true,
+    penalties: true,
     maxContextTokens,
     maxOutputTokens,
     costPer1kInput: inputPerMillion / 1000,
@@ -1021,6 +1140,38 @@ export const MODEL_ALIASES: Record<string, string> = {
   'gemini-flash-latest': 'gemini-3-flash-preview',
   'gemini-flash-lite-latest': 'gemini-3.1-flash-lite-preview',
 };
+
+/**
+ * Aliases whose target is chosen by quality/speed/cost intent rather than pinned to one model.
+ * Their target can change in any release, so a reproducible run should pin the resolved model.
+ */
+const FLOATING_ALIAS_SUFFIXES = [
+  '/best',
+  '/balanced',
+  '/fast',
+  '/cheap',
+  '/pro',
+  '/coding',
+  '/codex',
+  '/reasoning',
+  '/vision',
+  '/compound',
+];
+
+/**
+ * Stage and provenance for every bundled alias, derived from its target so the two cannot drift.
+ * An alias resolving to a preview model is itself preview.
+ */
+export const MODEL_ALIAS_METADATA: Record<string, AliasMetadata> = Object.fromEntries(
+  Object.entries(MODEL_ALIASES).map(([alias, target]) => [
+    alias,
+    {
+      stage: KNOWN_MODELS[target]?.status === 'preview' ? 'preview' : 'stable',
+      floating: alias.endsWith('-latest') || FLOATING_ALIAS_SUFFIXES.some((suffix) => alias.endsWith(suffix)),
+      verifiedAt: REGISTRY_PROVENANCE.verifiedAt,
+    } satisfies AliasMetadata,
+  ]),
+);
 
 export function resolveProvider(model: string): string | null {
   if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3') || model.startsWith('o4'))

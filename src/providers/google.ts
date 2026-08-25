@@ -2,12 +2,15 @@ import { BaseProvider, type ProviderInfo } from './base.js';
 import type { CompletionRequest, ContentPart, Message } from '../types/messages.js';
 import type { GoogleProviderConfig } from '../types/config.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
+import type { ReasoningEffort } from '../types/providers.js';
+import { buildMeta, type UsageInput } from '../core/usage.js';
 import { generateRequestId } from '../utils/ids.js';
-import { KNOWN_MODELS } from '../types/providers.js';
 import { createProviderHttpError, toNexusProviderError } from './errors.js';
 
 interface GeminiContentPart {
   text?: string;
+  /** Set on reasoning summaries when `includeThoughts` is requested. */
+  thought?: boolean;
   inlineData?: {
     mimeType: string;
     data: string;
@@ -28,11 +31,42 @@ interface GeminiCandidate {
   finishReason?: string;
 }
 
+interface GeminiUsageMetadata {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  cachedContentTokenCount?: number;
+  thoughtsTokenCount?: number;
+}
+
 interface GeminiGenerateResponse {
   candidates?: GeminiCandidate[];
-  usageMetadata?: {
-    promptTokenCount?: number;
-    candidatesTokenCount?: number;
+  usageMetadata?: GeminiUsageMetadata;
+}
+
+/**
+ * Thinking budgets per portable effort level, in tokens.
+ *
+ * Gemini budgets thinking in tokens; `0` disables it and `-1` lets the model decide.
+ */
+const THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+  none: 0,
+  minimal: 1024,
+  low: 2048,
+  medium: 8192,
+  high: 16384,
+  xhigh: 24576,
+  max: 32768,
+};
+
+/** Gemini counts cached tokens inside `promptTokenCount`, so the cached share is subtracted. */
+function geminiUsage(usage: GeminiUsageMetadata | undefined): UsageInput {
+  if (!usage) return {};
+  const cachedReadTokens = usage.cachedContentTokenCount;
+  return {
+    inputTokens: Math.max(0, (usage.promptTokenCount || 0) - (cachedReadTokens || 0)),
+    outputTokens: usage.candidatesTokenCount || 0,
+    cachedReadTokens,
+    reasoningTokens: usage.thoughtsTokenCount,
   };
 }
 
@@ -55,30 +89,18 @@ export class GoogleProvider extends BaseProvider {
       const candidate = result.candidates?.[0];
       const content = this.extractText(candidate?.content);
       const toolCalls = this.extractToolCalls(candidate?.content);
-      const usage = result.usageMetadata || {};
-      const inputTokens = usage.promptTokenCount || 0;
-      const outputTokens = usage.candidatesTokenCount || 0;
-      const caps = KNOWN_MODELS[model];
 
       return {
         content,
         role: 'assistant',
         toolCalls: toolCalls.length ? toolCalls : undefined,
         finishReason: toolCalls.length ? 'tool_calls' : this.mapFinishReason(candidate?.finishReason),
-        meta: {
-          requestId: generateRequestId(),
-          providerUsed: 'google',
-          modelUsed: model,
+        meta: buildMeta({
+          provider: 'google',
+          model,
           latencyMs: latency,
-          tokensInput: inputTokens,
-          tokensOutput: outputTokens,
-          tokensSaved: 0,
-          estimatedCost: caps
-            ? `$${((inputTokens / 1000) * caps.costPer1kInput + (outputTokens / 1000) * caps.costPer1kOutput).toFixed(4)}`
-            : '$0.00',
-          cacheHit: false,
-          guardrailsApplied: [],
-        },
+          ...geminiUsage(result.usageMetadata),
+        }),
       };
     } catch (error) {
       throw this.normalizeProviderError(error, request, { model: this.extractModel(request.model) });
@@ -107,6 +129,8 @@ export class GoogleProvider extends BaseProvider {
 
         const decoder = new TextDecoder();
         let buffer = '';
+        // Gemini repeats cumulative usage on every chunk; the last one carries the final totals.
+        let usage: UsageInput = {};
 
         while (true) {
           const { done, value } = await reader.read();
@@ -125,25 +149,19 @@ export class GoogleProvider extends BaseProvider {
             if (!data || data === '[DONE]') continue;
 
             const parsed = JSON.parse(data) as GeminiGenerateResponse;
-            const text = self.extractText(parsed.candidates?.[0]?.content);
-            if (text) yield { type: 'text', content: text } satisfies StreamChunk;
+            if (parsed.usageMetadata) usage = geminiUsage(parsed.usageMetadata);
+
+            const parts = parsed.candidates?.[0]?.content?.parts || [];
+            for (const part of parts) {
+              if (typeof part.text !== 'string' || !part.text) continue;
+              yield { type: part.thought ? 'reasoning' : 'text', content: part.text } satisfies StreamChunk;
+            }
           }
         }
 
         yield {
           type: 'done',
-          meta: {
-            requestId: generateRequestId(),
-            providerUsed: 'google',
-            modelUsed: model,
-            latencyMs: Date.now() - startTime,
-            tokensInput: 0,
-            tokensOutput: 0,
-            tokensSaved: 0,
-            estimatedCost: '$0.00',
-            cacheHit: false,
-            guardrailsApplied: [],
-          },
+          meta: buildMeta({ provider: 'google', model, latencyMs: Date.now() - startTime, ...usage }),
         } satisfies StreamChunk;
       } catch (error) {
         throw self.normalizeProviderError(error, request, { model });
@@ -180,8 +198,13 @@ export class GoogleProvider extends BaseProvider {
     const generationConfig: Record<string, unknown> = {
       temperature: request.temperature,
       topP: request.topP,
+      topK: request.topK,
+      seed: request.seed,
+      frequencyPenalty: request.frequencyPenalty,
+      presencePenalty: request.presencePenalty,
       maxOutputTokens: request.maxTokens,
       stopSequences: request.stop ? (Array.isArray(request.stop) ? request.stop : [request.stop]) : undefined,
+      thinkingConfig: this.thinkingConfig(request),
     };
 
     if (request.responseFormat?.type === 'json') {
@@ -191,12 +214,44 @@ export class GoogleProvider extends BaseProvider {
       generationConfig.responseSchema = request.responseFormat.schema;
     }
 
-    return {
+    const tools = this.formatToolsGoogle(request.tools);
+
+    return this.compact({
       contents,
       systemInstruction,
-      tools: this.formatToolsGoogle(request.tools),
+      tools,
+      toolConfig: tools ? this.toolConfig(request) : undefined,
       generationConfig: this.compact(generationConfig),
-    };
+    });
+  }
+
+  /**
+   * Maps portable reasoning controls onto Gemini's thinking budget.
+   *
+   * Returns undefined when the request says nothing about reasoning, leaving the model's own
+   * default in place rather than forcing a budget on it.
+   */
+  private thinkingConfig(request: CompletionRequest): Record<string, unknown> | undefined {
+    const reasoning = request.reasoning;
+    if (!reasoning) return undefined;
+
+    const budget = reasoning.maxTokens ?? (reasoning.effort ? THINKING_BUDGETS[reasoning.effort] : undefined);
+    const includeThoughts = reasoning.summary && reasoning.summary !== 'none' ? true : undefined;
+    if (budget === undefined && includeThoughts === undefined) return undefined;
+
+    return this.compact({ thinkingBudget: budget, includeThoughts });
+  }
+
+  private toolConfig(request: CompletionRequest): Record<string, unknown> | undefined {
+    const choice = request.toolChoice;
+    if (choice === undefined) return undefined;
+
+    if (typeof choice === 'object') {
+      return { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: [choice.name] } };
+    }
+
+    const mode = choice === 'none' ? 'NONE' : choice === 'required' ? 'ANY' : 'AUTO';
+    return { functionCallingConfig: { mode } };
   }
 
   private formatMessages(messages: Message[]): {
@@ -267,9 +322,10 @@ export class GoogleProvider extends BaseProvider {
     ];
   }
 
+  /** Reasoning summaries are marked `thought` and are excluded from visible output. */
   private extractText(content: GeminiContent | undefined): string {
     return (content?.parts || [])
-      .filter((part) => typeof part.text === 'string')
+      .filter((part) => typeof part.text === 'string' && !part.thought)
       .map((part) => part.text)
       .join('');
   }

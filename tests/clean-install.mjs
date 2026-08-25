@@ -16,8 +16,11 @@ const tempRoot = mkdtempSync(path.join(tempParent, 'clean-install-'));
 const packDir = path.join(tempRoot, 'pack');
 const consumerDir = path.join(tempRoot, 'consumer');
 // The package ships parallel ESM and CommonJS builds, so the JS payload is carried twice.
-const MAX_PACKED_BYTES = 320_000;
-const MAX_UNPACKED_BYTES = 2_000_000;
+// Raised in 1.4.0 for the capability-negotiation and usage modules, the expanded provider parameter
+// mapping, and the added registry capability data. The headroom is deliberately small so accidental
+// bloat still fails here; raise it only alongside a change that explains the growth.
+const MAX_PACKED_BYTES = 340_000;
+const MAX_UNPACKED_BYTES = 2_200_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

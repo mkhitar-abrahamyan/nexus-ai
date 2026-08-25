@@ -15,12 +15,35 @@ export { createNexusRouteHandler } from './next/route-handler.js';
 export {
   getModelRegistry,
   getModelAliases,
+  getAliasMetadata,
   resolveModel,
   resolveModelAlias,
   listKnownModels,
   listModelsForProvider,
   getModelCapabilities,
+  describeModel,
+  checkRegistryFreshness,
+  assertRegistryFreshness,
+  type ModelProvenance,
+  type RegistryFreshness,
+  type ResolvedModel,
 } from './models/registry.js';
+export {
+  negotiateCompletionRequest,
+  NexusCapabilityError,
+  type NegotiateOptions,
+  type NegotiationResult,
+} from './capabilities/negotiate.js';
+export {
+  buildMeta,
+  buildUsage,
+  costAmount,
+  ensureUsageAndCost,
+  priceUsage,
+  type BuildMetaOptions,
+  type PriceUsageOptions,
+  type UsageInput,
+} from './core/usage.js';
 export { MemoryCache, createCacheKey } from './cache/memory-cache.js';
 export {
   MemoryCacheAdapter,
@@ -192,7 +215,9 @@ export {
 export {
   estimateCost,
   assertWithinCostBudget,
+  formatCost,
   CostBudgetError,
+  DEFAULT_CURRENCY,
   type CostEstimateInput,
 } from './optimizer/cost.js';
 export {
@@ -341,17 +366,28 @@ export {
 } from './ops/otel-tracing.js';
 
 export type {
+  CacheHint,
   CompletionRequest,
   Message,
   MessageRole,
   ContentPart,
+  PromptCacheConfig,
+  ReasoningConfig,
   TextContent,
   ImageContent,
   AudioContent,
   VideoContent,
+  ToolChoice,
   ToolDefinition,
   ToolCallResult,
 } from './types/messages.js';
+
+export type {
+  CapabilityConfig,
+  CapabilityPolicy,
+  CapabilityWarning,
+  CapabilityWarningAction,
+} from './types/capabilities.js';
 
 export type {
   CostEstimate,
@@ -361,8 +397,10 @@ export type {
 export type {
   NexusResponse,
   NexusStream,
+  ResponseCost,
   ResponseMeta,
   StreamChunk,
+  TokenUsage,
   ToolCall,
 } from './types/response.js';
 
@@ -516,15 +554,25 @@ export type {
 } from './types/telephony.js';
 
 export type {
+  AliasMetadata,
+  AliasStage,
+  CacheTtl,
   Modality,
   ModelCapabilities,
   ModelEndpoint,
   ModelStatus,
+  PromptCachingCapability,
   ProviderCapabilities,
   ReasoningEffort,
   RoutingModelPreference,
 } from './types/providers.js';
-export { KNOWN_MODELS, resolveProvider } from './types/providers.js';
+export {
+  DEFAULT_CACHE_PRICING,
+  KNOWN_MODELS,
+  MODEL_ALIAS_METADATA,
+  REGISTRY_PROVENANCE,
+  resolveProvider,
+} from './types/providers.js';
 
 export type {
   SecurityLevel,

@@ -2,7 +2,7 @@ import { BaseProvider, type ProviderInfo } from './base.js';
 import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
 import type { OllamaProviderConfig } from '../types/config.js';
-import { generateRequestId } from '../utils/ids.js';
+import { buildMeta } from '../core/usage.js';
 
 interface OllamaClient {
   chat(params: OllamaChatParams & { stream: true }): Promise<AsyncIterable<OllamaChatResponse>>;
@@ -18,6 +18,11 @@ interface OllamaChatParams {
   options?: {
     temperature?: number;
     top_p?: number;
+    top_k?: number;
+    seed?: number;
+    frequency_penalty?: number;
+    presence_penalty?: number;
+    num_predict?: number;
     stop?: string[];
   };
 }
@@ -84,8 +89,7 @@ export class OllamaProvider extends BaseProvider {
         format: this.formatResponseFormat(request),
         signal: request.signal,
         options: {
-          temperature: request.temperature,
-          top_p: request.topP,
+          ...this.samplingOptions(request),
           stop: request.stop ? (Array.isArray(request.stop) ? request.stop : [request.stop]) : undefined,
         },
       });
@@ -96,18 +100,13 @@ export class OllamaProvider extends BaseProvider {
         content: result.message?.content || '',
         role: 'assistant',
         finishReason: 'stop',
-        meta: {
-          requestId: generateRequestId(),
-          providerUsed: 'ollama',
-          modelUsed: model,
+        meta: buildMeta({
+          provider: 'ollama',
+          model,
           latencyMs: latency,
-          tokensInput: result.prompt_eval_count || 0,
-          tokensOutput: result.eval_count || 0,
-          tokensSaved: 0,
-          estimatedCost: '$0.00',
-          cacheHit: false,
-          guardrailsApplied: [],
-        },
+          inputTokens: result.prompt_eval_count || 0,
+          outputTokens: result.eval_count || 0,
+        }),
       };
     } catch (error) {
       throw this.normalizeProviderError(error, request, { model });
@@ -130,10 +129,7 @@ export class OllamaProvider extends BaseProvider {
           stream: true,
           format: self.formatResponseFormat(request),
           signal: request.signal,
-          options: {
-            temperature: request.temperature,
-            top_p: request.topP,
-          },
+          options: self.samplingOptions(request),
         });
 
         for await (const chunk of stream) {
@@ -144,18 +140,13 @@ export class OllamaProvider extends BaseProvider {
           if (chunk.done) {
             yield {
               type: 'done',
-              meta: {
-                requestId: generateRequestId(),
-                providerUsed: 'ollama',
-                modelUsed: model,
+              meta: buildMeta({
+                provider: 'ollama',
+                model,
                 latencyMs: Date.now() - startTime,
-                tokensInput: chunk.prompt_eval_count || 0,
-                tokensOutput: chunk.eval_count || 0,
-                tokensSaved: 0,
-                estimatedCost: '$0.00',
-                cacheHit: false,
-                guardrailsApplied: [],
-              },
+                inputTokens: chunk.prompt_eval_count || 0,
+                outputTokens: chunk.eval_count || 0,
+              }),
             } satisfies StreamChunk;
           }
         }
@@ -163,6 +154,19 @@ export class OllamaProvider extends BaseProvider {
         throw self.normalizeProviderError(error, request, { model });
       }
     }, request.signal);
+  }
+
+  /** Shared sampling options so buffered and streamed calls cannot drift apart. */
+  private samplingOptions(request: CompletionRequest): OllamaChatParams['options'] {
+    return {
+      temperature: request.temperature,
+      top_p: request.topP,
+      top_k: request.topK,
+      seed: request.seed,
+      frequency_penalty: request.frequencyPenalty,
+      presence_penalty: request.presencePenalty,
+      num_predict: request.maxTokens,
+    };
   }
 
   private formatResponseFormat(request: CompletionRequest): string | Record<string, unknown> | undefined {

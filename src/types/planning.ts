@@ -9,7 +9,14 @@ export interface CostEstimate {
   outputTokens: number;
   inputCost: number;
   outputCost: number;
+  /** Tokens served from a provider prompt cache, priced at the cached-read rate. */
+  cachedReadTokens?: number;
+  /** Tokens written into a provider prompt cache, priced at the cache-write rate. */
+  cachedWriteTokens?: number;
+  cachedReadCost?: number;
+  cachedWriteCost?: number;
   totalCost: number;
+  currency?: string;
   formatted: string;
 }
 

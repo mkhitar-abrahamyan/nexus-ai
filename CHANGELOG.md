@@ -4,6 +4,83 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-25
+
+Request parity and cost truth: the completion request can now express what current models actually
+do, and the response reports what the call really cost. Every addition is an optional field or a new
+union member, so existing code is unaffected.
+
+### Added
+
+- **Provider prompt caching.** `CompletionRequest.cache` selects `off`, `auto`, or `explicit` mode
+  with a `5m` or `1h` lifetime, and `Message.cache` / `ToolDefinition.cache` mark the end of a
+  cacheable prefix. The Anthropic adapter translates marks into `cache_control` breakpoints,
+  respecting the four-breakpoint limit by keeping the deepest marks, and every adapter reports what
+  the provider actually reused.
+- **Reasoning controls.** `CompletionRequest.reasoning` carries `effort`, `maxTokens`, and `summary`.
+  These map to OpenAI `reasoning_effort` and the Responses `reasoning` field, Anthropic extended
+  thinking with a token budget, and Gemini `thinkingConfig`. A new `'reasoning'` `StreamChunk`
+  variant carries reasoning summaries, kept separate from `'text'` so existing consumers that switch
+  on chunk type see no change.
+- **Tool and sampling controls.** `toolChoice`, `parallelToolCalls`, `seed`, `topK`,
+  `frequencyPenalty`, and `presencePenalty` on `CompletionRequest`, mapped per provider.
+- **Structured usage and numeric cost.** `ResponseMeta.usage` reports input, output, cached-read,
+  cached-write, and reasoning tokens; `ResponseMeta.cost` reports a numeric amount with a currency
+  and an `estimated` or `reported` basis. Cached reads and cache writes are priced at their own
+  rates, with a long-lived write costing more than a short-lived one. `models.cachePricing`
+  overrides the bundled multipliers.
+- **Capability negotiation.** `negotiateCompletionRequest()` reconciles a request against the routed
+  model under a `strict`, `warn`, or `off` policy, set through `capabilities.policy` or per request
+  through `capabilityPolicy`. Refused options are reported on `ResponseMeta.capabilityWarnings` and
+  in `plan()` warnings. An option the registry does not mention is passed through: absence means
+  unknown, not unsupported, so an application-registered model is never restricted by fields it does
+  not declare, and `off` guarantees a newer provider feature is never blocked by stale metadata.
+- **Registry provenance.** Model entries accept `verifiedAt` and `source`; `MODEL_ALIAS_METADATA`
+  reports each alias's stage and whether its target floats between releases. `describeModel()`,
+  `checkRegistryFreshness()`, and `assertRegistryFreshness()` make drift visible instead of silent.
+- **Streamed usage on OpenAI.** `stream_options.include_usage` is requested for OpenAI and Azure, so
+  a streamed response reports real tokens and cost rather than zeros. Other OpenAI-compatible
+  servers opt in with the new `streamUsage` provider option.
+- A `nexus-ai-pro/capabilities` subpath for the negotiation API.
+
+### Fixed
+
+- Claude 5 models were declared as non-reasoning. The registry decided extended-thinking support by
+  looking for a `4` in the family name, which is absent from `claude-sonnet-5.0`, `claude-haiku-5.0`,
+  and `claude-fable-5.0`. Support is now derived from the family version, so every release from 3.7
+  onward is reported correctly, together with the thinking budget each model can accept.
+- The Anthropic adapter priced every completion at a hardcoded $0.003/$0.015 per 1k tokens instead of
+  using the model registry, so cost was wrong for every Claude model except one. All adapters now
+  share one pricing path.
+- Streamed Anthropic and Google responses reported zero tokens and `$0.00`. Both now carry the
+  provider's own usage totals on the final chunk.
+- Google reasoning summaries could be concatenated into visible output. Parts marked `thought` are
+  excluded from content and emitted as `'reasoning'` chunks instead.
+- A chat stream that ended without a finish reason produced no `done` chunk, leaving consumers
+  without terminal metadata.
+
+### Changed
+
+- `ResponseMeta.estimatedCost` is deprecated in favor of the numeric `cost` object. It is still
+  populated and stays until the next major release. The metrics path no longer parses money out of
+  its own display string.
+- `ResponseMeta.tokensInput` keeps its original meaning of every prompt token; the uncached share
+  billed at the standard rate is `usage.inputTokens`. Adapters whose provider folds cached tokens
+  into one prompt total subtract them so no token is priced twice.
+- `resolveModel()` no longer merges the bundled and application registries into a new object on each
+  call. It reads both maps directly, which removes a per-request allocation from the hot path;
+  `getModelRegistry()` and `getModelAliases()` are unchanged as the merged views.
+- Coverage gates raised to 80% lines, 68% branches, and 75% functions, with new tests for the agent
+  loop, the rules router, and the evaluation metric library.
+
+### Notes
+
+Image operations keep their existing strict capability behavior. An unsupported image option changes
+the artifact that comes back, so silently dropping one is worse than refusing the request; the
+shared policy vocabulary is in place for a future release that revisits this.
+
+## [1.3.0] - 2026-08-17
+
 ### Added
 
 - SMS routing on `updatePhoneNumber`. `UpdatePhoneNumberRequest` now carries `smsUrl`, `smsMethod`,
@@ -120,6 +197,11 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.2.1...v1.3.0
+[1.2.1]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/releases/tag/v1.0.0
 [0.9.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/releases/tag/v0.9.0

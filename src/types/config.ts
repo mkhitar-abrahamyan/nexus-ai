@@ -4,7 +4,8 @@ import type { ContextWindowConfig } from './context-window.js';
 import type { VoiceConfig } from './voice.js';
 import type { ImageConfig } from './images.js';
 import type { TelephonyConfig } from './telephony.js';
-import type { Modality, ModelCapabilities, ModelStatus, RoutingModelPreference } from './providers.js';
+import type { AliasMetadata, Modality, ModelCapabilities, ModelStatus, RoutingModelPreference } from './providers.js';
+import type { CapabilityConfig } from './capabilities.js';
 import type { PipelineConfig } from '../pipeline/types.js';
 import type { CacheAdapter } from '../cache/adapters.js';
 import type { SemanticCacheOptions } from '../cache/semantic-cache.js';
@@ -22,6 +23,12 @@ export interface OpenAIProviderConfig {
   providerName?: string;
   modelPrefix?: string | string[];
   isLocal?: boolean;
+  /**
+   * Requests token totals on the final streamed chunk through `stream_options.include_usage`, so a
+   * streamed response reports real usage and cost instead of zeros. Defaults to on for OpenAI and
+   * Azure. Enable it for any other OpenAI-compatible server that accepts the option.
+   */
+  streamUsage?: boolean;
 }
 
 export interface AnthropicProviderConfig {
@@ -127,8 +134,24 @@ export interface ProvidersConfig {
 
 export interface ModelRegistryConfig {
   aliases?: Record<string, string>;
+  aliasMetadata?: Record<string, AliasMetadata>;
   registry?: Record<string, ModelCapabilities>;
   includeDefaults?: boolean;
+  /**
+   * Cache prices as a multiple of the model's standard input rate, used when a registry entry
+   * declares no explicit `costPer1kCachedInput` or `costPer1kCacheWrite`. Overrides the bundled
+   * per-provider defaults.
+   */
+  cachePricing?: {
+    read?: number;
+    write?: number;
+    writeLong?: number;
+  };
+  /**
+   * Fails registry validation when a bundled entry has not been verified within this many days.
+   * Used by `assertRegistryFreshness()`; it never affects a running request.
+   */
+  maxAgeDays?: number;
 }
 
 export interface CacheConfig {
@@ -263,6 +286,8 @@ export interface NexusAIConfig {
   telephony?: TelephonyConfig;
   tokenOptimizer?: TokenOptimizerConfig;
   models?: ModelRegistryConfig;
+  /** How the runtime reacts to request options the target model does not declare. */
+  capabilities?: CapabilityConfig;
   cache?: CacheConfig;
   rateLimit?: RateLimitConfig;
   auditLog?: AuditLogConfig;

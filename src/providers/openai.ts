@@ -1,7 +1,8 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
-import type { CompletionRequest, ContentPart, Message } from '../types/messages.js';
+import type { CompletionRequest, ContentPart, Message, ToolChoice } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
 import type { OpenAIProviderConfig } from '../types/config.js';
+import { buildMeta, type UsageInput } from '../core/usage.js';
 import { generateRequestId } from '../utils/ids.js';
 import { KNOWN_MODELS } from '../types/providers.js';
 import { asArray, asNumber, asString, getArray, getNumber, getRecord, getString, isRecord } from './type-guards.js';
@@ -35,11 +36,19 @@ interface OpenAIChatCompletionParams {
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
+  top_k?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  seed?: number;
   logit_bias?: Record<string, number>;
   stop?: string | string[];
   response_format?: unknown;
   tools?: unknown[];
+  tool_choice?: unknown;
+  parallel_tool_calls?: boolean;
+  reasoning_effort?: string;
   stream?: boolean;
+  stream_options?: { include_usage: boolean };
 }
 
 interface OpenAIChatMessage {
@@ -49,18 +58,23 @@ interface OpenAIChatMessage {
 
 type OpenAIChatContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
 
+interface OpenAIChatUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  completion_tokens_details?: { reasoning_tokens?: number };
+}
+
 interface OpenAIChatCompletion {
   model: string;
   choices: OpenAIChatChoice[];
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-  };
+  usage?: OpenAIChatUsage;
 }
 
 interface OpenAIChatChoice {
   message?: {
     content?: string | null;
+    reasoning_content?: string | null;
     tool_calls?: unknown[];
   };
   finish_reason?: string | null;
@@ -70,10 +84,13 @@ interface OpenAIChatCompletionChunk {
   choices?: Array<{
     delta?: {
       content?: string | null;
+      // DeepSeek and other OpenAI-compatible reasoning servers stream summaries here.
+      reasoning_content?: string | null;
       tool_calls?: unknown[];
     };
     finish_reason?: string | null;
   }>;
+  usage?: OpenAIChatUsage;
 }
 
 interface OpenAIResponsesCreateParams {
@@ -85,17 +102,24 @@ interface OpenAIResponsesCreateParams {
   store: boolean;
   text?: unknown;
   tools?: unknown[];
+  tool_choice?: unknown;
+  parallel_tool_calls?: boolean;
+  reasoning?: { effort?: string; summary?: string };
   stream?: boolean;
+}
+
+interface OpenAIResponseUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  input_tokens_details?: { cached_tokens?: number };
+  output_tokens_details?: { reasoning_tokens?: number };
 }
 
 interface OpenAIResponse {
   model?: string;
   output_text?: string;
   status?: 'completed' | 'failed' | 'in_progress' | 'cancelled' | 'queued' | 'incomplete' | string;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
+  usage?: OpenAIResponseUsage;
   output?: unknown[];
   error?: {
     message?: string;
@@ -194,15 +218,12 @@ export class OpenAIProvider extends BaseProvider {
         throw new Error('OpenAI chat response did not include a message choice');
       }
 
-      const inputTokens = result.usage?.prompt_tokens || 0;
-      const outputTokens = result.usage?.completion_tokens || 0;
-
       return {
         content: choice.message.content || '',
         role: 'assistant',
         toolCalls: this.extractChatToolCalls(choice.message.tool_calls),
         finishReason: this.mapFinishReason(choice.finish_reason),
-        meta: this.createMeta(result.model, Date.now() - startTime, inputTokens, outputTokens),
+        meta: this.createMeta(result.model, Date.now() - startTime, chatUsage(result.usage)),
       };
     } catch (error) {
       throw this.normalizeProviderError(error, providerRequest);
@@ -223,20 +244,29 @@ export class OpenAIProvider extends BaseProvider {
 
         const client = await self.getClient();
         const startTime = Date.now();
-        const stream = await client.chat.completions.create(
-          {
-            ...self.createChatParams(providerRequest),
-            stream: true,
-          },
-          self.requestOptions(providerRequest),
-        );
+        const streamParams: OpenAIChatCompletionParams & { stream: true } = {
+          ...self.createChatParams(providerRequest),
+          stream: true,
+        };
+        if (self.includeStreamUsage()) streamParams.stream_options = { include_usage: true };
+        const stream = await client.chat.completions.create(streamParams, self.requestOptions(providerRequest));
 
         const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
+        // Usage arrives on its own final chunk when stream_options is enabled, which can be after
+        // the chunk carrying finish_reason, so it is captured as it appears.
+        let usage: UsageInput | undefined;
+        let finished = false;
 
         for await (const chunk of stream) {
+          if (chunk.usage) usage = chatUsage(chunk.usage);
+
           const choice = chunk.choices?.[0];
           const delta = choice?.delta;
           if (!delta) continue;
+
+          if (delta.reasoning_content) {
+            yield { type: 'reasoning', content: delta.reasoning_content } satisfies StreamChunk;
+          }
 
           if (delta.content) {
             yield { type: 'text', content: delta.content } satisfies StreamChunk;
@@ -258,11 +288,22 @@ export class OpenAIProvider extends BaseProvider {
 
           if (choice.finish_reason) {
             yield* self.flushToolCalls(toolCallBuffers);
+            finished = true;
             yield {
               type: 'done',
-              meta: self.createMeta(providerRequest.model, Date.now() - startTime),
+              meta: self.createMeta(providerRequest.model, Date.now() - startTime, usage),
             } satisfies StreamChunk;
           }
+        }
+
+        // A usage-only chunk can follow the finish chunk. Emitting a second `done` would confuse
+        // consumers, so the totals are only reported here when no finish chunk ever arrived.
+        if (!finished) {
+          yield* self.flushToolCalls(toolCallBuffers);
+          yield {
+            type: 'done',
+            meta: self.createMeta(providerRequest.model, Date.now() - startTime, usage),
+          } satisfies StreamChunk;
         }
       } catch (error) {
         throw self.normalizeProviderError(error, self.withProviderModel(request));
@@ -277,6 +318,13 @@ export class OpenAIProvider extends BaseProvider {
       temperature: request.temperature,
       max_tokens: request.maxTokens,
       top_p: request.topP,
+      // Not part of the OpenAI schema, but accepted by llama.cpp, LM Studio, and other
+      // OpenAI-compatible servers. Capability negotiation removes it for models that declare
+      // `topK: false`, so it only reaches a server that can use it.
+      top_k: request.topK,
+      frequency_penalty: request.frequencyPenalty,
+      presence_penalty: request.presencePenalty,
+      seed: request.seed,
       logit_bias: request.logitBias,
       stop: request.stop,
     };
@@ -295,9 +343,27 @@ export class OpenAIProvider extends BaseProvider {
     }
 
     const tools = this.formatTools(request.tools);
-    if (tools) params.tools = tools;
+    if (tools) {
+      params.tools = tools;
+      const toolChoice = mapChatToolChoice(request.toolChoice);
+      if (toolChoice !== undefined) params.tool_choice = toolChoice;
+      if (request.parallelToolCalls !== undefined) params.parallel_tool_calls = request.parallelToolCalls;
+    }
+
+    if (request.reasoning?.effort) params.reasoning_effort = request.reasoning.effort;
 
     return params;
+  }
+
+  /**
+   * Whether to ask for usage totals on the final streamed chunk.
+   *
+   * Enabled for OpenAI and Azure by default, where `stream_options` is part of the API. Other
+   * OpenAI-compatible servers vary, so they opt in through `streamUsage` rather than risking a
+   * rejected request.
+   */
+  protected includeStreamUsage(): boolean {
+    return this.config.streamUsage ?? this.info.name === 'openai';
   }
 
   private mapFinishReason(reason: string | null | undefined): NexusResponse['finishReason'] {
@@ -326,8 +392,6 @@ export class OpenAIProvider extends BaseProvider {
 
     const startTime = Date.now();
     const result = await responses.create(this.createResponsesParams(request), this.requestOptions(request));
-    const inputTokens = result.usage?.input_tokens || 0;
-    const outputTokens = result.usage?.output_tokens || 0;
     const toolCalls = this.extractResponsesToolCalls(result);
 
     return {
@@ -335,7 +399,7 @@ export class OpenAIProvider extends BaseProvider {
       role: 'assistant',
       toolCalls: toolCalls.length ? toolCalls : undefined,
       finishReason: toolCalls.length ? 'tool_calls' : this.mapResponsesFinishReason(result.status),
-      meta: this.createMeta(result.model || request.model, Date.now() - startTime, inputTokens, outputTokens),
+      meta: this.createMeta(result.model || request.model, Date.now() - startTime, responsesUsage(result.usage)),
     };
   }
 
@@ -397,18 +461,22 @@ export class OpenAIProvider extends BaseProvider {
           break;
         }
 
+        case 'response.reasoning_summary_text.delta': {
+          const delta = getString(event, 'delta');
+          if (delta) yield { type: 'reasoning', content: delta } satisfies StreamChunk;
+          break;
+        }
+
         case 'response.completed':
         case 'response.incomplete': {
           yield* this.flushToolCalls(toolCallBuffers);
           const response = getRecord(event, 'response') as OpenAIResponse | undefined;
-          const usage = response?.usage;
           yield {
             type: 'done',
             meta: this.createMeta(
               response?.model || request.model,
               Date.now() - startTime,
-              usage?.input_tokens || 0,
-              usage?.output_tokens || 0,
+              responsesUsage(response?.usage),
             ),
           } satisfies StreamChunk;
           return;
@@ -442,7 +510,21 @@ export class OpenAIProvider extends BaseProvider {
     };
 
     const tools = this.formatResponsesTools(request.tools);
-    if (tools) params.tools = tools;
+    if (tools) {
+      params.tools = tools;
+      const toolChoice = mapResponsesToolChoice(request.toolChoice);
+      if (toolChoice !== undefined) params.tool_choice = toolChoice;
+      if (request.parallelToolCalls !== undefined) params.parallel_tool_calls = request.parallelToolCalls;
+    }
+
+    // The Responses API takes reasoning as a structured field rather than `reasoning_effort`, and
+    // it is the only OpenAI surface that can return reasoning summaries.
+    if (request.reasoning?.effort || (request.reasoning?.summary && request.reasoning.summary !== 'none')) {
+      params.reasoning = {
+        effort: request.reasoning.effort,
+        summary: request.reasoning.summary === 'none' ? undefined : request.reasoning.summary,
+      };
+    }
 
     if (request.responseFormat?.type === 'json') {
       params.text = { format: { type: 'json_object' } };
@@ -538,25 +620,8 @@ export class OpenAIProvider extends BaseProvider {
     return 'stop';
   }
 
-  private createMeta(model: string, latencyMs: number, inputTokens = 0, outputTokens = 0): NexusResponse['meta'] {
-    return {
-      requestId: generateRequestId(),
-      providerUsed: this.info.name,
-      modelUsed: model,
-      latencyMs,
-      tokensInput: inputTokens,
-      tokensOutput: outputTokens,
-      tokensSaved: 0,
-      estimatedCost: this.estimateCost(model, inputTokens, outputTokens),
-      cacheHit: false,
-      guardrailsApplied: [],
-    };
-  }
-
-  private estimateCost(model: string, inputTokens: number, outputTokens: number): string {
-    const caps = KNOWN_MODELS[model];
-    if (!caps) return '$0.00';
-    return `$${((inputTokens / 1000) * caps.costPer1kInput + (outputTokens / 1000) * caps.costPer1kOutput).toFixed(4)}`;
+  private createMeta(model: string, latencyMs: number, usage: UsageInput = {}): NexusResponse['meta'] {
+    return buildMeta({ provider: this.info.name, model, latencyMs, ...usage });
   }
 
   private requestOptions(request: CompletionRequest): RequestOptions | undefined {
@@ -604,4 +669,45 @@ export class OpenAIProvider extends BaseProvider {
 function thisToolCallIndex(toolCall: unknown, fallback: number): number {
   const index = isRecord(toolCall) ? toolCall.index : undefined;
   return asNumber(index, fallback);
+}
+
+/**
+ * Normalizes chat usage.
+ *
+ * OpenAI counts cached tokens inside `prompt_tokens`, so the cached share is subtracted to leave
+ * only the tokens billed at the standard input rate.
+ */
+function chatUsage(usage: OpenAIChatUsage | undefined): UsageInput {
+  if (!usage) return {};
+  const cachedReadTokens = usage.prompt_tokens_details?.cached_tokens;
+  return {
+    inputTokens: Math.max(0, (usage.prompt_tokens || 0) - (cachedReadTokens || 0)),
+    outputTokens: usage.completion_tokens || 0,
+    cachedReadTokens,
+    reasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
+  };
+}
+
+/** Normalizes Responses API usage, which reports cached input the same way. */
+function responsesUsage(usage: OpenAIResponseUsage | undefined): UsageInput {
+  if (!usage) return {};
+  const cachedReadTokens = usage.input_tokens_details?.cached_tokens;
+  return {
+    inputTokens: Math.max(0, (usage.input_tokens || 0) - (cachedReadTokens || 0)),
+    outputTokens: usage.output_tokens || 0,
+    cachedReadTokens,
+    reasoningTokens: usage.output_tokens_details?.reasoning_tokens,
+  };
+}
+
+function mapChatToolChoice(choice: ToolChoice | undefined): unknown {
+  if (choice === undefined) return undefined;
+  if (typeof choice === 'string') return choice;
+  return { type: 'function', function: { name: choice.name } };
+}
+
+function mapResponsesToolChoice(choice: ToolChoice | undefined): unknown {
+  if (choice === undefined) return undefined;
+  if (typeof choice === 'string') return choice;
+  return { type: 'function', name: choice.name };
 }

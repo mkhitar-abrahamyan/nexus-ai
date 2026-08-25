@@ -57,6 +57,10 @@ export class CohereProvider extends BaseProvider {
           temperature: request.temperature,
           max_tokens: request.maxTokens,
           p: request.topP,
+          k: request.topK,
+          seed: request.seed,
+          frequency_penalty: request.frequencyPenalty,
+          presence_penalty: request.presencePenalty,
         }),
         signal: request.signal,
       });
