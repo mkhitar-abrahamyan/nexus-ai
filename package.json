@@ -585,7 +585,7 @@
     "typecheck:examples:browser": "tsc -p tsconfig.examples.browser.json --noEmit",
     "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:smoke && npm run test:api && npm run test:types",
     "test:unit": "node --import tsx --test tests/unit.ts tests/*.test.ts",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-lines=80 --test-coverage-branches=68 --test-coverage-functions=75 tests/unit.ts tests/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-lines=82 --test-coverage-branches=67 --test-coverage-functions=73 tests/unit.ts tests/*.test.ts",
     "test:smoke": "node tests/package-smoke.mjs",
     "test:api": "node tests/api-contract.mjs",
     "test:types": "node tests/type-consumer.mjs",

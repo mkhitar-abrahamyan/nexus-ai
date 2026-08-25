@@ -70,8 +70,12 @@ union member, so existing code is unaffected.
 - `resolveModel()` no longer merges the bundled and application registries into a new object on each
   call. It reads both maps directly, which removes a per-request allocation from the hot path;
   `getModelRegistry()` and `getModelAliases()` are unchanged as the merged views.
-- Coverage gates raised to 80% lines, 68% branches, and 75% functions, with new tests for the agent
-  loop, the rules router, and the evaluation metric library.
+- Coverage gates raised from 70/60/60 to 82% lines, 67% branches, and 73% functions, with new tests
+  for the agent loop, the rules router, the evaluation metric library, and the Google, Ollama, and
+  Cohere adapters. The gates sit a couple of points below the lowest figure the supported Node
+  versions report, because Node 22 and Node 24 do not count functions identically: the same suite
+  measures 78.7% on Node 22 and 75.9% on Node 24. A gate set from one version alone fails on the
+  other.
 
 ### Notes
 
