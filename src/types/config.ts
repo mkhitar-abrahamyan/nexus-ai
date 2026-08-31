@@ -3,6 +3,7 @@ import type { TokenOptimizerConfig } from './optimizer.js';
 import type { ContextWindowConfig } from './context-window.js';
 import type { VoiceConfig } from './voice.js';
 import type { ImageConfig } from './images.js';
+import type { EmbeddingConfig } from './embeddings.js';
 import type { TelephonyConfig } from './telephony.js';
 import type { AliasMetadata, Modality, ModelCapabilities, ModelStatus, RoutingModelPreference } from './providers.js';
 import type { CapabilityConfig } from './capabilities.js';
@@ -283,6 +284,8 @@ export interface NexusAIConfig {
   contextWindow?: ContextWindowConfig;
   voice?: VoiceConfig;
   images?: ImageConfig;
+  /** Provider-neutral embeddings reached through ai.embed(). */
+  embeddings?: EmbeddingConfig;
   telephony?: TelephonyConfig;
   tokenOptimizer?: TokenOptimizerConfig;
   models?: ModelRegistryConfig;

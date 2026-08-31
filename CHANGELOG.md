@@ -4,6 +4,71 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-31
+
+Embeddings become a first-class operation. `ai.embed()` gets the routing, caching, batching, budget,
+retry, audit, and metrics that until now only completions had, so embedding spend is visible next to
+completion spend instead of leaving the platform entirely. Everything here is additive.
+
+### Added
+
+- **`ai.embed()` and `ai.embedOne()`.** A provider-neutral embeddings operation family behind
+  `EmbeddingManager`, reached through `ai.embeddings` or the new `nexus-ai-pro/embeddings` subpath.
+  The manager is built on first access, so a runtime that never embeds pays nothing for it.
+- **Adapters for OpenAI, Google, Cohere, Mistral, and Ollama**, plus any OpenAI-compatible
+  `/embeddings` server through `OpenAIEmbeddingProvider`'s `baseUrl` and `providerName`. They are
+  registered automatically from the provider credentials already in `providers`, so a configured
+  chat provider makes `ai.embedOne('text')` work with no embedding-specific configuration. Explicit
+  registration through `registerEmbeddingProvider()` always wins, and auto-registration can be
+  turned off with `embeddings.autoRegisterProviders: false`.
+- **Batching, deduplication, and per-input caching.** A batch larger than the model's limit is split
+  and run with bounded concurrency, and the vectors still come back in input order. Repeated texts
+  within one request are answered by a single provider call, and caching is keyed per input, so a
+  partially repeated batch only sends the texts it has not seen. `meta.batches`, `meta.cachedInputs`,
+  and `meta.deduplicatedInputs` report what actually happened.
+- **Structured usage and numeric cost for embeddings.** `meta.usage` and `meta.cost` reuse the same
+  `TokenUsage` and `ResponseCost` shapes as completions, priced from a new embedding model registry.
+  When a provider reports no token counts — Google's `batchEmbedContents` does not — tokens are
+  estimated locally rather than reported as zero, so a call is never priced at nothing.
+- **An embedding model registry** with dimensions, supported truncation sizes, input limits, batch
+  limits, and prices for eleven models across five providers, with aliases (`auto`, `embed-fast`,
+  `embed-quality`, `embed-multilingual`, `embed-local`) and full override through
+  `embeddings.models.registry`. It is deliberately separate from `KNOWN_MODELS`, because completion
+  routing scores models on context window, output price, and tool support, none of which an
+  embedding model has.
+- **Capability refusal.** An unsupported `dimensions`, `inputType`, `encodingFormat`, or `truncate`
+  value throws `EmbeddingCapabilityError` before the provider call. Embeddings refuse rather than
+  drop: a vector built with different dimensions is silently incompatible with the vectors already
+  in a store, and the mismatch only surfaces later as unexplained retrieval quality loss. An option
+  the registry says nothing about is still passed through, and `providerOptions` reaches the
+  provider body untouched.
+- **`toEmbeddingFunction()`**, which adapts the family to the plain `EmbeddingProvider` function that
+  `MemoryVectorStore`, the semantic cache, and RAG ingestion already accept. An existing vector store
+  gains routing, caching, retry, and metrics without changing its own contract.
+- **`normalize`** for unit-length vectors, applied locally when the provider does not already return
+  them, and reapplied after a locally truncated vector loses its length.
+- **A deterministic `MockEmbeddingProvider`** and `runEmbeddingProviderConformance()`, which checks
+  one vector per input, input order, consistent width, optional determinism, and an honored abort.
+- New subpaths `nexus-ai-pro/embeddings`, `embeddings/adapters`, `embeddings/mock`, and
+  `embeddings/models`.
+
+### Changed
+
+- `RateLimiter.check()` accepts the new structural `RateLimitedRequest` instead of a
+  `CompletionRequest`, so one limiter instance and one budget cover every operation family.
+  `CompletionRequest` still satisfies it, so no call site changes.
+- Coverage rose from 82.6% lines / 68.9% branches / 78.2% functions to 85.7% / 70.9% / 80.8%, with
+  65 new tests. `embeddings/providers.ts`, previously the weakest file in the package at 37% lines,
+  is now at 99%.
+
+### Notes
+
+- Bundled embedding dimensions and prices are defaults, not financial truth; override them through
+  `embeddings.models.registry` when exact numbers matter.
+- Which concrete model an embedding alias resolves to can change in a minor release. Two targets do
+  not produce interchangeable vectors, so pin a concrete model when a stored index must stay valid
+  across upgrades.
+
 ## [1.4.0] - 2026-08-25
 
 Request parity and cost truth: the completion request can now express what current models actually
@@ -201,7 +266,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.2.0...v1.2.1

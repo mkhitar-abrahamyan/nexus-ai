@@ -106,6 +106,31 @@ exactly-once provider execution. Those capabilities will use additive adapters a
 `MemoryAssetStore` is likewise process-local and does not promise cross-process durability or shared
 tenant state.
 
+## Embeddings API stage
+
+The `nexus-ai-pro/embeddings` family is public and follows the 1.x rules, including the explicit
+`embeddings/adapters`, `embeddings/mock`, and `embeddings/models` subpaths. This covers
+`EmbeddingManager`, `ai.embed()` and `ai.embedOne()`, the `EmbeddingsProvider` contract, the
+normalized request, embedding, and meta shapes, the error subclasses, and `toEmbeddingFunction()`.
+
+`EmbeddingsProvider` is a distinct contract from the pre-existing `EmbeddingProvider` function type
+used by `MemoryVectorStore`, the semantic cache, and RAG ingestion. That function type is unchanged
+and remains supported; `toEmbeddingFunction()` converts one into the other.
+
+Two behaviors are guaranteed and differ deliberately from completions. Vectors are returned in input
+order regardless of how the request was split, deduplicated, or served from cache. And an option the
+target model or adapter declares it cannot honor is **refused**, not dropped, because a vector built
+with different dimensions or a different input type is silently incompatible with vectors already in
+a store. An option nothing in the registry describes is still passed through, on the same
+absence-means-unknown rule the completion path uses.
+
+Embedding model entries are registry data, not compatibility guarantees. Bundled dimensions, input
+limits, batch limits, and prices can change in a minor release when a provider changes its lineup,
+and are overridable through `embeddings.models.registry`. Which concrete model an alias such as
+`embed-quality` resolves to can also change in a minor release: the vectors two targets produce are
+not interchangeable, so pin a concrete model whenever a stored index must stay valid across
+upgrades. Provider payloads under `raw` and reported token counts are controlled by the provider.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

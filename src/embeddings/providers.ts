@@ -1,4 +1,26 @@
 import type { EmbeddingProvider } from '../hallucination/retrieval.js';
+import type { EmbeddingRequest, EmbeddingResponse } from '../types/embeddings.js';
+
+/**
+ * Anything that answers an embedding request: an `EmbeddingManager`, or a `NexusAI` runtime.
+ */
+export interface EmbeddingSource {
+  embed(request: EmbeddingRequest): Promise<EmbeddingResponse>;
+}
+
+/**
+ * Adapts the embeddings operation family to the plain function that `MemoryVectorStore`, the
+ * semantic cache, and RAG ingestion accept.
+ *
+ * This is how an existing vector store gains routing, caching, batching, budget, retry, audit, and
+ * metrics without changing its own contract.
+ */
+export function toEmbeddingFunction(
+  source: EmbeddingSource,
+  options: Omit<EmbeddingRequest, 'input'> = {},
+): EmbeddingProvider {
+  return async (texts) => (await source.embed({ ...options, input: texts })).vectors;
+}
 
 export interface OpenAIEmbeddingOptions {
   apiKey: string;

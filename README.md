@@ -83,6 +83,7 @@ You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want f
 - estimate tokens and cost before provider calls
 - cache exact or semantically similar prompts
 - add tools, agents, RAG context, evals, batch jobs, and queues
+- embed text through the same routing, caching, batching, budget, retry, and metrics as a completion
 - build persistent realtime voice agents with interruption, live tools, and normalized conversation state
 - keep TypeScript types around every request and response
 
@@ -415,6 +416,98 @@ const response = await ai.completeVerified(
   },
 );
 ```
+
+## Embeddings
+
+`ai.embed()` is a first-class operation, not a helper: it gets the same routing, caching, batching,
+budget, retry, audit, and metrics as a completion, so embedding spend shows up next to completion
+spend instead of being invisible.
+
+The smallest call is one line, and needs no embedding-specific configuration — adapters are derived
+from the provider credentials already in `providers`:
+
+```ts
+import { NexusAI } from 'nexus-ai-pro';
+
+const ai = new NexusAI({ providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } } });
+
+const vector = await ai.embedOne('Provider-neutral embeddings.');
+```
+
+A batch returns vectors in input order regardless of how many provider calls the model's batch
+limit required, and reports what the call cost:
+
+```ts
+const response = await ai.embed({
+  input: documents.map((document) => document.text),
+  model: 'embed-quality',
+  inputType: 'document',
+  normalize: true,
+});
+
+response.vectors;                  // number[][], in input order
+response.meta.batches;             // provider calls the split required
+response.meta.usage.inputTokens;   // reported by the provider, or estimated when it reports none
+response.meta.cost.amount;         // numeric, priced from the embedding registry
+response.meta.cachedInputs;        // inputs answered from cache
+response.meta.deduplicatedInputs;  // repeated inputs answered from one call
+```
+
+Caching is per input rather than per request, so a partially repeated batch only sends the texts it
+has not seen. Repeated texts inside one batch are collapsed into a single provider call:
+
+```ts
+const ai = new NexusAI({
+  providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } },
+  embeddings: {
+    cache: { enabled: true, ttlSeconds: 86_400 },
+    costBudget: { enabled: true, maxEstimatedCost: 5 },
+    retry: { enabled: true, maxRetries: 2 },
+    fallback: [{ provider: 'cohere', model: 'embed-v4.0' }],
+  },
+});
+```
+
+Unlike a completion, an unsupported embedding option is **refused rather than dropped**. A vector
+built with different dimensions or a different input type is silently incompatible with the vectors
+already in a store, and the mismatch only surfaces later as unexplained retrieval quality loss:
+
+```ts
+await ai.embed({ input: 'x', model: 'embed-english-v3.0', dimensions: 512 });
+// EmbeddingCapabilityError: model has a fixed size of 1024 dimensions
+```
+
+An option the registry says nothing about is still passed through, because an undeclared capability
+means unknown rather than unsupported, and `providerOptions` reaches the provider body untouched for
+anything the neutral contract does not model yet.
+
+Existing vector stores keep their contract. `toEmbeddingFunction()` adapts the family to the plain
+function `MemoryVectorStore`, the semantic cache, and RAG ingestion already accept:
+
+```ts
+import { MemoryVectorStore, toEmbeddingFunction } from 'nexus-ai-pro';
+
+const store = new MemoryVectorStore(toEmbeddingFunction(ai, { inputType: 'document' }));
+```
+
+Bundled adapters cover OpenAI (and any OpenAI-compatible `/embeddings` server), Google, Cohere,
+Mistral, and Ollama. A custom adapter implements `EmbeddingsProvider` and is checked against the
+neutral contract by `runEmbeddingProviderConformance()`:
+
+```ts
+import { OpenAIEmbeddingProvider } from 'nexus-ai-pro/embeddings/adapters';
+import { MockEmbeddingProvider } from 'nexus-ai-pro/embeddings/mock';
+
+ai.registerEmbeddingProvider('gateway', new OpenAIEmbeddingProvider({
+  apiKey: process.env.GATEWAY_KEY!,
+  baseUrl: 'https://gateway.internal/v1',
+  providerName: 'gateway',
+}));
+ai.registerEmbeddingProvider('mock', new MockEmbeddingProvider());
+```
+
+Bundled embedding dimensions and prices are defaults, not financial truth. Override them through
+`embeddings.models.registry` when exact numbers matter.
 
 ## Image Generation and Editing (Experimental)
 
@@ -1133,6 +1226,10 @@ import { negotiateCompletionRequest } from 'nexus-ai-pro/capabilities';
 import { guardrailPolicy } from 'nexus-ai-pro/security';
 import { RedisCacheAdapter } from 'nexus-ai-pro/cache';
 import { DeepSeekProvider } from 'nexus-ai-pro/providers/deepseek';
+import { EmbeddingManager } from 'nexus-ai-pro/embeddings';
+import { OpenAIEmbeddingProvider } from 'nexus-ai-pro/embeddings/adapters';
+import { MockEmbeddingProvider } from 'nexus-ai-pro/embeddings/mock';
+import { KNOWN_EMBEDDING_MODELS } from 'nexus-ai-pro/embeddings/models';
 import { ImageManager } from 'nexus-ai-pro/images';
 import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
 import { MockImageProvider } from 'nexus-ai-pro/images/mock';

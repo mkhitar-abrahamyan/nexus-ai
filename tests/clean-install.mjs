@@ -17,10 +17,12 @@ const packDir = path.join(tempRoot, 'pack');
 const consumerDir = path.join(tempRoot, 'consumer');
 // The package ships parallel ESM and CommonJS builds, so the JS payload is carried twice.
 // Raised in 1.4.0 for the capability-negotiation and usage modules, the expanded provider parameter
-// mapping, and the added registry capability data. The headroom is deliberately small so accidental
+// mapping, and the added registry capability data. Raised again in 1.5.0 for the embeddings
+// operation family: a manager, five adapters, a model registry, a mock, a conformance harness, and
+// their declarations, all carried in both builds. The headroom is deliberately small so accidental
 // bloat still fails here; raise it only alongside a change that explains the growth.
-const MAX_PACKED_BYTES = 340_000;
-const MAX_UNPACKED_BYTES = 2_200_000;
+const MAX_PACKED_BYTES = 390_000;
+const MAX_UNPACKED_BYTES = 2_450_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

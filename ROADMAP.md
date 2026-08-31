@@ -3,10 +3,11 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.4.0**. 55 export subpaths, 12 completion providers, 99 registry models plus 63
-aliases. 163 unit tests pass; coverage sits at **82.6% lines / 68.9% branches / 78.2% functions**
-against gates of 80/68/75. CI verifies lint, format, build, tests, coverage, mock conformance,
-packed-package smoke, API contract, consumer type resolution, and clean install on Node 22 and 24.
+Status baseline: **1.5.0**. 59 export subpaths, 12 completion providers, 5 embedding providers, 99
+completion registry models plus 63 aliases, and 11 embedding models plus 5 aliases. 234 unit tests
+pass; coverage sits at **85.7% lines / 70.9% branches / 80.8% functions** against gates of
+82/67/73. CI verifies lint, format, build, tests, coverage, mock conformance, packed-package smoke,
+API contract, consumer type resolution, and clean install on Node 22 and 24.
 
 ---
 
@@ -91,7 +92,17 @@ parallel-tool-call, seed, top-k, and penalty controls; structured `usage` with c
 cached-write, and reasoning token counts; numeric `cost` priced per token class; and capability
 negotiation under a `strict`, `warn`, or `off` policy with registry provenance and a freshness check.
 
-### 1.8 Operations, evaluation, and packaging
+### 1.8 Embeddings
+
+Delivered in 1.5.0. `ai.embed()` and `ai.embedOne()` over a provider-neutral `EmbeddingsProvider`
+contract with adapters for OpenAI (and any OpenAI-compatible server), Google, Cohere, Mistral, and
+Ollama, auto-registered from existing provider credentials. Around them: model-registry routing with
+aliases and per-provider fallback, batch splitting with bounded concurrency, within-request
+deduplication, per-input caching, cost budgets, retry, structured usage and numeric cost, capability
+refusal rather than silent option dropping, `toEmbeddingFunction()` for existing vector stores, a
+deterministic mock, and a conformance harness.
+
+### 1.9 Operations, evaluation, and packaging
 
 Rate limiting, audit logging, in-memory and OpenTelemetry metrics sinks, Prometheus export, an
 OpenTelemetry trace exporter, provider health monitoring, `EvalRunner` with LLM-as-judge and a
@@ -107,21 +118,27 @@ trusted publishing with provenance.
 
 Ordered by how much each one costs a consumer today.
 
-### 2.1 Only completions get the platform
+### 2.1 Media families still do not get the platform
 
-The pipeline, rate limiter, audit log, metrics collector, and cost budget are wired into
-`complete()` and `stream()` only. `ImageManager`, `VoiceManager`, `TelephonyManager`, and
-`RealtimeSession` emit nothing to `MetricsCollector` and pass through no rate limit or audit stage.
-An application running phone agents and image generation has observability for the smallest part of
-its spend. `PipelineContext` is also typed strictly around `CompletionRequest`/`NexusResponse`, so
-other families cannot reuse it without a refactor, and `PipelineStepName` ends in `| string`, which
-erases the union it defines.
+Narrowed in 1.5.0: `EmbeddingManager` shares the runtime's rate limiter, audit log, and metrics
+collector, and `RateLimiter` now buckets on a structural request rather than a `CompletionRequest`,
+so a family no longer has to be a completion to be governed. `ImageManager`, `VoiceManager`,
+`TelephonyManager`, and `RealtimeSession` still emit nothing to `MetricsCollector` and pass through
+no rate limit or audit stage, so an application running phone agents and image generation has
+observability for only part of its spend.
 
-### 2.2 No first-class embeddings operation
+The traced pipeline itself remains completion-only. `PipelineContext` is typed strictly around
+`CompletionRequest`/`NexusResponse`, so other families cannot reuse it without a refactor, and
+`PipelineStepName` ends in `| string`, which erases the union it defines. Embeddings therefore share
+the observability primitives but not the step trace.
 
-`src/embeddings/providers.ts` exports OpenAI/Gemini/Cohere factory functions used only by the
-semantic cache and vector store. There is no `ai.embed()`, so embeddings get no routing, caching,
-budget, retry, audit, or metrics — and no provider-neutral batch contract.
+### 2.2 Embeddings beyond text retrieval
+
+Closed for text in 1.5.0: `ai.embed()` is an operation family with routing, per-input caching,
+batching, deduplication, budget, retry, audit, and metrics, over five adapters and its own model
+registry. What remains is everything the family does not yet cover: a provider batch-API tier for
+large asynchronous ingestion jobs, image and multimodal embeddings, a distributed cache adapter for
+vectors shared across processes, and reranking as a sibling operation.
 
 ### 2.3 The model registry is still hand-maintained
 
@@ -160,14 +177,14 @@ local estimate, and a published latency benchmark methodology remain follow-on w
 ### 2.7 Test coverage weak spots
 
 1.4.0 closed the worst of these: the agent loop went from 40% to 95% line coverage, the rules router
-from 34% to 91%, and the evaluation metric library from 40% (5% of functions) to 99%. What is still
-thin:
+from 34% to 91%, and the evaluation metric library from 40% (5% of functions) to 99%. 1.5.0 took
+`embeddings/providers.ts` from 37% to 99% and landed the new embeddings family at 95–100% across its
+seven files. What is still thin:
 
 | Area | Lines | Note |
 | --- | --- | --- |
 | `hallucination/rag.ts`, `verification.ts` | 38% / 47% | Grounding claims deserve tests. |
 | `workflow/chains.ts`, `domain.ts` | 51% / 50% | |
-| `embeddings/providers.ts` | 37% | Should be covered as part of the embeddings operation family. |
 | `security/pii-detector.ts`, `semantic-injection-classifier.ts` | 49% / 49% | Security-relevant. |
 | `jobs/queue.ts`, `batch.ts` | 47% / 53% | |
 | `rag/file-ingestion.ts` | 43% | |
@@ -219,7 +236,18 @@ policy vocabulary is in place for a later release that revisits this.
 
 ---
 
-## 4. Next release: 1.5.0 — durable operations and batch economics
+## 4. Shipped in 1.5.0 — embeddings as an operation family
+
+`ai.embed()` with routing, per-input caching, batching, deduplication, budget, retry, audit, and
+metrics; the existing factory functions became one adapter shape behind it, and
+`toEmbeddingFunction()` keeps `MemoryVectorStore`, the semantic cache, and RAG ingestion working
+unchanged. Embeddings refuse an unsupported option rather than dropping it, because a mis-sized
+vector is silently incompatible with a populated store rather than merely different.
+
+Deliberately deferred: the provider batch-API tier, which belongs with the durable operation handle
+below rather than with the synchronous path.
+
+## 5. Next release: 1.6.0 — durable operations and batch economics
 
 The theme is work that outlives a process.
 
@@ -235,19 +263,17 @@ The theme is work that outlives a process.
 - **Distributed rate limiting and circuit breaking.** Redis-backed limiter adapter, plus a breaker
   that consumes existing `ProviderHealthMonitor` signals and trips routing away from a failing
   provider.
-- **Embeddings as an operation family.** `ai.embed()` with routing, caching, batching, budget, retry,
-  audit, and metrics; existing factories become adapters behind it.
 - **Filesystem and S3-compatible asset stores** implementing the existing `AssetStore` interface,
   with retention, tenant ownership, checksums, streaming, and signing. Provider URLs remain temporary
   delivery locations, never durable storage.
 - **Generated model registry** from versioned provider data, consuming the 1.4.0 provenance fields.
 - **Cross-family observability.** Route image, voice, telephony, and realtime operations through the
-  rate limiter, audit log, and metrics collector, closing gap 2.3 without waiting for the full
+  rate limiter, audit log, and metrics collector, closing gap 2.1 without waiting for the full
   lifecycle refactor.
 
 ---
 
-## 5. 1.6.0 — image portability, then promotion
+## 6. 1.7.0 — image portability, then promotion
 
 Images cannot leave experimental until the neutral contract survives a second wire protocol.
 
@@ -275,7 +301,7 @@ label come off.
 
 ---
 
-## 6. 2.0 candidate — one lifecycle for every operation
+## 7. 2.0 candidate — one lifecycle for every operation
 
 Create an internal typed lifecycle and adapt every family to it:
 
@@ -298,7 +324,7 @@ Also in the 2.0 window, because each requires a breaking change:
 
 ---
 
-## 7. Longer-term backlog
+## 8. Longer-term backlog
 
 1. MCP client and server adapters with asset and tool interoperability.
 2. Video generation through the same asynchronous operation, job, and asset contracts.
@@ -323,7 +349,7 @@ Also in the 2.0 window, because each requires a breaking change:
 
 ---
 
-## 8. Design notes carried forward
+## 9. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -375,7 +401,7 @@ await ai.images.edit({
 
 ---
 
-## 9. How an item graduates
+## 10. How an item graduates
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.

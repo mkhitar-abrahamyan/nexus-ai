@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "A typed multi-provider AI pipeline for Node.js with routing, streaming, tools, and guardrails",
   "type": "module",
   "main": "dist-cjs/index.js",
@@ -308,6 +308,46 @@
       "require": {
         "types": "./dist-cjs/images/openai.d.ts",
         "default": "./dist-cjs/images/openai.js"
+      }
+    },
+    "./embeddings": {
+      "import": {
+        "types": "./dist/embeddings/index.d.ts",
+        "default": "./dist/embeddings/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/embeddings/index.d.ts",
+        "default": "./dist-cjs/embeddings/index.js"
+      }
+    },
+    "./embeddings/adapters": {
+      "import": {
+        "types": "./dist/embeddings/adapters.d.ts",
+        "default": "./dist/embeddings/adapters.js"
+      },
+      "require": {
+        "types": "./dist-cjs/embeddings/adapters.d.ts",
+        "default": "./dist-cjs/embeddings/adapters.js"
+      }
+    },
+    "./embeddings/mock": {
+      "import": {
+        "types": "./dist/embeddings/mock.d.ts",
+        "default": "./dist/embeddings/mock.js"
+      },
+      "require": {
+        "types": "./dist-cjs/embeddings/mock.d.ts",
+        "default": "./dist-cjs/embeddings/mock.js"
+      }
+    },
+    "./embeddings/models": {
+      "import": {
+        "types": "./dist/embeddings/models.d.ts",
+        "default": "./dist/embeddings/models.js"
+      },
+      "require": {
+        "types": "./dist-cjs/embeddings/models.d.ts",
+        "default": "./dist-cjs/embeddings/models.js"
       }
     },
     "./realtime": {
@@ -779,6 +819,18 @@
       ],
       "images/openai": [
         "dist-cjs/images/openai.d.ts"
+      ],
+      "embeddings": [
+        "dist-cjs/embeddings/index.d.ts"
+      ],
+      "embeddings/adapters": [
+        "dist-cjs/embeddings/adapters.d.ts"
+      ],
+      "embeddings/mock": [
+        "dist-cjs/embeddings/mock.d.ts"
+      ],
+      "embeddings/models": [
+        "dist-cjs/embeddings/models.d.ts"
       ],
       "realtime": [
         "dist-cjs/realtime/index.d.ts"

@@ -86,7 +86,7 @@ export {
   createVoiceTwiML,
 } from './telephony/index.js';
 export { hardenPrompt } from './security/prompt-hardening.js';
-export { RateLimiter, NexusRateLimitError } from './ops/rate-limiter.js';
+export { RateLimiter, NexusRateLimitError, type RateLimitedRequest } from './ops/rate-limiter.js';
 export { AuditLogger } from './ops/audit-logger.js';
 export {
   MetricsCollector,
@@ -224,10 +224,37 @@ export {
   createOpenAIEmbeddingProvider,
   createGeminiEmbeddingProvider,
   createCohereEmbeddingProvider,
+  toEmbeddingFunction,
   type OpenAIEmbeddingOptions,
   type GeminiEmbeddingOptions,
   type CohereEmbeddingOptions,
+  type EmbeddingSource,
 } from './embeddings/providers.js';
+export { EmbeddingManager } from './embeddings/manager.js';
+export {
+  EmbeddingCapabilityError,
+  EmbeddingError,
+  EmbeddingModelNotFoundError,
+  EmbeddingProviderError,
+  EmbeddingProviderNotFoundError,
+  EmbeddingProviderResponseError,
+  EmbeddingValidationError,
+} from './embeddings/errors.js';
+export {
+  EMBEDDING_MODEL_ALIASES,
+  EMBEDDING_REGISTRY_PROVENANCE,
+  KNOWN_EMBEDDING_MODELS,
+  estimateEmbeddingCost,
+  getEmbeddingModelAliases,
+  getEmbeddingModelCapabilities,
+  getEmbeddingModelRegistry,
+  listEmbeddingModels,
+  listEmbeddingModelsForProvider,
+  priceEmbeddingUsage,
+  resolveEmbeddingModel,
+  type EmbeddingCostEstimateInput,
+  type ResolvedEmbeddingModel,
+} from './embeddings/models.js';
 export { tool, ToolExecutor } from './agent/tool.js';
 export { AgentLoop, type AgentModelClient } from './agent/loop.js';
 export { Tokenizer } from './utils/tokenizer.js';
@@ -350,6 +377,13 @@ export {
   type ProviderConformanceOptions,
   type ProviderConformanceResult,
 } from './testing/provider-conformance.js';
+export {
+  EMBEDDING_PROVIDER_CONFORMANCE_FIXTURES,
+  runEmbeddingProviderConformance,
+  type EmbeddingProviderConformanceCase,
+  type EmbeddingProviderConformanceOptions,
+  type EmbeddingProviderConformanceResult,
+} from './testing/embedding-provider-conformance.js';
 export {
   IMAGE_PROVIDER_CONFORMANCE_FIXTURES,
   runImageProviderConformance,
@@ -525,6 +559,28 @@ export type {
   MemoryAssetStoreOptions,
   MemoryAssetStoreSnapshot,
 } from './images/assets.js';
+
+export type {
+  Embedding,
+  EmbeddingConfig,
+  EmbeddingCostBudgetConfig,
+  EmbeddingEncodingFormat,
+  EmbeddingInput,
+  EmbeddingInputType,
+  EmbeddingMeta,
+  EmbeddingModelCapabilities,
+  EmbeddingModelRegistryConfig,
+  EmbeddingProviderCallContext,
+  EmbeddingProviderCapabilities,
+  EmbeddingProviderInfo,
+  EmbeddingProviderRequest,
+  EmbeddingProviderResult,
+  EmbeddingProviderUsage,
+  EmbeddingRequest,
+  EmbeddingResponse,
+  EmbeddingTruncateMode,
+  EmbeddingsProvider,
+} from './types/embeddings.js';
 
 export type {
   CreateCallRequest,

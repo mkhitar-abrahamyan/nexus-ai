@@ -1,5 +1,15 @@
-import type { CompletionRequest } from '../types/messages.js';
 import type { RateLimitConfig } from '../types/config.js';
+
+/**
+ * The parts of a request the limiter buckets on.
+ *
+ * Structural rather than tied to `CompletionRequest`, so every operation family — completions,
+ * embeddings, and whatever comes next — shares one limiter instance and one budget.
+ */
+export interface RateLimitedRequest {
+  model?: string;
+  userId?: string;
+}
 
 export class NexusRateLimitError extends Error {
   constructor(public key: string) {
@@ -16,7 +26,7 @@ interface Bucket {
 export class RateLimiter {
   private buckets = new Map<string, Bucket>();
 
-  check(request: CompletionRequest, config?: RateLimitConfig): void {
+  check(request: RateLimitedRequest, config?: RateLimitConfig): void {
     if (!config?.enabled) return;
 
     const key = this.getKey(request, config);
@@ -34,7 +44,7 @@ export class RateLimiter {
     }
   }
 
-  private getKey(request: CompletionRequest, config: RateLimitConfig): string {
+  private getKey(request: RateLimitedRequest, config: RateLimitConfig): string {
     if (config.key === 'model') return `model:${request.model}`;
     if (config.key === 'global') return 'global';
     return `user:${request.userId || 'anonymous'}`;

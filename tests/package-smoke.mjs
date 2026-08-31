@@ -35,6 +35,16 @@ const imports = [
   { specifier: 'nexus-ai-pro/images/mock', exports: ['MockImageProvider'] },
   { specifier: 'nexus-ai-pro/images/openai', exports: ['OpenAIImageProvider', 'OpenAIImageProviderError'] },
   {
+    specifier: 'nexus-ai-pro/embeddings',
+    exports: ['EmbeddingManager', 'EmbeddingProviderError', 'MockEmbeddingProvider', 'OpenAIEmbeddingProvider'],
+  },
+  {
+    specifier: 'nexus-ai-pro/embeddings/adapters',
+    exports: ['OpenAIEmbeddingProvider', 'CohereEmbeddingProvider', 'OllamaEmbeddingProvider'],
+  },
+  { specifier: 'nexus-ai-pro/embeddings/mock', exports: ['MockEmbeddingProvider'] },
+  { specifier: 'nexus-ai-pro/embeddings/models', exports: ['KNOWN_EMBEDDING_MODELS', 'resolveEmbeddingModel'] },
+  {
     specifier: 'nexus-ai-pro/realtime',
     exports: [
       'RealtimeSession',

@@ -15,6 +15,7 @@ import type {
   VoiceTurnResponse,
 } from '../types/voice.js';
 import type { ImageProvider } from '../types/images.js';
+import type { EmbeddingRequest, EmbeddingResponse, EmbeddingsProvider } from '../types/embeddings.js';
 import type {
   CreateCallRequest,
   CreateCallResponse,
@@ -52,6 +53,7 @@ import { SecurityPipeline } from '../security/index.js';
 import { ContextWindowManager } from '../context/index.js';
 import { VoiceManager, type VoiceSession } from '../voice/index.js';
 import { ImageManager } from '../images/manager.js';
+import { EmbeddingManager } from '../embeddings/manager.js';
 import { TelephonyManager } from '../telephony/index.js';
 import { TokenOptimizer } from '../optimizer/index.js';
 import { AgentLoop } from '../agent/loop.js';
@@ -85,6 +87,7 @@ export class NexusAI {
   readonly images: ImageManager;
 
   private config: NexusAIConfig;
+  private embeddingManager?: EmbeddingManager;
   private providers = new Map<string, BaseProvider>();
   private router = new Router();
   private failover = new FailoverExecutor();
@@ -628,6 +631,40 @@ export class NexusAI {
   }
 
   /**
+   * Provider-neutral embeddings, sharing this runtime's metrics, audit log, and rate limiter.
+   *
+   * Built on first access, so a runtime that never embeds pays nothing for the family. Adapters are
+   * derived from the provider credentials already in `providers`, which makes `ai.embed('text')`
+   * work without any embedding-specific configuration.
+   */
+  get embeddings(): EmbeddingManager {
+    if (!this.embeddingManager) {
+      this.embeddingManager = new EmbeddingManager(this.config.embeddings || {}, {
+        metrics: this.metrics,
+        auditLogger: this.auditLogger,
+        rateLimiter: this.rateLimiter,
+        providers: this.config.providers,
+      });
+    }
+    return this.embeddingManager;
+  }
+
+  /**
+   * Embeds one text or a batch through the configured embedding provider.
+   *
+   * `vectors[0]` is the answer for the single-string form; a batch comes back in input order no
+   * matter how many provider calls the model's batch limit required.
+   */
+  embed(request: EmbeddingRequest): Promise<EmbeddingResponse> {
+    return this.embeddings.embed(request);
+  }
+
+  /** Embeds one text and returns the vector alone. */
+  embedOne(text: string, options: Omit<EmbeddingRequest, 'input'> = {}): Promise<number[]> {
+    return this.embeddings.embedOne(text, options);
+  }
+
+  /**
    * Registers a custom text provider at runtime.
    */
   registerProvider(name: string, provider: BaseProvider): this {
@@ -659,6 +696,14 @@ export class NexusAI {
     return this;
   }
 
+  /**
+   * Registers a custom embedding provider at runtime.
+   */
+  registerEmbeddingProvider(name: string, provider: EmbeddingsProvider): this {
+    this.embeddings.registerEmbeddingProvider(name, provider);
+    return this;
+  }
+
   hasProvider(name: string): boolean {
     return this.providers.has(name);
   }
@@ -673,6 +718,10 @@ export class NexusAI {
 
   hasTelephonyProvider(name: string): boolean {
     return this.telephonyManager.hasProvider(name);
+  }
+
+  hasEmbeddingProvider(name: string): boolean {
+    return this.embeddings.hasEmbeddingProvider(name);
   }
 
   /**
@@ -692,6 +741,10 @@ export class NexusAI {
 
   listTelephonyProviders(): string[] {
     return this.telephonyManager.listProviders();
+  }
+
+  listEmbeddingProviders(): string[] {
+    return this.embeddings.listEmbeddingProviders();
   }
 
   /**

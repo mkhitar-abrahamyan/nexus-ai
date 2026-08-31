@@ -99,6 +99,7 @@ import {
   DeepSeekProvider,
   GoogleProvider,
   GroqProvider,
+  EmbeddingManager,
   ImageManager,
   LMStudioProvider,
   LlamaCppProvider,
@@ -122,6 +123,10 @@ import {
   type ContextWindowConfig,
   type CostBudgetConfig,
   type DeepSeekProviderConfig,
+  type EmbeddingConfig,
+  type EmbeddingRequest,
+  type EmbeddingResponse,
+  type EmbeddingsProvider,
   type ImageConfig,
   type ImageGenerateRequest,
   type ImageProvider,
@@ -158,6 +163,10 @@ import { ImageManager as SubpathImageManager } from 'nexus-ai-pro/images';
 import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
 import { MockImageProvider } from 'nexus-ai-pro/images/mock';
 import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
+import { EmbeddingManager as SubpathEmbeddingManager } from 'nexus-ai-pro/embeddings';
+import { MockEmbeddingProvider } from 'nexus-ai-pro/embeddings/mock';
+import { OpenAIEmbeddingProvider } from 'nexus-ai-pro/embeddings/adapters';
+import { resolveEmbeddingModel } from 'nexus-ai-pro/embeddings/models';
 import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/telephony';
 import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
@@ -368,6 +377,13 @@ const voiceSessionConfig: VoiceSessionConfig = {
   toolSelection: 'task',
   speech: { provider: 'consumer-voice', format: 'mp3' },
 };
+const embeddingConfigProvider: EmbeddingsProvider = new MockEmbeddingProvider();
+const embeddingConfig: EmbeddingConfig = {
+  providers: { mock: embeddingConfigProvider },
+  defaultProvider: 'mock',
+  cache: { enabled: true, ttlSeconds: 60 },
+  costBudget: { enabled: true, maxEstimatedCost: 1 },
+};
 const mockImageProvider: ImageProvider = new MockImageProvider({ model: 'mock-image-v1' });
 const imageConfig: ImageConfig = {
   defaultProvider: 'mock',
@@ -390,6 +406,7 @@ const aiConfig: NexusAIConfig = {
   contextWindow: contextWindowConfig,
   voice: voiceConfig,
   images: imageConfig,
+  embeddings: embeddingConfig,
   telephony: telephonyConfig,
   defaultModel: 'consumer/test',
   security: 'off',
@@ -436,6 +453,13 @@ const subpathVoiceManager = new SubpathVoiceManager(voiceConfig);
 const voiceSession: VoiceSession = ai.createVoiceSession(voiceSessionConfig);
 const subpathVoiceSession = new SubpathVoiceSession(voiceSessionConfig, subpathVoiceManager, ai);
 const openAiVoice = new OpenAIVoiceProvider({ apiKey: 'test' });
+const embeddingManager = new EmbeddingManager(embeddingConfig);
+const subpathEmbeddingManager = new SubpathEmbeddingManager(embeddingConfig);
+const openAiEmbeddings = new OpenAIEmbeddingProvider({ apiKey: 'test' });
+const embeddingRequest: EmbeddingRequest = { input: ['one', 'two'], inputType: 'document', normalize: true };
+const embeddingResponse: Promise<EmbeddingResponse> = ai.embed(embeddingRequest);
+const embeddingVector: Promise<number[]> = ai.embedOne('one');
+const resolvedEmbeddingModel = resolveEmbeddingModel('embed-quality');
 const imageManager = new ImageManager(imageConfig);
 const subpathImageManager = new SubpathImageManager(imageConfig);
 const openAiImages = new OpenAIImageProvider({ apiKey: 'test' });
@@ -534,6 +558,12 @@ void providerName;
 void error.retryable;
 void subpathError.category;
 void toolCall;
+void embeddingManager;
+void subpathEmbeddingManager;
+void openAiEmbeddings;
+void embeddingResponse;
+void embeddingVector;
+void resolvedEmbeddingModel;
 void doneChunk;
 void directRealtimeSession;
 void realtimeAgent;
