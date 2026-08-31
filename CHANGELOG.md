@@ -4,6 +4,55 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Durable operations: the first half of the 1.6.0 theme, *work that outlives a process*. Long-running
+work now runs through one lifecycle that survives a worker crash. Additive throughout.
+
+### Added
+
+- **`OperationRunner` and a shared operation lifecycle.** `queued → running → succeeded | failed`,
+  with `retrying`, `cancelling`, `cancelled`, and `expired` covering the rest, exposed through the
+  new `nexus-ai-pro/operations` subpath. The runner persists a record before doing any work, claims
+  a lease, heartbeats while the executor runs, retries with backoff and jitter, dead-letters what
+  never succeeds, and emits signed webhooks.
+- **Restart survival through leases rather than locks.** A worker that dies leaves a record whose
+  lease lapses; another worker's `recover()` sweep resumes it. Every store write is a compare-and-set
+  on the record's `sequence`, so two workers racing on one operation cannot both win, and the loser
+  is told it lost instead of silently overwriting.
+- **`RedisOperationStore` and `BullMQOperationDispatcher`.** Redis persists records, with the
+  compare-and-set done in one Lua call when the client exposes `eval`. BullMQ dispatch queues the
+  operation id and its routing metadata only, never a payload.
+- **Idempotency keys.** A key matching an existing record replays that operation instead of starting
+  a second one, so an ambiguous timeout cannot produce a duplicate charge.
+- **Progress and cancellation.** An executor reports progress through `context.report()`, which
+  reaches both `handle.events()` and the persisted record. `runner.cancel()` settles an operation
+  owned by another worker, observed there through its heartbeat.
+- **Signed webhooks, with the verifying half included.** Deliveries are HMAC-SHA256 over
+  `${timestamp}.${body}`, so a captured delivery cannot be replayed indefinitely.
+  `verifyOperationWebhook()` ships alongside `signOperationWebhook()` rather than leaving every
+  receiver to hand-roll a constant-time comparison. A failed delivery is reported and never fails
+  the operation it describes.
+- **A binary-payload guard.** Persisting a result carrying a `Uint8Array`, `Buffer`, `Blob`, or
+  stream throws `OperationSerializationError` naming the exact path and pointing at `AssetStore`.
+  Base64 in a job payload inflates it by a third and most queue backends cap job size well below one
+  image, so this fails loudly at the boundary instead of appearing later as a truncated job.
+- New subpaths `nexus-ai-pro/operations`, `operations/adapters`, and `operations/webhooks`.
+
+### Changed
+
+- The operation lifecycle types moved from `types/images.ts` to a family-neutral `types/operations.ts`
+  and are re-exported from their old home, so existing image imports resolve unchanged. The image
+  family's private handle was replaced by the shared `LocalOperationHandle`, which is told to reject
+  with `ImageOperationCancelledError` so callers catching that error see no difference.
+- `OperationStatus` gained `retrying`; `OperationEvent` gained `progress` and `retrying` variants and
+  an `attempt` field on `running`. Additive, but code switching exhaustively on either union should
+  add the new members.
+
+### Fixed
+
+- A handle driven by the runner stayed in `queued` for the whole run, so no `running` event was
+  emitted and every `context.report()` call was silently dropped. Found while testing the runner's
+  event sequence; the handle now exposes `markRunning()` and the runner calls it before each attempt.
+
 ## [1.5.0] - 2026-08-31
 
 Embeddings become a first-class operation. `ai.embed()` gets the routing, caching, batching, budget,

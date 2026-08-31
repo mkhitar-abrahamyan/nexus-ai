@@ -68,6 +68,40 @@ export {
   type VoiceSessionCompletionClient,
   type VoiceSessionRuntime,
 } from './voice/index.js';
+export { OperationRunner } from './operations/runner.js';
+export { LocalOperationHandle, describeOperationError } from './operations/handle.js';
+export { MemoryOperationStore, assertSerializableRecord } from './operations/store.js';
+export {
+  BullMQOperationDispatcher,
+  RedisOperationStore,
+  type BullMQLikeOperationQueue,
+  type RedisOperationLikeClient,
+} from './operations/adapters.js';
+export {
+  OPERATION_WEBHOOK_SIGNATURE_HEADER,
+  deliverOperationWebhook,
+  signOperationWebhook,
+  verifyOperationWebhook,
+} from './operations/webhooks.js';
+export { TERMINAL_OPERATION_STATUSES } from './types/operations.js';
+export {
+  allowedTransitions,
+  assertTransition,
+  canTransition,
+  isClaimable,
+  isSettled,
+  isTerminalOperationStatus,
+} from './operations/state-machine.js';
+export {
+  OperationCancelledError,
+  OperationConflictError,
+  OperationError,
+  OperationExpiredError,
+  OperationLeaseLostError,
+  OperationNotFoundError,
+  OperationSerializationError,
+  OperationTransitionError,
+} from './operations/errors.js';
 export { ImageManager } from './images/manager.js';
 export {
   ImageCapabilityError,
@@ -559,6 +593,20 @@ export type {
   MemoryAssetStoreOptions,
   MemoryAssetStoreSnapshot,
 } from './images/assets.js';
+
+export type {
+  DurableOperationHandle,
+  OperationContext,
+  OperationDispatcher,
+  OperationExecutor,
+  OperationLease,
+  OperationRecord,
+  OperationRetryConfig,
+  OperationRunnerConfig,
+  OperationStore,
+  OperationSubmitOptions,
+  OperationWebhookConfig,
+} from './types/operations.js';
 
 export type {
   Embedding,

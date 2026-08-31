@@ -20,9 +20,11 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // mapping, and the added registry capability data. Raised again in 1.5.0 for the embeddings
 // operation family: a manager, five adapters, a model registry, a mock, a conformance harness, and
 // their declarations, all carried in both builds. The headroom is deliberately small so accidental
-// bloat still fails here; raise it only alongside a change that explains the growth.
-const MAX_PACKED_BYTES = 390_000;
-const MAX_UNPACKED_BYTES = 2_450_000;
+// bloat still fails here; raise it only alongside a change that explains the growth. Raised once
+// more for the durable operations family: a runner, a state machine, two stores, a dispatcher, and
+// webhook helpers, again carried in both builds.
+const MAX_PACKED_BYTES = 420_000;
+const MAX_UNPACKED_BYTES = 2_650_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

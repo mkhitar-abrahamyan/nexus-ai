@@ -45,6 +45,12 @@ const imports = [
   { specifier: 'nexus-ai-pro/embeddings/mock', exports: ['MockEmbeddingProvider'] },
   { specifier: 'nexus-ai-pro/embeddings/models', exports: ['KNOWN_EMBEDDING_MODELS', 'resolveEmbeddingModel'] },
   {
+    specifier: 'nexus-ai-pro/operations',
+    exports: ['OperationRunner', 'MemoryOperationStore', 'LocalOperationHandle', 'OperationCancelledError'],
+  },
+  { specifier: 'nexus-ai-pro/operations/adapters', exports: ['RedisOperationStore', 'BullMQOperationDispatcher'] },
+  { specifier: 'nexus-ai-pro/operations/webhooks', exports: ['signOperationWebhook', 'verifyOperationWebhook'] },
+  {
     specifier: 'nexus-ai-pro/realtime',
     exports: [
       'RealtimeSession',

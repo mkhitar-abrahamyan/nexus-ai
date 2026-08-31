@@ -84,6 +84,7 @@ You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want f
 - cache exact or semantically similar prompts
 - add tools, agents, RAG context, evals, batch jobs, and queues
 - embed text through the same routing, caching, batching, budget, retry, and metrics as a completion
+- run long operations that survive a restart, with leases, retries, dead-lettering, and signed webhooks
 - build persistent realtime voice agents with interruption, live tools, and normalized conversation state
 - keep TypeScript types around every request and response
 
@@ -416,6 +417,96 @@ const response = await ai.completeVerified(
   },
 );
 ```
+
+## Durable Operations
+
+Long-running work — an image render, a batch, anything asynchronous — runs through one lifecycle:
+`queued → running → succeeded | failed`, with `retrying`, `cancelling`, `cancelled`, and `expired`
+covering the rest. `OperationRunner` owns it end to end, so a crashed worker does not lose work.
+
+The default store is in-process, so the small case needs no infrastructure:
+
+```ts
+import { OperationRunner } from 'nexus-ai-pro/operations';
+
+const runner = new OperationRunner<string>({ retry: { maxAttempts: 3, baseDelayMs: 500 } });
+
+const handle = await runner.submit(async (context) => {
+  context.report({ completed: 1, total: 3 });
+  return doTheWork(context.signal);
+});
+
+for await (const event of handle.events()) {
+  console.log(event.type, event.sequence);
+}
+
+const value = await handle.result();
+```
+
+Swapping the store makes the same code survive a restart. Nothing else changes:
+
+```ts
+import { OperationRunner } from 'nexus-ai-pro/operations';
+import { BullMQOperationDispatcher, RedisOperationStore } from 'nexus-ai-pro/operations/adapters';
+
+const runner = new OperationRunner({
+  store: new RedisOperationStore(redis),
+  dispatcher: new BullMQOperationDispatcher(queue),
+  owner: process.env.HOSTNAME,
+  leaseMs: 30_000,
+  webhook: { url: 'https://app.example/hooks/operations', secret: process.env.HOOK_SECRET! },
+});
+```
+
+**How restart survival actually works.** A worker claims a lease before running and heartbeats
+while it works. If the process dies, the lease simply lapses; another worker's `recover()` sweep
+finds the record and resumes it. There is no distributed lock — every store write is a
+compare-and-set on the record's `sequence`, so two workers racing on the same operation cannot both
+win.
+
+```ts
+// On startup, in each worker.
+const resumed = await runner.recover(executor);
+```
+
+Recovery is deliberately conservative: a record past its `expiresAt` is **expired** rather than
+re-run, and one that has used every attempt is **dead-lettered** and parked for inspection, so a
+permanently failing operation cannot be recovered forever.
+
+**Idempotency.** An `idempotencyKey` that matches an existing record replays that operation instead
+of starting a second one, which is what stops an ambiguous timeout from double-charging:
+
+```ts
+const handle = await runner.submit(chargeAndRender, { idempotencyKey: `render:${orderId}` });
+```
+
+**Webhooks** are signed with HMAC-SHA256 over `${timestamp}.${body}`, so a captured delivery cannot
+be replayed indefinitely. The verifying half ships too — a receiver should never have to hand-roll a
+constant-time comparison:
+
+```ts
+import { OPERATION_WEBHOOK_SIGNATURE_HEADER, verifyOperationWebhook } from 'nexus-ai-pro/operations/webhooks';
+
+app.post('/hooks/operations', (request, response) => {
+  const ok = verifyOperationWebhook(
+    request.rawBody,
+    request.header(OPERATION_WEBHOOK_SIGNATURE_HEADER),
+    process.env.HOOK_SECRET!,
+  );
+  response.sendStatus(ok ? 204 : 400);
+});
+```
+
+A failed delivery is reported through `onWebhookError` and never turns a completed operation into a
+failed one.
+
+**Binary payloads are refused, not truncated.** Persisting a result that carries a `Uint8Array`,
+`Buffer`, or `Blob` throws `OperationSerializationError` naming the exact path. Base64 in a job
+payload inflates it by a third and most queue backends cap job size well below one image, so the
+bytes belong in an `AssetStore` with only a reference on the record. The BullMQ dispatcher likewise
+queues the operation id and nothing else.
+
+The image family already runs on this lifecycle, so `ai.images.submit()` reports the same events.
 
 ## Embeddings
 
@@ -1226,6 +1317,9 @@ import { negotiateCompletionRequest } from 'nexus-ai-pro/capabilities';
 import { guardrailPolicy } from 'nexus-ai-pro/security';
 import { RedisCacheAdapter } from 'nexus-ai-pro/cache';
 import { DeepSeekProvider } from 'nexus-ai-pro/providers/deepseek';
+import { OperationRunner } from 'nexus-ai-pro/operations';
+import { RedisOperationStore } from 'nexus-ai-pro/operations/adapters';
+import { verifyOperationWebhook } from 'nexus-ai-pro/operations/webhooks';
 import { EmbeddingManager } from 'nexus-ai-pro/embeddings';
 import { OpenAIEmbeddingProvider } from 'nexus-ai-pro/embeddings/adapters';
 import { MockEmbeddingProvider } from 'nexus-ai-pro/embeddings/mock';

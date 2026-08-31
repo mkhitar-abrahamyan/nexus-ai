@@ -11,10 +11,7 @@ import type {
   ImageResult,
   ImageSafetyContext,
   MediaSafetyFinding,
-  OperationErrorDescriptor,
-  OperationEvent,
   OperationHandle,
-  OperationStatus,
 } from '../types/images.js';
 import {
   ImageCapabilityError,
@@ -26,129 +23,9 @@ import {
   ImageSafetyError,
   ImageValidationError,
 } from './errors.js';
+import { LocalOperationHandle } from '../operations/handle.js';
 
 type ImageRequest = ImageGenerateRequest | ImageEditRequest;
-
-const TERMINAL_STATUSES = new Set<OperationStatus>(['succeeded', 'failed', 'cancelled', 'expired']);
-
-class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
-  private readonly controller = new AbortController();
-  private readonly history: Array<OperationEvent<TResult>> = [];
-  private readonly waiters = new Set<() => void>();
-  private readonly resultPromise: Promise<TResult>;
-  private resolveResult!: (result: TResult) => void;
-  private rejectResult!: (error: unknown) => void;
-  private currentStatus: OperationStatus = 'queued';
-  private sequence = 0;
-
-  constructor(
-    readonly id: string,
-    private readonly now: () => Date,
-  ) {
-    this.resultPromise = new Promise<TResult>((resolve, reject) => {
-      this.resolveResult = resolve;
-      this.rejectResult = reject;
-    });
-    // Consumers may choose events() without calling result(); keep that valid without hiding rejection from result().
-    void this.resultPromise.catch(() => undefined);
-    this.emit({ ...this.eventBase(), type: 'queued', status: 'queued' });
-  }
-
-  status(): OperationStatus {
-    return this.currentStatus;
-  }
-
-  result(): Promise<TResult> {
-    return this.resultPromise;
-  }
-
-  cancel(reason?: string): boolean {
-    if (TERMINAL_STATUSES.has(this.currentStatus) || this.currentStatus === 'cancelling') return false;
-
-    this.currentStatus = 'cancelling';
-    this.emit({ ...this.eventBase(), type: 'cancelling', status: 'cancelling', reason });
-    this.controller.abort(reason);
-
-    this.currentStatus = 'cancelled';
-    this.emit({ ...this.eventBase(), type: 'cancelled', status: 'cancelled', reason });
-    this.rejectResult(new ImageOperationCancelledError(this.id, reason));
-    return true;
-  }
-
-  events(): AsyncIterable<OperationEvent<TResult>> {
-    return this.iterateEvents();
-  }
-
-  start(executor: (signal: AbortSignal) => Promise<TResult>): void {
-    queueMicrotask(() => {
-      void this.run(executor);
-    });
-  }
-
-  private async run(executor: (signal: AbortSignal) => Promise<TResult>): Promise<void> {
-    if (TERMINAL_STATUSES.has(this.currentStatus)) return;
-
-    this.currentStatus = 'running';
-    this.emit({ ...this.eventBase(), type: 'running', status: 'running' });
-
-    try {
-      const value = await executor(this.controller.signal);
-      if (TERMINAL_STATUSES.has(this.currentStatus)) return;
-
-      this.currentStatus = 'succeeded';
-      this.emit({ ...this.eventBase(), type: 'succeeded', status: 'succeeded', result: value });
-      this.resolveResult(value);
-    } catch (error) {
-      if (TERMINAL_STATUSES.has(this.currentStatus)) return;
-
-      this.currentStatus = 'failed';
-      this.emit({ ...this.eventBase(), type: 'failed', status: 'failed', error: describeError(error) });
-      this.rejectResult(error);
-    }
-  }
-
-  private async *iterateEvents(): AsyncGenerator<OperationEvent<TResult>, void, void> {
-    let index = 0;
-    let waiter: (() => void) | undefined;
-
-    try {
-      while (true) {
-        const event = this.history[index];
-        if (event) {
-          index += 1;
-          yield event;
-          if (TERMINAL_STATUSES.has(event.status)) return;
-          continue;
-        }
-
-        if (TERMINAL_STATUSES.has(this.currentStatus)) return;
-        await new Promise<void>((resolve) => {
-          waiter = resolve;
-          this.waiters.add(resolve);
-        });
-        if (waiter) this.waiters.delete(waiter);
-        waiter = undefined;
-      }
-    } finally {
-      if (waiter) this.waiters.delete(waiter);
-    }
-  }
-
-  private eventBase(): { operationId: string; sequence: number; timestamp: string } {
-    return {
-      operationId: this.id,
-      sequence: ++this.sequence,
-      timestamp: this.now().toISOString(),
-    };
-  }
-
-  private emit(event: OperationEvent<TResult>): void {
-    this.history.push(event);
-    const waiters = [...this.waiters];
-    this.waiters.clear();
-    for (const wake of waiters) wake();
-  }
-}
 
 export class ImageManager {
   private readonly providers = new Map<string, ImageProvider>();
@@ -199,7 +76,12 @@ export class ImageManager {
   ): OperationHandle<ImageResult> {
     const submission = normalizeSubmission(input, request);
     const operationId = this.createOperationId();
-    const handle = new LocalOperationHandle<ImageResult>(operationId, this.now);
+    // The shared handle is told to reject with the image family's own cancellation error, so this
+    // refactor is invisible to existing callers catching ImageOperationCancelledError.
+    const handle = new LocalOperationHandle<ImageResult>(operationId, {
+      now: this.now,
+      cancellationError: (id, reason) => new ImageOperationCancelledError(id, reason),
+    });
     const externalSignal = submission.request.signal;
     const onAbort = (): void => {
       handle.cancel(abortReason(externalSignal));
@@ -672,12 +554,6 @@ function knownImageMimeType(format: string | undefined): string | undefined {
 
 function normalizeMimeType(value: string): string {
   return value.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-}
-
-function describeError(error: unknown): OperationErrorDescriptor {
-  if (error instanceof ImageError) return { name: error.name, message: error.message, code: error.code };
-  if (error instanceof Error) return { name: error.name, message: error.message };
-  return { name: 'Error', message: String(error) };
 }
 
 function assertSafetyFindings(message: string, findings: readonly MediaSafetyFinding[]): void {

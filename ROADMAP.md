@@ -251,11 +251,13 @@ below rather than with the synchronous path.
 
 The theme is work that outlives a process.
 
-- **Operation state machine.** `queued → running → succeeded | failed | cancelling | cancelled | expired`,
-  with leases, heartbeats, progress events, delayed retry, dead-letter handling, timestamps, signed
-  webhooks, and trace propagation. Applies to images first, then to any long-running family.
-- **Durable operation adapters.** Redis and BullMQ-backed handles so `submit()` survives a restart.
-  Queue asset references only; never JSON-serialize binary media into job payloads.
+- ~~**Operation state machine.**~~ Landed on `main`, unreleased. `queued → running → retrying →
+  succeeded | failed | cancelling | cancelled | expired`, with leases, heartbeats, progress events,
+  delayed retry, dead-letter handling, timestamps, signed webhooks, and trace propagation. The image
+  family already runs on it.
+- ~~**Durable operation adapters.**~~ Landed on `main`, unreleased. `RedisOperationStore` persists
+  records with a compare-and-set on `sequence`; `BullMQOperationDispatcher` queues the operation id
+  only. A record carrying raw bytes is refused rather than serialized.
 - **Provider batch APIs.** OpenAI Batch and Anthropic Message Batches behind the same operation
   handle, exposing the discounted asynchronous tier that local `runBatch()` concurrency cannot reach.
   Idempotency keys replay an accepted operation; ambiguous timeouts must not produce duplicate

@@ -350,6 +350,36 @@
         "default": "./dist-cjs/embeddings/models.js"
       }
     },
+    "./operations": {
+      "import": {
+        "types": "./dist/operations/index.d.ts",
+        "default": "./dist/operations/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/operations/index.d.ts",
+        "default": "./dist-cjs/operations/index.js"
+      }
+    },
+    "./operations/adapters": {
+      "import": {
+        "types": "./dist/operations/adapters.d.ts",
+        "default": "./dist/operations/adapters.js"
+      },
+      "require": {
+        "types": "./dist-cjs/operations/adapters.d.ts",
+        "default": "./dist-cjs/operations/adapters.js"
+      }
+    },
+    "./operations/webhooks": {
+      "import": {
+        "types": "./dist/operations/webhooks.d.ts",
+        "default": "./dist/operations/webhooks.js"
+      },
+      "require": {
+        "types": "./dist-cjs/operations/webhooks.d.ts",
+        "default": "./dist-cjs/operations/webhooks.js"
+      }
+    },
     "./realtime": {
       "import": {
         "types": "./dist/realtime/index.d.ts",
@@ -831,6 +861,15 @@
       ],
       "embeddings/models": [
         "dist-cjs/embeddings/models.d.ts"
+      ],
+      "operations": [
+        "dist-cjs/operations/index.d.ts"
+      ],
+      "operations/adapters": [
+        "dist-cjs/operations/adapters.d.ts"
+      ],
+      "operations/webhooks": [
+        "dist-cjs/operations/webhooks.d.ts"
       ],
       "realtime": [
         "dist-cjs/realtime/index.d.ts"

@@ -100,6 +100,8 @@ import {
   GoogleProvider,
   GroqProvider,
   EmbeddingManager,
+  MemoryOperationStore,
+  OperationRunner,
   ImageManager,
   LMStudioProvider,
   LlamaCppProvider,
@@ -123,11 +125,14 @@ import {
   type ContextWindowConfig,
   type CostBudgetConfig,
   type DeepSeekProviderConfig,
+  type DurableOperationHandle,
   type EmbeddingConfig,
   type EmbeddingRequest,
   type EmbeddingResponse,
   type EmbeddingsProvider,
   type ImageConfig,
+  type OperationRecord,
+  type OperationStore,
   type ImageGenerateRequest,
   type ImageProvider,
   type ImageResult,
@@ -163,6 +168,9 @@ import { ImageManager as SubpathImageManager } from 'nexus-ai-pro/images';
 import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
 import { MockImageProvider } from 'nexus-ai-pro/images/mock';
 import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
+import { OperationRunner as SubpathOperationRunner } from 'nexus-ai-pro/operations';
+import { RedisOperationStore } from 'nexus-ai-pro/operations/adapters';
+import { verifyOperationWebhook } from 'nexus-ai-pro/operations/webhooks';
 import { EmbeddingManager as SubpathEmbeddingManager } from 'nexus-ai-pro/embeddings';
 import { MockEmbeddingProvider } from 'nexus-ai-pro/embeddings/mock';
 import { OpenAIEmbeddingProvider } from 'nexus-ai-pro/embeddings/adapters';
@@ -453,6 +461,12 @@ const subpathVoiceManager = new SubpathVoiceManager(voiceConfig);
 const voiceSession: VoiceSession = ai.createVoiceSession(voiceSessionConfig);
 const subpathVoiceSession = new SubpathVoiceSession(voiceSessionConfig, subpathVoiceManager, ai);
 const openAiVoice = new OpenAIVoiceProvider({ apiKey: 'test' });
+const operationStore: OperationStore<string> = new MemoryOperationStore<string>();
+const operationRunner = new OperationRunner<string>({ store: operationStore, retry: { maxAttempts: 2 } });
+const subpathOperationRunner = new SubpathOperationRunner<string>();
+const operationHandle: Promise<DurableOperationHandle<string>> = operationRunner.submit(async () => 'ok');
+const operationRecord: Promise<OperationRecord<string> | undefined> = operationRunner.read('op-1');
+const webhookOk: boolean = verifyOperationWebhook('{}', 't=1,v1=aa', 'secret');
 const embeddingManager = new EmbeddingManager(embeddingConfig);
 const subpathEmbeddingManager = new SubpathEmbeddingManager(embeddingConfig);
 const openAiEmbeddings = new OpenAIEmbeddingProvider({ apiKey: 'test' });
@@ -558,6 +572,12 @@ void providerName;
 void error.retryable;
 void subpathError.category;
 void toolCall;
+void operationRunner;
+void subpathOperationRunner;
+void operationHandle;
+void operationRecord;
+void webhookOk;
+void RedisOperationStore;
 void embeddingManager;
 void subpathEmbeddingManager;
 void openAiEmbeddings;

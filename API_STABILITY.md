@@ -131,6 +131,33 @@ and are overridable through `embeddings.models.registry`. Which concrete model a
 not interchangeable, so pin a concrete model whenever a stored index must stay valid across
 upgrades. Provider payloads under `raw` and reported token counts are controlled by the provider.
 
+## Operations API stage
+
+The `nexus-ai-pro/operations` family is public and follows the 1.x rules, including the
+`operations/adapters` and `operations/webhooks` subpaths. This covers `OperationRunner`,
+`LocalOperationHandle`, `MemoryOperationStore`, the `OperationStore` and `OperationDispatcher`
+contracts, the Redis and BullMQ adapters, the webhook signing and verification helpers, the state
+machine predicates, and the normalized record, event, and error shapes.
+
+The lifecycle types moved out of `types/images.ts` and are re-exported from it, so existing image
+imports of `OperationStatus`, `OperationEvent`, `OperationHandle`, `OperationEventBase`, and
+`OperationErrorDescriptor` resolve unchanged. `OperationStatus` gained `retrying`, and
+`OperationEvent` gained `progress` and `retrying` variants and an `attempt` field on `running` —
+additive changes this policy permits in a minor release. Code that switches exhaustively on either
+union should add the new members.
+
+Three behaviors are guaranteed. Terminal statuses are final, so a late provider callback cannot
+resurrect a settled operation. Store writes are compare-and-set on `sequence`, so a losing writer
+is told it lost rather than silently overwriting. And a record carrying raw bytes is refused with
+`OperationSerializationError` rather than persisted, because a base64 round trip through a queue
+payload is a failure mode that otherwise appears only as a truncated job.
+
+Durability is a property of the configured store, not of the runner. `MemoryOperationStore` does
+not survive a restart and does not promise cross-process recovery. `RedisOperationStore` is atomic
+only when the client exposes `eval`; without it the compare-and-set degrades to a read-compare-write
+that narrows but does not close the race, and that limitation is documented rather than hidden.
+Webhook delivery is best-effort and never fails the operation it describes.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

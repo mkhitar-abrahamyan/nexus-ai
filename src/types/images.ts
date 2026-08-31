@@ -148,36 +148,18 @@ export interface ImageResult {
   raw?: unknown;
 }
 
-export type OperationStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelling' | 'cancelled' | 'expired';
-
-export interface OperationEventBase {
-  operationId: string;
-  sequence: number;
-  timestamp: string;
-}
-
-export interface OperationErrorDescriptor {
-  name: string;
-  message: string;
-  code?: string;
-}
-
-export type OperationEvent<TResult> =
-  | (OperationEventBase & { type: 'queued'; status: 'queued' })
-  | (OperationEventBase & { type: 'running'; status: 'running' })
-  | (OperationEventBase & { type: 'cancelling'; status: 'cancelling'; reason?: string })
-  | (OperationEventBase & { type: 'succeeded'; status: 'succeeded'; result: TResult })
-  | (OperationEventBase & { type: 'failed'; status: 'failed'; error: OperationErrorDescriptor })
-  | (OperationEventBase & { type: 'cancelled'; status: 'cancelled'; reason?: string })
-  | (OperationEventBase & { type: 'expired'; status: 'expired'; error?: OperationErrorDescriptor });
-
-export interface OperationHandle<TResult> {
-  readonly id: string;
-  status(): OperationStatus;
-  result(): Promise<TResult>;
-  cancel(reason?: string): boolean;
-  events(): AsyncIterable<OperationEvent<TResult>>;
-}
+/**
+ * The operation lifecycle now lives in `types/operations.ts`, shared by every long-running family.
+ * It is re-exported here so existing image imports keep working unchanged.
+ */
+export type {
+  OperationErrorDescriptor,
+  OperationEvent,
+  OperationEventBase,
+  OperationHandle,
+  OperationProgress,
+  OperationStatus,
+} from './operations.js';
 
 export interface ImageProviderCapabilities {
   operations: readonly ImageOperation[];
