@@ -61,6 +61,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - The shared asset contract, errors, and validation moved from `images/assets` to an internal
   `asset-support` module so the filesystem, S3, and memory stores cannot drift on what a valid asset
   is. `images/assets` re-exports all of it, so existing imports are unchanged.
+- Documentation consolidated from nine files to seven. `NEXUS.md` and `EXPLANATION.md` were four
+  releases stale and largely restated the README; their unique content moved to `CONTRIBUTING.md`
+  (real-provider test setup, the public-feature checklist, the manual smoke checklist) and to a new
+  README "Known Limitations" section. The published package now carries only `README.md`,
+  `API_STABILITY.md`, `CHANGELOG.md`, `SECURITY.md`, and `LICENSE`; `ROADMAP.md` is a design proposal
+  and stays on GitHub.
+- `SECURITY.md` no longer names a specific supported version line. It claimed `0.9.x` while 1.6.0 was
+  the published release, so the wording is now version-independent and cannot go stale again.
 - `RouterContext` gained an optional `openCircuits`, and `Router.route()` an optional trailing
   parameter. When every candidate's circuit is open the router routes anyway: that usually means a
   shared dependency is down, and one attempt beats a certain failure with no attempt at all.

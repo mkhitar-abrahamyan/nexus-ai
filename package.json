@@ -813,9 +813,7 @@
     "API_STABILITY.md",
     "CHANGELOG.md",
     "SECURITY.md",
-    "ROADMAP.md",
-    "LICENSE",
-    "NEXUS.md"
+    "LICENSE"
   ],
   "repository": {
     "type": "git",

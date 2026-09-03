@@ -6,8 +6,8 @@ Use the whole pipeline for production AI features, or turn pieces off when you o
 
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
-- Full technical notes and manual test cases: [NEXUS.md](./NEXUS.md)
-- Image generation status and remaining infrastructure work: [ROADMAP.md](./ROADMAP.md)
+- Contributing, testing, and release procedure: [CONTRIBUTING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/CONTRIBUTING.md)
+- Delivered work and what is planned next: [ROADMAP.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md)
 
 ## Install
 
@@ -1586,12 +1586,33 @@ npm run test:conformance:real
 
 ## Roadmap
 
+See [ROADMAP.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) for what has
+shipped and what is planned. It is a design proposal, not a compatibility promise; the guarantees
+live in [API_STABILITY.md](./API_STABILITY.md).
+
 1.4.0 closed the completion-request gap: prompt caching, reasoning controls, tool and sampling
 controls, structured usage with numeric cost, and capability negotiation with registry provenance.
 
 Next is durable execution — an operation state machine, provider batch APIs, distributed rate
 limiting and circuit breaking, first-class embeddings, and filesystem/S3 asset stores — followed by
-image portability and promotion out of experimental. See [ROADMAP.md](./ROADMAP.md).
+image portability and promotion out of experimental. See
+[ROADMAP.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md).
+
+## Known Limitations
+
+- Voice, telephony, images, local models, and custom providers are optional layers; enable only what
+  you use.
+- Audio and video preprocessing is limited, and provider modality support differs.
+- Bundled model metadata is a routing and estimation convenience, not a pricing contract.
+- Process-memory cache, queues, and asset storage are not enough for a distributed deployment; use
+  the Redis, BullMQ, filesystem, or S3 adapters instead.
+- Default hash embeddings suit tests and demos, not strong semantic search. Register a real
+  embedding provider for production retrieval.
+- NLI verification is an interface; bring a specialized verifier for high-confidence entailment.
+- Guardrails reduce risk but do not replace application authorization, provider-side moderation, or
+  human review of high-impact actions.
+- Circuit-breaker state is per process, and realtime sessions are not yet routed through the metrics,
+  audit, and rate-limit path that every other family uses.
 
 ## Production Notes
 

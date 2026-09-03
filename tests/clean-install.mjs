@@ -86,8 +86,9 @@ try {
   );
   for (const requiredPath of [
     'README.md',
-    'ROADMAP.md',
     'SECURITY.md',
+    'API_STABILITY.md',
+    'CHANGELOG.md',
     'dist/index.js',
     'dist/index.d.ts',
     'dist/images/index.js',
@@ -107,10 +108,15 @@ try {
   }
   for (const packedPath of packedPaths) {
     assert.equal(
-      /^(?:assets|examples|src|tests)\//.test(packedPath),
+      /^(?:assets|data|examples|scripts|src|tests)\//.test(packedPath),
       false,
       `packed tarball should not include repository-only file ${packedPath}`,
     );
+  }
+  // ROADMAP is a design proposal and NEXUS was a duplicate of the README; both are GitHub-only, so
+  // an installer does not carry them.
+  for (const repositoryOnlyDoc of ['ROADMAP.md', 'NEXUS.md', 'EXPLANATION.md', 'CONTRIBUTING.md', 'RELEASING.md']) {
+    assert.equal(packedPaths.has(repositoryOnlyDoc), false, `packed tarball should not include ${repositoryOnlyDoc}`);
   }
   const tarball = path.join(packDir, packed.filename);
 

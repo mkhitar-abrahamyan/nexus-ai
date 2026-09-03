@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest published minor release. Users should upgrade to the newest `0.9.x` patch as fixes become available.
+Security fixes are provided for the latest published minor release. Upgrade to the newest patch of that line as fixes become available; older minor releases do not receive backports.
 
 ## Reporting a vulnerability
 
