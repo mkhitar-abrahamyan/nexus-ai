@@ -3,9 +3,9 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.5.0**. 59 export subpaths, 12 completion providers, 5 embedding providers, 99
-completion registry models plus 63 aliases, and 11 embedding models plus 5 aliases. 234 unit tests
-pass; coverage sits at **85.7% lines / 70.9% branches / 80.8% functions** against gates of
+Status baseline: **1.6.0**. 62 export subpaths, 12 completion providers, 5 embedding providers, 99
+completion registry models plus 63 aliases, and 11 embedding models plus 5 aliases. 292 unit tests
+pass; coverage sits at **86.3% lines / 71.6% branches / 81.4% functions** against gates of
 82/67/73. CI verifies lint, format, build, tests, coverage, mock conformance, packed-package smoke,
 API contract, consumer type resolution, and clean install on Node 22 and 24.
 
@@ -102,7 +102,16 @@ deduplication, per-input caching, cost budgets, retry, structured usage and nume
 refusal rather than silent option dropping, `toEmbeddingFunction()` for existing vector stores, a
 deterministic mock, and a conformance harness.
 
-### 1.9 Operations, evaluation, and packaging
+### 1.9 Durable operations
+
+Delivered in 1.6.0. `OperationRunner` over an `OperationStore` contract, with a checked state
+machine, leases and heartbeats, delayed retry with backoff and jitter, dead-lettering, progress
+events, idempotency replay, crash recovery, and HMAC-signed webhooks with a matching verifier.
+`MemoryOperationStore` keeps the single-process case dependency-free; `RedisOperationStore` and
+`BullMQOperationDispatcher` make the same code survive a restart. Persisting raw bytes is refused
+so binary media cannot end up in a queue payload.
+
+### 1.10 Operations, evaluation, and packaging
 
 Rate limiting, audit logging, in-memory and OpenTelemetry metrics sinks, Prometheus export, an
 OpenTelemetry trace exporter, provider health monitoring, `EvalRunner` with LLM-as-judge and a
@@ -147,13 +156,17 @@ visible. The data itself is still a hand-written TypeScript literal of 99 models
 Generation from versioned provider data remains outstanding, and the Claude 5 reasoning bug 1.4.0
 fixed is the kind of error generation would have prevented.
 
-### 2.4 Durable-execution primitives are process-local
+### 2.4 Durable execution is only half distributed
 
-`RateLimiter` is an in-memory token bucket with no distributed adapter. There is no circuit breaker
-(health monitoring exists, but nothing opens a circuit). `OperationHandle` is process-bound;
-`MemoryAssetStore` is process-local. Realtime conversation snapshots and exports live in memory.
-Cross-process recovery, distributed deduplication, and provider-state replay remain application
-responsibilities.
+Closed in 1.6.0 for operations: `OperationHandle` is no longer process-bound, cross-process recovery
+works through lapsed leases, and idempotency keys deduplicate across workers.
+
+Still process-local: `RateLimiter` is an in-memory token bucket with no distributed adapter, there is
+no circuit breaker (health monitoring exists, but nothing opens a circuit), `MemoryAssetStore` holds
+assets in one process, and realtime conversation snapshots and exports live in memory. Provider-state
+replay remains an application responsibility. One caveat on what did land: `RedisOperationStore` is
+atomic only when the client exposes `eval`; without it the compare-and-set degrades to a
+read-compare-write that narrows but does not close the race.
 
 ### 2.5 Image family blockers
 
@@ -247,17 +260,33 @@ vector is silently incompatible with a populated store rather than merely differ
 Deliberately deferred: the provider batch-API tier, which belongs with the durable operation handle
 below rather than with the synchronous path.
 
-## 5. Next release: 1.6.0 — durable operations and batch economics
+## 5. Shipped in 1.6.0 — durable operations
 
-The theme is work that outlives a process.
+The first half of *work that outlives a process*. One lifecycle now covers every long-running
+family, and it survives a worker crash.
 
-- ~~**Operation state machine.**~~ Landed on `main`, unreleased. `queued → running → retrying →
-  succeeded | failed | cancelling | cancelled | expired`, with leases, heartbeats, progress events,
-  delayed retry, dead-letter handling, timestamps, signed webhooks, and trace propagation. The image
-  family already runs on it.
-- ~~**Durable operation adapters.**~~ Landed on `main`, unreleased. `RedisOperationStore` persists
-  records with a compare-and-set on `sequence`; `BullMQOperationDispatcher` queues the operation id
-  only. A record carrying raw bytes is refused rather than serialized.
+- **Operation state machine.** `queued → running → retrying → succeeded | failed | cancelling |
+  cancelled | expired`, with leases, heartbeats, progress events, delayed retry, dead-letter
+  handling, timestamps, signed webhooks, and trace propagation. The image family runs on it, and the
+  lifecycle types moved to a family-neutral `types/operations.ts` re-exported from their old home.
+- **Durable operation adapters.** `RedisOperationStore` persists records with a compare-and-set on
+  `sequence`, done in one Lua call when the client exposes `eval`. `BullMQOperationDispatcher`
+  queues the operation id only. A record carrying raw bytes is refused rather than serialized.
+- **Idempotency and recovery.** A matching key replays an accepted operation instead of starting a
+  second; `recover()` resumes records whose lease lapsed, expiring those past their deadline and
+  dead-lettering those that used every attempt.
+
+Restart survival comes from leases rather than locks. There is no distributed lock anywhere: every
+store write is a compare-and-set, so a losing writer is told it lost instead of overwriting.
+
+Deliberately deferred: everything below, which needed the operation handle to exist first.
+
+---
+
+## 6. Next release: 1.7.0 — batch economics and distributed limits
+
+The rest of the theme, now that the handle they sit behind exists.
+
 - **Provider batch APIs.** OpenAI Batch and Anthropic Message Batches behind the same operation
   handle, exposing the discounted asynchronous tier that local `runBatch()` concurrency cannot reach.
   Idempotency keys replay an accepted operation; ambiguous timeouts must not produce duplicate
@@ -275,7 +304,7 @@ The theme is work that outlives a process.
 
 ---
 
-## 6. 1.7.0 — image portability, then promotion
+## 7. 1.8.0 — image portability, then promotion
 
 Images cannot leave experimental until the neutral contract survives a second wire protocol.
 
@@ -303,7 +332,7 @@ label come off.
 
 ---
 
-## 7. 2.0 candidate — one lifecycle for every operation
+## 8. 2.0 candidate — one lifecycle for every operation
 
 Create an internal typed lifecycle and adapt every family to it:
 
@@ -326,7 +355,7 @@ Also in the 2.0 window, because each requires a breaking change:
 
 ---
 
-## 8. Longer-term backlog
+## 9. Longer-term backlog
 
 1. MCP client and server adapters with asset and tool interoperability.
 2. Video generation through the same asynchronous operation, job, and asset contracts.
@@ -351,7 +380,7 @@ Also in the 2.0 window, because each requires a breaking change:
 
 ---
 
-## 9. Design notes carried forward
+## 10. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -403,7 +432,7 @@ await ai.images.edit({
 
 ---
 
-## 10. How an item graduates
+## 11. How an item graduates
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.

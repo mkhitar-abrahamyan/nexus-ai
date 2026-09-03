@@ -4,8 +4,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-Durable operations: the first half of the 1.6.0 theme, *work that outlives a process*. Long-running
-work now runs through one lifecycle that survives a worker crash. Additive throughout.
+## [1.6.0] - 2026-09-03
+
+Durable operations, the first half of the theme *work that outlives a process*. Long-running work now
+runs through one lifecycle that survives a worker crash. Everything here is additive.
+
+The rest of the theme — provider batch APIs, distributed rate limiting and circuit breaking,
+filesystem and S3 asset stores, a generated model registry, and cross-family observability — moves to
+1.7.0. The operation handle they all sit behind ships here, which is what unblocks them.
 
 ### Added
 
@@ -315,7 +321,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.2.1...v1.3.0
