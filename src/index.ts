@@ -102,6 +102,16 @@ export {
   OperationSerializationError,
   OperationTransitionError,
 } from './operations/errors.js';
+export { BatchManager, type BatchManagerRuntime } from './batch/manager.js';
+export {
+  BatchCapabilityError,
+  BatchError,
+  BatchProviderError,
+  BatchProviderNotFoundError,
+  BatchProviderResponseError,
+  BatchValidationError,
+} from './batch/errors.js';
+export { TERMINAL_BATCH_STATUSES, isTerminalBatchStatus } from './types/batch.js';
 export { ImageManager } from './images/manager.js';
 export {
   ImageCapabilityError,
@@ -613,6 +623,22 @@ export type {
   MemoryAssetStoreOptions,
   MemoryAssetStoreSnapshot,
 } from './images/assets.js';
+
+export type {
+  BatchConfig,
+  BatchCounts,
+  BatchInputItem,
+  BatchJobRef,
+  BatchJobResult,
+  BatchJobState,
+  BatchJobStatus,
+  BatchOutputItem,
+  BatchProvider,
+  BatchProviderCallContext,
+  BatchProviderCapabilities,
+  BatchProviderInfo,
+  BatchSubmitRequest,
+} from './types/batch.js';
 
 export type {
   DurableOperationHandle,

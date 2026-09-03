@@ -1,0 +1,29 @@
+{
+  "provider": "llamacpp",
+  "models": {
+    "llamacpp/local-model": {
+      "provider": "llamacpp",
+      "family": "local",
+      "modalities": ["text"],
+      "streaming": true,
+      "toolCalling": true,
+      "structuredOutputs": true,
+      "jsonMode": true,
+      "reasoning": false,
+      "toolChoice": true,
+      "parallelToolCalls": true,
+      "seed": true,
+      "penalties": true,
+      "maxContextTokens": 8192,
+      "maxOutputTokens": 4096,
+      "costPer1kInput": 0,
+      "costPer1kOutput": 0,
+      "qualityScore": 65,
+      "speedScore": 75,
+      "release": "local",
+      "status": "stable",
+      "endpoints": ["chat"],
+      "notes": "Placeholder for llama.cpp OpenAI-compatible server. Use an explicit llamacpp/<loaded-model> name for direct routing."
+    }
+  }
+}

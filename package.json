@@ -400,6 +400,56 @@
         "default": "./dist-cjs/ops/rate-limit-adapters.js"
       }
     },
+    "./batch": {
+      "import": {
+        "types": "./dist/batch/index.d.ts",
+        "default": "./dist/batch/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/batch/index.d.ts",
+        "default": "./dist-cjs/batch/index.js"
+      }
+    },
+    "./batch/openai": {
+      "import": {
+        "types": "./dist/batch/openai.d.ts",
+        "default": "./dist/batch/openai.js"
+      },
+      "require": {
+        "types": "./dist-cjs/batch/openai.d.ts",
+        "default": "./dist-cjs/batch/openai.js"
+      }
+    },
+    "./batch/anthropic": {
+      "import": {
+        "types": "./dist/batch/anthropic.d.ts",
+        "default": "./dist/batch/anthropic.js"
+      },
+      "require": {
+        "types": "./dist-cjs/batch/anthropic.d.ts",
+        "default": "./dist-cjs/batch/anthropic.js"
+      }
+    },
+    "./batch/mock": {
+      "import": {
+        "types": "./dist/batch/mock.d.ts",
+        "default": "./dist/batch/mock.js"
+      },
+      "require": {
+        "types": "./dist-cjs/batch/mock.d.ts",
+        "default": "./dist-cjs/batch/mock.js"
+      }
+    },
+    "./images/stores": {
+      "import": {
+        "types": "./dist/images/asset-stores.d.ts",
+        "default": "./dist/images/asset-stores.js"
+      },
+      "require": {
+        "types": "./dist-cjs/images/asset-stores.d.ts",
+        "default": "./dist-cjs/images/asset-stores.js"
+      }
+    },
     "./realtime": {
       "import": {
         "types": "./dist/realtime/index.d.ts",
@@ -666,6 +716,8 @@
     "example:optimizer": "tsx examples/optimizer.ts",
     "example:agent": "tsx examples/agent.ts",
     "example:realtime": "tsx examples/realtime-scheduling.ts",
+    "registry:generate": "node scripts/generate-model-registry.mjs",
+    "registry:check": "node scripts/generate-model-registry.mjs --check",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",
@@ -683,7 +735,7 @@
     "test:conformance:mock": "tsx tests/conformance.mock.ts",
     "test:conformance:real": "tsx tests/conformance.real.ts",
     "pack:dry-run": "npm pack --dry-run --cache .tmp-nexus-ai-tests/npm-cache",
-    "check": "npm run format:check && npm run lint && npm test && npm run typecheck:tests && npm run typecheck:examples && npm run typecheck:examples:browser && npm run test:coverage",
+    "check": "npm run format:check && npm run registry:check && npm run lint && npm test && npm run typecheck:tests && npm run typecheck:examples && npm run typecheck:examples:browser && npm run test:coverage",
     "check:release": "npm run check && npm run pack:dry-run && npm run test:clean-install",
     "prepack": "npm run build",
     "prepublishOnly": "npm run check:release",
@@ -896,6 +948,21 @@
       ],
       "ops/rate-limit-adapters": [
         "dist-cjs/ops/rate-limit-adapters.d.ts"
+      ],
+      "batch": [
+        "dist-cjs/batch/index.d.ts"
+      ],
+      "batch/openai": [
+        "dist-cjs/batch/openai.d.ts"
+      ],
+      "batch/anthropic": [
+        "dist-cjs/batch/anthropic.d.ts"
+      ],
+      "batch/mock": [
+        "dist-cjs/batch/mock.d.ts"
+      ],
+      "images/stores": [
+        "dist-cjs/images/asset-stores.d.ts"
       ],
       "realtime": [
         "dist-cjs/realtime/index.d.ts"

@@ -100,6 +100,7 @@ import {
   GoogleProvider,
   GroqProvider,
   EmbeddingManager,
+  BatchManager,
   CircuitBreaker,
   MemoryOperationStore,
   MemoryRateLimitStore,
@@ -133,6 +134,8 @@ import {
   type EmbeddingResponse,
   type EmbeddingsProvider,
   type ImageConfig,
+  type BatchJobRef,
+  type BatchJobResult,
   type CircuitState,
   type OperationRecord,
   type RateLimitStore,
@@ -172,6 +175,11 @@ import { ImageManager as SubpathImageManager } from 'nexus-ai-pro/images';
 import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
 import { MockImageProvider } from 'nexus-ai-pro/images/mock';
 import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
+import { BatchManager as SubpathBatchManager } from 'nexus-ai-pro/batch';
+import { MockBatchProvider } from 'nexus-ai-pro/batch/mock';
+import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
+import { AnthropicBatchProvider } from 'nexus-ai-pro/batch/anthropic';
+import { FilesystemAssetStore, S3AssetStore } from 'nexus-ai-pro/images/stores';
 import { CircuitBreaker as SubpathCircuitBreaker } from 'nexus-ai-pro/ops/circuit-breaker';
 import { RedisRateLimitStore } from 'nexus-ai-pro/ops/rate-limit-adapters';
 import { OperationRunner as SubpathOperationRunner } from 'nexus-ai-pro/operations';
@@ -467,6 +475,13 @@ const subpathVoiceManager = new SubpathVoiceManager(voiceConfig);
 const voiceSession: VoiceSession = ai.createVoiceSession(voiceSessionConfig);
 const subpathVoiceSession = new SubpathVoiceSession(voiceSessionConfig, subpathVoiceManager, ai);
 const openAiVoice = new OpenAIVoiceProvider({ apiKey: 'test' });
+const batchManager = new BatchManager({ providers: { mock: new MockBatchProvider() }, defaultProvider: 'mock' });
+const subpathBatchManager = new SubpathBatchManager();
+const openAiBatch = new OpenAIBatchProvider({ apiKey: 'test' });
+const anthropicBatch = new AnthropicBatchProvider({ apiKey: 'test' });
+const batchRef: BatchJobRef = { id: 'batch-1', provider: 'mock' };
+const batchResult: Promise<BatchJobResult> = batchManager.resume(batchRef);
+const fileStore: AssetStore = new FilesystemAssetStore({ directory: './assets' });
 const rateLimitStore: RateLimitStore = new MemoryRateLimitStore();
 const breaker = new CircuitBreaker({ enabled: true, failureThreshold: 3 });
 const subpathBreaker = new SubpathCircuitBreaker({ enabled: true });
@@ -582,6 +597,13 @@ void providerName;
 void error.retryable;
 void subpathError.category;
 void toolCall;
+void batchManager;
+void subpathBatchManager;
+void openAiBatch;
+void anthropicBatch;
+void batchResult;
+void fileStore;
+void S3AssetStore;
 void rateLimitStore;
 void breaker;
 void subpathBreaker;

@@ -1,0 +1,170 @@
+#!/usr/bin/env node
+/**
+ * Generates the model registry from versioned provider data.
+ *
+ * The registry was a hand-written TypeScript literal of 100+ models, and the Claude 5 reasoning bug
+ * fixed in 1.4.0 was exactly the kind of error a hand-edited literal invites. `data/models/*.json`
+ * is now the source of truth, and this script emits `src/models/generated.ts` from it.
+ *
+ *   node scripts/generate-model-registry.mjs           # write the generated module
+ *   node scripts/generate-model-registry.mjs --check   # fail if it is out of date
+ *
+ * `--check` runs in CI, so committed data and committed output cannot drift apart.
+ */
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const dataDir = path.join(repoRoot, 'data', 'models');
+const outputFile = path.join(repoRoot, 'src', 'models', 'generated.ts');
+
+const REQUIRED_FIELDS = [
+  'modalities',
+  'streaming',
+  'toolCalling',
+  'maxContextTokens',
+  'costPer1kInput',
+  'costPer1kOutput',
+];
+const VALID_STATUSES = new Set(['stable', 'preview', 'latest', 'deprecated']);
+
+function readJson(file) {
+  return JSON.parse(readFileSync(file, 'utf8'));
+}
+
+/** Fails loudly on data a hand-edit could plausibly get wrong. */
+function validate(provider, model, capabilities, problems) {
+  for (const field of REQUIRED_FIELDS) {
+    if (capabilities[field] === undefined) problems.push(`${model}: missing ${field}`);
+  }
+  if (capabilities.provider && capabilities.provider !== provider) {
+    problems.push(`${model}: declares provider "${capabilities.provider}" inside ${provider}.json`);
+  }
+  if (typeof capabilities.costPer1kInput === 'number' && capabilities.costPer1kInput < 0) {
+    problems.push(`${model}: costPer1kInput must not be negative`);
+  }
+  if (typeof capabilities.costPer1kOutput === 'number' && capabilities.costPer1kOutput < 0) {
+    problems.push(`${model}: costPer1kOutput must not be negative`);
+  }
+  if (typeof capabilities.maxContextTokens === 'number' && capabilities.maxContextTokens <= 0) {
+    problems.push(`${model}: maxContextTokens must be positive`);
+  }
+  if (capabilities.maxOutputTokens !== undefined && capabilities.maxOutputTokens > capabilities.maxContextTokens) {
+    problems.push(`${model}: maxOutputTokens exceeds maxContextTokens`);
+  }
+  if (capabilities.status !== undefined && !VALID_STATUSES.has(capabilities.status)) {
+    problems.push(`${model}: unknown status "${capabilities.status}"`);
+  }
+  if (capabilities.verifiedAt !== undefined && Number.isNaN(Date.parse(capabilities.verifiedAt))) {
+    problems.push(`${model}: verifiedAt is not a date`);
+  }
+}
+
+function collect() {
+  const files = readdirSync(dataDir)
+    .filter((file) => file.endsWith('.json'))
+    .sort();
+
+  const models = {};
+  const problems = [];
+  let aliases = {};
+  let aliasMetadata = {};
+  let provenance = { verifiedAt: '1970-01-01', source: 'unknown' };
+
+  for (const file of files) {
+    const full = path.join(dataDir, file);
+    if (file === 'aliases.json') {
+      const parsed = readJson(full);
+      aliases = parsed.aliases ?? {};
+      aliasMetadata = parsed.metadata ?? {};
+      continue;
+    }
+    if (file === 'provenance.json') {
+      provenance = readJson(full);
+      continue;
+    }
+
+    const parsed = readJson(full);
+    const provider = parsed.provider ?? path.basename(file, '.json');
+    for (const [model, capabilities] of Object.entries(parsed.models ?? {})) {
+      if (models[model]) problems.push(`${model}: defined in more than one provider file`);
+      validate(provider, model, capabilities, problems);
+      models[model] = capabilities;
+    }
+  }
+
+  for (const [alias, target] of Object.entries(aliases)) {
+    // An alias pointing at nothing resolves to a literal model name at runtime and fails only when
+    // a request uses it, so it is caught here instead.
+    const normalized = target.startsWith('ollama/') ? target.slice(7) : target;
+    if (!models[target] && !models[normalized]) {
+      problems.push(`alias "${alias}" points at unknown model "${target}"`);
+    }
+  }
+  for (const alias of Object.keys(aliasMetadata)) {
+    if (!aliases[alias]) problems.push(`alias metadata "${alias}" has no matching alias`);
+  }
+
+  if (problems.length > 0) {
+    console.error('Model registry data is invalid:');
+    for (const problem of problems) console.error(`  - ${problem}`);
+    process.exit(1);
+  }
+
+  return { models, aliases, aliasMetadata, provenance, files };
+}
+
+function render({ models, aliases, aliasMetadata, provenance, files }) {
+  const sortedModels = Object.fromEntries(Object.entries(models).sort(([a], [b]) => a.localeCompare(b)));
+  const sortedAliases = Object.fromEntries(Object.entries(aliases).sort(([a], [b]) => a.localeCompare(b)));
+  const sortedMetadata = Object.fromEntries(Object.entries(aliasMetadata).sort(([a], [b]) => a.localeCompare(b)));
+
+  return `// Generated by scripts/generate-model-registry.mjs from data/models/. Do not edit by hand.
+// Sources: ${files.join(', ')}
+// Run \`npm run registry:generate\` after changing the data, and \`npm run registry:check\` to verify.
+
+import type { AliasMetadata, ModelCapabilities } from '../types/providers.js';
+
+/** Provenance of the generated data, mirroring data/models/provenance.json. */
+export const GENERATED_REGISTRY_PROVENANCE = ${JSON.stringify(provenance, null, 2)} as const;
+
+/** Every model defined in the versioned provider data, sorted by name. */
+export const GENERATED_MODELS: Record<string, ModelCapabilities> = ${JSON.stringify(sortedModels, null, 2)};
+
+export const GENERATED_MODEL_ALIASES: Record<string, string> = ${JSON.stringify(sortedAliases, null, 2)};
+
+export const GENERATED_ALIAS_METADATA: Record<string, AliasMetadata> = ${JSON.stringify(sortedMetadata, null, 2)};
+
+/** Count of generated entries, so a drift check can report a difference without a deep compare. */
+export const GENERATED_MODEL_COUNT = ${Object.keys(sortedModels).length};
+`;
+}
+
+const collected = collect();
+const rendered = render(collected);
+const checkOnly = process.argv.includes('--check');
+
+if (checkOnly) {
+  let current = '';
+  try {
+    current = readFileSync(outputFile, 'utf8');
+  } catch {
+    console.error(`Missing ${path.relative(repoRoot, outputFile)}. Run: npm run registry:generate`);
+    process.exit(1);
+  }
+  if (current !== rendered) {
+    console.error(
+      `${path.relative(repoRoot, outputFile)} is out of date with data/models/. Run: npm run registry:generate`,
+    );
+    process.exit(1);
+  }
+  console.log(
+    `Model registry is current: ${collected.files.length} data files, ${Object.keys(collected.models).length} models.`,
+  );
+} else {
+  writeFileSync(outputFile, rendered, 'utf8');
+  console.log(
+    `Wrote ${path.relative(repoRoot, outputFile)}: ${Object.keys(collected.models).length} models, ${Object.keys(collected.aliases).length} aliases.`,
+  );
+}

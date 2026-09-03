@@ -49,6 +49,13 @@ export type {
   OperationMeta,
   OperationStatus,
 } from '../types/images.js';
+export {
+  FilesystemAssetStore,
+  S3AssetStore,
+  type FilesystemAssetStoreOptions,
+  type S3AssetStoreOptions,
+  type S3LikeClient,
+} from './asset-stores.js';
 export type {
   AssetCapacityConstraint,
   AssetPutOptions,

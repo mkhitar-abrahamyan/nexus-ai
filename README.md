@@ -86,6 +86,8 @@ You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want f
 - embed text through the same routing, caching, batching, budget, retry, and metrics as a completion
 - run long operations that survive a restart, with leases, retries, dead-lettering, and signed webhooks
 - trip routing away from a failing provider, and share one rate-limit budget across workers
+- reach the providers' half-price asynchronous batch tier behind one operation handle
+- persist generated media to disk or S3 with tenant isolation, retention, and checksums
 - build persistent realtime voice agents with interruption, live tools, and normalized conversation state
 - keep TypeScript types around every request and response
 
@@ -419,6 +421,118 @@ const response = await ai.completeVerified(
 );
 ```
 
+## Provider Batch Tiers
+
+Both OpenAI and Anthropic sell an asynchronous tier at roughly half price, in exchange for a
+completion window measured in hours. Local `runBatch()` concurrency cannot reach it — it is a
+different API. `BatchManager` puts both behind one operation handle.
+
+```ts
+import { BatchManager } from 'nexus-ai-pro/batch';
+import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
+
+const batch = new BatchManager({
+  providers: { openai: new OpenAIBatchProvider({ apiKey: process.env.OPENAI_API_KEY! }) },
+  defaultProvider: 'openai',
+});
+
+const handle = await batch.submit({
+  model: 'gpt-5.4-mini',
+  idempotencyKey: `nightly-${date}`,
+  items: documents.map((document) => ({
+    customId: document.id,
+    request: { model: 'gpt-5.4-mini', messages: [{ role: 'user', content: document.text }] },
+  })),
+});
+
+console.log(handle.id);        // persist this, do not block a request on the result
+```
+
+`customId` is required, not optional. A batch provider does not guarantee output order, and matching
+results by position is exactly the bug that silently mislabels every row. Duplicates are refused
+before submission for the same reason.
+
+The handle settles when the provider finishes, which can be hours later, so treat it as a background
+operation:
+
+```ts
+const result = await handle.result();
+
+result.status;              // completed | failed | expired | cancelled
+result.counts;              // { total, completed, failed }
+result.items;               // one entry per customId, with response or error
+result.cost.amount;         // priced per item, then discounted at the provider's batch rate
+```
+
+A mixed batch is normal: individual items carry their own `error` while the batch still reports
+`completed`. Nothing is invented for a failed batch — `items` comes back empty rather than padded.
+
+**Surviving a restart.** Everything after `submit` takes only a `BatchJobRef`, which is
+JSON-serializable. A worker that never submitted the batch can collect it:
+
+```ts
+const ref = { id: savedBatchId, provider: 'openai' };
+
+await batch.status(ref);     // provider-side state, without waiting
+const result = await batch.resume(ref);
+await batch.cancel(ref);
+```
+
+Polling backs off from the configured interval up to `maxPollIntervalMs`, so a 24-hour batch does
+not generate 2,880 polls while a fast one is still caught by the first few short intervals.
+
+## Asset Stores
+
+`AssetStore` has three implementations. They share one contract, so retention, tenant isolation, and
+checksums behave identically:
+
+```ts
+import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
+import { FilesystemAssetStore, S3AssetStore } from 'nexus-ai-pro/images/stores';
+
+const store = new FilesystemAssetStore({ directory: '/var/lib/app/assets', defaultTtlSeconds: 86_400 });
+
+const s3 = new S3AssetStore({
+  client,                    // structural: S3, R2, MinIO, or a test double
+  bucket: 'generated-media',
+  prefix: 'nexus-assets/',
+});
+```
+
+A missing asset and one owned by another tenant are **indistinguishable** — both return `undefined`
+rather than a permission error, because a distinguishable error leaks the existence of another
+tenant's asset.
+
+Both durable stores write two objects per asset: the bytes, and a JSON sidecar holding the
+descriptor, tenant, and expiry. A single shared index would be a write-contention point and a
+corruption blast radius; per-asset sidecars let concurrent writers proceed and lose at most one
+record. `purgeExpired()` is exact but costs a directory listing, so on a large S3 bucket prefer the
+provider's own lifecycle rules and keep this as the fallback.
+
+## Model Registry Generation
+
+The registry is generated from versioned provider data in `data/models/`, not hand-edited. The
+Claude 5 reasoning bug fixed in 1.4.0 was exactly the kind of error a hand-written literal of 100+
+models invites.
+
+```bash
+npm run registry:generate   # data/models/*.json -> src/models/generated.ts
+npm run registry:check      # fails if the committed output is stale
+```
+
+`registry:check` runs as part of `npm run check`, so committed data and committed output cannot
+drift apart. The generator validates required fields, price signs, context bounds, status values,
+and that every alias points at a model that exists — a dangling alias otherwise fails only when a
+request happens to use it.
+
+The runtime still reads the hand-written `KNOWN_MODELS`; a test asserts the generated registry
+matches it exactly. Swapping the runtime over is deliberately a separate change, so introducing the
+generator cannot quietly alter pricing data in the same release.
+
+`src/models/generated.ts` and `data/` are build-time artifacts and are **not** published. They
+duplicate `KNOWN_MODELS` exactly, and shipping them in both builds would add roughly 310KB to every
+install for data nothing reads. Both live in the repository, where a diff is what you actually want.
+
 ## Resilience: Circuit Breaking and Distributed Limits
 
 Health monitoring ranks a struggling provider lower. A circuit breaker is the stronger step: while a
@@ -509,6 +623,9 @@ covering the rest. `OperationRunner` owns it end to end, so a crashed worker doe
 The default store is in-process, so the small case needs no infrastructure:
 
 ```ts
+import { BatchManager } from 'nexus-ai-pro/batch';
+import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
+import { FilesystemAssetStore, S3AssetStore } from 'nexus-ai-pro/images/stores';
 import { CircuitBreaker } from 'nexus-ai-pro/ops/circuit-breaker';
 import { RedisRateLimitStore } from 'nexus-ai-pro/ops/rate-limit-adapters';
 import { OperationRunner } from 'nexus-ai-pro/operations';

@@ -8,5 +8,5 @@
     "verbatimModuleSyntax": false
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "dist-cjs", "src/cli.ts"]
+  "exclude": ["node_modules", "dist", "dist-cjs", "src/cli.ts", "src/models/generated.ts"]
 }

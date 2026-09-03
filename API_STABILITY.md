@@ -180,6 +180,51 @@ breaker nor its snapshot promises cluster-wide consensus. Rate-limit counters ar
 are only shared when a store is configured, and the default in-memory counter gives each worker its
 own budget.
 
+## Batch API stage
+
+`BatchManager`, the `BatchProvider` contract, the OpenAI and Anthropic adapters, the deterministic
+mock, and the `nexus-ai-pro/batch`, `batch/openai`, `batch/anthropic`, and `batch/mock` subpaths are
+public and follow the 1.x rules, as are the normalized request, ref, state, and result shapes.
+
+`BatchJobRef` is guaranteed to stay JSON-serializable and sufficient on its own to poll, collect, or
+cancel a batch. That is what makes a persisted ref survive a restart, and narrowing it would break
+every stored ref, so it requires a major release.
+
+Two behaviors are guaranteed. Results are matched by `customId`, never by position, and a duplicate
+`customId` is refused before submission. And a failed batch returns no items rather than fabricated
+ones.
+
+Provider vocabulary is not normalized beyond `BatchJobStatus`. Anthropic reports only `in_progress`
+and `ended`, with the real outcome on the per-item results; that adapter maps `ended` to `completed`
+and lets item errors carry the detail rather than inventing a batch-level failure. Payloads under
+`raw`, provider quotas, completion windows, and the discount rate itself are provider-controlled and
+may change without a major release.
+
+## Asset store stage
+
+`FilesystemAssetStore`, `S3AssetStore`, the `S3LikeClient` contract, and the
+`nexus-ai-pro/images/stores` subpath are public under the 1.x rules and implement the existing
+`AssetStore` contract unchanged. The shared contract, errors, and validation moved to an internal
+`asset-support` module and are re-exported from `images/assets`, so every existing import resolves
+as before.
+
+All three stores guarantee that a missing asset and one owned by another tenant are
+indistinguishable, that stored bytes carry a SHA-256 checksum, and that a lapsed asset is unreadable
+before it is purged. `S3AssetStore.purgeExpired()` lists the record prefix on every call; on a large
+bucket prefer the provider lifecycle rules. Neither durable store coordinates concurrent deletes
+across processes.
+
+## Model registry generation stage
+
+`data/models/*.json` is the versioned source of truth in the repository, and
+`scripts/generate-model-registry.mjs` emits `src/models/generated.ts` from it.
+
+Neither is published, and neither is public API. They duplicate `KNOWN_MODELS` exactly, so shipping
+them would add roughly 310KB to every install for data nothing reads. Generation is a build-time
+guarantee about how the registry is maintained, not a runtime surface: the resolver continues to read
+`KNOWN_MODELS`, and a test asserts the two match. Switching the resolver over is a later change, so
+that introducing generation cannot alter pricing behavior in the same release.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

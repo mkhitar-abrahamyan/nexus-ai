@@ -52,6 +52,11 @@ const imports = [
   { specifier: 'nexus-ai-pro/operations/webhooks', exports: ['signOperationWebhook', 'verifyOperationWebhook'] },
   { specifier: 'nexus-ai-pro/ops/circuit-breaker', exports: ['CircuitBreaker'] },
   { specifier: 'nexus-ai-pro/ops/rate-limit-adapters', exports: ['MemoryRateLimitStore', 'RedisRateLimitStore'] },
+  { specifier: 'nexus-ai-pro/batch', exports: ['BatchManager', 'MockBatchProvider', 'BatchValidationError'] },
+  { specifier: 'nexus-ai-pro/batch/openai', exports: ['OpenAIBatchProvider'] },
+  { specifier: 'nexus-ai-pro/batch/anthropic', exports: ['AnthropicBatchProvider'] },
+  { specifier: 'nexus-ai-pro/batch/mock', exports: ['MockBatchProvider'] },
+  { specifier: 'nexus-ai-pro/images/stores', exports: ['FilesystemAssetStore', 'S3AssetStore'] },
   {
     specifier: 'nexus-ai-pro/realtime',
     exports: [

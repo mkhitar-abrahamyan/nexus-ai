@@ -289,17 +289,18 @@ Deliberately deferred: everything below, which needed the operation handle to ex
 
 The rest of the theme, now that the handle they sit behind exists.
 
-- **Provider batch APIs.** OpenAI Batch and Anthropic Message Batches behind the same operation
-  handle, exposing the discounted asynchronous tier that local `runBatch()` concurrency cannot reach.
-  Idempotency keys replay an accepted operation; ambiguous timeouts must not produce duplicate
-  charges.
+- ~~**Provider batch APIs.**~~ Landed on `main`, unreleased. `BatchManager` over OpenAI Batch and
+  Anthropic Message Batches, matched by `customId`, with backoff polling, idempotency replay, and
+  `resume()` from a persisted ref.
 - ~~**Distributed rate limiting and circuit breaking.**~~ Landed on `main`, unreleased.
   `RedisRateLimitStore` shares one budget across workers; `CircuitBreaker` consumes the existing
   attempt signals and removes a failing provider from routing until a probe succeeds.
-- **Filesystem and S3-compatible asset stores** implementing the existing `AssetStore` interface,
-  with retention, tenant ownership, checksums, streaming, and signing. Provider URLs remain temporary
-  delivery locations, never durable storage.
-- **Generated model registry** from versioned provider data, consuming the 1.4.0 provenance fields.
+- ~~**Filesystem and S3-compatible asset stores.**~~ Landed on `main`, unreleased, with retention,
+  tenant ownership, checksums, and signing. Streaming reads remain outstanding: both stores return
+  whole byte arrays, which is fine for an image and wrong for video.
+- ~~**Generated model registry.**~~ Landed on `main`, unreleased. `data/models/*.json` is the source
+  of truth and `registry:check` gates drift. The runtime still reads `KNOWN_MODELS`; switching the
+  resolver over is deliberately a separate change.
 - ~~**Cross-family observability.**~~ Landed on `main`, unreleased, for images, voice, and telephony:
   each reports through the runtime's metrics collector, audit log, and rate limiter via a shared
   `FamilyTelemetry`. Realtime is still outstanding — a persistent session's unit of work is an event

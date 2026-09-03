@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!dist", "!dist-cjs", "!node_modules", "!.tmp"]
+    "includes": ["**", "!dist", "!dist-cjs", "!node_modules", "!.tmp", "!src/models/generated.ts"]
   },
   "formatter": {
     "enabled": true,

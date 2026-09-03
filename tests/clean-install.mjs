@@ -22,9 +22,12 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // their declarations, all carried in both builds. The headroom is deliberately small so accidental
 // bloat still fails here; raise it only alongside a change that explains the growth. Raised once
 // more for the durable operations family: a runner, a state machine, two stores, a dispatcher, and
-// webhook helpers, again carried in both builds.
-const MAX_PACKED_BYTES = 420_000;
-const MAX_UNPACKED_BYTES = 2_650_000;
+// webhook helpers, again carried in both builds. Raised again in 1.7.0 for the provider batch
+// family, the filesystem and S3 asset stores, and the resilience modules. The generated model
+// registry is deliberately NOT shipped: it duplicates KNOWN_MODELS byte for byte, and carrying it
+// in both builds plus its JSON source cost ~310KB unpacked for data no consumer reads.
+const MAX_PACKED_BYTES = 460_000;
+const MAX_UNPACKED_BYTES = 2_850_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

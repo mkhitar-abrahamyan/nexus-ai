@@ -22,6 +22,28 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - `NexusRateLimitError` now carries `resetAt` and a `retryAfterSeconds` accessor, so a gateway can
   answer with a real `Retry-After` header.
 - New subpaths `nexus-ai-pro/ops/circuit-breaker` and `nexus-ai-pro/ops/rate-limit-adapters`.
+- **Provider batch tiers.** `BatchManager` puts OpenAI Batch and Anthropic Message Batches behind one
+  operation handle, reaching the roughly half-price asynchronous tier that local `runBatch()`
+  concurrency cannot. Results are matched by a required `customId` rather than by position, since a
+  batch provider does not guarantee output order; a duplicate id is refused before submission.
+  Polling backs off up to a configurable ceiling, an idempotency key replays instead of submitting
+  twice, and `resume()` collects a batch from its `BatchJobRef` alone so a restarted worker can
+  finish what another submitted. Ships with a deterministic `MockBatchProvider`.
+- **Filesystem and S3 asset stores.** `FilesystemAssetStore` and `S3AssetStore` implement the
+  existing `AssetStore` contract, with tenant isolation, retention, SHA-256 checksums, and signing.
+  A missing asset and one owned by another tenant are indistinguishable, because a distinguishable
+  error leaks the existence of another tenant asset. Both write bytes and a JSON sidecar per asset
+  rather than a shared index, so concurrent writers do not contend and a torn write loses at most
+  one record. `S3LikeClient` is structural, so S3, R2, and MinIO all work without an SDK dependency.
+- **Generated model registry.** `data/models/*.json` is now the versioned source of truth, and
+  `scripts/generate-model-registry.mjs` emits `src/models/generated.ts` from it. The generator
+  validates required fields, price signs, context bounds, status values, and dangling aliases;
+  `npm run registry:check` runs inside `npm run check` so committed data and output cannot drift.
+  The runtime still reads `KNOWN_MODELS`, and a test asserts the two match exactly. The generated
+  module and its data are build-time artifacts and are not published: they duplicate `KNOWN_MODELS`
+  exactly, so shipping them would add roughly 310KB to every install for data nothing reads.
+- New subpaths `nexus-ai-pro/batch`, `batch/openai`, `batch/anthropic`, `batch/mock`, and
+  `nexus-ai-pro/images/stores`.
 - **Cross-family observability.** Image, voice, and telephony operations now report into the same
   metrics collector, audit log, and rate limiter as completions and embeddings, closing the gap where
   an application running phone agents and image generation had observability for only part of its
@@ -36,6 +58,9 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - `ImageManager`, `VoiceManager`, and `TelephonyManager` accept an optional second constructor
   argument carrying the shared observability objects. It defaults to empty, so constructing one
   standalone is unchanged and simply records nothing.
+- The shared asset contract, errors, and validation moved from `images/assets` to an internal
+  `asset-support` module so the filesystem, S3, and memory stores cannot drift on what a valid asset
+  is. `images/assets` re-exports all of it, so existing imports are unchanged.
 - `RouterContext` gained an optional `openCircuits`, and `Router.route()` an optional trailing
   parameter. When every candidate's circuit is open the router routes anyway: that usually means a
   shared dependency is down, and one attempt beats a certain failure with no attempt at all.
