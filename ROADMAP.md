@@ -127,14 +127,16 @@ trusted publishing with provenance.
 
 Ordered by how much each one costs a consumer today.
 
-### 2.1 Media families still do not get the platform
+### 2.1 The traced pipeline is still completion-only
 
-Narrowed in 1.5.0: `EmbeddingManager` shares the runtime's rate limiter, audit log, and metrics
-collector, and `RateLimiter` now buckets on a structural request rather than a `CompletionRequest`,
-so a family no longer has to be a completion to be governed. `ImageManager`, `VoiceManager`,
-`TelephonyManager`, and `RealtimeSession` still emit nothing to `MetricsCollector` and pass through
-no rate limit or audit stage, so an application running phone agents and image generation has
-observability for only part of its spend.
+Closed for observability: embeddings in 1.5.0, then images, voice, and telephony through a shared
+`FamilyTelemetry`, so every one of them reports into the runtime's metrics collector, audit log, and
+rate limiter. `RealtimeSession` remains outside it, because a persistent session's unit of work is an
+event stream rather than a discrete call and does not fit a call wrapper.
+
+Cost is deliberately not recorded for media families. Providers there price per second, per image, or
+per minute, and inventing a number for a metric named after tokens would be worse than reporting
+none.
 
 The traced pipeline itself remains completion-only. `PipelineContext` is typed strictly around
 `CompletionRequest`/`NexusResponse`, so other families cannot reuse it without a refactor, and
@@ -298,9 +300,10 @@ The rest of the theme, now that the handle they sit behind exists.
   with retention, tenant ownership, checksums, streaming, and signing. Provider URLs remain temporary
   delivery locations, never durable storage.
 - **Generated model registry** from versioned provider data, consuming the 1.4.0 provenance fields.
-- **Cross-family observability.** Route image, voice, telephony, and realtime operations through the
-  rate limiter, audit log, and metrics collector, closing gap 2.1 without waiting for the full
-  lifecycle refactor.
+- ~~**Cross-family observability.**~~ Landed on `main`, unreleased, for images, voice, and telephony:
+  each reports through the runtime's metrics collector, audit log, and rate limiter via a shared
+  `FamilyTelemetry`. Realtime is still outstanding — a persistent session's unit of work is an event
+  stream rather than a call, so it needs its own shape rather than this wrapper.
 
 ---
 

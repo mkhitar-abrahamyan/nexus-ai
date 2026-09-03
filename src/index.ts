@@ -123,6 +123,11 @@ export { hardenPrompt } from './security/prompt-hardening.js';
 export { RateLimiter, NexusRateLimitError, type RateLimitedRequest } from './ops/rate-limiter.js';
 export { AuditLogger } from './ops/audit-logger.js';
 export {
+  FamilyTelemetry,
+  type FamilyCallDescriptor,
+  type FamilyRuntime,
+} from './ops/family-telemetry.js';
+export {
   MetricsCollector,
   InMemoryMetrics,
   OpenTelemetryMetricsSink,

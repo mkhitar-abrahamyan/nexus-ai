@@ -24,6 +24,7 @@ import {
   ImageValidationError,
 } from './errors.js';
 import { LocalOperationHandle } from '../operations/handle.js';
+import { FamilyTelemetry, type FamilyRuntime } from '../ops/family-telemetry.js';
 
 type ImageRequest = ImageGenerateRequest | ImageEditRequest;
 
@@ -31,7 +32,13 @@ export class ImageManager {
   private readonly providers = new Map<string, ImageProvider>();
   private operationCounter = 0;
 
-  constructor(private readonly config: ImageConfig = {}) {
+  private readonly telemetry: FamilyTelemetry;
+
+  constructor(
+    private readonly config: ImageConfig = {},
+    runtime: FamilyRuntime = {},
+  ) {
+    this.telemetry = new FamilyTelemetry('images', runtime);
     for (const [name, provider] of Object.entries(config.providers ?? {})) {
       this.registerImageProvider(name, provider);
     }
@@ -111,7 +118,24 @@ export class ImageManager {
     return `image-operation-${this.operationCounter}`;
   }
 
-  private async execute(
+  private execute(
+    submission: ImageOperationSubmission,
+    operationId: string,
+    signal: AbortSignal,
+  ): Promise<ImageResult> {
+    return this.telemetry.run(
+      {
+        operation: `images.${submission.operation}`,
+        model: submission.request.model,
+        provider: submission.request.provider,
+        requestId: submission.request.requestId ?? operationId,
+        metadata: { count: submission.request.count },
+      },
+      () => this.runOperation(submission, operationId, signal),
+    );
+  }
+
+  private async runOperation(
     submission: ImageOperationSubmission,
     operationId: string,
     signal: AbortSignal,

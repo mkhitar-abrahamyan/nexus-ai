@@ -121,14 +121,22 @@ export class NexusAI {
     this.logger = new Logger(this.config.debug, this.config.logger);
     this.security = new SecurityPipeline(this.config.security || 'standard');
     this.contextWindow = new ContextWindowManager(this.config.contextWindow || {});
-    this.voiceManager = new VoiceManager(this.config.voice || {});
-    this.images = new ImageManager(this.config.images || {});
-    this.telephonyManager = new TelephonyManager(this.config.telephony || {});
+    this.auditLogger = new AuditLogger(this.config.auditLog);
+    this.metrics = new MetricsCollector(this.config.metrics || {});
+    // Built before the families so every one of them shares this runtime's collector, audit log,
+    // and rate limiter rather than reporting into instances nobody can read.
+    const familyRuntime = {
+      metrics: this.metrics,
+      auditLogger: this.auditLogger,
+      rateLimiter: this.rateLimiter,
+      rateLimit: this.config.rateLimit,
+    };
+    this.voiceManager = new VoiceManager(this.config.voice || {}, familyRuntime);
+    this.images = new ImageManager(this.config.images || {}, familyRuntime);
+    this.telephonyManager = new TelephonyManager(this.config.telephony || {}, familyRuntime);
     this.optimizer = new TokenOptimizer(this.config.tokenOptimizer || {});
     this.cache = new MemoryCache<NexusResponse>(this.config.cache?.maxEntries || 500);
-    this.auditLogger = new AuditLogger(this.config.auditLog);
     this.pipeline = new PipelineRunner(this.config.pipeline || {});
-    this.metrics = new MetricsCollector(this.config.metrics || {});
     this.health = new ProviderHealthMonitor(this.config.health || {});
     this.circuitBreaker = new CircuitBreaker(this.config.circuitBreaker || {});
     this.semanticCache = new SemanticCache({

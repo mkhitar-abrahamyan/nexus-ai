@@ -35,6 +35,7 @@ const expectedRootExports = [
   'EmbeddingValidationError',
   'EvalRunner',
   'FailoverExecutor',
+  'FamilyTelemetry',
   'GUARDRAIL_POLICIES',
   'GoogleProvider',
   'GroqProvider',

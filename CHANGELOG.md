@@ -22,12 +22,20 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - `NexusRateLimitError` now carries `resetAt` and a `retryAfterSeconds` accessor, so a gateway can
   answer with a real `Retry-After` header.
 - New subpaths `nexus-ai-pro/ops/circuit-breaker` and `nexus-ai-pro/ops/rate-limit-adapters`.
+- **Cross-family observability.** Image, voice, and telephony operations now report into the same
+  metrics collector, audit log, and rate limiter as completions and embeddings, closing the gap where
+  an application running phone agents and image generation had observability for only part of its
+  spend. Metrics carry `family` and `operation` labels, and one rate-limit budget now covers every
+  family. `FamilyTelemetry` is exported for a family an application adds itself.
 
 ### Changed
 
 - `RateLimiter` gained `checkAsync()` for the store-aware path. `check()` keeps its synchronous
   signature and behavior, and the runtime only awaits when a store is configured, so a request
   without one pays no extra microtask.
+- `ImageManager`, `VoiceManager`, and `TelephonyManager` accept an optional second constructor
+  argument carrying the shared observability objects. It defaults to empty, so constructing one
+  standalone is unchanged and simply records nothing.
 - `RouterContext` gained an optional `openCircuits`, and `Router.route()` an optional trailing
   parameter. When every candidate's circuit is open the router routes anyway: that usually means a
   shared dependency is down, and one attempt beats a certain failure with no attempt at all.

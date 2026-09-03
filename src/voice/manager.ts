@@ -12,6 +12,7 @@ import type {
 } from '../types/voice.js';
 import type { NexusResponse } from '../types/response.js';
 import { VoiceCapabilityError, VoiceProviderError } from './errors.js';
+import { FamilyTelemetry, type FamilyRuntime } from '../ops/family-telemetry.js';
 import { VoiceSession, type VoiceSessionCompletionClient } from './session.js';
 
 export interface VoiceCompletionClient {
@@ -20,8 +21,13 @@ export interface VoiceCompletionClient {
 
 export class VoiceManager {
   private providers = new Map<string, VoiceProvider>();
+  private readonly telemetry: FamilyTelemetry;
 
-  constructor(private config: VoiceConfig = {}) {
+  constructor(
+    private config: VoiceConfig = {},
+    runtime: FamilyRuntime = {},
+  ) {
+    this.telemetry = new FamilyTelemetry('voice', runtime);
     for (const [name, provider] of Object.entries(config.providers || {})) {
       this.registerProvider(name, provider);
     }
@@ -45,31 +51,49 @@ export class VoiceManager {
       'transcription',
       request.provider || this.config.defaultTranscriptionProvider,
     );
-    if (!provider.transcribe) throw new VoiceCapabilityError(provider.info.name, 'transcription');
+    const transcribe = provider.transcribe;
+    if (!transcribe) throw new VoiceCapabilityError(provider.info.name, 'transcription');
 
+    return this.telemetry.run({ operation: 'transcribe', provider: provider.info.name, model: request.model }, () =>
+      this.callTranscribe(provider.info.name, transcribe.bind(provider), request),
+    );
+  }
+
+  private async callTranscribe(
+    providerName: string,
+    transcribe: (request: TranscriptionRequest) => Promise<TranscriptionResponse>,
+    request: TranscriptionRequest,
+  ): Promise<TranscriptionResponse> {
     try {
-      return await provider.transcribe(request);
+      return await transcribe(request);
     } catch (error) {
       if (error instanceof VoiceProviderError) throw error;
-      throw new VoiceProviderError(
-        `Voice transcription failed for provider "${provider.info.name}"`,
-        provider.info.name,
-        error,
-      );
+      throw new VoiceProviderError(`Voice transcription failed for provider "${providerName}"`, providerName, error);
     }
   }
 
   async speak(request: SpeechRequest): Promise<SpeechResponse> {
     const provider = this.resolveProvider('speech', request.provider || this.config.defaultSpeechProvider);
-    if (!provider.speak) throw new VoiceCapabilityError(provider.info.name, 'speech');
+    const speak = provider.speak;
+    if (!speak) throw new VoiceCapabilityError(provider.info.name, 'speech');
 
+    return this.telemetry.run({ operation: 'speak', provider: provider.info.name, model: request.model }, () =>
+      this.callSpeak(provider.info.name, speak.bind(provider), request),
+    );
+  }
+
+  private async callSpeak(
+    providerName: string,
+    speak: (request: SpeechRequest) => Promise<SpeechResponse>,
+    request: SpeechRequest,
+  ): Promise<SpeechResponse> {
     try {
-      return await provider.speak(request);
+      return await speak(request);
     } catch (error) {
       if (error instanceof VoiceProviderError) throw error;
       throw new VoiceProviderError(
-        `Voice speech generation failed for provider "${provider.info.name}"`,
-        provider.info.name,
+        `Voice speech generation failed for provider "${providerName}"`,
+        providerName,
         error,
       );
     }

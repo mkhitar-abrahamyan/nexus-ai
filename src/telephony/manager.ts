@@ -17,6 +17,7 @@ import type {
   UpdatePhoneNumberRequest,
 } from '../types/telephony.js';
 import { TelephonyCapabilityError, TelephonyProviderError } from './errors.js';
+import { FamilyTelemetry, type FamilyRuntime } from '../ops/family-telemetry.js';
 
 type TelephonyCapability =
   | 'createCall'
@@ -33,7 +34,13 @@ type TelephonyCapability =
 export class TelephonyManager {
   private providers = new Map<string, TelephonyProvider>();
 
-  constructor(private config: TelephonyConfig = {}) {
+  private readonly telemetry: FamilyTelemetry;
+
+  constructor(
+    private config: TelephonyConfig = {},
+    runtime: FamilyRuntime = {},
+  ) {
+    this.telemetry = new FamilyTelemetry('telephony', runtime);
     for (const [name, provider] of Object.entries(config.providers || {})) {
       this.registerProvider(name, provider);
     }
@@ -54,15 +61,26 @@ export class TelephonyManager {
 
   async createCall(request: CreateCallRequest): Promise<CreateCallResponse> {
     const provider = this.resolveProvider('createCall', request.provider || this.config.defaultProvider);
-    if (!provider.createCall) throw new TelephonyCapabilityError(provider.info.name, 'outbound calls');
+    const createCall = provider.createCall;
+    if (!createCall) throw new TelephonyCapabilityError(provider.info.name, 'outbound calls');
 
+    return this.telemetry.run({ operation: 'createCall', provider: provider.info.name }, () =>
+      this.callCreate(provider.info.name, createCall.bind(provider), request),
+    );
+  }
+
+  private async callCreate(
+    providerName: string,
+    createCall: (request: CreateCallRequest) => Promise<CreateCallResponse>,
+    request: CreateCallRequest,
+  ): Promise<CreateCallResponse> {
     try {
-      return await provider.createCall(request);
+      return await createCall(request);
     } catch (error) {
       if (error instanceof TelephonyProviderError) throw error;
       throw new TelephonyProviderError(
-        `Telephony call creation failed for provider "${provider.info.name}"`,
-        provider.info.name,
+        `Telephony call creation failed for provider "${providerName}"`,
+        providerName,
         error,
       );
     }
@@ -108,15 +126,26 @@ export class TelephonyManager {
 
   async endCall(request: EndCallRequest): Promise<TelephonyCallDetails> {
     const provider = this.resolveProvider('endCall', request.provider || this.config.defaultProvider);
-    if (!provider.endCall) throw new TelephonyCapabilityError(provider.info.name, 'call control');
+    const endCall = provider.endCall;
+    if (!endCall) throw new TelephonyCapabilityError(provider.info.name, 'call control');
 
+    return this.telemetry.run({ operation: 'endCall', provider: provider.info.name }, () =>
+      this.callEnd(provider.info.name, endCall.bind(provider), request),
+    );
+  }
+
+  private async callEnd(
+    providerName: string,
+    endCall: (request: EndCallRequest) => Promise<TelephonyCallDetails>,
+    request: EndCallRequest,
+  ): Promise<TelephonyCallDetails> {
     try {
-      return await provider.endCall(request);
+      return await endCall(request);
     } catch (error) {
       if (error instanceof TelephonyProviderError) throw error;
       throw new TelephonyProviderError(
-        `Telephony call hangup failed for provider "${provider.info.name}"`,
-        provider.info.name,
+        `Telephony call hangup failed for provider "${providerName}"`,
+        providerName,
         error,
       );
     }
