@@ -71,6 +71,7 @@ import { costAmount, ensureUsageAndCost } from './usage.js';
 import { PipelineRunner, createPipelineContext } from '../pipeline/pipeline.js';
 import { MetricsCollector } from '../ops/metrics.js';
 import { ProviderHealthMonitor } from '../ops/health.js';
+import { CircuitBreaker } from '../ops/circuit-breaker.js';
 import { SemanticCache } from '../cache/semantic-cache.js';
 import { runBatch, type BatchOptions, type BatchItemResult } from '../jobs/batch.js';
 import { JobQueue, type QueueOptions } from '../jobs/queue.js';
@@ -103,6 +104,7 @@ export class NexusAI {
   private pipeline: PipelineRunner;
   private metrics: MetricsCollector;
   private health: ProviderHealthMonitor;
+  private circuitBreaker: CircuitBreaker;
   private semanticCache: SemanticCache;
 
   /**
@@ -128,6 +130,7 @@ export class NexusAI {
     this.pipeline = new PipelineRunner(this.config.pipeline || {});
     this.metrics = new MetricsCollector(this.config.metrics || {});
     this.health = new ProviderHealthMonitor(this.config.health || {});
+    this.circuitBreaker = new CircuitBreaker(this.config.circuitBreaker || {});
     this.semanticCache = new SemanticCache({
       enabled:
         this.config.cache?.enabled &&
@@ -147,7 +150,10 @@ export class NexusAI {
 
     try {
       await this.metrics.recordRequest({ model: request.model });
-      this.rateLimiter.check(request, this.config.rateLimit);
+      // The synchronous path stays the default so a request without a distributed store pays no
+      // extra microtask for the limiter.
+      if (this.config.rateLimit?.store) await this.rateLimiter.checkAsync(request, this.config.rateLimit);
+      else this.rateLimiter.check(request, this.config.rateLimit);
 
       if (this.isAuditLogEnabled()) {
         await this.pipeline.trace(context, 'auditLog', () =>
@@ -216,7 +222,13 @@ export class NexusAI {
       context = await this.pipeline.runHook('afterSecurity', context);
 
       const decision = await this.pipeline.trace(context, 'routing', () => {
-        return this.router.route(context.request, this.config, this.providers, this.health.snapshot());
+        return this.router.route(
+          context.request,
+          this.config,
+          this.providers,
+          this.health.snapshot(),
+          this.circuitBreaker.openProviders(),
+        );
       });
       context.route = decision;
       this.logger.info('route decision', decision as unknown as Record<string, unknown>);
@@ -275,8 +287,14 @@ export class NexusAI {
         return this.failover.complete(context.request, decision, this.providers, {
           timeoutMs: this.config.timeout,
           retry: this.config.retry,
-          onAttemptSuccess: (providerName, latencyMs) => this.health.recordSuccess(providerName, latencyMs),
-          onAttemptFailure: (providerName, error) => this.health.recordFailure(providerName, error),
+          onAttemptSuccess: (providerName, latencyMs) => {
+            this.health.recordSuccess(providerName, latencyMs);
+            this.circuitBreaker.recordSuccess(providerName);
+          },
+          onAttemptFailure: (providerName, error) => {
+            this.health.recordFailure(providerName, error);
+            this.circuitBreaker.recordFailure(providerName, error);
+          },
         });
       });
       context.response = response;
@@ -420,7 +438,13 @@ export class NexusAI {
     const securityResult = this.isSecurityEnabled()
       ? this.security.protectInput(optimizationResult.value)
       : { ok: true, value: optimizationResult.value, findings: [], guardrailsApplied: [] };
-    const decision = this.router.route(securityResult.value, this.config, this.providers, this.health.snapshot());
+    const decision = this.router.route(
+      securityResult.value,
+      this.config,
+      this.providers,
+      this.health.snapshot(),
+      this.circuitBreaker.openProviders(),
+    );
     const resolved = resolveModel(decision.model, this.config);
     const outputTokens = this.estimatedOutputTokens(securityResult.value);
     const cost = estimateCost({
@@ -505,8 +529,14 @@ export class NexusAI {
     const stream = this.failover.stream(routedRequest, decision, this.providers, {
       timeoutMs: this.config.timeout,
       retry: this.config.retry,
-      onAttemptSuccess: (providerName, latencyMs) => this.health.recordSuccess(providerName, latencyMs),
-      onAttemptFailure: (providerName, error) => this.health.recordFailure(providerName, error),
+      onAttemptSuccess: (providerName, latencyMs) => {
+        this.health.recordSuccess(providerName, latencyMs);
+        this.circuitBreaker.recordSuccess(providerName);
+      },
+      onAttemptFailure: (providerName, error) => {
+        this.health.recordFailure(providerName, error);
+        this.circuitBreaker.recordFailure(providerName, error);
+      },
     });
     return this.isSecurityEnabled() ? protectStreamOutput(stream, this.security, routedRequest.signal) : stream;
   }
@@ -786,6 +816,16 @@ export class NexusAI {
   /**
    * Returns current provider health snapshots.
    */
+  /** Circuit state per provider, for a health endpoint or dashboard. */
+  getCircuitBreakerStatus() {
+    return this.circuitBreaker.snapshot();
+  }
+
+  /** Forces a circuit closed, for an operator override. Omit the name to reset every provider. */
+  resetCircuitBreaker(providerName?: string): void {
+    this.circuitBreaker.reset(providerName);
+  }
+
   getProviderHealth() {
     return this.health.snapshot();
   }
@@ -997,8 +1037,14 @@ export class NexusAI {
     const response = await this.failover.complete(routedRequest, decision, this.providers, {
       timeoutMs: this.config.timeout,
       retry: this.config.retry,
-      onAttemptSuccess: (providerName, latencyMs) => this.health.recordSuccess(providerName, latencyMs),
-      onAttemptFailure: (providerName, error) => this.health.recordFailure(providerName, error),
+      onAttemptSuccess: (providerName, latencyMs) => {
+        this.health.recordSuccess(providerName, latencyMs);
+        this.circuitBreaker.recordSuccess(providerName);
+      },
+      onAttemptFailure: (providerName, error) => {
+        this.health.recordFailure(providerName, error);
+        this.circuitBreaker.recordFailure(providerName, error);
+      },
     });
 
     return response.content.trim();

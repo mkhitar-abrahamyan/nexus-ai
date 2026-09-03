@@ -158,6 +158,28 @@ only when the client exposes `eval`; without it the compare-and-set degrades to 
 that narrows but does not close the race, and that limitation is documented rather than hidden.
 Webhook delivery is best-effort and never fails the operation it describes.
 
+## Resilience API stage
+
+`CircuitBreaker`, the `RateLimitStore` contract, `MemoryRateLimitStore`, `RedisRateLimitStore`, and
+the `ops/circuit-breaker` and `ops/rate-limit-adapters` subpaths are public and follow the 1.x rules,
+together with `circuitBreaker` and `rateLimit.store` in `NexusAIConfig`.
+
+`RateLimiter.check()` keeps its synchronous signature and in-memory behavior; `checkAsync()` is the
+additive store-aware path. `NexusRateLimitError` gained an optional `resetAt` and a
+`retryAfterSeconds` accessor. `RouterContext` gained an optional `openCircuits`, and `Router.route()`
+an optional trailing parameter, both additive.
+
+Which provider a breaker excludes at a given moment is a runtime decision, not a compatibility
+guarantee: thresholds, scoring, and the exact ordering of candidates can change in a minor release.
+What is guaranteed is the state machine — closed, open after a threshold is crossed, half-open after
+the cooldown, closed again only after the configured probe successes — and that routing still selects
+a provider when every circuit is open rather than failing the request untried.
+
+Breaker state is per process by design. Two workers can disagree about a provider, and neither the
+breaker nor its snapshot promises cluster-wide consensus. Rate-limit counters are the opposite: they
+are only shared when a store is configured, and the default in-memory counter gives each worker its
+own budget.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

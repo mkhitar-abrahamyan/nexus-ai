@@ -1,4 +1,5 @@
 import type { RateLimitConfig } from '../types/config.js';
+import type { RateLimitStore } from './rate-limit-adapters.js';
 
 /**
  * The parts of a request the limiter buckets on.
@@ -12,9 +13,19 @@ export interface RateLimitedRequest {
 }
 
 export class NexusRateLimitError extends Error {
-  constructor(public key: string) {
+  constructor(
+    public key: string,
+    /** Epoch milliseconds when the window resets, when the store reported one. */
+    public readonly resetAt?: number,
+  ) {
     super(`NexusAI rate limit exceeded for ${key}`);
     this.name = 'NexusRateLimitError';
+  }
+
+  /** Seconds a caller should wait, suitable for a `Retry-After` header. */
+  get retryAfterSeconds(): number | undefined {
+    if (this.resetAt === undefined) return undefined;
+    return Math.max(0, Math.ceil((this.resetAt - Date.now()) / 1000));
   }
 }
 
@@ -25,6 +36,29 @@ interface Bucket {
 
 export class RateLimiter {
   private buckets = new Map<string, Bucket>();
+
+  /**
+   * Counts one call against a distributed store.
+   *
+   * Separate from `check()` rather than replacing it: a store is asynchronous, and making the
+   * common in-memory path await a promise would add a microtask to every request that does not use
+   * one. Callers pick the path by whether `config.store` is set.
+   */
+  async checkAsync(request: RateLimitedRequest, config?: RateLimitConfig): Promise<void> {
+    if (!config?.enabled) return;
+
+    const store: RateLimitStore | undefined = config.store;
+    if (!store) {
+      this.check(request, config);
+      return;
+    }
+
+    const key = this.getKey(request, config);
+    const hit = await store.hit(key, config.windowMs);
+    if (hit.count > config.maxRequests) {
+      throw new NexusRateLimitError(key, hit.resetAt);
+    }
+  }
 
   check(request: RateLimitedRequest, config?: RateLimitConfig): void {
     if (!config?.enabled) return;
@@ -40,7 +74,7 @@ export class RateLimiter {
 
     bucket.count += 1;
     if (bucket.count > config.maxRequests) {
-      throw new NexusRateLimitError(key);
+      throw new NexusRateLimitError(key, bucket.resetAt);
     }
   }
 

@@ -127,7 +127,11 @@ export class EmbeddingManager {
 
     try {
       await this.metrics.recordRequest({ model, operation: 'embed' });
-      this.rateLimiter.check({ model, userId: request.userId }, this.config.rateLimit);
+      if (this.config.rateLimit?.store) {
+        await this.rateLimiter.checkAsync({ model, userId: request.userId }, this.config.rateLimit);
+      } else {
+        this.rateLimiter.check({ model, userId: request.userId }, this.config.rateLimit);
+      }
       await this.logAudit('request', { requestId, request, model, provider: route.providerName });
 
       assertRequestedOptions(route, request);

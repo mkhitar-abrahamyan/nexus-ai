@@ -291,9 +291,9 @@ The rest of the theme, now that the handle they sit behind exists.
   handle, exposing the discounted asynchronous tier that local `runBatch()` concurrency cannot reach.
   Idempotency keys replay an accepted operation; ambiguous timeouts must not produce duplicate
   charges.
-- **Distributed rate limiting and circuit breaking.** Redis-backed limiter adapter, plus a breaker
-  that consumes existing `ProviderHealthMonitor` signals and trips routing away from a failing
-  provider.
+- ~~**Distributed rate limiting and circuit breaking.**~~ Landed on `main`, unreleased.
+  `RedisRateLimitStore` shares one budget across workers; `CircuitBreaker` consumes the existing
+  attempt signals and removes a failing provider from routing until a probe succeeds.
 - **Filesystem and S3-compatible asset stores** implementing the existing `AssetStore` interface,
   with retention, tenant ownership, checksums, streaming, and signing. Provider URLs remain temporary
   delivery locations, never durable storage.

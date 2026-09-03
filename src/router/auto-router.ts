@@ -14,7 +14,7 @@ interface Candidate {
 export class AutoRouter {
   route(ctx: RouterContext): RouteDecision {
     const strategy = ctx.config.routing?.strategy || 'quality';
-    const candidates = this.getCandidates(ctx).map((candidate) => ({
+    const candidates = this.withoutOpenCircuits(this.getCandidates(ctx), ctx).map((candidate) => ({
       ...candidate,
       score:
         this.score(candidate.model, strategy, ctx.config) +
@@ -36,6 +36,20 @@ export class AutoRouter {
       reason: `${winner.reason}: ${winner.model}`,
       fallbacks: candidates.slice(1).map((c) => ({ providerName: c.providerName, model: c.model })),
     };
+  }
+
+  /**
+   * Drops providers whose circuit is open.
+   *
+   * If that would leave nothing to route to, the original list is kept instead. Every circuit being
+   * open usually means a shared dependency is down rather than every provider individually, and
+   * attempting one call is strictly better than failing the request without trying anything.
+   */
+  private withoutOpenCircuits<T extends { providerName: string }>(candidates: T[], ctx: RouterContext): T[] {
+    if (!ctx.openCircuits?.length) return candidates;
+    const open = new Set(ctx.openCircuits);
+    const remaining = candidates.filter((candidate) => !open.has(candidate.providerName));
+    return remaining.length > 0 ? remaining : candidates;
   }
 
   private getCandidates(ctx: RouterContext): Array<Omit<Candidate, 'score' | 'reason'>> {

@@ -380,6 +380,26 @@
         "default": "./dist-cjs/operations/webhooks.js"
       }
     },
+    "./ops/circuit-breaker": {
+      "import": {
+        "types": "./dist/ops/circuit-breaker.d.ts",
+        "default": "./dist/ops/circuit-breaker.js"
+      },
+      "require": {
+        "types": "./dist-cjs/ops/circuit-breaker.d.ts",
+        "default": "./dist-cjs/ops/circuit-breaker.js"
+      }
+    },
+    "./ops/rate-limit-adapters": {
+      "import": {
+        "types": "./dist/ops/rate-limit-adapters.d.ts",
+        "default": "./dist/ops/rate-limit-adapters.js"
+      },
+      "require": {
+        "types": "./dist-cjs/ops/rate-limit-adapters.d.ts",
+        "default": "./dist-cjs/ops/rate-limit-adapters.js"
+      }
+    },
     "./realtime": {
       "import": {
         "types": "./dist/realtime/index.d.ts",
@@ -870,6 +890,12 @@
       ],
       "operations/webhooks": [
         "dist-cjs/operations/webhooks.d.ts"
+      ],
+      "ops/circuit-breaker": [
+        "dist-cjs/ops/circuit-breaker.d.ts"
+      ],
+      "ops/rate-limit-adapters": [
+        "dist-cjs/ops/rate-limit-adapters.d.ts"
       ],
       "realtime": [
         "dist-cjs/realtime/index.d.ts"

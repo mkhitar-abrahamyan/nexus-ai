@@ -15,8 +15,9 @@ export class Router {
     config: NexusAIConfig,
     providers: Map<string, BaseProvider>,
     health?: ProviderHealthSnapshot[],
+    openCircuits?: readonly string[],
   ): RouteDecision {
-    const ctx: RouterContext = { request, config, providers, health };
+    const ctx: RouterContext = { request, config, providers, health, openCircuits };
     const routingMode = config.routing?.mode || 'auto';
 
     if (request.model !== 'auto') {

@@ -85,6 +85,7 @@ You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want f
 - add tools, agents, RAG context, evals, batch jobs, and queues
 - embed text through the same routing, caching, batching, budget, retry, and metrics as a completion
 - run long operations that survive a restart, with leases, retries, dead-lettering, and signed webhooks
+- trip routing away from a failing provider, and share one rate-limit budget across workers
 - build persistent realtime voice agents with interruption, live tools, and normalized conversation state
 - keep TypeScript types around every request and response
 
@@ -418,6 +419,87 @@ const response = await ai.completeVerified(
 );
 ```
 
+## Resilience: Circuit Breaking and Distributed Limits
+
+Health monitoring ranks a struggling provider lower. A circuit breaker is the stronger step: while a
+circuit is open the provider is removed from routing entirely, so a hard-down provider stops
+absorbing one failed attempt per request.
+
+```ts
+const ai = new NexusAI({
+  providers: { openai: { apiKey: process.env.OPENAI_API_KEY! }, anthropic: { apiKey: process.env.ANTHROPIC_API_KEY! } },
+  health: { enabled: true },
+  circuitBreaker: {
+    enabled: true,
+    failureThreshold: 5,        // consecutive failures that open the circuit
+    failureRateThreshold: 0.5,  // or half the calls failing in the window
+    minimumThroughput: 10,
+    resetTimeoutMs: 30_000,     // cooldown before a probe
+    halfOpenMaxCalls: 1,
+    onStateChange: (event) => logger.warn('circuit', event),
+  },
+});
+
+ai.getCircuitBreakerStatus();   // state, failure rate, retryAt per provider
+ai.resetCircuitBreaker('openai');
+```
+
+Two independent triggers, because they catch different failures. A consecutive count catches a
+provider that is hard down. A failure *rate* catches one that fails half its calls without ever
+failing several in a row — invisible to a consecutive counter. The rate is only considered once
+`minimumThroughput` calls have been seen, since one failure out of two is not evidence of anything.
+
+After the cooldown the circuit goes half-open and admits a limited number of probes. A successful
+probe closes it; a failed probe reopens it and restarts the cooldown. If *every* circuit is open the
+router routes anyway — that usually means a shared dependency is down, and one attempt beats a
+certain failure with no attempt at all.
+
+`isFailure` keeps errors that are not the provider's fault out of the calculation:
+
+```ts
+circuitBreaker: {
+  enabled: true,
+  isFailure: (error) => !(error instanceof Error && error.name === 'AbortError'),
+}
+```
+
+**Distributed rate limiting.** The built-in limiter is process-local, which multiplies the real
+limit by the number of workers. Pointing it at a shared store fixes that, and the same budget then
+covers completions and embeddings alike:
+
+```ts
+import { RedisRateLimitStore } from 'nexus-ai-pro/ops/rate-limit-adapters';
+
+const ai = new NexusAI({
+  providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } },
+  rateLimit: {
+    enabled: true,
+    maxRequests: 100,
+    windowMs: 60_000,
+    key: 'userId',
+    store: new RedisRateLimitStore(redis),
+  },
+});
+```
+
+Prefer a client exposing `eval`: the increment and the expiry then happen in one atomic round trip.
+Without it the store falls back to `INCR` plus `PEXPIRE` and re-arms any missing TTL it sees, so a
+crash between the two calls cannot block a key forever.
+
+`NexusRateLimitError` carries `resetAt` and `retryAfterSeconds`, so a gateway can answer with a
+real `Retry-After` header:
+
+```ts
+catch (error) {
+  if (error instanceof NexusRateLimitError) {
+    response.setHeader('Retry-After', String(error.retryAfterSeconds ?? 60));
+  }
+}
+```
+
+Omitting `store` keeps the original synchronous in-memory path, which costs no extra microtask per
+request.
+
 ## Durable Operations
 
 Long-running work — an image render, a batch, anything asynchronous — runs through one lifecycle:
@@ -427,6 +509,8 @@ covering the rest. `OperationRunner` owns it end to end, so a crashed worker doe
 The default store is in-process, so the small case needs no infrastructure:
 
 ```ts
+import { CircuitBreaker } from 'nexus-ai-pro/ops/circuit-breaker';
+import { RedisRateLimitStore } from 'nexus-ai-pro/ops/rate-limit-adapters';
 import { OperationRunner } from 'nexus-ai-pro/operations';
 
 const runner = new OperationRunner<string>({ retry: { maxAttempts: 3, baseDelayMs: 500 } });

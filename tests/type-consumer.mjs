@@ -100,7 +100,9 @@ import {
   GoogleProvider,
   GroqProvider,
   EmbeddingManager,
+  CircuitBreaker,
   MemoryOperationStore,
+  MemoryRateLimitStore,
   OperationRunner,
   ImageManager,
   LMStudioProvider,
@@ -131,7 +133,9 @@ import {
   type EmbeddingResponse,
   type EmbeddingsProvider,
   type ImageConfig,
+  type CircuitState,
   type OperationRecord,
+  type RateLimitStore,
   type OperationStore,
   type ImageGenerateRequest,
   type ImageProvider,
@@ -168,6 +172,8 @@ import { ImageManager as SubpathImageManager } from 'nexus-ai-pro/images';
 import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
 import { MockImageProvider } from 'nexus-ai-pro/images/mock';
 import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
+import { CircuitBreaker as SubpathCircuitBreaker } from 'nexus-ai-pro/ops/circuit-breaker';
+import { RedisRateLimitStore } from 'nexus-ai-pro/ops/rate-limit-adapters';
 import { OperationRunner as SubpathOperationRunner } from 'nexus-ai-pro/operations';
 import { RedisOperationStore } from 'nexus-ai-pro/operations/adapters';
 import { verifyOperationWebhook } from 'nexus-ai-pro/operations/webhooks';
@@ -461,6 +467,10 @@ const subpathVoiceManager = new SubpathVoiceManager(voiceConfig);
 const voiceSession: VoiceSession = ai.createVoiceSession(voiceSessionConfig);
 const subpathVoiceSession = new SubpathVoiceSession(voiceSessionConfig, subpathVoiceManager, ai);
 const openAiVoice = new OpenAIVoiceProvider({ apiKey: 'test' });
+const rateLimitStore: RateLimitStore = new MemoryRateLimitStore();
+const breaker = new CircuitBreaker({ enabled: true, failureThreshold: 3 });
+const subpathBreaker = new SubpathCircuitBreaker({ enabled: true });
+const breakerState: CircuitState = breaker.state('openai');
 const operationStore: OperationStore<string> = new MemoryOperationStore<string>();
 const operationRunner = new OperationRunner<string>({ store: operationStore, retry: { maxAttempts: 2 } });
 const subpathOperationRunner = new SubpathOperationRunner<string>();
@@ -572,6 +582,11 @@ void providerName;
 void error.retryable;
 void subpathError.category;
 void toolCall;
+void rateLimitStore;
+void breaker;
+void subpathBreaker;
+void breakerState;
+void RedisRateLimitStore;
 void operationRunner;
 void subpathOperationRunner;
 void operationHandle;

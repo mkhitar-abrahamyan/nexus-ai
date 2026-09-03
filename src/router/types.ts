@@ -15,4 +15,11 @@ export interface RouterContext {
   config: NexusAIConfig;
   providers: Map<string, BaseProvider>;
   health?: ProviderHealthSnapshot[];
+  /**
+   * Providers whose circuit is open, excluded from routing entirely.
+   *
+   * Distinct from an unhealthy provider, which is only ranked lower: an open circuit means the
+   * provider is not tried at all until its cooldown elapses.
+   */
+  openCircuits?: readonly string[];
 }

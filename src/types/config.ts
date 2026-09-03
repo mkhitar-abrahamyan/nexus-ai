@@ -11,6 +11,8 @@ import type { PipelineConfig } from '../pipeline/types.js';
 import type { CacheAdapter } from '../cache/adapters.js';
 import type { SemanticCacheOptions } from '../cache/semantic-cache.js';
 import type { MetricsConfig } from '../ops/metrics.js';
+import type { RateLimitStore } from '../ops/rate-limit-adapters.js';
+import type { CircuitBreakerConfig } from '../ops/circuit-breaker.js';
 import type { HealthConfig } from '../ops/health.js';
 
 // ── Provider Configs ───────────────────────────────────────────────
@@ -174,6 +176,11 @@ export interface RateLimitConfig {
   maxRequests: number;
   windowMs: number;
   key?: 'userId' | 'model' | 'global';
+  /**
+   * Where counters live. Omitted means process-local, which multiplies the real limit by the
+   * number of workers; supply `RedisRateLimitStore` to share one budget across them.
+   */
+  store?: RateLimitStore;
 }
 
 export interface AuditLogConfig {
@@ -300,6 +307,8 @@ export interface NexusAIConfig {
   pipeline?: PipelineConfig;
   metrics?: MetricsConfig;
   health?: HealthConfig;
+  /** Trips routing away from a provider that is failing. Off unless enabled. */
+  circuitBreaker?: CircuitBreakerConfig;
   logger?: LoggerConfig;
   defaultModel?: string;
   timeout?: number;

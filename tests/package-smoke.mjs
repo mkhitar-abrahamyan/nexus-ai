@@ -50,6 +50,8 @@ const imports = [
   },
   { specifier: 'nexus-ai-pro/operations/adapters', exports: ['RedisOperationStore', 'BullMQOperationDispatcher'] },
   { specifier: 'nexus-ai-pro/operations/webhooks', exports: ['signOperationWebhook', 'verifyOperationWebhook'] },
+  { specifier: 'nexus-ai-pro/ops/circuit-breaker', exports: ['CircuitBreaker'] },
+  { specifier: 'nexus-ai-pro/ops/rate-limit-adapters', exports: ['MemoryRateLimitStore', 'RedisRateLimitStore'] },
   {
     specifier: 'nexus-ai-pro/realtime',
     exports: [

@@ -4,6 +4,34 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Circuit breaking.** `CircuitBreaker` consumes the same attempt signals as `ProviderHealthMonitor`
+  and trips routing away from a failing provider entirely, rather than merely ranking it lower. Two
+  independent triggers: consecutive failures, and a failure rate over a rolling window that catches a
+  provider failing half its calls without ever failing several in a row. After a cooldown the circuit
+  admits a limited number of probes; a success closes it, a failure reopens it and restarts the
+  cooldown. Exposed through `circuitBreaker` config, `ai.getCircuitBreakerStatus()`,
+  `ai.resetCircuitBreaker()`, and the `nexus-ai-pro/ops/circuit-breaker` subpath.
+- **Distributed rate limiting.** A `RateLimitStore` contract with `MemoryRateLimitStore` and
+  `RedisRateLimitStore`, set through `rateLimit.store`, so one budget covers every worker instead of
+  each process getting the full limit. The Redis store does the increment and the expiry in one
+  atomic Lua call when the client exposes `eval`, and re-arms a missing TTL on the fallback path so a
+  crash between `INCR` and `PEXPIRE` cannot block a key forever. Completions and embeddings share the
+  limiter, so they share the budget.
+- `NexusRateLimitError` now carries `resetAt` and a `retryAfterSeconds` accessor, so a gateway can
+  answer with a real `Retry-After` header.
+- New subpaths `nexus-ai-pro/ops/circuit-breaker` and `nexus-ai-pro/ops/rate-limit-adapters`.
+
+### Changed
+
+- `RateLimiter` gained `checkAsync()` for the store-aware path. `check()` keeps its synchronous
+  signature and behavior, and the runtime only awaits when a store is configured, so a request
+  without one pays no extra microtask.
+- `RouterContext` gained an optional `openCircuits`, and `Router.route()` an optional trailing
+  parameter. When every candidate's circuit is open the router routes anyway: that usually means a
+  shared dependency is down, and one attempt beats a certain failure with no attempt at all.
+
 ## [1.6.0] - 2026-09-03
 
 Durable operations, the first half of the theme *work that outlives a process*. Long-running work now

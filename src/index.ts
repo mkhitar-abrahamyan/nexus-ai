@@ -136,6 +136,21 @@ export {
   type ProviderHealthSnapshot,
 } from './ops/health.js';
 export {
+  CircuitBreaker,
+  type CircuitBreakerConfig,
+  type CircuitSnapshot,
+  type CircuitState,
+  type CircuitStateChange,
+} from './ops/circuit-breaker.js';
+export {
+  MemoryRateLimitStore,
+  RedisRateLimitStore,
+  type RateLimitHit,
+  type RateLimitStore,
+  type RedisRateLimitLikeClient,
+  type RedisRateLimitStoreOptions,
+} from './ops/rate-limit-adapters.js';
+export {
   PipelineRunner,
   createPipelineContext,
 } from './pipeline/pipeline.js';
