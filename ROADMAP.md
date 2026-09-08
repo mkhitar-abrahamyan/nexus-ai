@@ -3,10 +3,10 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.6.0**. 62 export subpaths, 12 completion providers, 5 embedding providers, 99
-completion registry models plus 63 aliases, and 11 embedding models plus 5 aliases. 292 unit tests
-pass; coverage sits at **86.3% lines / 71.6% branches / 81.4% functions** against gates of
-82/67/73. CI verifies lint, format, build, tests, coverage, mock conformance, packed-package smoke,
+Status baseline: **1.7.0**. 69 export subpaths, 12 completion providers, 5 embedding providers, 2
+batch providers, 101 completion registry models plus 63 aliases, and 11 embedding models plus 5
+aliases. 398 unit tests pass; coverage sits at **88.9% lines / 72.8% branches / 82.7% functions**
+against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, mock conformance, packed-package smoke,
 API contract, consumer type resolution, and clean install on Node 22 and 24.
 
 ---
@@ -111,7 +111,23 @@ events, idempotency replay, crash recovery, and HMAC-signed webhooks with a matc
 `BullMQOperationDispatcher` make the same code survive a restart. Persisting raw bytes is refused
 so binary media cannot end up in a queue payload.
 
-### 1.10 Operations, evaluation, and packaging
+### 1.10 Batch economics and resilience
+
+Delivered in 1.7.0. `BatchManager` over OpenAI Batch and Anthropic Message Batches behind the
+operation handle, matched by `customId`, with backoff polling, idempotency replay, and `resume()`
+from a persisted ref. `CircuitBreaker` removes a failing provider from routing until a probe
+succeeds, on either a consecutive-failure count or a windowed failure rate. `RedisRateLimitStore`
+shares one budget across workers, and `FamilyTelemetry` routes images, voice, and telephony through
+the same metrics collector, audit log, and rate limiter as completions.
+
+### 1.11 Durable asset storage
+
+Delivered in 1.7.0. `FilesystemAssetStore` and `S3AssetStore` implement the existing `AssetStore`
+contract with tenant isolation, retention, SHA-256 checksums, and signing. A missing asset and one
+owned by another tenant are indistinguishable. The shared contract and validation live in one module
+so the three stores cannot drift.
+
+### 1.12 Operations, evaluation, and packaging
 
 Rate limiting, audit logging, in-memory and OpenTelemetry metrics sinks, Prometheus export, an
 OpenTelemetry trace exporter, provider health monitoring, `EvalRunner` with LLM-as-judge and a
@@ -285,30 +301,35 @@ Deliberately deferred: everything below, which needed the operation handle to ex
 
 ---
 
-## 6. Next release: 1.7.0 — batch economics and distributed limits
+## 6. Shipped in 1.7.0 — batch economics, distributed limits, and durable assets
 
-The rest of the theme, now that the handle they sit behind exists.
+The rest of *work that outlives a process*, now that the handle they sit behind exists.
 
-- ~~**Provider batch APIs.**~~ Landed on `main`, unreleased. `BatchManager` over OpenAI Batch and
-  Anthropic Message Batches, matched by `customId`, with backoff polling, idempotency replay, and
-  `resume()` from a persisted ref.
-- ~~**Distributed rate limiting and circuit breaking.**~~ Landed on `main`, unreleased.
-  `RedisRateLimitStore` shares one budget across workers; `CircuitBreaker` consumes the existing
-  attempt signals and removes a failing provider from routing until a probe succeeds.
-- ~~**Filesystem and S3-compatible asset stores.**~~ Landed on `main`, unreleased, with retention,
-  tenant ownership, checksums, and signing. Streaming reads remain outstanding: both stores return
-  whole byte arrays, which is fine for an image and wrong for video.
-- ~~**Generated model registry.**~~ Landed on `main`, unreleased. `data/models/*.json` is the source
-  of truth and `registry:check` gates drift. The runtime still reads `KNOWN_MODELS`; switching the
-  resolver over is deliberately a separate change.
-- ~~**Cross-family observability.**~~ Landed on `main`, unreleased, for images, voice, and telephony:
-  each reports through the runtime's metrics collector, audit log, and rate limiter via a shared
-  `FamilyTelemetry`. Realtime is still outstanding — a persistent session's unit of work is an event
-  stream rather than a call, so it needs its own shape rather than this wrapper.
+- **Provider batch APIs.** `BatchManager` over OpenAI Batch and Anthropic Message Batches, matched
+  by `customId`, with backoff polling, idempotency replay, and `resume()` from a persisted ref. Both
+  hosted adapters are verified against mocked wire responses, not live APIs; a real smoke test
+  against each provider is still owed before depending on the discount.
+- **Distributed rate limiting and circuit breaking.** `RedisRateLimitStore` shares one budget across
+  workers; `CircuitBreaker` consumes the existing attempt signals and removes a failing provider from
+  routing until a probe succeeds. Breaker state stays per process by design.
+- **Filesystem and S3-compatible asset stores** with retention, tenant ownership, checksums, and
+  signing. Streaming reads remain outstanding: both stores return whole byte arrays, which is fine
+  for an image and wrong for video.
+- **Generated model registry.** `data/models/*.json` is the source of truth and `registry:check`
+  gates drift. The runtime still reads `KNOWN_MODELS`; switching the resolver over is deliberately a
+  separate change, so generation could not alter pricing in the release that introduced it.
+- **Cross-family observability** for images, voice, and telephony: each reports through the runtime's
+  metrics collector, audit log, and rate limiter via a shared `FamilyTelemetry`. Realtime is still
+  outstanding — a persistent session's unit of work is an event stream rather than a call, so it
+  needs its own shape rather than this wrapper.
+
+Documentation was consolidated from nine files to seven in the same release, and the published
+package now carries only `README.md`, `API_STABILITY.md`, `CHANGELOG.md`, `SECURITY.md`, and
+`LICENSE`.
 
 ---
 
-## 7. 1.8.0 — image portability, then promotion
+## 7. Next release: 1.8.0 — image portability, then promotion
 
 Images cannot leave experimental until the neutral contract survives a second wire protocol.
 

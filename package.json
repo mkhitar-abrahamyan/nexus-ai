@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "A typed multi-provider AI pipeline for Node.js with routing, streaming, tools, and guardrails",
   "type": "module",
   "main": "dist-cjs/index.js",

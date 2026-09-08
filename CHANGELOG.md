@@ -4,6 +4,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-08
+
+Batch economics, distributed limits, and durable assets: the rest of the theme *work that
+outlives a process*. The half-price asynchronous tier is reachable, one rate-limit budget covers
+every worker, a failing provider leaves routing until it recovers, generated media persists
+outside the process, and every operation family reports into the same metrics and audit log.
+
 ### Added
 
 - **Circuit breaking.** `CircuitBreaker` consumes the same attempt signals as `ProviderHealthMonitor`
@@ -390,7 +397,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.3.0...v1.4.0
