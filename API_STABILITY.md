@@ -225,6 +225,28 @@ guarantee about how the registry is maintained, not a runtime surface: the resol
 `KNOWN_MODELS`, and a test asserts the two match. Switching the resolver over is a later change, so
 that introducing generation cannot alter pricing behavior in the same release.
 
+## Graph API stage
+
+`createGraph`, `StateGraph`, `CompiledGraph`, the channel constructors, both checkpointers, the error
+classes, and the `nexus-ai-pro/graph` subpath are public and follow the 1.x rules, as are the
+normalized checkpoint, result, and step-event shapes.
+
+Four behaviors are guaranteed. A superstep is atomic with respect to checkpointing: state is reduced
+and written before the next set of nodes is computed. A node that finished is never re-run by a
+resume, so a completed branch's side effect happens once. `interrupt()` returns the supplied value on
+replay rather than throwing again, keyed by node, step, and position, so a node may ask more than one
+question. And `GraphCheckpoint` stays JSON-serializable, because a checkpoint that cannot be written
+to Redis is not a checkpoint.
+
+`GraphCheckpointer` is deliberately not generic over the channel schema: it persists opaque state,
+and threading the schema through it would force an annotation on every construction for no benefit.
+The graph casts at that boundary and hands typed state back through `state()` and `history()`.
+
+Scheduling within a superstep is not a guarantee. Nodes in a fan-out currently run in edge order and
+sequentially; running them concurrently is a valid future change, so a node must not depend on
+observing another node's write within the same superstep — that is what channels are for. The default
+`maxSteps` may change; pass it explicitly when a run depends on the bound.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

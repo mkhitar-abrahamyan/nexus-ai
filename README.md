@@ -85,6 +85,7 @@ You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want f
 - add tools, agents, RAG context, evals, batch jobs, and queues
 - embed text through the same routing, caching, batching, budget, retry, and metrics as a completion
 - run long operations that survive a restart, with leases, retries, dead-lettering, and signed webhooks
+- build stateful graphs with cycles, fan-out, subgraphs, human approval, and resumable checkpoints
 - trip routing away from a failing provider, and share one rate-limit budget across workers
 - reach the providers' half-price asynchronous batch tier behind one operation handle
 - persist generated media to disk or S3 with tenant isolation, retention, and checksums
@@ -421,6 +422,90 @@ const response = await ai.completeVerified(
 );
 ```
 
+## Graphs
+
+A graph is nodes, edges, and typed state. Cycles, fan-out, subgraphs, and human approval are
+supported shapes rather than workarounds, and every run is checkpointed, so it is resumable by
+construction rather than after configuring a checkpointer.
+
+```ts
+import { createGraph, appendList, counter, END, MemoryGraphCheckpointer } from 'nexus-ai-pro/graph';
+
+const graph = createGraph({
+  channels: { messages: appendList<string>(), turns: counter() },
+})
+  .addNode('research', async (ctx) => ({ messages: [await search(ctx.state.messages)], turns: 1 }))
+  .addNode('answer', async (ctx) => ({ messages: [await ai.complete(...).then((r) => r.content)] }))
+  .setEntry('research')
+  .addConditionalEdges('research', (state) => (state.turns >= 3 ? 'answer' : 'research'))
+  .addEdge('answer', END)
+  .compile({ checkpointer: new MemoryGraphCheckpointer() });
+
+const result = await graph.invoke({ messages: ['who won?'] }, { threadId: 'q-42' });
+```
+
+**Channels, not assignment.** Each state slot declares how writes combine — `lastValue`,
+`appendList`, `appendSet`, `mergeObject`, `counter`, or your own `reducerChannel`. That is what makes
+fan-out safe: two branches running in the same superstep can both write, and the channel decides
+whether that means overwrite, append, or sum. Assignment would silently drop one branch's work.
+
+**Cycles are first-class**, so `maxSteps` is what stands between a mistaken router and an infinite
+loop. Exceeding it names the nodes still pending rather than hanging.
+
+**Human in the loop.** A node calls `interrupt()`; the graph checkpoints and stops:
+
+```ts
+.addNode('approve', (ctx) => ({
+  approved: ctx.interrupt<boolean>({ reason: 'Publish this draft?', payload: { chars: 1200 } }),
+}))
+```
+
+```ts
+const run = await graph.invoke(input, { threadId });
+if (run.status === 'awaiting_input') {
+  // Hours later, in another process:
+  await graph.resumeWith(threadId, true);
+}
+```
+
+The interrupted node runs again from the top and `interrupt()` returns the supplied value instead of
+throwing, so the node body reads as straight-line code either way. Keep the work before an interrupt
+cheap, because it happens twice. A sibling branch that already finished is **not** re-run — its
+writes were checkpointed before the graph suspended.
+
+**Time travel and inspection.** Every superstep is a checkpoint:
+
+```ts
+await graph.state(threadId);        // latest checkpoint
+await graph.history(threadId);      // newest first
+graph.resumeFrom(threadId, 3);      // rewind and run forward
+```
+
+**Durable by construction.** The default checkpointer is in-process. Point it at the operation store
+that already backs durable operations and a thread survives a restart — a different worker resumes
+what another suspended:
+
+```ts
+import { OperationStoreCheckpointer } from 'nexus-ai-pro/graph';
+import { RedisOperationStore } from 'nexus-ai-pro/operations/adapters';
+
+const checkpointer = new OperationStoreCheckpointer(new RedisOperationStore(redis));
+```
+
+Writes are compare-and-set on the record's sequence, so two workers advancing the same thread cannot
+both win.
+
+**Subgraphs.** A compiled graph is a node:
+
+```ts
+parent.addNode('research', researchGraph.asNode());
+```
+
+Channels shared by name are passed in and merged back; anything the parent does not declare stays
+private to the subgraph.
+
+The graph is not in the root import. It costs nothing to a user who does not build graphs.
+
 ## Provider Batch Tiers
 
 Both OpenAI and Anthropic sell an asynchronous tier at roughly half price, in exchange for a
@@ -428,6 +513,7 @@ completion window measured in hours. Local `runBatch()` concurrency cannot reach
 different API. `BatchManager` puts both behind one operation handle.
 
 ```ts
+import { createGraph } from 'nexus-ai-pro/graph';
 import { BatchManager } from 'nexus-ai-pro/batch';
 import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
 

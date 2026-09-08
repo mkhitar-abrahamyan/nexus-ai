@@ -175,6 +175,8 @@ import { ImageManager as SubpathImageManager } from 'nexus-ai-pro/images';
 import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
 import { MockImageProvider } from 'nexus-ai-pro/images/mock';
 import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
+import { createGraph, MemoryGraphCheckpointer, appendList, counter, END } from 'nexus-ai-pro/graph';
+import type { GraphResult } from 'nexus-ai-pro/graph';
 import { BatchManager as SubpathBatchManager } from 'nexus-ai-pro/batch';
 import { MockBatchProvider } from 'nexus-ai-pro/batch/mock';
 import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
@@ -475,6 +477,13 @@ const subpathVoiceManager = new SubpathVoiceManager(voiceConfig);
 const voiceSession: VoiceSession = ai.createVoiceSession(voiceSessionConfig);
 const subpathVoiceSession = new SubpathVoiceSession(voiceSessionConfig, subpathVoiceManager, ai);
 const openAiVoice = new OpenAIVoiceProvider({ apiKey: 'test' });
+const demoGraph = createGraph({ channels: { log: appendList<string>(), turns: counter() } })
+  .addNode('think', () => ({ log: ['thought'], turns: 1 }))
+  .setEntry('think')
+  .addConditionalEdges('think', (state) => (state.turns >= 2 ? END : 'think'))
+  .compile({ checkpointer: new MemoryGraphCheckpointer() });
+const graphRun: Promise<GraphResult<{ log: ReturnType<typeof appendList<string>>; turns: ReturnType<typeof counter> }>> =
+  demoGraph.invoke({}, { threadId: 'consumer-thread' });
 const batchManager = new BatchManager({ providers: { mock: new MockBatchProvider() }, defaultProvider: 'mock' });
 const subpathBatchManager = new SubpathBatchManager();
 const openAiBatch = new OpenAIBatchProvider({ apiKey: 'test' });
@@ -597,6 +606,8 @@ void providerName;
 void error.retryable;
 void subpathError.category;
 void toolCall;
+void demoGraph;
+void graphRun;
 void batchManager;
 void subpathBatchManager;
 void openAiBatch;

@@ -4,6 +4,32 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Added
+
+- **Typed state graphs.** `nexus-ai-pro/graph` adds nodes, edges, conditional edges, cycles, fan-out,
+  and subgraphs over typed state channels, closing the five capability rows where LangGraph led:
+  explicit nodes and edges, persistent graph state, checkpoint and resume, human-in-the-loop
+  interrupts, and complex branching.
+- **Durable by construction.** Every superstep is checkpointed, so a run is resumable without opting
+  into a checkpointer first. `MemoryGraphCheckpointer` covers a single process;
+  `OperationStoreCheckpointer` persists through the `OperationStore` that already backs durable
+  operations, which makes a Redis-backed thread a one-line change and lets a different worker resume
+  what another suspended. The store is imported as a type only, so the graph subpath stays small.
+- **Human in the loop.** A node calls `context.interrupt()`; the graph checkpoints and reports
+  `awaiting_input`, and `resume()` supplies the value. On replay the same call returns that value
+  instead of throwing, keyed by node, step, and position, so one node can ask several questions
+  across several resumes. A sibling branch that already completed is not re-run.
+- **Channels with reducers** — `lastValue`, `appendList`, `appendSet`, `mergeObject`, `counter`, and
+  `reducerChannel` — so two branches writing the same slot in one superstep combine rather than
+  clobber.
+- **Time travel.** `state()`, `history()`, and `resumeFrom(step)` read and rewind a thread.
+- **Compile-time validation.** An edge to an unknown node, a node nothing routes to, a duplicate node
+  name, and a reserved name are all refused at `compile()` rather than at run time.
+- New subpath `nexus-ai-pro/graph`. It is deliberately absent from the root import, so a user who
+  does not build graphs pays nothing for it.
+
 ## [1.7.0] - 2026-09-08
 
 Batch economics, distributed limits, and durable assets: the rest of the theme *work that

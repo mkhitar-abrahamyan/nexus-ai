@@ -3,6 +3,40 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
+## How we measure progress
+
+Work is prioritised against LangChain and LangGraph, on two axes that pull in opposite directions
+for them and the same direction for us: **capability** and **install weight**. A row where we trail
+is a candidate for the next release. A row where we trail *by choice* is recorded as such, so it is
+not mistaken for a backlog item.
+
+| Capability | nexus-ai-pro | LangChain | LangGraph |
+| --- | --- | --- | --- |
+| Provider abstraction, tools, agent loop, RAG, caching | Yes | Yes | Partial |
+| Routing and failover | Yes | Partial | No |
+| Guardrails and security | Yes | Partial | No |
+| Cost accounting, numeric and per token class | Yes | Partial | Partial |
+| Capability negotiation | Yes | No | No |
+| Provider batch tiers at the discounted rate | Yes | Partial | No |
+| Circuit breaking, distributed rate limiting | Yes | No | No |
+| Evals without a paid service | Yes | Partial | Partial |
+| Durable execution | Yes | No | Yes |
+| Graph nodes and edges, persistent state, cycles | Yes, unreleased | Partial | Yes |
+| Checkpoint and resume, human-in-the-loop | Yes, unreleased | No | Yes |
+| Install granularity | Yes | No | No |
+| Integration catalogue | No, by choice | Yes | Yes |
+| Python | No, by choice | Yes | Yes |
+
+**Install granularity is the differentiator**, so it is a constraint on every new capability rather
+than a feature of its own. Measured from the 1.7.0 build, an entry point costs a fraction of the
+root import: `/operations` 8%, `/images/stores` 4%, `/ops/circuit-breaker` 1%,
+`/cache/memory-cache` 0.5%, `/streaming` 0.2%. A capability that only works by importing the whole
+runtime fails this bar however good it is, and belongs on its own subpath.
+
+The two `No, by choice` rows stay that way. Matching a catalogue of hundreds of integrations is a
+treadmill decided by headcount, and a second language runtime doubles the maintenance surface. The
+intended edge is runtime quality and install weight.
+
 Status baseline: **1.7.0**. 69 export subpaths, 12 completion providers, 5 embedding providers, 2
 batch providers, 101 completion registry models plus 63 aliases, and 11 embedding models plus 5
 aliases. 398 unit tests pass; coverage sits at **88.9% lines / 72.8% branches / 82.7% functions**
@@ -127,7 +161,15 @@ contract with tenant isolation, retention, SHA-256 checksums, and signing. A mis
 owned by another tenant are indistinguishable. The shared contract and validation live in one module
 so the three stores cannot drift.
 
-### 1.12 Operations, evaluation, and packaging
+### 1.12 Graphs
+
+Landed on `main`, unreleased. `nexus-ai-pro/graph`: nodes, static and conditional edges, cycles,
+fan-out, and subgraphs over typed state channels with reducers. Every superstep is checkpointed, so
+resume, time travel, and human-in-the-loop interrupts work without opting into a checkpointer first.
+`OperationStoreCheckpointer` persists through the store that already backs durable operations, which
+is what makes a thread survive a restart and lets a different worker finish it.
+
+### 1.13 Operations, evaluation, and packaging
 
 Rate limiting, audit logging, in-memory and OpenTelemetry metrics sinks, Prometheus export, an
 OpenTelemetry trace exporter, provider health monitoring, `EvalRunner` with LLM-as-judge and a
@@ -153,6 +195,10 @@ event stream rather than a discrete call and does not fit a call wrapper.
 Cost is deliberately not recorded for media families. Providers there price per second, per image, or
 per minute, and inventing a number for a metric named after tokens would be worse than reporting
 none.
+
+The graph family is outside this path too. A graph is a composition of whatever its nodes call, so
+the nodes report and the graph itself has nothing of its own to meter; what it needs instead is a
+per-thread view over the checkpoints, which does not exist yet.
 
 The traced pipeline itself remains completion-only. `PipelineContext` is typed strictly around
 `CompletionRequest`/`NexusResponse`, so other families cannot reuse it without a refactor, and
@@ -329,7 +375,42 @@ package now carries only `README.md`, `API_STABILITY.md`, `CHANGELOG.md`, `SECUR
 
 ---
 
-## 7. Next release: 1.8.0 — image portability, then promotion
+## 7. Next release: 1.8.0 — graphs
+
+Closes every capability row where LangGraph led. Landed on `main` and awaiting a release.
+
+- **Nodes, edges, and typed state.** Channels declare how concurrent writes combine, which is what
+  makes fan-out safe; assignment would silently drop a branch's work.
+- **Cycles as a supported shape**, bounded by `maxSteps` so a mistaken router fails with the pending
+  nodes named rather than hanging.
+- **Checkpoint and resume.** Each superstep writes a checkpoint, so `state()`, `history()`, and
+  `resumeFrom(step)` all follow from the execution model rather than being bolted on.
+- **Human-in-the-loop.** `interrupt()` suspends and checkpoints; `resume()` supplies the value, which
+  the replayed node receives instead of the throw. A branch that already finished is not re-run.
+- **Subgraphs.** A compiled graph is a node. Shared channels pass through; the rest stays private.
+- **Durable by construction**, through the existing `OperationStore`, imported as a type only so the
+  subpath stays small.
+
+Still open in this area: nodes within one superstep run sequentially in edge order, so genuine
+parallel execution is a later change, and the API_STABILITY note says so rather than implying
+concurrency that does not exist.
+
+---
+
+## 8. 1.9.0 — size and modularity as a shipped feature
+
+The differentiator, made checkable rather than claimed.
+
+- **Lazy or injectable model registry.** `types/providers.js` is 30 KB and is pulled in by anything
+  that prices a call, which is roughly a quarter of both `/embeddings` and `/batch`. It is a data
+  catalogue dragged in to do arithmetic.
+- **A per-subpath size budget in CI.** Today only the whole package is budgeted, which is why the
+  per-entry cost went unnoticed across three releases.
+- **Publish the size table** in the README, and keep it generated rather than hand-maintained.
+
+---
+
+## 9. 1.10.0 — image portability, then promotion
 
 Images cannot leave experimental until the neutral contract survives a second wire protocol.
 
@@ -357,7 +438,7 @@ label come off.
 
 ---
 
-## 8. 2.0 candidate — one lifecycle for every operation
+## 10. 2.0 candidate — one lifecycle for every operation
 
 Create an internal typed lifecycle and adapt every family to it:
 
@@ -380,7 +461,7 @@ Also in the 2.0 window, because each requires a breaking change:
 
 ---
 
-## 9. Longer-term backlog
+## 11. Longer-term backlog
 
 1. MCP client and server adapters with asset and tool interoperability.
 2. Video generation through the same asynchronous operation, job, and asset contracts.
@@ -405,7 +486,7 @@ Also in the 2.0 window, because each requires a breaking change:
 
 ---
 
-## 10. Design notes carried forward
+## 12. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -457,7 +538,7 @@ await ai.images.edit({
 
 ---
 
-## 11. How an item graduates
+## 13. How an item graduates
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.

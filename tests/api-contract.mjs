@@ -271,6 +271,7 @@ const expectedSubpaths = [
   './operations',
   './operations/adapters',
   './operations/webhooks',
+  './graph',
   './ops/circuit-breaker',
   './ops/rate-limit-adapters',
   './batch',
