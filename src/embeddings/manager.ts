@@ -17,7 +17,7 @@ import { AuditLogger } from '../ops/audit-logger.js';
 import { MetricsCollector } from '../ops/metrics.js';
 import { RateLimiter } from '../ops/rate-limiter.js';
 import { NexusProviderError, createTimeoutProviderError, isAbortError } from '../providers/errors.js';
-import { assertWithinCostBudget } from '../optimizer/cost.js';
+import { assertWithinCostBudget } from '../optimizer/cost-budget.js';
 import { Tokenizer } from '../utils/tokenizer.js';
 import { generateRequestId } from '../utils/ids.js';
 import {

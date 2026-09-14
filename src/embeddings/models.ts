@@ -5,7 +5,7 @@ import type {
   EmbeddingsProvider,
 } from '../types/embeddings.js';
 import type { ResponseCost, TokenUsage } from '../types/response.js';
-import { DEFAULT_CURRENCY, formatCost } from '../optimizer/cost.js';
+import { DEFAULT_CURRENCY, formatCost } from '../optimizer/cost-budget.js';
 
 /**
  * Default provenance for bundled embedding entries.

@@ -5,45 +5,18 @@ surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
 ## How we measure progress
 
-Work is prioritised against LangChain and LangGraph, on two axes that pull in opposite directions
-for them and the same direction for us: **capability** and **install weight**. A row where we trail
-is a candidate for the next release. A row where we trail *by choice* is recorded as such, so it is
-not mistaken for a backlog item.
+Two axes, weighed together: **capability** and **install weight**. A capability that only works by
+importing the whole runtime fails the second test however well it does on the first, so install
+weight is a constraint on every new feature rather than a feature of its own.
 
-| Capability | nexus-ai-pro | LangChain | LangGraph |
-| --- | --- | --- | --- |
-| Provider abstraction, tools, agent loop, RAG, caching | Yes | Yes | Partial |
-| Routing and failover | Yes | Partial | No |
-| Guardrails and security | Yes | Partial | No |
-| Cost accounting, numeric and per token class | Yes | Partial | Partial |
-| Capability negotiation | Yes | No | No |
-| Provider batch tiers at the discounted rate | Yes | Partial | No |
-| Circuit breaking, distributed rate limiting | Yes | No | No |
-| Evals without a paid service | Yes | Partial | Partial |
-| Durable execution | Yes | No | Yes |
-| Graph nodes and edges, persistent state, cycles | Yes | Partial | Yes |
-| Checkpoint and resume, human-in-the-loop | Yes | No | Yes |
-| Install granularity | Yes | No | No |
-| Integration catalogue | No, by choice | Yes | Yes |
-| Python | No, by choice | Yes | Yes |
+Measured from the 1.8.0 build, an entry point costs a fraction of the root import: `/graph` 5%,
+`/operations` 8%, `/images/stores` 4%, `/ops/circuit-breaker` 1%, `/cache/memory-cache` 0.5%,
+`/streaming` 0.2%. Every new capability gets its own export subpath and stays out of the root.
 
-**Install granularity is the differentiator**, so it is a constraint on every new capability rather
-than a feature of its own. Measured from the 1.7.0 build, an entry point costs a fraction of the
-root import: `/graph` 5%, `/operations` 8%, `/images/stores` 4%,
-`/ops/circuit-breaker` 1%, `/cache/memory-cache` 0.5%, `/streaming` 0.2%. A capability that only works by importing the whole
-runtime fails this bar however good it is, and belongs on its own subpath.
-
-The two `No, by choice` rows stay that way. Matching a catalogue of hundreds of integrations is a
-treadmill decided by headcount, and a second language runtime doubles the maintenance surface. The
-intended edge is runtime quality and install weight.
-
-Status baseline: **1.8.0**. 70 export subpaths, 12 completion providers, 5 embedding providers, 2
-batch providers, 101 completion registry models plus 63 aliases, and 11 embedding models plus 5
-aliases. 436 unit tests pass; coverage sits at **89.3% lines / 73.6% branches / 83.4% functions**
-against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, mock conformance, packed-package smoke,
-API contract, consumer type resolution, and clean install on Node 22 and 24.
-
----
+Two things this project deliberately does not chase: a large catalogue of third-party integrations,
+and a second language runtime. Both are decided by headcount rather than design, and pursuing either
+would come out of the budget for routing, guardrails, cost accounting, durability, and install size —
+which is where the work is meant to show.
 
 ## 1. What is delivered
 
@@ -377,7 +350,7 @@ package now carries only `README.md`, `API_STABILITY.md`, `CHANGELOG.md`, `SECUR
 
 ## 7. Shipped in 1.8.0 — graphs
 
-Closes every capability row where LangGraph led, on a subpath measuring 29 KB across six files.
+Stateful orchestration on a subpath measuring 29 KB across six files.
 
 - **Nodes, edges, and typed state.** Channels declare how concurrent writes combine, which is what
   makes fan-out safe; assignment would silently drop a branch's work.
@@ -399,14 +372,20 @@ concurrency that does not exist.
 
 ## 8. Next release: 1.9.0 — size and modularity as a shipped feature
 
-The differentiator, made checkable rather than claimed.
+The differentiator, made checkable rather than claimed. Landed on `main`, unreleased.
 
-- **Lazy or injectable model registry.** `types/providers.js` is 30 KB and is pulled in by anything
-  that prices a call, which is roughly a quarter of both `/embeddings` and `/batch`. It is a data
-  catalogue dragged in to do arithmetic.
-- **A per-subpath size budget in CI.** Today only the whole package is budgeted, which is why the
-  per-entry cost went unnoticed across three releases.
-- **Publish the size table** in the README, and keep it generated rather than hand-maintained.
+- **Budget enforcement split from price lookup.** Comparing two numbers no longer loads the 101-model
+  catalogue. `/embeddings` fell 29%, from 129 KB to 91 KB, and no longer reaches
+  `types/providers.js` at all.
+- **A per-subpath size budget in CI**, across all 70 entry points, with the failure naming the entry
+  point and pointing at the fix.
+- **A generated size table in the README**, which the same check keeps honest.
+
+`/batch` keeps the catalogue, and should: it prices each item against the model that item actually
+ran on, so the data is doing real work there rather than riding along. The remaining idea — deferring
+the catalogue behind a dynamic import on the async pricing paths — was left out because it trades a
+measurable static cost for an unmeasured deferred one, and the guard now exists to tell us whether
+that trade is worth making.
 
 ---
 

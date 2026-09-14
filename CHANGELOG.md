@@ -6,19 +6,40 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **A per-subpath size budget, enforced in CI.** `npm run size:check` measures the transitive import
+  graph of every one of the 70 export subpaths and fails when an entry point grows past its recorded
+  budget. The package already budgeted the whole tarball, which is exactly why per-entry growth went
+  unnoticed across three releases while the total budget was raised three times: a shared module
+  pulled into an otherwise small entry point does not move the tarball at all, it only moves what a
+  consumer pays to import one piece. `npm run size:update` rewrites the budgets and regenerates the
+  README table.
+- **A published size table.** The README now carries what each import actually costs, generated from
+  the build rather than written by hand, and the check fails if it goes stale. The claim is now
+  verifiable before installing.
+
+### Changed
+
+- **Enforcing a cost budget no longer loads the model catalogue.** `assertWithinCostBudget`,
+  `CostBudgetError`, `formatCost`, and `DEFAULT_CURRENCY` moved to `optimizer/cost-budget.ts`, which
+  has no registry dependency; `optimizer/cost.ts` re-exports all four, so no import changes and the
+  error classes stay identical rather than becoming copies. Comparing two numbers had been dragging
+  30 KB of chat-model data along with it.
+- **`nexus-ai-pro/embeddings` is 29% smaller**, 129 KB down to 91 KB, and no longer reaches
+  `types/providers.js` at all. A test pins that, not just the budget.
+
 ## [1.8.0] - 2026-09-14
 
 Graphs. Nodes, edges, cycles, fan-out and subgraphs over typed state, with every superstep
 checkpointed so a run is resumable, inspectable and interruptible by construction rather than
-after opting in. This closes the five capability rows where LangGraph led, on a subpath that
-costs 5% of the root import.
+after opting in, on a subpath that costs 5% of the root import.
 
 ### Added
 
 - **Typed state graphs.** `nexus-ai-pro/graph` adds nodes, edges, conditional edges, cycles, fan-out,
-  and subgraphs over typed state channels, closing the five capability rows where LangGraph led:
-  explicit nodes and edges, persistent graph state, checkpoint and resume, human-in-the-loop
-  interrupts, and complex branching.
+  and subgraphs over typed state channels: explicit nodes and edges, persistent graph state,
+  checkpoint and resume, human-in-the-loop interrupts, and complex branching.
 - **Durable by construction.** Every superstep is checkpointed, so a run is resumable without opting
   into a checkpointer first. `MemoryGraphCheckpointer` covers a single process;
   `OperationStoreCheckpointer` persists through the `OperationStore` that already backs durable

@@ -3,6 +3,13 @@ import type { CostEstimate } from '../types/planning.js';
 import type { CacheTtl, ModelCapabilities } from '../types/providers.js';
 import { DEFAULT_CACHE_PRICING } from '../types/providers.js';
 import { resolveModel } from '../models/registry.js';
+import { DEFAULT_CURRENCY, formatCost } from './cost-budget.js';
+
+/**
+ * Budget enforcement lives in `optimizer/budget.ts`, which carries no registry dependency, and is
+ * re-exported here so every existing import of this module keeps resolving.
+ */
+export { CostBudgetError, DEFAULT_CURRENCY, assertWithinCostBudget, formatCost } from './cost-budget.js';
 
 export interface CostEstimateInput {
   model: string;
@@ -16,15 +23,6 @@ export interface CostEstimateInput {
   cacheTtl?: CacheTtl;
   config?: Pick<NexusAIConfig, 'models'>;
 }
-
-export class CostBudgetError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CostBudgetError';
-  }
-}
-
-export const DEFAULT_CURRENCY = 'USD';
 
 /**
  * Resolves the per-1k prices for cached reads and cache writes.
@@ -101,18 +99,4 @@ export function estimateCost(input: CostEstimateInput): CostEstimate {
     currency: DEFAULT_CURRENCY,
     formatted: formatCost(totalCost),
   };
-}
-
-/** Formats an amount the way `ResponseMeta.estimatedCost` has always presented it. */
-export function formatCost(amount: number): string {
-  return `$${amount.toFixed(4)}`;
-}
-
-export function assertWithinCostBudget(estimate: CostEstimate, maxEstimatedCost?: number): void {
-  if (maxEstimatedCost === undefined) return;
-  if (estimate.totalCost > maxEstimatedCost) {
-    throw new CostBudgetError(
-      `Estimated cost ${estimate.formatted} exceeds maxEstimatedCost $${maxEstimatedCost.toFixed(4)}`,
-    );
-  }
 }

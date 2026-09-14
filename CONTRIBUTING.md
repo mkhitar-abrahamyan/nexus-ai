@@ -66,6 +66,8 @@ The automated checks catch a missing export but not a half-wired one, so work th
 - update `tests/api-contract.mjs`, `tests/package-smoke.mjs`, and `tests/type-consumer.mjs` when the
   public surface changes;
 - add focused unit tests, including the smallest and largest realistic call;
+- run `npm run size:update` when the import graph changes, and check the diff: a jump in an unrelated
+  entry point means a shared module reached somewhere it should not have;
 - document the feature once, in the most relevant README section, rather than in several places;
 - record the change under `Unreleased` in `CHANGELOG.md`;
 - follow `API_STABILITY.md`, and state any new guarantee there explicitly.
