@@ -19,6 +19,7 @@ import {
   ImageProviderResponseError,
   ImageValidationError,
 } from './errors.js';
+import type { AssetTransformer } from './transform.js';
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_MODEL = 'gpt-image-2';
@@ -36,6 +37,11 @@ export interface OpenAIImageProviderConfig {
   maxInputBytes?: number;
   fetch?: typeof globalThis.fetch;
   includeRawResponse?: boolean;
+  /**
+   * Converts a neutral mask into OpenAI's alpha-channel semantics. Defaults to the bundled PNG
+   * transformer, which is loaded only when a request actually carries a mask.
+   */
+  maskTransformer?: AssetTransformer;
 }
 
 export interface OpenAIModerationDetails {
@@ -81,10 +87,12 @@ interface OpenAIImagesResponse {
 }
 
 /**
- * Hosted OpenAI Image API adapter for one-shot generation and reference-based editing.
+ * Hosted OpenAI Image API adapter for generation, reference-based editing, and masked editing.
  *
- * Masked editing stays disabled until an asset transformer can verify dimensions and convert the
- * provider-neutral mask polarity into the alpha-channel semantics required by OpenAI.
+ * OpenAI edits where a mask is fully transparent, which is neither of the neutral polarities a
+ * caller draws in. Masks are converted by an `AssetTransformer` at the input image's exact
+ * dimensions; the PNG codec behind the default transformer is imported on the first masked request,
+ * so an application that never masks never loads it.
  */
 export class OpenAIImageProvider implements ImageProvider {
   readonly info: ImageProviderInfo;
@@ -134,10 +142,10 @@ export class OpenAIImageProvider implements ImageProvider {
         qualities: ['auto', 'low', 'medium', 'high'],
         minCount: 1,
         maxCount: 10,
-        supportsMask: false,
+        supportsMask: true,
         supportsReferences: true,
         maxReferences: 15,
-        supportsTransparency: false,
+        supportsTransparency: true,
         supportsSeed: false,
         supportsNegativePrompt: false,
       },
@@ -173,7 +181,6 @@ export class OpenAIImageProvider implements ImageProvider {
 
   async edit(request: ImageEditRequest, context: ImageProviderCallContext): Promise<ImageResult> {
     this.assertDirectRequest(request, 'edit');
-    if (request.mask) throw new ImageCapabilityError('openai', 'mask');
 
     const startedAt = Date.now();
     const outputFormat = resolveOutputFormat(request);
@@ -194,6 +201,18 @@ export class OpenAIImageProvider implements ImageProvider {
     const inputs = [request.input, ...(request.references ?? [])];
     for (const [index, asset] of inputs.entries()) {
       this.appendAsset(form, 'image[]', asset, `image-${index + 1}`);
+    }
+    if (request.mask) {
+      // OpenAI applies the mask to the first image, so it is sized against that one.
+      const transform = await import('./transform.js');
+      const transformer = this.config.maskTransformer ?? transform.defaultMaskTransformer();
+      const target = transform.requireImageDimensions(request.input, 'openai');
+      const prepared = await transformer.prepareMask(request.mask, {
+        ...target,
+        semantics: 'alpha-transparent-is-editable',
+        provider: 'openai',
+      });
+      this.appendAsset(form, 'mask', prepared, 'mask');
     }
 
     const response = await this.request('/images/edits', form, context, false);
@@ -217,7 +236,16 @@ export class OpenAIImageProvider implements ImageProvider {
     if (request.negativePrompt) throw new ImageCapabilityError('openai', 'negativePrompt');
     if (request.seed !== undefined) throw new ImageCapabilityError('openai', 'seed', request.seed);
     if (request.background === 'transparent') {
-      throw new ImageCapabilityError('openai', 'background', request.background);
+      // Transparency needs an alpha channel, which JPEG cannot carry.
+      const format = request.outputFormat ?? request.delivery?.format ?? 'png';
+      if (format === 'jpeg') {
+        throw new ImageCapabilityError(
+          'openai',
+          'background',
+          request.background,
+          'A transparent background requires png or webp output; jpeg has no alpha channel',
+        );
+      }
     }
     if (operation === 'edit' && 'references' in request && (request.references?.length ?? 0) > 15) {
       throw new ImageCapabilityError('openai', 'references', request.references?.length);

@@ -34,6 +34,24 @@ const imports = [
   { specifier: 'nexus-ai-pro/images/assets', exports: ['MemoryAssetStore', 'AssetStoreCapacityError'] },
   { specifier: 'nexus-ai-pro/images/mock', exports: ['MockImageProvider'] },
   { specifier: 'nexus-ai-pro/images/openai', exports: ['OpenAIImageProvider', 'OpenAIImageProviderError'] },
+  { specifier: 'nexus-ai-pro/images/google', exports: ['GoogleImageProvider'] },
+  {
+    specifier: 'nexus-ai-pro/images/comfyui',
+    exports: ['ComfyUIImageProvider', 'comfyTextToImageWorkflow', 'comfyInpaintWorkflow'],
+  },
+  {
+    specifier: 'nexus-ai-pro/images/transform',
+    exports: ['PngMaskTransformer', 'decodePng', 'encodePng', 'sniffImageType', 'readImageDimensions'],
+  },
+  {
+    specifier: 'nexus-ai-pro/images/inputs',
+    exports: ['ImageInputResolver', 'ImageInputError', 'createImageInputResolver'],
+  },
+  { specifier: 'nexus-ai-pro/images/moderation', exports: ['createOpenAIVisualModeration', 'combineSafetyPolicies'] },
+  {
+    specifier: 'nexus-ai-pro/images/evals',
+    exports: ['MediaEvalRunner', 'MemoryReviewQueue', 'perceptualSimilarity', 'textAccuracy'],
+  },
   {
     specifier: 'nexus-ai-pro/embeddings',
     exports: ['EmbeddingManager', 'EmbeddingProviderError', 'MockEmbeddingProvider', 'OpenAIEmbeddingProvider'],

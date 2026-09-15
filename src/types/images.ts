@@ -220,10 +220,35 @@ export interface ImageSafetyPolicy {
   ): readonly MediaSafetyFinding[] | Promise<readonly MediaSafetyFinding[]>;
 }
 
+export interface ImageAssetResolverContext {
+  /** Which asset is being resolved, such as `input`, `mask`, or `references[2]`, for error messages. */
+  option: string;
+  signal: AbortSignal;
+  tenantId?: string;
+}
+
+/**
+ * Turns an asset location a provider cannot read into one it can.
+ *
+ * Typed here as an interface so `ImageManager` depends only on the shape: the hardened
+ * implementation, `ImageInputResolver`, lives on the `nexus-ai-pro/images/inputs` subpath with its
+ * network code, and a caller that never resolves remote inputs never loads it.
+ */
+export interface ImageAssetResolver {
+  resolve(asset: AssetInput, context: ImageAssetResolverContext): Promise<AssetInput> | AssetInput;
+}
+
 export interface ImageConfig {
   defaultProvider?: string;
   providers?: Record<string, ImageProvider>;
   safety?: ImageSafetyPolicy;
+  /**
+   * Resolves `url` and `stored` inputs to bytes, and validates byte inputs, before capability
+   * checks run. Off unless set, so a request whose inputs are already bytes pays nothing.
+   */
+  inputResolver?: ImageAssetResolver;
+  /** Tenant passed to the resolver for `stored` inputs. */
+  tenantId?: string;
   createOperationId?: () => string;
   now?: () => Date;
 }

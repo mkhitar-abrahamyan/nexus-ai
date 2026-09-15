@@ -175,6 +175,13 @@ import { ImageManager as SubpathImageManager } from 'nexus-ai-pro/images';
 import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
 import { MockImageProvider } from 'nexus-ai-pro/images/mock';
 import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
+import { GoogleImageProvider } from 'nexus-ai-pro/images/google';
+import { ComfyUIImageProvider, comfyInpaintWorkflow } from 'nexus-ai-pro/images/comfyui';
+import { PngMaskTransformer, type AssetTransformer } from 'nexus-ai-pro/images/transform';
+import { createImageInputResolver } from 'nexus-ai-pro/images/inputs';
+import { combineSafetyPolicies, createOpenAIVisualModeration } from 'nexus-ai-pro/images/moderation';
+import { MediaEvalRunner, MemoryReviewQueue } from 'nexus-ai-pro/images/evals';
+import type { MediaEvalReport } from 'nexus-ai-pro/images/evals';
 import { createGraph, MemoryGraphCheckpointer, appendList, counter, END } from 'nexus-ai-pro/graph';
 import type { GraphResult } from 'nexus-ai-pro/graph';
 import { BatchManager as SubpathBatchManager } from 'nexus-ai-pro/batch';
@@ -511,6 +518,21 @@ const resolvedEmbeddingModel = resolveEmbeddingModel('embed-quality');
 const imageManager = new ImageManager(imageConfig);
 const subpathImageManager = new SubpathImageManager(imageConfig);
 const openAiImages = new OpenAIImageProvider({ apiKey: 'test' });
+const maskTransformer: AssetTransformer = new PngMaskTransformer({ threshold: 128 });
+const googleImages = new GoogleImageProvider({ apiKey: 'test', maskTransformer });
+const comfyImages = new ComfyUIImageProvider({
+  workflow: (request, context) => comfyInpaintWorkflow(request, context, 'sd-inpaint.safetensors'),
+});
+const portableImageManager = new SubpathImageManager({
+  providers: { google: googleImages, comfyui: comfyImages },
+  defaultProvider: 'google',
+  inputResolver: createImageInputResolver({ maxPixels: 16_000_000 }),
+  safety: combineSafetyPolicies(createOpenAIVisualModeration({ apiKey: 'test' })),
+});
+const mediaEvalReport: Promise<MediaEvalReport> = new MediaEvalRunner(
+  (evalCase) => portableImageManager.generate(evalCase.request),
+  { reviewQueue: new MemoryReviewQueue(), runs: 3 },
+).evaluate([{ id: 'case', operation: 'generate', request: { prompt: 'a cat' }, expect: { minAlignment: 0.5 } }]);
 const imageResult: Promise<ImageResult> = ai.images.generate(imageRequest);
 const assetStore: AssetStore = new MemoryAssetStore({ maxEntries: 10, maxTotalBytes: 1_000_000 });
 const telephonyManager = new TelephonyManager(telephonyConfig);
@@ -592,6 +614,7 @@ void openAiVoice;
 void imageManager;
 void subpathImageManager;
 void openAiImages;
+void mediaEvalReport;
 void imageResult;
 void assetStore;
 void telephonyManager;

@@ -921,9 +921,123 @@ console.log(image.assets[0]?.location);
 
 `ImageProvider` is independent from completion providers. Explicit options are negotiated against the
 selected provider's declared capabilities, so unsupported formats, delivery kinds, masks, seeds, or
-dimensions fail before a provider call. The OpenAI adapter supports one-shot generation and
-reference-based editing through byte assets. Masked OpenAI edits remain disabled until a transformer can
-verify dimensions and convert the neutral mask contract to OpenAI's alpha-channel semantics.
+dimensions fail before a provider call rather than being silently dropped.
+
+### Three backends, one contract
+
+The same request runs against OpenAI, Google Imagen, or a self-hosted ComfyUI server. Each adapter is
+its own subpath, so an application loads only the backends it registers.
+
+```ts
+import { ComfyUIImageProvider } from 'nexus-ai-pro/images/comfyui';
+import { GoogleImageProvider } from 'nexus-ai-pro/images/google';
+
+const portable = new NexusAI({
+  providers: {},
+  images: {
+    defaultProvider: 'google',
+    providers: {
+      openai: openaiImages,
+      google: new GoogleImageProvider({ apiKey: process.env.GEMINI_API_KEY! }),
+      local: new ComfyUIImageProvider({ baseUrl: 'http://127.0.0.1:8188' }),
+    },
+  },
+});
+```
+
+The backends really do differ, and negotiation says so instead of hiding it. Imagen sizes output by
+aspect ratio and refuses `dimensions`. It honours `seed` and `negativePrompt`, which OpenAI refuses, and
+setting a seed turns its watermark off, which the result reports as a warning. When Imagen filters some
+images in a batch, you get the ones that passed plus a withheld finding for each missing one. ComfyUI
+queues work and polls for it, records the seed it used so any run can be reproduced, and removes an
+abandoned prompt from the server queue. Its graph is yours: pass a `workflow` builder, or use the bundled
+`comfyTextToImageWorkflow` and `comfyInpaintWorkflow`.
+
+### Masked edits
+
+Draw the mask once, with either polarity. Each adapter converts it to what its backend expects:
+OpenAI's alpha channel, or Imagen's and ComfyUI's white-is-editable greyscale.
+
+```ts
+const edited = await portable.images.edit({
+  provider: 'openai',
+  prompt: 'Replace the sky with a sunset',
+  input: { location: { kind: 'bytes', data: photo }, mimeType: 'image/png' },
+  mask: {
+    location: { kind: 'bytes', data: maskPng },
+    mimeType: 'image/png',
+    polarity: 'white-is-editable',
+    resizeMode: 'reject', // or 'stretch' | 'contain' | 'cover'
+  },
+});
+```
+
+A mask whose size differs from the image is refused unless `resizeMode` allows resampling.
+Partly transparent mask pixels count as non-editable, so a soft brush edge never widens the edit.
+The PNG codec behind the bundled `PngMaskTransformer` loads on the first masked request, so an
+application that never masks never loads it. To accept JPEG or WebP masks, pass your own
+`maskTransformer`.
+
+### Validating inputs
+
+Byte uploads, remote URLs, and stored assets all go through the same checks before any provider sees
+them:
+
+```ts
+import { createImageInputResolver } from 'nexus-ai-pro/images/inputs';
+
+const guarded = new NexusAI({
+  providers: {},
+  images: {
+    providers: { google: googleImages },
+    inputResolver: createImageInputResolver({
+      maxBytes: 10 * 1024 * 1024,
+      maxPixels: 16_000_000,
+      allowedDomains: ['cdn.example.com'],
+    }),
+  },
+});
+```
+
+The file's own bytes decide its type. A declared or served MIME type that disagrees is refused. Pixel
+limits are checked from the header before decoding, so a small file that claims a huge canvas costs
+nothing. Remote URLs use the same SSRF protection as the web connector: pinned DNS, redirect
+revalidation, and blocking of private networks and cloud metadata endpoints. A refusal is an
+`ImageInputError` whose `reason` is machine-readable (`too-large`, `mime-mismatch`, `blocked-url`, and
+so on). Without a resolver, nothing runs and nothing is loaded.
+
+### Visual moderation
+
+```ts
+import { combineSafetyPolicies, createOpenAIVisualModeration } from 'nexus-ai-pro/images/moderation';
+
+const safety = combineSafetyPolicies(
+  createOpenAIVisualModeration({ apiKey: process.env.OPENAI_API_KEY!, reviewThreshold: 0.4 }),
+  myBrandPolicy,
+);
+```
+
+Visual moderation screens the prompt, the input and reference images, and every generated image. An
+innocuous prompt can still produce an unsafe image, so text-only checks are not enough. Scores map to
+`block` or `review` findings, with per-category thresholds. If the moderation call itself fails, the
+request is blocked unless you set `failOpen`.
+
+### Evaluating media
+
+`MediaEvalRunner` from `nexus-ai-pro/images/evals` scores what a string golden file cannot:
+
+- prompt alignment, scored by your judge;
+- rendered text, through your OCR function and edit distance;
+- whether an edit preserved the rest of the image, through a perceptual hash that survives re-encoding;
+- whether content was blocked when it should have been, reported as false-positive and false-negative
+  rates.
+
+Each case runs several times and reports mean, spread, and a 95% interval. Scores inside a configured
+uncertainty band go to a `ReviewQueue` for a person to judge instead of being decided automatically.
+
+Image support is still marked experimental. The adapters are verified against recorded wire shapes
+and a shared conformance suite, which now includes a masked-edit case. The label comes off after the
+opt-in live conformance suite passes against each hosted backend.
 
 Use `submit()` for a cancellable local operation handle with replayable lifecycle events:
 
@@ -1615,6 +1729,12 @@ import { ImageManager } from 'nexus-ai-pro/images';
 import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
 import { MockImageProvider } from 'nexus-ai-pro/images/mock';
 import { OpenAIImageProvider } from 'nexus-ai-pro/images/openai';
+import { GoogleImageProvider } from 'nexus-ai-pro/images/google';
+import { ComfyUIImageProvider } from 'nexus-ai-pro/images/comfyui';
+import { PngMaskTransformer } from 'nexus-ai-pro/images/transform';
+import { createImageInputResolver } from 'nexus-ai-pro/images/inputs';
+import { createOpenAIVisualModeration } from 'nexus-ai-pro/images/moderation';
+import { MediaEvalRunner } from 'nexus-ai-pro/images/evals';
 import { createRealtimeSession } from 'nexus-ai-pro/realtime/session';
 import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
 import { TelephonyManager } from 'nexus-ai-pro/telephony';
@@ -1633,12 +1753,12 @@ past its budget — so the numbers stay true rather than aspirational.
 <!-- size-table:start -->
 | Import | Size | Share of root |
 | --- | --- | --- |
-| `nexus-ai-pro` | 606 KB | 100% |
-| `nexus-ai-pro/config` | 465 KB | 77% |
-| `nexus-ai-pro/core` | 459 KB | 76% |
+| `nexus-ai-pro` | 611 KB | 100% |
+| `nexus-ai-pro/config` | 467 KB | 76% |
+| `nexus-ai-pro/core` | 461 KB | 75% |
 | `nexus-ai-pro/realtime` | 157 KB | 26% |
 | `nexus-ai-pro/batch` | 118 KB | 19% |
-| `nexus-ai-pro/realtime/session` | 94 KB | 16% |
+| `nexus-ai-pro/realtime/session` | 94 KB | 15% |
 | `nexus-ai-pro/embeddings` | 91 KB | 15% |
 | `nexus-ai-pro/providers/groq` | 79 KB | 13% |
 | `nexus-ai-pro/providers/mistral` | 79 KB | 13% |
@@ -1648,10 +1768,10 @@ past its budget — so the numbers stay true rather than aspirational.
 | `nexus-ai-pro/providers/llamacpp` | 77 KB | 13% |
 | `nexus-ai-pro/providers/lmstudio` | 77 KB | 13% |
 | `nexus-ai-pro/providers/openai` | 77 KB | 13% |
-| `nexus-ai-pro/providers/anthropic` | 70 KB | 12% |
+| `nexus-ai-pro/providers/anthropic` | 70 KB | 11% |
 | `nexus-ai-pro/providers/google` | 66 KB | 11% |
-| `nexus-ai-pro/images` | 63 KB | 10% |
-| `nexus-ai-pro/providers/ollama` | 58 KB | 10% |
+| `nexus-ai-pro/images` | 65 KB | 11% |
+| `nexus-ai-pro/providers/ollama` | 58 KB | 9% |
 | `nexus-ai-pro/batch/openai` | 52 KB | 9% |
 | `nexus-ai-pro/batch/anthropic` | 52 KB | 9% |
 | `nexus-ai-pro/operations` | 49 KB | 8% |
@@ -1660,17 +1780,22 @@ past its budget — so the numbers stay true rather than aspirational.
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% |
 | `nexus-ai-pro/security` | 40 KB | 7% |
 | `nexus-ai-pro/models` | 35 KB | 6% |
+| `nexus-ai-pro/images/inputs` | 31 KB | 5% |
 | `nexus-ai-pro/graph` | 29 KB | 5% |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 5% |
 | `nexus-ai-pro/evals` | 23 KB | 4% |
+| `nexus-ai-pro/images/transform` | 22 KB | 4% |
 | `nexus-ai-pro/images/stores` | 22 KB | 4% |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 3% |
 | `nexus-ai-pro/telephony` | 20 KB | 3% |
+| `nexus-ai-pro/images/openai` | 19 KB | 3% |
 | `nexus-ai-pro/realtime/mock` | 19 KB | 3% |
 | `nexus-ai-pro/voice` | 18 KB | 3% |
-| `nexus-ai-pro/images/openai` | 18 KB | 3% |
+| `nexus-ai-pro/images/comfyui` | 17 KB | 3% |
 | `nexus-ai-pro/embeddings/adapters` | 17 KB | 3% |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 3% |
+| `nexus-ai-pro/images/google` | 15 KB | 2% |
+| `nexus-ai-pro/images/evals` | 15 KB | 2% |
 | `nexus-ai-pro/images/assets` | 14 KB | 2% |
 | `nexus-ai-pro/context` | 13 KB | 2% |
 | `nexus-ai-pro/operations/adapters` | 13 KB | 2% |
@@ -1683,6 +1808,7 @@ past its budget — so the numbers stay true rather than aspirational.
 | `nexus-ai-pro/providers/base` | 10 KB | 2% |
 | `nexus-ai-pro/embeddings/models` | 10 KB | 2% |
 | `nexus-ai-pro/voice/openai` | 9 KB | 1% |
+| `nexus-ai-pro/images/moderation` | 9 KB | 1% |
 | `nexus-ai-pro/ops/circuit-breaker` | 8 KB | 1% |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 1% |
 | `nexus-ai-pro/capabilities` | 8 KB | 1% |
@@ -1760,13 +1886,16 @@ See [ROADMAP.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMA
 shipped and what is planned. It is a design proposal, not a compatibility promise; the guarantees
 live in [API_STABILITY.md](./API_STABILITY.md).
 
-1.4.0 closed the completion-request gap: prompt caching, reasoning controls, tool and sampling
-controls, structured usage with numeric cost, and capability negotiation with registry provenance.
+Shipped so far:
 
-Next is durable execution — an operation state machine, provider batch APIs, distributed rate
-limiting and circuit breaking, first-class embeddings, and filesystem/S3 asset stores — followed by
-image portability and promotion out of experimental. See
-[ROADMAP.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md).
+- completion controls and capability negotiation;
+- durable operations, provider batch tiers, and distributed resilience;
+- first-class embeddings and graphs;
+- per-entry-point size budgets.
+
+The current work is image portability: three backends behind one contract, masked edits, validated
+inputs, visual moderation, and media evaluation. Promotion out of experimental waits on live
+conformance.
 
 ## Known Limitations
 

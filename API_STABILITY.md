@@ -106,6 +106,41 @@ exactly-once provider execution. Those capabilities will use additive adapters a
 `MemoryAssetStore` is likewise process-local and does not promise cross-process durability or shared
 tenant state.
 
+### Image portability (Unreleased)
+
+The following are public under the same 1.x rules. None is exported from the root or from
+`nexus-ai-pro/images`:
+
+- `nexus-ai-pro/images/google`
+- `nexus-ai-pro/images/comfyui`
+- `nexus-ai-pro/images/transform`, which re-exports the PNG codec and header helpers
+- `nexus-ai-pro/images/inputs`
+- `nexus-ai-pro/images/moderation`
+- `nexus-ai-pro/images/evals`
+
+The following changes are additive:
+
+- `ImageConfig.inputResolver` and `ImageConfig.tenantId` are optional. With no resolver, requests are
+  handled exactly as before.
+- `ImageAssetResolver` and `ImageAssetResolverContext` are new types.
+- Output from the new modules is still generative. Backend wire shapes such as Imagen `:predict` and
+  the ComfyUI queue API are upstream contracts outside this policy, like `raw`.
+
+Behaviour that changed:
+
+- **OpenAI masks and transparency.** `OpenAIImageProvider` now declares `supportsMask: true` and
+  `supportsTransparency: true`, and accepts masked edits. A mask whose size differs from the input is
+  still refused unless `resizeMode` allows resampling. `background: 'transparent'` is refused only with
+  JPEG output.
+- **Withheld outputs.** A provider finding with `source: 'output'`, `action: 'block'`, and
+  `metadata.withheld: true` describes an image the provider removed before responding. The manager
+  accepts one fewer asset per such finding, and does not let that finding block the images that were
+  returned. Any other blocking finding still blocks the whole result.
+- **Masked-edit conformance case.** `runImageProviderConformance` adds a `masked-image-edit` case for
+  providers that declare `supportsMask`. Pass `testMask: false` to skip it.
+- **`UrlPolicyError`.** Safe-fetch policy refusals are now this subclass of `Error`. Their messages are
+  unchanged.
+
 ## Embeddings API stage
 
 The `nexus-ai-pro/embeddings` family is public and follows the 1.x rules, including the explicit

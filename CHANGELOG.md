@@ -4,7 +4,80 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-## [Unreleased]
+Image portability. Three image backends now sit behind one contract: OpenAI, Google Imagen, and a
+self-hosted ComfyUI server. Masked edits work on all three, and every input is validated before any
+provider sees it. Visual moderation inspects both the request and the generated images. Image output
+can be evaluated for alignment, rendered text, preservation, and safety. Each piece is its own subpath,
+and none is loaded by the root import.
+
+### Added
+
+- **Google Imagen adapter** (`nexus-ai-pro/images/google`). It calls the `:predict` protocol on the
+  Gemini API with an API key, or on Vertex AI with a bearer token, for generation and masked
+  inpainting.
+  - It differs from OpenAI, and negotiation says so. Output is sized by aspect ratio, so `dimensions`
+    is refused. `seed` and `negativePrompt` are supported.
+  - A seed disables the watermark, and the result reports that as a warning.
+  - When Imagen filters some images in a batch, the images that passed are still returned.
+- **ComfyUI adapter** (`nexus-ai-pro/images/comfyui`) for a self-hosted server.
+  - It uploads inputs, queues a workflow, polls with backoff, and downloads saved outputs.
+  - It records the seed it used, even when the caller chose none, so a good run can be reproduced.
+  - It removes an abandoned or failed prompt from the queue and interrupts it, so the GPU is not left
+    working on a result nobody is waiting for.
+  - The workflow graph belongs to the application. Stock text-to-image and inpainting builders are
+    included.
+- **Mask conversion** (`nexus-ai-pro/images/transform`). You draw a mask once, with either polarity, and
+  it becomes OpenAI's alpha channel or the white-is-editable greyscale that Imagen and ComfyUI read.
+  - A size mismatch is refused unless `resizeMode` allows `stretch`, `contain`, or `cover`. Resampling
+    is nearest-neighbour, so a binary mask gains no grey fringe, and `contain` padding is never
+    editable.
+  - Partly transparent pixels count as non-editable, so a soft brush edge never widens an edit.
+  - The PNG codec loads on the first masked request. An application that never masks never pays for
+    it.
+  - `AssetTransformer` is an injection seam for applications that want JPEG or WebP masks.
+- **Validated inputs** (`nexus-ai-pro/images/inputs`). `ImageInputResolver` applies the same checks to
+  byte uploads, remote URLs, and stored assets, and plugs into `ImageConfig.inputResolver`.
+  - The type is decided by the bytes. A declared or served MIME type that disagrees is refused rather
+    than corrected.
+  - Byte and pixel limits are enforced. The pixel limit is read from the header before decoding, so a
+    small file claiming a huge canvas is refused without allocating anything.
+  - Remote fetches get the web connector's SSRF protection: pinned DNS, redirect revalidation, and
+    blocking of private networks and cloud metadata.
+  - Refusals are `ImageInputError`s with a machine-readable `reason`.
+- **Visual moderation** (`nexus-ai-pro/images/moderation`). `createOpenAIVisualModeration` screens the
+  prompt, input and reference images, and every generated image, because an innocuous prompt can
+  still produce an unsafe image.
+  - Block and review thresholds can be set per category.
+  - If the moderation call fails, the request is blocked unless `failOpen` is set.
+  - A stored output that cannot be sent for moderation is routed to review.
+  - `combineSafetyPolicies` runs several policies and keeps every finding.
+- **Media evaluation** (`nexus-ai-pro/images/evals`). `MediaEvalRunner` checks four things:
+  - prompt alignment, using an injected judge;
+  - rendered text, using OCR and edit distance;
+  - edit preservation, using a perceptual hash that survives re-encoding;
+  - blocking behaviour, reported as false-positive and false-negative rates.
+
+  Every case runs repeatedly and reports mean, spread, and a 95% interval, plus latency, cost, error,
+  and failover figures. Scores inside a configured uncertainty band go to a `ReviewQueue` instead of
+  being decided automatically.
+- **A masked-edit conformance case.** It runs for every provider that declares `supportsMask`. The
+  fixture is a literal PNG, so the testing entry point does not load the codec.
+
+### Changed
+
+- **OpenAI masked edits and transparency are enabled.** `OpenAIImageProvider` now declares
+  `supportsMask` and `supportsTransparency`. `background: 'transparent'` is refused only with JPEG
+  output.
+- **A provider can explain missing images.** A blocking output finding marked `metadata.withheld`
+  counts toward the requested image count, and it does not block the images that were returned. Any
+  other blocking finding still blocks the whole result.
+- **SSRF protection is shared.** It moved out of the web connector into one module that the connector
+  and image inputs both use. The web connector behaves the same, and its security tests pass
+  unchanged. Policy refusals are now a `UrlPolicyError`, with the same messages.
+- **The whole-package size limit is higher.** The new modules are about 200 KB unpacked across both
+  builds, so the tarball limit rose from 460 KB to 500 KB packed and from 2.85 MB to 3.1 MB unpacked.
+  No existing import got heavier because of them. Each new module has its own per-subpath budget, and
+  the root import loads none of them.
 
 ## [1.9.0] - 2026-09-15
 

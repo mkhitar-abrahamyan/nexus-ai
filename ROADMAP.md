@@ -100,6 +100,13 @@ editing, provider registration, strict capability negotiation, visual-safety hoo
 in-process submissions; a deterministic network-free mock; an image-provider conformance harness; an
 opt-in OpenAI Image API adapter; and a bounded tenant-aware `MemoryAssetStore` with retention,
 defensive byte copies, computed SHA-256 checksums, capacity rejection, and optional signed URLs.
+Ready for 1.10.0:
+
+- Google Imagen and ComfyUI adapters;
+- masked edits on every backend through an `AssetTransformer`;
+- validated input resolution;
+- visual moderation;
+- `MediaEvalRunner`.
 
 ### 1.7 Request controls and cost accounting
 
@@ -223,12 +230,19 @@ read-compare-write that narrows but does not close the race.
 
 ### 2.5 Image family blockers
 
-OpenAI masks are deliberately rejected ([src/images/openai.ts:176](src/images/openai.ts#L176)) until
-a transformer can verify dimensions and convert neutral mask polarity into provider alpha semantics.
-The adapter also rejects `aspectRatio`, `negativePrompt`, `seed`, `background`, and `references` for
-generation. Only one hosted provider exists, so the provider-neutral contract has never been tested
-against a second wire protocol. There is no filesystem or S3-compatible asset store, no durable
-operation state machine, and no media evaluation. None of these can be waived before promotion.
+Closed in code for 1.10.0, not yet released:
+
+- masks, on all three backends;
+- a second hosted wire protocol, Imagen;
+- a self-hosted backend, ComfyUI;
+- input hardening, visual moderation, and media evaluation.
+
+Filesystem and S3 asset stores and the durable operation state machine shipped in 1.7.0 and 1.6.0.
+
+What still blocks promotion is verification, not code. Every adapter has been tested against recorded
+wire shapes, but none has passed live conformance. OpenAI generation still refuses `aspectRatio`,
+`negativePrompt`, `seed`, and `references`. The upstream API does not accept them, so a portable
+application should route those requests to Imagen or ComfyUI.
 
 ### 2.6 Realtime family limitations
 
@@ -405,31 +419,48 @@ that trade is worth making.
 
 ---
 
-## 9. Next release: 1.10.0 — image portability, then promotion
+## 9. Ready for 1.10.0 (unreleased): image portability
 
-Images cannot leave experimental until the neutral contract survives a second wire protocol.
+The neutral image contract now runs against three backends that disagree with each other: OpenAI,
+Google Imagen, and ComfyUI. Everything below is implemented and tested, and awaits release.
 
-- **Second hosted image provider** (Google Gemini image or a comparable API) exercising masks, seeds,
-  negative prompts, polling, formats, and quality controls that OpenAI currently refuses.
-- **Mask support.** An `AssetTransformer` seam that verifies dimensions and converts neutral polarity
-  into provider alpha semantics, unblocking [src/images/openai.ts:176](src/images/openai.ts#L176).
-- **Local ComfyUI adapter** to validate the contract against a self-hosted, graph-based backend and
-  to expose assumptions a hosted API hides.
-- **Input resolution hardening.** SSRF protection, MIME sniffing, byte/pixel limits,
-  decompression-bomb protection, and a redirect policy for remote inputs.
-- **Visual moderation** on both input and output; text-only checks are insufficient for media.
-- **Media evaluation.** Prompt/image semantic alignment, OCR accuracy for generated text, perceptual
-  similarity for edit preservation, safety pass rate with false-positive tracking, latency/cost/retry/
-  failover metrics, repeated-run statistical baselines for stochastic output, and human-review queues.
-  A `MediaEvalRunner` or a generic evaluation target — string-only golden-file tests are not an
-  image-quality gate.
-- **Modality cleanup.** Split model capabilities into `inputModalities` and `outputModalities` and
-  retire the semantic overlap between `vision`, `image`, and `pdf`. This is a breaking registry change
-  and may need to wait for 2.0.
+- **Second hosted provider: landed.** `nexus-ai-pro/images/google` calls Imagen through `:predict` on
+  the Gemini API or Vertex AI.
+  - It exercises what OpenAI refuses: seeds, negative prompts, and aspect-ratio sizing.
+  - It exercises what OpenAI lacks: per-image safety filtering. That filtering made the manager learn
+    about withheld outputs, so a partly filtered batch keeps the images that passed.
+- **Mask support: landed.** The `AssetTransformer` seam and the bundled `PngMaskTransformer` check
+  dimensions and convert neutral polarity into each backend's semantics.
+  - OpenAI masked edits are now enabled.
+  - The PNG codec loads on the first masked request.
+- **Local ComfyUI adapter: landed.** It is queue based and graph based, and its inputs are uploaded
+  files. It exposed two assumptions that a hosted API hides:
+  - a cancelled request keeps running unless it is removed from the queue;
+  - an unseeded run cannot be reproduced unless the adapter records the seed it used.
+- **Input resolution hardening: landed.** `nexus-ai-pro/images/inputs` covers:
+  - SSRF protection, shared with the web connector rather than copied;
+  - content sniffing that overrides declared and served MIME types;
+  - byte and pixel limits, with the pixel limit checked from the header before any decode;
+  - redirect revalidation.
+- **Visual moderation: landed.** `nexus-ai-pro/images/moderation` screens both input and output. If
+  moderation itself fails, the request is blocked.
+- **Media evaluation: landed.** `nexus-ai-pro/images/evals` measures:
+  - prompt alignment and OCR accuracy;
+  - perceptual similarity for edit preservation;
+  - safety confusion counts with false-positive and false-negative rates;
+  - latency, cost, error, and failover;
+  - repeated-run statistics with a 95% interval.
 
-Promotion criterion: packed-package tests, provider conformance across two hosted providers plus
-ComfyUI, and media evals covering the supported capability matrix. Only then does the experimental
-label come off.
+  Scores in an uncertainty band go to a human-review queue.
+- **Modality cleanup: deferred to 2.0.** Splitting `inputModalities` from `outputModalities` is a
+  breaking registry change, and it is listed in section 10.
+
+**Not yet promoted.** The adapters are verified against recorded wire shapes and the shared
+conformance suite, which now includes a masked-edit case. None of it has run against the live
+services. The experimental label comes off in a later release, after both of these:
+
+1. The opt-in live conformance suite passes against OpenAI, Imagen, and a real ComfyUI server.
+2. Media evals cover the supported capability matrix against those live backends.
 
 ---
 

@@ -264,6 +264,12 @@ const expectedSubpaths = [
   './images/assets',
   './images/mock',
   './images/openai',
+  './images/google',
+  './images/comfyui',
+  './images/transform',
+  './images/inputs',
+  './images/moderation',
+  './images/evals',
   './embeddings',
   './embeddings/adapters',
   './embeddings/mock',
@@ -359,7 +365,17 @@ for (const embeddingIntegrationExport of [
   );
 }
 
-for (const imageIntegrationExport of ['MockImageProvider', 'OpenAIImageProvider', 'MemoryAssetStore']) {
+for (const imageIntegrationExport of [
+  'MockImageProvider',
+  'OpenAIImageProvider',
+  'MemoryAssetStore',
+  'GoogleImageProvider',
+  'ComfyUIImageProvider',
+  'PngMaskTransformer',
+  'ImageInputResolver',
+  'createOpenAIVisualModeration',
+  'MediaEvalRunner',
+]) {
   assert.equal(
     imageIntegrationExport in root,
     false,
@@ -374,7 +390,9 @@ assert.equal(
   'root import graph should exclude realtime',
 );
 assert.equal(
-  /(?:from|import\s*)\s*['"].*\/images\/(?:assets|mock|openai)/.test(rootSource),
+  /(?:from|import\s*)\s*['"].*\/images\/(?:assets|mock|openai|google|comfyui|transform|codec|inputs|moderation|evals)/.test(
+    rootSource,
+  ),
   false,
   'root import graph should exclude optional image integrations',
 );

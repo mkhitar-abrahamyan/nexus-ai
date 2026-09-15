@@ -140,8 +140,9 @@ export class ImageManager {
     operationId: string,
     signal: AbortSignal,
   ): Promise<ImageResult> {
-    const { operation, request } = submission;
-    validateRequest(operation, request);
+    const { operation } = submission;
+    validateRequest(operation, submission.request);
+    const request = await this.resolveInputs(operation, submission.request, signal);
     const [registeredName, provider] = this.resolveProvider(operation, request.provider);
     assertCapabilities(registeredName, provider, operation, request);
 
@@ -195,6 +196,38 @@ export class ImageManager {
       if (error instanceof ImageError) throw error;
       throw new ImageProviderError(`Image ${operation} failed for provider "${registeredName}"`, registeredName, error);
     }
+  }
+
+  /**
+   * Resolves remote and stored inputs to validated bytes, when a resolver is configured.
+   *
+   * Runs before capability checks, so a provider that reads only bytes can still accept a URL input
+   * — and every input, whatever its location, passes the same MIME, byte, and pixel checks.
+   */
+  private async resolveInputs(
+    operation: ImageOperation,
+    request: ImageRequest,
+    signal: AbortSignal,
+  ): Promise<ImageRequest> {
+    const resolver = this.config.inputResolver;
+    if (!resolver || operation !== 'edit') return request;
+
+    const edit = request as ImageEditRequest;
+    const resolve = (asset: AssetInput, option: string) =>
+      Promise.resolve(resolver.resolve(asset, { option, signal, tenantId: this.config.tenantId }));
+
+    const [input, mask, references] = await Promise.all([
+      resolve(edit.input, 'input'),
+      edit.mask ? resolve(edit.mask, 'mask') : Promise.resolve(undefined),
+      Promise.all((edit.references ?? []).map((asset, index) => resolve(asset, `references[${index}]`))),
+    ]);
+
+    return {
+      ...edit,
+      input,
+      ...(mask ? { mask: { ...edit.mask, ...mask } as ImageEditRequest['mask'] } : {}),
+      ...(edit.references ? { references } : {}),
+    };
   }
 
   private resolveProvider(operation: ImageOperation, preferred?: string): [string, ImageProvider] {
@@ -492,7 +525,10 @@ function validateResult(
     throw new ImageProviderResponseError(providerName, 'assets must be a non-empty array');
   }
   const expectedCount = request.count ?? 1;
-  if (result.assets.length !== expectedCount) {
+  // A provider that filtered some images itself reports each one as a withheld finding; those
+  // account for the shortfall, so the images that did pass are not discarded with them.
+  const withheld = (result.safetyFindings ?? []).filter(isWithheldFinding).length;
+  if (result.assets.length !== expectedCount && result.assets.length + withheld !== expectedCount) {
     throw new ImageProviderResponseError(
       providerName,
       `asset count ${result.assets.length} does not match requested count ${expectedCount}`,
@@ -581,8 +617,14 @@ function normalizeMimeType(value: string): string {
 }
 
 function assertSafetyFindings(message: string, findings: readonly MediaSafetyFinding[]): void {
-  const blocked = findings.filter((finding) => finding.action === 'block');
+  // A withheld output never reached the caller, so there is nothing left for it to block.
+  const blocked = findings.filter((finding) => finding.action === 'block' && !isWithheldFinding(finding));
   if (blocked.length > 0) throw new ImageSafetyError(message, blocked);
+}
+
+/** An output the provider removed before returning, reported so the gap in the result is explained. */
+function isWithheldFinding(finding: MediaSafetyFinding): boolean {
+  return finding.source === 'output' && finding.action === 'block' && finding.metadata?.withheld === true;
 }
 
 function abortReason(signal: AbortSignal | undefined): string | undefined {

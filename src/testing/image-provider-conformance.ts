@@ -3,6 +3,7 @@ import type {
   AssetLocationKind,
   ImageEditRequest,
   ImageGenerateRequest,
+  ImageMaskInput,
   ImageOperation,
   ImageOutputFormat,
   ImageProvider,
@@ -44,6 +45,10 @@ export interface ImageProviderConformanceOptions {
   editInput?: AssetInput;
   testAbort?: boolean;
   testEdit?: boolean;
+  /** Run the masked-edit case when the provider declares `supportsMask`. Defaults to true. */
+  testMask?: boolean;
+  /** Mask for the masked-edit case. Must match `editInput` dimensions when both are supplied. */
+  editMask?: ImageMaskInput;
 }
 
 const PORTABLE_PNG_BYTES = new Uint8Array([
@@ -75,9 +80,23 @@ const BASIC_EDIT_FIXTURE: ImageEditProviderConformanceCase = {
   },
 };
 
+const MASKED_EDIT_FIXTURE: ImageEditProviderConformanceCase = {
+  name: 'masked-image-edit',
+  operation: 'edit',
+  request: {
+    prompt: 'Change the square to green.',
+    count: 1,
+    outputFormat: 'png',
+    delivery: { kind: 'bytes', format: 'png' },
+    input: portableEditInput(),
+    mask: portableMask(),
+  },
+};
+
 export const IMAGE_PROVIDER_CONFORMANCE_FIXTURES: readonly ImageProviderConformanceCase[] = [
   BASIC_GENERATE_FIXTURE,
   BASIC_EDIT_FIXTURE,
+  MASKED_EDIT_FIXTURE,
 ];
 
 export async function runImageProviderConformance(
@@ -173,6 +192,18 @@ function defaultFixtures(
         input: options.editInput || portableEditInput(),
       },
     });
+
+    if (capabilities.supportsMask && options.testMask !== false) {
+      fixtures.push({
+        ...MASKED_EDIT_FIXTURE,
+        request: {
+          ...MASKED_EDIT_FIXTURE.request,
+          ...requestDefaults,
+          input: options.editInput || portableEditInput(),
+          mask: options.editMask || portableMask(),
+        },
+      });
+    }
   }
 
   return fixtures;
@@ -222,6 +253,16 @@ function portableEditInput(): AssetInput {
     location: { kind: 'bytes', data: PORTABLE_PNG_BYTES.slice() },
     mimeType: 'image/png',
     filename: 'conformance-input.png',
+  };
+}
+
+// The same 1 × 1 PNG serves as the mask. Literal bytes keep the codec out of this module.
+function portableMask(): ImageMaskInput {
+  return {
+    location: { kind: 'bytes', data: PORTABLE_PNG_BYTES.slice() },
+    mimeType: 'image/png',
+    filename: 'conformance-mask.png',
+    polarity: 'white-is-editable',
   };
 }
 
@@ -309,7 +350,16 @@ function validateResult(
   if (!Array.isArray(result.assets)) {
     errors.push('response assets is not an array');
   } else {
-    validateAssetCount(result.assets.length, request.count, capabilities, errors);
+    const withheld = Array.isArray(result.safetyFindings)
+      ? result.safetyFindings.filter(
+          (finding) =>
+            isRecord(finding) &&
+            finding.action === 'block' &&
+            isRecord(finding.metadata) &&
+            finding.metadata.withheld === true,
+        ).length
+      : 0;
+    validateAssetCount(result.assets.length, request.count, withheld, capabilities, errors);
     for (const [index, asset] of result.assets.entries()) {
       validateAsset(asset, index, request, context, operation, expectedProvider, capabilities, errors);
     }
@@ -335,10 +385,11 @@ function validateResult(
 function validateAssetCount(
   actual: number,
   requested: number | undefined,
+  withheld: number,
   capabilities: ImageProviderCapabilities,
   errors: string[],
 ): void {
-  if (requested !== undefined && actual !== requested) {
+  if (requested !== undefined && actual !== requested && actual + withheld !== requested) {
     errors.push(`asset count ${actual} does not match requested count ${requested}`);
   } else if (requested === undefined && actual === 0) {
     errors.push('response contains no assets');

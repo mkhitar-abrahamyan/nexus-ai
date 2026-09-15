@@ -498,6 +498,15 @@ test('runImageProviderConformance passes generate, edit, and abort checks for th
       abortOk: true,
       error: undefined,
     },
+    {
+      providerName: 'mock',
+      model: 'mock-image-v1',
+      caseName: 'masked-image-edit',
+      operation: 'edit',
+      operationOk: true,
+      abortOk: true,
+      error: undefined,
+    },
   ]);
 });
 
@@ -505,9 +514,21 @@ test('runImageProviderConformance only exercises operations declared by a provid
   const provider = new MockImageProvider({ capabilities: { operations: ['edit'] } });
   const results = await runImageProviderConformance('edit-only', provider);
 
-  assert.equal(results.length, 1);
-  assert.equal(results[0]?.operation, 'edit');
-  assert.equal(results[0]?.operationOk, true);
+  assert.deepEqual(
+    results.map((result) => [result.operation, result.operationOk]),
+    [
+      ['edit', true],
+      ['edit', true],
+    ],
+  );
+
+  const unmasked = new MockImageProvider({ capabilities: { operations: ['edit'], supportsMask: false } });
+  const unmaskedResults = await runImageProviderConformance('edit-only-unmasked', unmasked);
+  assert.deepEqual(
+    unmaskedResults.map((result) => result.caseName),
+    ['basic-image-edit'],
+  );
+  assert.equal((await runImageProviderConformance('mock', new MockImageProvider(), { testMask: false })).length, 2);
 });
 
 test('runImageProviderConformance rejects relative URL delivery locations', async () => {

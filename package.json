@@ -310,6 +310,66 @@
         "default": "./dist-cjs/images/openai.js"
       }
     },
+    "./images/google": {
+      "import": {
+        "types": "./dist/images/google.d.ts",
+        "default": "./dist/images/google.js"
+      },
+      "require": {
+        "types": "./dist-cjs/images/google.d.ts",
+        "default": "./dist-cjs/images/google.js"
+      }
+    },
+    "./images/comfyui": {
+      "import": {
+        "types": "./dist/images/comfyui.d.ts",
+        "default": "./dist/images/comfyui.js"
+      },
+      "require": {
+        "types": "./dist-cjs/images/comfyui.d.ts",
+        "default": "./dist-cjs/images/comfyui.js"
+      }
+    },
+    "./images/transform": {
+      "import": {
+        "types": "./dist/images/transform.d.ts",
+        "default": "./dist/images/transform.js"
+      },
+      "require": {
+        "types": "./dist-cjs/images/transform.d.ts",
+        "default": "./dist-cjs/images/transform.js"
+      }
+    },
+    "./images/inputs": {
+      "import": {
+        "types": "./dist/images/inputs.d.ts",
+        "default": "./dist/images/inputs.js"
+      },
+      "require": {
+        "types": "./dist-cjs/images/inputs.d.ts",
+        "default": "./dist-cjs/images/inputs.js"
+      }
+    },
+    "./images/moderation": {
+      "import": {
+        "types": "./dist/images/moderation.d.ts",
+        "default": "./dist/images/moderation.js"
+      },
+      "require": {
+        "types": "./dist-cjs/images/moderation.d.ts",
+        "default": "./dist-cjs/images/moderation.js"
+      }
+    },
+    "./images/evals": {
+      "import": {
+        "types": "./dist/images/evals.d.ts",
+        "default": "./dist/images/evals.js"
+      },
+      "require": {
+        "types": "./dist-cjs/images/evals.d.ts",
+        "default": "./dist-cjs/images/evals.js"
+      }
+    },
     "./embeddings": {
       "import": {
         "types": "./dist/embeddings/index.d.ts",
@@ -931,6 +991,24 @@
       ],
       "images/openai": [
         "dist-cjs/images/openai.d.ts"
+      ],
+      "images/google": [
+        "dist-cjs/images/google.d.ts"
+      ],
+      "images/comfyui": [
+        "dist-cjs/images/comfyui.d.ts"
+      ],
+      "images/transform": [
+        "dist-cjs/images/transform.d.ts"
+      ],
+      "images/inputs": [
+        "dist-cjs/images/inputs.d.ts"
+      ],
+      "images/moderation": [
+        "dist-cjs/images/moderation.d.ts"
+      ],
+      "images/evals": [
+        "dist-cjs/images/evals.d.ts"
       ],
       "embeddings": [
         "dist-cjs/embeddings/index.d.ts"

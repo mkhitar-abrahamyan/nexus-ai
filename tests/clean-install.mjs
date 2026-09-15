@@ -25,9 +25,12 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // webhook helpers, again carried in both builds. Raised again in 1.7.0 for the provider batch
 // family, the filesystem and S3 asset stores, and the resilience modules. The generated model
 // registry is deliberately NOT shipped: it duplicates KNOWN_MODELS byte for byte, and carrying it
-// in both builds plus its JSON source cost ~310KB unpacked for data no consumer reads.
-const MAX_PACKED_BYTES = 460_000;
-const MAX_UNPACKED_BYTES = 2_850_000;
+// in both builds plus its JSON source cost ~310KB unpacked for data no consumer reads. Raised in
+// 1.10.0 for image portability: the Imagen and ComfyUI adapters, mask transformation with a PNG
+// codec, input resolution, visual moderation, and media evals — about 200KB unpacked across both
+// builds and their declarations, all opt-in subpaths that the root import never loads.
+const MAX_PACKED_BYTES = 500_000;
+const MAX_UNPACKED_BYTES = 3_100_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
@@ -153,6 +156,10 @@ const imports = [
   ['nexus-ai-pro/images/assets', ['MemoryAssetStore']],
   ['nexus-ai-pro/images/mock', ['MockImageProvider']],
   ['nexus-ai-pro/images/openai', ['OpenAIImageProvider']],
+  ['nexus-ai-pro/images/google', ['GoogleImageProvider']],
+  ['nexus-ai-pro/images/comfyui', ['ComfyUIImageProvider']],
+  ['nexus-ai-pro/images/transform', ['PngMaskTransformer', 'decodePng']],
+  ['nexus-ai-pro/images/inputs', ['ImageInputResolver']],
   ['nexus-ai-pro/realtime', ['RealtimeSession', 'createRealtimeAgent', 'MockRealtimeTransport']],
   ['nexus-ai-pro/realtime/openai-webrtc', ['OpenAIWebRTCTransport']],
   ['nexus-ai-pro/realtime/openai-websocket', ['OpenAIWebSocketTransport']],
