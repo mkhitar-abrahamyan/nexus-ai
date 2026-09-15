@@ -394,9 +394,10 @@ Stateful orchestration on a subpath measuring 29 KB across six files.
 - **Durable by construction**, through the existing `OperationStore`, imported as a type only so the
   subpath stays small.
 
-Still open in this area: nodes within one superstep run sequentially in edge order, so genuine
-parallel execution is a later change, and the API_STABILITY note says so rather than implying
-concurrency that does not exist.
+Still open in this area: nodes within one superstep run sequentially in edge order, and the
+API_STABILITY note says so rather than implying concurrency that does not exist. Parallel execution
+is planned for 1.11.0 (section 11). A review of this release also found defects where the code
+contradicts the docs; their fixes are listed in section 9.
 
 ---
 
@@ -419,7 +420,7 @@ that trade is worth making.
 
 ---
 
-## 9. Ready for 1.10.0 (unreleased): image portability
+## 9. Ready for 1.10.0 (unreleased): image portability and graph correctness
 
 The neutral image contract now runs against three backends that disagree with each other: OpenAI,
 Google Imagen, and ComfyUI. Everything below is implemented and tested, and awaits release.
@@ -453,7 +454,34 @@ Google Imagen, and ComfyUI. Everything below is implemented and tested, and awai
 
   Scores in an uncertainty band go to a human-review queue.
 - **Modality cleanup: deferred to 2.0.** Splitting `inputModalities` from `outputModalities` is a
-  breaking registry change, and it is listed in section 10.
+  breaking registry change, and it is listed in section 18.
+
+- **Graph and agent correctness: planned before release.** A review of the 1.9.0 source found nine
+  defects where the code contradicts documented behaviour. Each fix restores what the docs already
+  promise, so none changes the public API:
+  1. **No default checkpointer.** `compile()` never creates one, although the README and the
+     `MemoryGraphCheckpointer` doc comment both say it does. Without one, `interrupt()` throws and
+     `state()` returns nothing. Fix: default to a `MemoryGraphCheckpointer` capped at a number of
+     threads, dropping the least recently used thread when full, so a service that never resumes
+     does not grow without limit. `checkpointer: false` opts out.
+  2. **Unnamed runs report no thread id.** `invoke()` without a `threadId` returns `threadId: ''`,
+     even though it generated one, so the run cannot be inspected or resumed.
+  3. **Subgraph interrupts are swallowed.** A subgraph that interrupts is treated as finished: the
+     parent merges its partial state and moves on. Fix for 1.10.0: surface it as an interrupt of the
+     parent. Full resume into the subgraph lands in 1.12.0.
+  4. **Rewinding leaves stale checkpoints.** After `resumeFrom(step)`, `MemoryGraphCheckpointer`
+     keeps checkpoints from the abandoned future, so `state()` can return a step from a timeline
+     that no longer exists. Fix: drop the later steps on rewind. Forking lands in 1.12.0.
+  5. **A failed node re-runs its siblings.** The failed checkpoint discards writes from siblings that
+     already succeeded, so `continue()` runs them again. That breaks the guarantee in API_STABILITY
+     that a node which finished is never re-run by a resume.
+  6. **`context.report()` does nothing.**
+  7. **`CompileOptions.name` is documented but never read.**
+  8. **Malformed tool arguments run the tool.** `AgentLoop` turns invalid tool-call JSON into `{}`
+     and executes the tool with empty arguments. Fix: send the parse error back to the model as the
+     tool result, and never execute.
+  9. **Silent iteration limit.** `AgentLoop` stops at `maxIterations` without saying so. Fix: the
+     result gains a `stopReason`.
 
 **Not yet promoted.** The adapters are verified against recorded wire shapes and the shared
 conformance suite, which now includes a masked-edit case. None of it has run against the live
@@ -464,55 +492,469 @@ services. The experimental label comes off in a later release, after both of the
 
 ---
 
-## 10. 2.0 candidate — one lifecycle for every operation
+## 10. How releases are planned from here
 
-Create an internal typed lifecycle and adapt every family to it:
+Every release closes at least one capability gap that a user can see, and ships proof that it is
+closed: a benchmark, a runnable example, or a test that fails on the previous version. A release may
+be large to get there. Three rules apply to every item below.
 
-`validate → authorize → input policy → resolve assets → route → reserve budget → execute →`
-`output policy → persist → reconcile cost → audit`
+1. **Weight follows use.**
+   - Every capability lands on its own subpath, with its size budget recorded in the same commit.
+   - Nothing new enters the root import.
+   - Infrastructure (Redis, Postgres, OpenTelemetry, MCP, a UI) is reached through injected client
+     interfaces or optional peer dependencies, loaded only by the subpath that needs it.
+   - A caller who does not use a feature pays nothing for it: no bytes, no allocations, and no
+     per-call work.
+2. **Defaults plus escape hatches.**
+   - Each feature has a sensible default and a fully expressive option: overrides at compile time and
+     per run, injectable adapters, and access to raw data.
+   - Tests cover both the smallest configuration and the largest.
+3. **Breaking changes wait for 2.0.0.**
+   - Ship the change additively in 1.x wherever possible.
+   - Anything that must break is marked `@deprecated` and noted in the changelog at least one minor
+     release before 2.0.0.
+   - Every breaking item is collected in section 18.
 
-Completions, streams, embeddings, voice, realtime, telephony, images, and jobs share the same
-authorization, budget, hooks, audit, metrics, and finalization stages, including cache hits.
-Transport-specific code only performs the provider call and normalizes the result. Every provider
-family gets a shared internal `ProviderCallContext` carrying abort signal, deadline, request ID,
-trace context, and idempotency key — generalizing the one images already has.
-
-Also in the 2.0 window, because each requires a breaking change:
-
-- retype `PipelineContext` generically over request/response instead of hard-coding
-  `CompletionRequest`/`NexusResponse`, and remove the `| string` escape from `PipelineStepName`;
-- remove the deprecated `estimatedCost` string in favor of the numeric `cost` object;
-- land the `inputModalities`/`outputModalities` registry split if it has not shipped;
-- true mixed text/asset outputs, so tool results can pass asset references without base64 JSON.
-
----
-
-## 11. Longer-term backlog
-
-1. MCP client and server adapters with asset and tool interoperability.
-2. Video generation through the same asynchronous operation, job, and asset contracts.
-3. Realtime follow-ons: a second provider, SIP and video transports, durable session recovery,
-   browser compatibility automation, and published latency/load benchmark methodology.
-4. Telephony follow-ons: a second provider (Vonage, Telnyx, or SIP-native), outbound SMS and
-   messaging as an operation family, call recording with retention policy, and conference/transfer
-   control.
-5. OCR, captioning, visual question answering, image embeddings, and media search/RAG.
-6. Human approval checkpoints for high-impact tools and generated-media publication.
-7. Policy-as-code presets versioned independently from the runtime.
-8. Prompt and workflow versioning with offline replay and A/B evaluation.
-9. Multi-tenant credential-vault adapters and per-provider residency routing.
-10. Record/replay provider fixtures so most conformance tests run without credentials, plus capability
-    drift detection.
-11. An optional local control plane for approvals, traces, evals, costs, provider health, assets,
-    retention, and queued operations.
-12. Smaller install surface: keep a provider-neutral core and move heavy or environment-specific
-    integrations (OpenTelemetry, BullMQ, image transforms, provider adapters) into optional exports or
-    a scoped package family, isolating Node filesystem, crypto, DNS, and stream dependencies behind
-    adapters so browser and edge compatibility is explicit.
+| Release | Theme | Gap it closes | Proof it ships |
+| --- | --- | --- | --- |
+| 1.10.0 | Image portability, graph correctness | Masks and three image backends; documented graph behaviour made true | Masked-edit conformance on three backends; regression tests for the nine defects |
+| 1.11.0 | Parallel graphs | Parallel nodes, dynamic fan-out, per-node retries; dependency cost shown | Graph benchmark in CI; size table with a dependency column |
+| 1.12.0 | Graph control and introspection | Control commands, state editing and forks, visualization, mature subgraphs | Mermaid diagram rendered in the README; fork-and-edit test |
+| 1.13.0 | Memory, agents, MCP | Cross-thread memory, agents with durable approvals, MCP tools | Agent that survives a restart and remembers across threads |
+| 1.14.0 | Queryable traces | Run trees across every family, feedback, alerts | `nexus traces` showing a full agent run tree |
+| 1.15.0 | Evaluation platform | Datasets, experiments, comparisons, online eval, annotation queues | CI gate that fails a pull request on a measured regression |
+| 1.16.0 | Prompt and config versioning | Versioned prompts with environments and gated promotion | Promotion blocked until an experiment passes |
+| 1.17.0 | Self-hosted agent server | Deployment: runs, threads, background work, horizontal scale | Two replicas; a run survives killing the one that started it |
+| 1.18.0 | Local studio | UIs for traces, threads, approvals, experiments, prompts | `npx` studio against the example application |
+| 2.0.0 | Consolidation | One lifecycle, slim root, optional validators, stable surfaces | Migration guide and codemod; install-footprint targets met |
 
 ---
 
-## 12. Design notes carried forward
+## 11. 1.11.0: parallel graphs
+
+A fan-out that looks parallel will run in parallel. Four branches of three seconds each should finish
+in about three seconds, not twelve.
+
+**Concurrent supersteps.**
+- All tasks in a superstep start together.
+- `maxConcurrency` limits them. It can be set at compile time and overridden per run, defaults to 16,
+  and `1` restores sequential execution exactly.
+- Writes are reduced in task order, not completion order, so a replay produces the same state
+  regardless of timing.
+- A superstep with one task skips the scheduler entirely, so a linear graph pays nothing new.
+- API_STABILITY already reserves scheduling order, so this is not a breaking change.
+
+**Failure semantics.**
+- Each task's successful write is checkpointed as a pending write before the step completes. A resume
+  or `continue()` after a failure re-runs only the tasks that did not finish, which makes the
+  "a finished node never re-runs" guarantee hold under concurrency.
+- `onNodeError` chooses what happens to siblings when one task fails:
+  - `fail-fast` (the default) aborts the siblings through their signals;
+  - `settle` lets them finish first.
+
+**Several interrupts in one step.**
+- Parallel tasks may each ask a question. The checkpoint gains `interrupts: PendingInterrupt[]`, each
+  with a stable id.
+- `resumeInterrupts(threadId, { [id]: value })` answers any subset of them.
+- `interrupt` and `resume()` keep working whenever there is exactly one question.
+
+**Dynamic fan-out.**
+- A router or a node can return `new Send(node, input)` or an array of them. That creates N tasks of
+  the same node, each with its own input, which the node reads from `context.input`.
+- Task ids are derived from step and index, so a resume never duplicates a task.
+- Targets must be declared through `mapping` or a node's `ends`, which keeps validation and
+  visualization honest.
+- The checkpoint gains an additive `tasks` field; `next` stays as the list of node names.
+
+**Retry and timeout policies.**
+- `addNode(name, fn, { retry, timeoutMs })` takes a per-node policy, and `compile({ retry })` sets
+  the default.
+- The retry policy fields are `maxAttempts`, `initialIntervalMs`, `backoffFactor`, `maxIntervalMs`,
+  `jitter`, and `retryOn`.
+- By default, interrupts, aborts, validation errors, and non-retryable provider errors are never
+  retried.
+- `context.attempt` and the stream events report retries.
+- `timeoutMs` aborts a signal scoped to that node.
+
+**Honest install weight.**
+- `size:check` also follows imports of third-party packages. The README table gains a column for
+  dependency code, so `/graph` can be shown to load no third-party code at all.
+- A new `size:install` measures the `node_modules` footprint of a clean install. Today that is about
+  10 MB, of which roughly 7 MB is `zod`, `ajv`, and `@types/node` that every consumer installs.
+- The internal code paths that load the validators go async, so `ajv` and `zod` load only when a
+  request uses schema validation. Their exported synchronous helpers keep static imports until 2.0.0.
+- Internal message validation is rewritten without `zod`, which also takes schema construction off
+  the request path.
+
+**Budgets.** `/graph` rises to at most 40 KB. The root import must not grow.
+
+**Proof.**
+- `npm run bench:graph` runs in CI and checks two things:
+  - four 300 ms branches finish in under 450 ms, where 1.10.0 takes 1,200 ms;
+  - a `Send` over 57 items with `maxConcurrency: 8` completes in bounded time.
+- A test proves that a failed step does not re-run its successful siblings.
+
+---
+
+## 12. 1.12.0: graph control flow and introspection
+
+**Commands.**
+- A node can return `new Command({ update, goto, resume, graph })`, which updates state and chooses
+  the next step in a single return. `goto` accepts node names or `Send`s.
+- `graph: Command.PARENT` routes from inside a subgraph to its parent.
+- Nodes declare `ends` so that reachability checks and diagrams stay exact.
+
+**State editing and forks.**
+- Checkpoints gain `id` and `parentId`.
+- `updateState(threadId, update, { asNode, checkpointId })` writes a new checkpoint as if that node
+  had produced the update.
+- `resumeFrom(checkpointId)` forks rather than overwrites.
+- `history()` follows the lineage of the current head, and `forks(threadId)` lists the branches.
+- Both bundled checkpointers store the lineage.
+
+**Visualization.**
+- `nexus-ai-pro/graph/visualize` exports `toMermaid(graph, options)` and `toGraphJSON(graph)`.
+- Options: expanded or collapsed subgraphs, conditional and `Send` edges, and highlighting a
+  checkpoint's position.
+- PNG output is available through an injected renderer. None is bundled, so the graph runtime pays
+  nothing for diagrams.
+
+**Streaming modes.**
+- `stream(input, { modes, subgraphs })` supports these modes, several at once:
+  - `values`, full state after each step;
+  - `updates`, per-task writes;
+  - `tasks`, start, retry, and finish;
+  - `checkpoints`;
+  - `custom`, events a node emits through `context.emit()`;
+  - `messages`, model tokens from inside nodes.
+- Events are typed per mode.
+
+**Mature subgraphs.**
+- Each subgraph checkpoints under a namespace derived from its parent thread and task.
+- Interrupts propagate up to the parent, and the parent's resume continues inside the subgraph.
+- `state(threadId, { subgraphs: true })` includes nested state.
+
+**Breakpoints, schemas, caching, and deferred nodes.**
+- `interruptBefore` and `interruptAfter` pause a run at chosen nodes for debugging, set per compile or
+  per run.
+- `createGraph({ channels, input, output })` restricts what a caller may pass in and what comes back.
+  Private channels stay internal.
+- Per-node caching: `cache: { key, ttlMs, store }` through the existing cache adapters, imported as
+  types only.
+- `defer: true` holds a node until every other pending task has finished, so an aggregator waits for
+  branches of different lengths.
+
+**Budgets.** `/graph` at most 48 KB; `/graph/visualize` at most 6 KB.
+
+**Proof.**
+- The README graph section includes a live Mermaid diagram, which GitHub renders.
+- A test forks a thread at step 2, edits the state, finishes both timelines, and reads both histories.
+
+---
+
+## 13. 1.13.0: long-term memory, agents on graphs, and MCP
+
+**Store** (`nexus-ai-pro/store`).
+- Operations: `put(namespace, key, value, { ttlMs, index })`, `get`, `delete`,
+  `search(namespacePrefix, { query, filter, limit, offset })`, and `listNamespaces`.
+- Semantic search is opt-in through an injected embedding function, so the store never imports the
+  embeddings runtime.
+- Adapters: `MemoryStore`, `/store/redis`, and `/store/postgres` (with pgvector when available). All
+  use injected client-like interfaces, as the Redis operation store does.
+- Tenant scoping, TTL sweeping, and a namespace authorization hook.
+- `compile({ store })` exposes the store to nodes as `context.store`, which is how memory crosses
+  threads.
+
+**Agents on graphs** (`nexus-ai-pro/agent`, via `createAgent`).
+- `createAgent` returns a compiled graph, so an agent inherits durability, streaming, forks, and
+  retries without code of its own.
+- Options: model, tools, `systemPrompt`, `responseFormat` for a typed final answer, `maxIterations`
+  with a stop reason, per-run budget, checkpointer, and store.
+- Tool calls run in parallel, limited by `toolConcurrency`.
+- `interruptOn` gives each tool a human-approval policy: approve, edit, or reject. It is a graph
+  interrupt, so an approval can arrive days later on another machine.
+- Middleware hooks: `beforeModel`, `afterModel`, `wrapModelCall`, `wrapToolCall`, `beforeAgent`, and
+  `afterAgent`.
+- Bundled middleware, each on its own subpath: summarization through the context manager, PII
+  redaction through the security module, tool-call limits, model fallback, and retries.
+- Multi-agent helpers: an agent can be used as a tool, and a `handoff()` command transfers control.
+- `AgentLoop` stays as the small path and gains parallel tool execution and `stopReason`.
+
+**MCP** (`nexus-ai-pro/mcp`).
+- A client over stdio and streamable HTTP maps MCP tools, resources, and prompts into tools and
+  agents.
+- A server exposes Nexus tools and compiled graphs to MCP clients.
+- The protocol SDK is an optional peer dependency, loaded only by these subpaths.
+- This is how the project reaches a broad tool ecosystem without maintaining its own integration
+  catalogue.
+
+**Budgets.** `/store` at most 8 KB. The two store adapters at most 10 KB each. `/agent` at most 20 KB
+on top of `/graph`. `/mcp` at most 25 KB. `AgentLoop`'s entry point must not grow.
+
+**Proof.** A runnable example shows three things:
+- an agent that remembers a preference from an earlier thread through the store;
+- a pause for approval before a side-effecting tool, where the process is killed and the approval
+  resumes the run from Redis;
+- tools called from a local MCP server.
+
+---
+
+## 14. 1.14.0: queryable traces
+
+**Run model.**
+- A run has an id, a trace id, and a parent, plus kind, inputs, outputs, error, timing, tokens, cost,
+  tags, metadata, events, and feedback.
+- Kinds cover every family: model, tool, graph, node, retriever, embedding, image, voice, realtime,
+  and operation.
+- This closes gap 2.1 for tracing. Realtime sessions and graphs finally report, alongside the
+  families that already do.
+
+**Instrumentation** (`nexus-ai-pro/tracing`).
+- Families are instrumented automatically through the existing `FamilyTelemetry`.
+- `traceable(fn, options)` wraps application code.
+- Context propagates through `AsyncLocalStorage`, which is created only when tracing is configured,
+  so untraced applications pay nothing.
+
+**Storage and export.**
+- `MemoryTraceStore`.
+- `JsonlTraceStore`, with file rotation.
+- `/tracing/postgres`, through a client interface.
+- The existing OpenTelemetry exporter.
+- Export uses a batching queue with backpressure and an explicit drop policy.
+
+**Privacy and cost control.**
+- Per-field input and output redaction, with PII detection loaded lazily.
+- Head sampling, plus tail sampling that keeps every error, every slow run, and every run above a
+  cost threshold.
+- Retention by age and size.
+
+**Querying and feedback.**
+- `query()` filters by status, latency, cost, model, tags, metadata, and time.
+- `getTree(traceId)` returns a run tree, and `compare(a, b)` gives a structural diff of two traces.
+- `recordFeedback(runId, { key, score, value, comment, source })` attaches feedback.
+
+**Alerts** (`/tracing/alerts`).
+- Rules over error rate, latency percentiles, and cost per window, grouped by model, route, or tenant.
+- Notifications through webhooks.
+- The repository gains Grafana dashboards and Prometheus alert rules. They live in the repository
+  only and are not shipped in the package.
+
+**Also in scope.** Circuit-breaker state through a distributed adapter, closing the per-process
+caveat in gap 2.4.
+
+**Budgets.** `/tracing` at most 12 KB. Adding tracing must not grow any other entry point's static
+import cost.
+
+**Proof.** `nexus traces tail` and `nexus traces show <id>` print the run tree of an agent, with
+graph nodes, tool calls, model calls, tokens, and cost. A test shows tail sampling keeping every error
+at a 1% head rate.
+
+---
+
+## 15. 1.15.0: evaluation platform
+
+**One evaluation entry point** (`nexus-ai-pro/evaluate`).
+- `evaluate(target, dataset, evaluators, { concurrency, repetitions, experiment, metadata })` accepts
+  any target: a completion, an agent, a graph, an image operation, or plain code.
+- `EvalRunner` and `MediaEvalRunner` keep their APIs and are rebuilt on top of it.
+
+**Datasets.**
+- Versioned examples with inputs, reference outputs, metadata, and splits.
+- `DatasetStore` adapters: memory, JSONL files, and Postgres.
+- Versions can be pinned by tag.
+- Datasets can be built from traces: "add this production run to the regression set."
+
+**Evaluators.**
+- Code evaluators, the existing LLM judge, and pairwise comparison.
+- Summary evaluators over a whole experiment.
+- Trajectory evaluators for agents and graphs: expected tool sequence and node path.
+- Similarity through an injected embedder, plus the existing metric library.
+
+**Experiments and comparisons.**
+- Results are stored with repetition statistics, reusing the media evaluation stats.
+- `compareExperiments(baseline, candidate)` reports per-example differences, with paired bootstrap
+  confidence intervals and a regression verdict.
+- Backtesting replays stored production traces against a new version.
+- `nexus eval run`, `nexus eval compare`, and `nexus eval gate --fail-on-regression` give CI a real
+  quality gate.
+
+**Online evaluation.**
+- Sampling rules select traces from the trace store.
+- Evaluators run asynchronously through the operation runner, with leases and retries.
+- Scores return as trace feedback, and alert rules can watch them.
+
+**Annotation queues.**
+- A generic `AnnotationQueue` extends the image review queue into rubrics, reviewer leases through
+  the operation store, and consensus. Reviewed items feed back into datasets.
+
+**Record and replay.**
+- Provider responses are recorded once and replayed in tests, so conformance and evaluations run
+  without credentials.
+- This is backlog item 10, and it gives image promotion a repeatable gate. The image family leaves
+  experimental in the first release after the live conformance suite passes against every hosted
+  backend.
+
+**Budgets.** `/evaluate` at most 25 KB. Stores and the CLI stay on their own subpaths.
+
+**Proof.** An example pull request changes a prompt, and `nexus eval gate` fails it with a
+per-example diff and a confidence interval. An online evaluator scores sampled traces in a running
+example.
+
+---
+
+## 16. 1.16.0: prompt and configuration versioning
+
+**Templates.** Message templates with typed variables, partials, and a model configuration bundled
+with each version.
+
+**Registry** (`nexus-ai-pro/prompts`).
+- Content-addressed versions, tags, and environments such as development, staging, and production.
+- History, diffs, and rollback.
+- Promotion can require a named experiment to pass first.
+- Webhooks fire on promotion.
+- Storage adapters: memory, files, Redis, and Postgres.
+
+**Serving.**
+- A client cache with a TTL and stale-while-revalidate.
+- If the registry is unreachable, the last known version for an environment keeps serving.
+- A/B serving with sticky assignment. Every trace records the prompt version it used.
+
+**Headless playground.** Run a prompt version against dataset examples; the output is a stored
+experiment.
+
+**Budgets.** `/prompts` at most 12 KB. The storage adapters sit on their own subpaths.
+
+**Proof.** A promotion from staging to production is refused until its experiment passes. A trace
+names the prompt version it ran. A simulated registry outage keeps serving the cached version.
+
+---
+
+## 17. 1.17.0 and 1.18.0: self-hosted server and local studio
+
+### 1.17.0: agent server (`nexus-ai-pro/server`, experimental)
+
+**API.**
+- REST and server-sent events for assistants, threads, runs, and cron jobs, over Node `http`.
+- Adapters for Express, Fastify, and NestJS.
+
+**Runs.**
+- Background runs execute through the operation runner, so leases, heartbeats, crash recovery, and
+  idempotency come from infrastructure that already exists.
+- Horizontal scaling through Redis.
+- When a new message arrives while a run is still going, the behaviour is configurable: `reject`,
+  `enqueue`, `interrupt`, or `rollback`.
+
+**Streaming.** Resumable with `Last-Event-ID`.
+
+**Integration.**
+- Authentication and tenancy through hooks.
+- Webhooks on completion.
+- A `RemoteGraph` client, so a deployed graph can be used as a subgraph.
+
+**Deployment.** Docker and Compose templates in the repository.
+
+**Proof.** A Compose example runs two replicas with Redis. A run keeps going after the replica that
+started it is killed, and a reconnecting client resumes its event stream.
+
+### 1.18.0: local studio (separate package)
+
+**Packaging.** A separate npm package, so the core install never carries a UI. Its name is still to
+be decided.
+
+**Views.**
+- Traces, with trees and diffs.
+- Threads, with a live diagram, state, forks, edit, and resume.
+- An approvals inbox covering interrupts and annotation queues.
+- Datasets and experiment comparisons.
+- Prompts and the playground.
+- Costs and budgets.
+- Provider health and circuit states.
+- The operation queue and assets.
+
+**Architecture.** It reads the stores above through their adapters, requires no hosted service, and
+protects local access with a token.
+
+**Proof.** `npx <studio-package>` against the example application shows a traced agent run, an
+approval waiting in the inbox, and an experiment comparison.
+
+---
+
+## 18. 2.0.0: consolidation
+
+2.0.0 ships once 1.11.0 through 1.18.0 are released, each experimental surface has had at least one
+minor release to settle, and every removal below has been deprecated in a 1.x release.
+
+**Breaking changes.**
+- **One lifecycle for every operation:**
+  `validate → authorize → input policy → resolve assets → route → reserve budget → execute →`
+  `output policy → persist → reconcile cost → audit`
+  - Completions, streams, embeddings, voice, realtime, telephony, images, jobs, graphs, and agents
+    share authorization, budgets, hooks, audit, metrics, tracing, and finalization, including cache
+    hits.
+  - Every family gets a shared `ProviderCallContext` carrying the abort signal, deadline, request id,
+    trace context, and idempotency key.
+- `PipelineContext` becomes generic over request and response, and `PipelineStepName` loses its
+  `| string` escape.
+- The deprecated `estimatedCost` string is removed in favour of the numeric `cost` object.
+- The registry splits `inputModalities` from `outputModalities`, ending the overlap between
+  `vision`, `image`, and `pdf`.
+- True mixed text-and-asset outputs, so a tool result can pass asset references instead of base64
+  JSON.
+- **A slim root import.** The root exports the core client, config builders, types, and errors, and
+  every family is reached through its subpath. Target: at most 250 KB, down from 674 KB.
+- **Optional validators and types.**
+  - `zod`, `ajv`, and `ajv-formats` become optional peer dependencies, needed only when a caller
+    passes a schema.
+  - `@types/node` becomes an optional peer.
+  - Target: a graph-only consumer installs at most 3.5 MB, down from about 10 MB.
+- **Checkpoint schema v2.**
+  - Task and checkpoint ids become required.
+  - `interrupt` gives way to `interrupts`.
+  - `migrateCheckpoint()` reads v1, and both checkpointers keep reading v1 for the whole 2.x line.
+- Deprecated aliases are removed, including `ImageManagerConfig`. The full list is audited when the
+  2.0 branch opens.
+
+**Promotions to stable.** Advanced graph APIs, the store, agents, tracing, evaluation, prompts, and
+the server. Images too, if live conformance has passed.
+
+**Migration.**
+- `MIGRATING.md` covers every breaking item, with before-and-after code.
+- `nexus migrate` rewrites import paths.
+- The last 1.x minor release logs each deprecated call once per process.
+
+**Runtime.** Node 22 reaches end of life in April 2027. If 2.0.0 ships after that, the engine floor
+moves to Node 24.
+
+---
+
+## 19. Longer-term backlog
+
+**Absorbed by the releases above.** MCP adapters, human approval checkpoints, prompt and workflow
+versioning, record and replay fixtures, and the local control plane.
+
+**Remaining:**
+1. Video generation through the same asynchronous operation, job, and asset contracts.
+2. Realtime follow-ons: a second provider, SIP and video transports, durable session recovery,
+   browser compatibility automation, and a published method for latency and load benchmarks.
+3. Telephony follow-ons: a second provider (Vonage, Telnyx, or SIP-native), outbound SMS and
+   messaging as an operation family, call recording with a retention policy, and conference and
+   transfer control.
+4. OCR, captioning, visual question answering, image embeddings, and media search and RAG.
+5. Policy-as-code presets versioned independently from the runtime.
+6. Multi-tenant credential-vault adapters and routing by provider residency.
+7. Browser and edge builds: Node filesystem, crypto, DNS, and stream dependencies isolated behind
+   adapters, so that compatibility is explicit.
+8. Streaming reads and writes for the filesystem and S3 asset stores.
+9. Vector store adapters for retrieval (pgvector, Qdrant) through injected client interfaces.
+
+**Deliberately not planned.**
+- A hosted service. Deployment stays self-hosted through the server and templates.
+- A large third-party integration catalogue. MCP covers breadth instead.
+- A second language runtime.
+
+---
+
+## 20. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -564,7 +1006,7 @@ await ai.images.edit({
 
 ---
 
-## 13. How an item graduates
+## 21. How an item graduates
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.
