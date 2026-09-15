@@ -4,6 +4,7 @@ import type {
   CompileOptions,
   EdgeRouter,
   GraphCheckpoint,
+  GraphCheckpointer,
   GraphProgress,
   GraphResult,
   GraphRunOptions,
@@ -16,6 +17,7 @@ import type {
   StateUpdate,
 } from '../types/graph.js';
 import { END, START } from '../types/graph.js';
+import { MemoryGraphCheckpointer } from './checkpointer.js';
 import {
   GraphInterrupt,
   GraphNodeError,
@@ -141,6 +143,7 @@ export class StateGraph<S extends ChannelSchema> {
 /** A validated graph, ready to run. */
 export class CompiledGraph<S extends ChannelSchema> {
   private readonly now: () => Date;
+  private readonly store: GraphCheckpointer | undefined;
 
   constructor(
     private readonly channels: S,
@@ -149,18 +152,21 @@ export class CompiledGraph<S extends ChannelSchema> {
     private readonly options: CompileOptions,
   ) {
     this.now = options.now ?? (() => new Date());
+    this.store = options.checkpointer === false ? undefined : (options.checkpointer ?? new MemoryGraphCheckpointer());
   }
 
   /** Runs to completion, to an interrupt, or to the step limit. */
   async invoke(input: StateUpdate<S> = {}, runOptions: GraphRunOptions = {}): Promise<GraphResult<S>> {
+    // Resolve the id here rather than inside stream(), so the result reports the id actually used.
+    const threadId = resolveThreadId(runOptions.threadId);
     let last: GraphStepEvent<S> | undefined;
-    for await (const event of this.stream(input, runOptions)) last = event;
-    return this.toResult(runOptions.threadId ?? '', last);
+    for await (const event of this.stream(input, { ...runOptions, threadId })) last = event;
+    return this.toResult(threadId, last);
   }
 
   /** Yields one event per superstep, so a caller can render progress as it happens. */
   stream(input: StateUpdate<S> = {}, runOptions: GraphRunOptions = {}): AsyncIterable<GraphStepEvent<S>> {
-    const threadId = runOptions.threadId?.trim() || `thread-${randomBytes(6).toString('hex')}`;
+    const threadId = resolveThreadId(runOptions.threadId);
     return this.run(threadId, runOptions, async () => {
       const state = this.seedState(input);
       const next = this.entryNodes();
@@ -448,8 +454,8 @@ export class CompiledGraph<S extends ChannelSchema> {
     await this.checkpointer()?.put(checkpoint as GraphCheckpoint);
   }
 
-  private checkpointer() {
-    return this.options.checkpointer;
+  private checkpointer(): GraphCheckpointer | undefined {
+    return this.store;
   }
 
   private toEvent(checkpoint: GraphCheckpoint<S>, nodes: string[]): GraphStepEvent<S> {
@@ -480,6 +486,10 @@ export class CompiledGraph<S extends ChannelSchema> {
 /** Starts a graph definition. */
 export function createGraph<S extends ChannelSchema>(config: { channels: S }): StateGraph<S> {
   return new StateGraph(config.channels);
+}
+
+function resolveThreadId(requested: string | undefined): string {
+  return requested?.trim() || `thread-${randomBytes(6).toString('hex')}`;
 }
 
 function describe(error: unknown): string {

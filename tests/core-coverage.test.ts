@@ -150,9 +150,10 @@ test('the agent loop records a failing tool without aborting the run', async () 
   assert.equal(result.content, 'I could not use the tool.');
 });
 
-test('the agent loop tolerates malformed tool arguments and stops at maxIterations', async () => {
+test('the agent loop refuses malformed tool arguments and reports hitting maxIterations', async () => {
   const client = new ScriptedAgentClient([{ content: '', toolCalls: [toolCall('echo', 'not json')] }]);
   let received: Record<string, unknown> | undefined;
+  let calls = 0;
 
   const result = await new AgentLoop(client).run({
     model: 'mock/test',
@@ -165,15 +166,33 @@ test('the agent loop tolerates malformed tool arguments and stops at maxIteratio
         parameters: { type: 'object' },
         execute: async (args) => {
           received = args;
+          calls += 1;
           return 'ok';
         },
       },
     ],
   });
 
-  assert.deepEqual(received, {}, 'unparsable arguments become an empty object rather than throwing');
+  assert.equal(calls, 0, 'a tool never runs with arguments the model did not actually send');
+  assert.equal(received, undefined);
+  const toolMessage = result.messages.find((message) => message.role === 'tool');
+  assert.match(String(toolMessage?.content), /not valid JSON.*the tool was not run/);
   assert.equal(result.iterations, 3);
+  assert.equal(result.stopReason, 'max_iterations');
   assert.equal(client.requests.length, 3);
+
+  const arrayArgs = new ScriptedAgentClient([
+    { content: '', toolCalls: [toolCall('echo', '[1,2]')] },
+    { content: 'done' },
+  ]);
+  const finished = await new AgentLoop(arrayArgs).run({
+    model: 'mock/test',
+    goal: 'array arguments',
+    tools: [{ name: 'echo', description: 'echoes', parameters: { type: 'object' }, execute: async () => 'ok' }],
+  });
+  assert.equal(calls, 0);
+  assert.match(String(finished.messages.find((message) => message.role === 'tool')?.content), /must be a JSON object/);
+  assert.equal(finished.stopReason, 'completed');
 });
 
 // ── Rules router ───────────────────────────────────────────────────

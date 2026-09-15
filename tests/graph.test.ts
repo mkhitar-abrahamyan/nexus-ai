@@ -353,16 +353,70 @@ test('resuming an unknown thread is reported clearly', async () => {
   await assert.rejects(() => collect(graph.continue('missing')), GraphThreadNotFoundError);
 });
 
-test('without a checkpointer there is no history to read', async () => {
+test('with checkpointing turned off there is no history to read', async () => {
   const graph = createGraph({ channels: basicChannels() })
     .addNode('a', () => undefined)
     .setEntry('a')
     .addEdge('a', END)
-    .compile();
+    .compile({ checkpointer: false });
 
   await graph.invoke({}, { threadId: 't3' });
   assert.deepEqual(await graph.history('t3'), []);
   assert.equal(await graph.state('t3'), undefined);
+});
+
+test('compile() checkpoints in memory by default, so interrupts and history work without setup', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('approve', (ctx) => ({ done: ctx.interrupt<boolean>({ reason: 'Approve?' }) }))
+    .setEntry('approve')
+    .addEdge('approve', END)
+    .compile();
+
+  // No threadId: the generated one must come back on the result, or the run could never be resumed.
+  const paused = await graph.invoke();
+  assert.equal(paused.status, 'awaiting_input');
+  assert.match(paused.threadId, /^thread-[0-9a-f]{12}$/);
+  assert.equal((await graph.state(paused.threadId))?.status, 'awaiting_input');
+
+  const resumed = await graph.resumeWith(paused.threadId, true);
+  assert.equal(resumed.status, 'completed');
+  assert.equal(resumed.threadId, paused.threadId);
+  assert.equal(resumed.state.done, true);
+  assert.ok((await graph.history(paused.threadId)).length >= 2);
+});
+
+test('a named thread id is reported back trimmed, exactly as it was stored', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('a', () => ({ count: 1 }))
+    .setEntry('a')
+    .addEdge('a', END)
+    .compile();
+
+  const result = await graph.invoke({}, { threadId: '  order-42 ' });
+  assert.equal(result.threadId, 'order-42');
+  assert.equal((await graph.state('order-42'))?.status, 'completed');
+});
+
+test('the in-memory checkpointer drops the least recently written thread past maxThreads', () => {
+  const checkpointer = new MemoryGraphCheckpointer({ maxThreads: 2 });
+  const checkpoint = (threadId: string, step: number) => ({
+    threadId,
+    step,
+    state: {},
+    next: [],
+    status: 'completed' as const,
+    createdAt: new Date(0).toISOString(),
+  });
+
+  checkpointer.put(checkpoint('a', 0));
+  checkpointer.put(checkpoint('b', 0));
+  checkpointer.put(checkpoint('a', 1)); // touching "a" makes "b" the oldest
+  checkpointer.put(checkpoint('c', 0));
+
+  assert.deepEqual(checkpointer.threadIds().sort(), ['a', 'c']);
+  assert.equal(checkpointer.get('b'), undefined);
+  assert.equal(checkpointer.get('a')?.step, 1);
+  assert.throws(() => new MemoryGraphCheckpointer({ maxThreads: 0 }), RangeError);
 });
 
 // ── Human in the loop ──────────────────────────────────────────────
@@ -458,12 +512,12 @@ test('resuming a thread that is not waiting is refused', async () => {
   await assert.rejects(() => graph.resumeWith('done', true), GraphNotInterruptedError);
 });
 
-test('interrupt without a checkpointer fails loudly rather than hanging', async () => {
+test('interrupt with checkpointing turned off fails loudly rather than hanging', async () => {
   const graph = createGraph({ channels: basicChannels() })
     .addNode('ask', (ctx) => ({ done: ctx.interrupt<boolean>({ reason: 'Approve?' }) }))
     .setEntry('ask')
     .addEdge('ask', END)
-    .compile();
+    .compile({ checkpointer: false });
 
   await assert.rejects(() => graph.invoke(), /without a checkpointer/);
 });

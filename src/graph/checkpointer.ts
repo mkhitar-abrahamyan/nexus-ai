@@ -4,20 +4,31 @@ import type { OperationRecord, OperationStore } from '../types/operations.js';
 export interface MemoryGraphCheckpointerOptions {
   /** Checkpoints kept per thread, newest first. Defaults to 50. */
   maxPerThread?: number;
+  /**
+   * Threads kept before the least recently written one is dropped. Defaults to 1,000.
+   *
+   * The cap is what makes this safe as a default: a service that runs graphs without ever resuming
+   * them would otherwise grow without bound. Pass `Infinity` to keep every thread.
+   */
+  maxThreads?: number;
 }
 
 /**
  * In-process checkpoint history.
  *
- * The default, and enough for a single process that wants interrupts, resume, and time travel
- * without a store. It does not survive a restart; `OperationStoreCheckpointer` does.
+ * The default when `compile()` is given no checkpointer, and enough for a single process that wants
+ * interrupts, resume, and time travel without a store. It does not survive a restart;
+ * `OperationStoreCheckpointer` does.
  */
 export class MemoryGraphCheckpointer implements GraphCheckpointer {
   private readonly threads = new Map<string, GraphCheckpoint[]>();
   private readonly maxPerThread: number;
+  private readonly maxThreads: number;
 
   constructor(options: MemoryGraphCheckpointerOptions = {}) {
     this.maxPerThread = options.maxPerThread ?? 50;
+    this.maxThreads = options.maxThreads ?? 1_000;
+    if (!(this.maxThreads >= 1)) throw new RangeError('maxThreads must be at least 1');
   }
 
   put(checkpoint: GraphCheckpoint): void {
@@ -28,7 +39,13 @@ export class MemoryGraphCheckpointer implements GraphCheckpointer {
     list.push(clone(checkpoint));
     list.sort((a, b) => a.step - b.step);
     while (list.length > this.maxPerThread) list.shift();
+    // Re-inserting moves the thread to the end, so Map order is least recently written first.
+    this.threads.delete(checkpoint.threadId);
     this.threads.set(checkpoint.threadId, list);
+    while (this.threads.size > this.maxThreads) {
+      const oldest = this.threads.keys().next().value as string;
+      this.threads.delete(oldest);
+    }
   }
 
   get(threadId: string, step?: number): GraphCheckpoint | undefined {

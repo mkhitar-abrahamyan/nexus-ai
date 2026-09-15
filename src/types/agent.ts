@@ -27,6 +27,12 @@ export interface AgentResult {
   content: string;
   steps: AgentStep[];
   iterations: number;
+  /**
+   * Why the loop ended. `max_iterations` means the model was still requesting tools when the limit
+   * was reached, so `content` is not a final answer. Always set by `AgentLoop`; optional in the type so
+   * results constructed elsewhere, such as test doubles, keep compiling.
+   */
+  stopReason?: 'completed' | 'max_iterations';
   response: NexusResponse;
   messages: Message[];
 }

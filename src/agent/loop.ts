@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentResult, AgentStep } from '../types/agent.js';
+import type { AgentConfig, AgentResult, AgentStep, ToolExecutionResult } from '../types/agent.js';
 import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import { ToolExecutor } from './tool.js';
@@ -55,14 +55,20 @@ export class AgentLoop {
           content: response.content,
           steps,
           iterations: iteration,
+          stopReason: 'completed',
           response,
           messages,
         };
       }
 
       for (const toolCall of response.toolCalls) {
-        const args = this.parseToolArgs(toolCall.function.arguments);
-        const result = await executor.execute(toolCall.function.name, args);
+        const parsed = parseToolArgs(toolCall.function.arguments);
+        // Malformed arguments are reported back to the model rather than guessed at: running a tool
+        // with empty arguments could perform an action the model never asked for.
+        const result: ToolExecutionResult = parsed.ok
+          ? await executor.execute(toolCall.function.name, parsed.args)
+          : { ok: false, error: parsed.error };
+        const args = parsed.ok ? parsed.args : {};
 
         const toolStep: AgentStep = {
           iteration,
@@ -93,17 +99,24 @@ export class AgentLoop {
       content: lastResponse.content,
       steps,
       iterations: maxIterations,
+      stopReason: 'max_iterations',
       response: lastResponse,
       messages,
     };
   }
+}
 
-  private parseToolArgs(raw: string): Record<string, unknown> {
-    try {
-      const parsed = JSON.parse(raw || '{}');
-      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
+type ParsedToolArgs = { ok: true; args: Record<string, unknown> } | { ok: false; error: string };
+
+function parseToolArgs(raw: string): ParsedToolArgs {
+  // An absent argument string is a call with no arguments, which is legitimate.
+  if (!raw?.trim()) return { ok: true, args: {} };
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) return { ok: true, args: parsed };
+    return { ok: false, error: 'Tool arguments must be a JSON object; the tool was not run' };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `Tool arguments are not valid JSON (${reason}); the tool was not run` };
   }
 }

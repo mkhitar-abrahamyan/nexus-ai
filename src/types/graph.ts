@@ -138,7 +138,7 @@ export interface GraphCheckpointer {
 export interface GraphRunOptions {
   /**
    * Identifies the run. Reusing one resumes that thread rather than starting a second.
-   * Defaults to a generated id, which means an unnamed run is not resumable.
+   * Defaults to a generated id, returned on the result so the run can still be inspected or resumed.
    */
   threadId?: string;
   /**
@@ -173,7 +173,12 @@ export interface GraphStepEvent<S extends ChannelSchema> {
 }
 
 export interface CompileOptions {
-  checkpointer?: GraphCheckpointer;
+  /**
+   * Where checkpoints go. Defaults to an in-process `MemoryGraphCheckpointer` holding up to 1,000
+   * threads, so interrupts, `state()`, and `history()` work without setup. Pass a persistent
+   * checkpointer to survive restarts, or `false` to write no checkpoints at all.
+   */
+  checkpointer?: GraphCheckpointer | false;
   maxSteps?: number;
   /** Identifies this graph in checkpoints and subgraph node names. */
   name?: string;

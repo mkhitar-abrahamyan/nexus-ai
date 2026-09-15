@@ -74,6 +74,25 @@ and none is loaded by the root import.
 - **SSRF protection is shared.** It moved out of the web connector into one module that the connector
   and image inputs both use. The web connector behaves the same, and its security tests pass
   unchanged. Policy refusals are now a `UrlPolicyError`, with the same messages.
+- **Graphs checkpoint by default, as the documentation always said.** `compile()` now uses an
+  in-process `MemoryGraphCheckpointer` when none is given, so `interrupt()`, `state()`, and
+  `history()` work without setup. The default keeps at most 1,000 threads, dropping the least recently
+  written one, so a service that never resumes cannot grow without limit. `maxThreads` is configurable,
+  and `checkpointer: false` turns checkpointing off. Before this fix, `compile()` created no
+  checkpointer and `interrupt()` threw.
+
+### Fixed
+
+- **An unnamed graph run now reports its thread id.** `invoke()` without a `threadId` returned
+  `threadId: ''` even though it had generated one, so the run could not be inspected or resumed.
+- **`AgentLoop` no longer runs a tool with arguments the model did not send.** Malformed tool-call
+  JSON, or arguments that are not an object, used to become `{}` and the tool ran anyway. The tool is
+  now skipped, and the parse error goes back to the model as the tool result.
+- **`AgentLoop` says why it stopped.** `AgentResult.stopReason` is `completed` or `max_iterations`, so
+  a caller can tell a final answer from a run that hit the iteration limit.
+
+### Changed (continued)
+
 - **The whole-package size limit is higher.** The new modules are about 200 KB unpacked across both
   builds, so the tarball limit rose from 460 KB to 500 KB packed and from 2.85 MB to 3.1 MB unpacked.
   No existing import got heavier because of them. Each new module has its own per-subpath budget, and

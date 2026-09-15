@@ -277,6 +277,10 @@ to Redis is not a checkpoint.
 and threading the schema through it would force an annotation on every construction for no benefit.
 The graph casts at that boundary and hands typed state back through `state()` and `history()`.
 
+`compile()` without a checkpointer uses an in-process `MemoryGraphCheckpointer` capped at 1,000
+threads (Unreleased; earlier releases created none). `checkpointer: false` disables checkpointing. A
+run started without a `threadId` reports its generated id on the result.
+
 Scheduling within a superstep is not a guarantee. Nodes in a fan-out currently run in edge order and
 sequentially; running them concurrently is a valid future change, so a node must not depend on
 observing another node's write within the same superstep — that is what channels are for. The default

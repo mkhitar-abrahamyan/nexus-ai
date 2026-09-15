@@ -1753,9 +1753,9 @@ past its budget — so the numbers stay true rather than aspirational.
 <!-- size-table:start -->
 | Import | Size | Share of root |
 | --- | --- | --- |
-| `nexus-ai-pro` | 611 KB | 100% |
-| `nexus-ai-pro/config` | 467 KB | 76% |
-| `nexus-ai-pro/core` | 461 KB | 75% |
+| `nexus-ai-pro` | 612 KB | 100% |
+| `nexus-ai-pro/config` | 468 KB | 76% |
+| `nexus-ai-pro/core` | 462 KB | 75% |
 | `nexus-ai-pro/realtime` | 157 KB | 26% |
 | `nexus-ai-pro/batch` | 118 KB | 19% |
 | `nexus-ai-pro/realtime/session` | 94 KB | 15% |
@@ -1772,8 +1772,8 @@ past its budget — so the numbers stay true rather than aspirational.
 | `nexus-ai-pro/providers/google` | 66 KB | 11% |
 | `nexus-ai-pro/images` | 65 KB | 11% |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 9% |
-| `nexus-ai-pro/batch/openai` | 52 KB | 9% |
-| `nexus-ai-pro/batch/anthropic` | 52 KB | 9% |
+| `nexus-ai-pro/batch/openai` | 52 KB | 8% |
+| `nexus-ai-pro/batch/anthropic` | 52 KB | 8% |
 | `nexus-ai-pro/operations` | 49 KB | 8% |
 | `nexus-ai-pro/batch/mock` | 47 KB | 8% |
 | `nexus-ai-pro/providers/cohere` | 46 KB | 8% |
@@ -1781,7 +1781,7 @@ past its budget — so the numbers stay true rather than aspirational.
 | `nexus-ai-pro/security` | 40 KB | 7% |
 | `nexus-ai-pro/models` | 35 KB | 6% |
 | `nexus-ai-pro/images/inputs` | 31 KB | 5% |
-| `nexus-ai-pro/graph` | 29 KB | 5% |
+| `nexus-ai-pro/graph` | 30 KB | 5% |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 5% |
 | `nexus-ai-pro/evals` | 23 KB | 4% |
 | `nexus-ai-pro/images/transform` | 22 KB | 4% |

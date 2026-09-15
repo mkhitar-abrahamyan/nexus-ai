@@ -456,7 +456,7 @@ Google Imagen, and ComfyUI. Everything below is implemented and tested, and awai
 - **Modality cleanup: deferred to 2.0.** Splitting `inputModalities` from `outputModalities` is a
   breaking registry change, and it is listed in section 18.
 
-- **Graph and agent correctness: planned before release.** A review of the 1.9.0 source found nine
+- **Graph and agent correctness: 1, 2, 8, and 9 landed; 3 to 7 are still planned before release.** A review of the 1.9.0 source found nine
   defects where the code contradicts documented behaviour. Each fix restores what the docs already
   promise, so none changes the public API:
   1. **No default checkpointer.** `compile()` never creates one, although the README and the
