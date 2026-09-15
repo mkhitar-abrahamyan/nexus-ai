@@ -3,15 +3,25 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
+Status baseline: **1.9.0**. 70 export subpaths, each held to a size budget in CI, 12 completion
+providers, 5 embedding providers, 2 batch providers, 101 completion registry models plus 63 aliases,
+and 11 embedding models plus 5 aliases. 444 unit tests pass; coverage sits at **89.3% lines / 73.7%
+branches / 83.4% functions** against gates of 82/67/73. CI verifies lint, format, build, tests,
+coverage, registry drift, per-subpath size, mock conformance, packed-package smoke, API contract,
+consumer type resolution, and clean install on Node 22 and 24.
+
+---
+
 ## How we measure progress
 
 Two axes, weighed together: **capability** and **install weight**. A capability that only works by
 importing the whole runtime fails the second test however well it does on the first, so install
 weight is a constraint on every new feature rather than a feature of its own.
 
-Measured from the 1.8.0 build, an entry point costs a fraction of the root import: `/graph` 5%,
+Measured from the 1.9.0 build, an entry point costs a fraction of the root import: `/graph` 5%,
 `/operations` 8%, `/images/stores` 4%, `/ops/circuit-breaker` 1%, `/cache/memory-cache` 0.5%,
-`/streaming` 0.2%. Every new capability gets its own export subpath and stays out of the root.
+`/streaming` 0.2%. Every new capability gets its own export subpath and stays out of the root,
+and `npm run size:check` fails the build when any entry point grows past its budget.
 
 Two things this project deliberately does not chase: a large catalogue of third-party integrations,
 and a second language runtime. Both are decided by headcount rather than design, and pursuing either
@@ -142,7 +152,13 @@ resume, time travel, and human-in-the-loop interrupts work without opting into a
 `OperationStoreCheckpointer` persists through the store that already backs durable operations, which
 is what makes a thread survive a restart and lets a different worker finish it.
 
-### 1.13 Operations, evaluation, and packaging
+### 1.13 Install weight
+
+Delivered in 1.9.0. Every export subpath is held to a size budget in CI, and the README publishes a
+generated table of what each import costs, which the same check keeps from going stale. Enforcing a
+cost budget no longer loads the model catalogue, which took `/embeddings` from 129 KB to 91 KB.
+
+### 1.14 Operations, evaluation, and packaging
 
 Rate limiting, audit logging, in-memory and OpenTelemetry metrics sinks, Prometheus export, an
 OpenTelemetry trace exporter, provider health monitoring, `EvalRunner` with LLM-as-judge and a
@@ -370,9 +386,9 @@ concurrency that does not exist.
 
 ---
 
-## 8. Next release: 1.9.0 — size and modularity as a shipped feature
+## 8. Shipped in 1.9.0 — size and modularity
 
-The differentiator, made checkable rather than claimed. Landed on `main`, unreleased.
+The differentiator, made checkable rather than claimed.
 
 - **Budget enforcement split from price lookup.** Comparing two numbers no longer loads the 101-model
   catalogue. `/embeddings` fell 29%, from 129 KB to 91 KB, and no longer reaches
@@ -389,7 +405,7 @@ that trade is worth making.
 
 ---
 
-## 9. 1.10.0 — image portability, then promotion
+## 9. Next release: 1.10.0 — image portability, then promotion
 
 Images cannot leave experimental until the neutral contract survives a second wire protocol.
 

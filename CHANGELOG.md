@@ -6,6 +6,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-15
+
+Install weight, made measurable and enforced. Every export subpath now has a size budget that
+CI holds it to, the README publishes what each import costs, and enforcing a cost budget no
+longer loads the model catalogue. No public API changed.
+
 ### Added
 
 - **A per-subpath size budget, enforced in CI.** `npm run size:check` measures the transitive import
@@ -451,7 +457,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.5.0...v1.6.0
