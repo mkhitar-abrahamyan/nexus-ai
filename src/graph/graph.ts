@@ -207,11 +207,16 @@ export class CompiledGraph<S extends ChannelSchema> {
   continue(threadId: string, runOptions: GraphRunOptions = {}): AsyncIterable<GraphStepEvent<S>> {
     return this.run(threadId, runOptions, async () => {
       const checkpoint = await this.requireCheckpoint(threadId);
-      return { ...checkpoint, status: 'running' };
+      return { ...checkpoint, status: 'running', error: undefined };
     });
   }
 
-  /** Rewinds to an earlier superstep and runs forward from there. */
+  /**
+   * Rewinds to an earlier superstep and runs forward from there.
+   *
+   * Checkpoints after `step` belong to the timeline being abandoned, so the checkpointer drops them
+   * once the rewound checkpoint is written.
+   */
   resumeFrom(threadId: string, step: number, runOptions: GraphRunOptions = {}): AsyncIterable<GraphStepEvent<S>> {
     return this.run(threadId, runOptions, async () => {
       const checkpoint = (await this.checkpointer()?.get(threadId, step)) as GraphCheckpoint<S> | undefined;
@@ -235,18 +240,35 @@ export class CompiledGraph<S extends ChannelSchema> {
    *
    * The subgraph runs to completion within one superstep of the parent. Channels the two graphs
    * share by name are passed in and merged back; anything else stays private to the subgraph.
+   *
+   * When the subgraph interrupts, the parent interrupts with the same question. Resuming the parent
+   * passes the answer into the subgraph, which continues where it stopped rather than starting over.
    */
   asNode<P extends ChannelSchema>(): NodeFn<P> {
     return async (context) => {
-      const seed: Record<string, unknown> = {};
-      for (const key of Object.keys(this.channels)) {
-        if (key in context.state) seed[key] = (context.state as Record<string, unknown>)[key];
+      const runOptions: GraphRunOptions = { threadId: `${context.threadId}:${context.node}`, signal: context.signal };
+      const paused = await this.state(runOptions.threadId as string);
+      let result: GraphResult<S>;
+
+      if (paused?.status === 'awaiting_input' && paused.interrupt) {
+        // The parent node is being replayed after an answer. Every answer the subgraph already
+        // received came through an earlier parent interrupt, so consume those positions in order;
+        // the next position is the answer to the question the subgraph is waiting on now.
+        const answered = Object.keys(paused.resolved ?? {}).length;
+        for (let index = 0; index < answered; index += 1) context.interrupt({ reason: paused.interrupt.reason });
+        result = this.checkpointResult(paused);
+      } else {
+        const seed: Record<string, unknown> = {};
+        for (const key of Object.keys(this.channels)) {
+          if (key in context.state) seed[key] = (context.state as Record<string, unknown>)[key];
+        }
+        result = await this.invoke(seed as StateUpdate<S>, runOptions);
       }
 
-      const result = await this.invoke(seed as StateUpdate<S>, {
-        threadId: `${context.threadId}:${context.node}`,
-        signal: context.signal,
-      });
+      while (result.status === 'awaiting_input' && result.interrupt) {
+        const answer = context.interrupt({ reason: result.interrupt.reason, payload: result.interrupt.payload });
+        result = await this.resumeWith(runOptions.threadId as string, answer, runOptions);
+      }
 
       const update: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(result.state)) {
@@ -280,6 +302,9 @@ export class CompiledGraph<S extends ChannelSchema> {
 
       const step = checkpoint.step + 1;
       const running = [...checkpoint.next];
+      // Nodes of this step that finished before an earlier pause or failure. Their writes are already
+      // in state; they only still count for routing once the step completes.
+      const carried = checkpoint.completed ?? [];
       const updates: Array<StateUpdate<S>> = [];
       const finished: string[] = [];
       let pending: PendingInterrupt | undefined;
@@ -305,8 +330,13 @@ export class CompiledGraph<S extends ChannelSchema> {
             };
             break;
           }
+          // Keep what the siblings that already finished wrote, and carry only the unfinished nodes,
+          // so continue() retries the failure without repeating side effects that already happened.
           const failed: GraphCheckpoint<S> = {
             ...checkpoint,
+            state: this.reduce(checkpoint.state, updates),
+            next: running.filter((item) => !finished.includes(item)),
+            completed: [...carried, ...finished],
             status: 'failed',
             error: { name: error instanceof Error ? error.name : 'Error', message: describe(error) },
             createdAt: this.now().toISOString(),
@@ -326,6 +356,7 @@ export class CompiledGraph<S extends ChannelSchema> {
           ...checkpoint,
           state,
           next: running.filter((node) => !finished.includes(node)),
+          completed: [...carried, ...finished],
           status: 'awaiting_input',
           interrupt: pending,
           createdAt: this.now().toISOString(),
@@ -335,7 +366,9 @@ export class CompiledGraph<S extends ChannelSchema> {
         return;
       }
 
-      const next = await this.nextNodes(running, state);
+      // Route from every node of the step, including those that finished before a pause or failure;
+      // otherwise their outgoing edges would be lost on resume.
+      const next = await this.nextNodes([...carried, ...running], state);
       checkpoint = {
         threadId,
         step,
@@ -379,7 +412,14 @@ export class CompiledGraph<S extends ChannelSchema> {
         }
         throw new GraphInterrupt(request, node, step, index);
       },
-      report: (progress) => this.options.checkpointer && void progress,
+      report: (progress) => {
+        if (!runOptions.onProgress) return;
+        try {
+          runOptions.onProgress({ ...progress, step, node });
+        } catch {
+          // Progress is informational; a broken listener must not fail the node reporting it.
+        }
+      },
     };
 
     const result = await fn(context);
@@ -451,7 +491,22 @@ export class CompiledGraph<S extends ChannelSchema> {
 
   /** Persists a checkpoint. The store keeps opaque state; the schema stays this class's business. */
   private async save(checkpoint: GraphCheckpoint<S>): Promise<void> {
-    await this.checkpointer()?.put(checkpoint as GraphCheckpoint);
+    const store = this.checkpointer();
+    if (!store) return;
+    const named = this.options.name
+      ? { ...checkpoint, metadata: { ...checkpoint.metadata, graph: this.options.name } }
+      : checkpoint;
+    await store.put(named as GraphCheckpoint);
+  }
+
+  private checkpointResult(checkpoint: GraphCheckpoint<S>): GraphResult<S> {
+    return {
+      threadId: checkpoint.threadId,
+      status: checkpoint.status,
+      state: checkpoint.state,
+      steps: checkpoint.step,
+      ...(checkpoint.interrupt ? { interrupt: checkpoint.interrupt } : {}),
+    };
   }
 
   private checkpointer(): GraphCheckpointer | undefined {

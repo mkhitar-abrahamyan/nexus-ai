@@ -32,10 +32,9 @@ export class MemoryGraphCheckpointer implements GraphCheckpointer {
   }
 
   put(checkpoint: GraphCheckpoint): void {
-    const list = this.threads.get(checkpoint.threadId) ?? [];
-    // A resumed run can rewrite a step it already wrote, so replace rather than append blindly.
-    const existing = list.findIndex((item) => item.step === checkpoint.step);
-    if (existing >= 0) list.splice(existing, 1);
+    // Writing step N means the thread continues from N. Anything already stored at N or later belongs
+    // to a timeline that was rewound or restarted, and would otherwise surface as the "latest" state.
+    const list = (this.threads.get(checkpoint.threadId) ?? []).filter((item) => item.step < checkpoint.step);
     list.push(clone(checkpoint));
     list.sort((a, b) => a.step - b.step);
     while (list.length > this.maxPerThread) list.shift();
@@ -100,7 +99,12 @@ export class OperationStoreCheckpointer implements GraphCheckpointer {
     await this.write(stepId(checkpoint.threadId, checkpoint.step), checkpoint);
 
     const head = await this.readHead(checkpoint.threadId);
-    const steps = [...new Set([...(head?.steps ?? []), checkpoint.step])].sort((a, b) => a - b);
+    // As in the memory checkpointer, steps after this one belong to an abandoned timeline.
+    for (const stale of head?.steps.filter((step) => step > checkpoint.step) ?? []) {
+      await this.store.delete?.(stepId(checkpoint.threadId, stale));
+    }
+    const kept = (head?.steps ?? []).filter((step) => step < checkpoint.step);
+    const steps = [...kept, checkpoint.step];
     while (steps.length > this.maxPerThread) {
       const dropped = steps.shift() as number;
       await this.store.delete?.(stepId(checkpoint.threadId, dropped));

@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-16
+
 Image portability. Three image backends now sit behind one contract: OpenAI, Google Imagen, and a
 self-hosted ComfyUI server. Masked edits work on all three, and every input is validated before any
 provider sees it. Visual moderation inspects both the request and the generated images. Image output
@@ -80,9 +82,30 @@ and none is loaded by the root import.
   written one, so a service that never resumes cannot grow without limit. `maxThreads` is configurable,
   and `checkpointer: false` turns checkpointing off. Before this fix, `compile()` created no
   checkpointer and `interrupt()` threw.
+- **The whole-package size limit is higher.** The new modules are about 200 KB unpacked across both
+  builds, so the tarball limit rose from 460 KB to 500 KB packed and from 2.85 MB to 3.1 MB unpacked.
+  No existing import got heavier because of them. Each new module has its own per-subpath budget, and
+  the root import loads none of them.
 
 ### Fixed
 
+- **A failed graph step no longer re-runs the siblings that finished.** The failed checkpoint used to
+  discard their writes, so `continue()` ran them again and repeated their side effects. It now keeps
+  those writes, and `continue()` retries only the nodes that did not finish.
+- **Finished siblings still route onward after a paused or failed step resumes.** The checkpoint
+  carried only the unfinished nodes, so the outgoing edges of siblings that had already finished were
+  lost. A new optional `completed` field on the checkpoint records those siblings.
+- **A subgraph that asks a question now pauses its parent.** `asNode()` used to treat an interrupted
+  subgraph as finished: the parent merged its partial state and carried on. The parent now interrupts
+  with the same question, and resuming the parent passes the answer into the subgraph, which continues
+  where it stopped. A subgraph that asks several questions works across several resumes.
+- **Rewinding no longer leaves checkpoints from the abandoned timeline.** After `resumeFrom(step)`,
+  both checkpointers kept the later steps, so `state()` could return a step that no longer existed.
+  Writing a step now drops any stored steps at or after it.
+- **`context.report()` works.** It did nothing. Progress now reaches the new
+  `GraphRunOptions.onProgress` callback, and a callback that throws does not fail the node.
+- **`CompileOptions.name` is used.** It was documented but never read. It is now recorded on every
+  checkpoint as `metadata.graph`.
 - **An unnamed graph run now reports its thread id.** `invoke()` without a `threadId` returned
   `threadId: ''` even though it had generated one, so the run could not be inspected or resumed.
 - **`AgentLoop` no longer runs a tool with arguments the model did not send.** Malformed tool-call
@@ -90,13 +113,6 @@ and none is loaded by the root import.
   now skipped, and the parse error goes back to the model as the tool result.
 - **`AgentLoop` says why it stopped.** `AgentResult.stopReason` is `completed` or `max_iterations`, so
   a caller can tell a final answer from a run that hit the iteration limit.
-
-### Changed (continued)
-
-- **The whole-package size limit is higher.** The new modules are about 200 KB unpacked across both
-  builds, so the tarball limit rose from 460 KB to 500 KB packed and from 2.85 MB to 3.1 MB unpacked.
-  No existing import got heavier because of them. Each new module has its own per-subpath budget, and
-  the root import loads none of them.
 
 ## [1.9.0] - 2026-09-15
 
@@ -549,7 +565,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.6.0...v1.7.0

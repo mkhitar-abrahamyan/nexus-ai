@@ -544,7 +544,161 @@ test('work done by other branches before an interrupt is not repeated', async ()
   assert.equal(sideEffects, 1, 'the completed branch ran once, not once per resume');
 });
 
+test('a finished sibling still routes onward after the step resumes from an interrupt', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('split', () => ({ log: ['split'] }))
+    .addNode('work', () => ({ log: ['worked'] }))
+    .addNode('after-work', () => ({ log: ['after-work'] }))
+    .addNode('ask', (ctx) => ({ done: ctx.interrupt<boolean>({ reason: 'Approve?' }) }))
+    .setEntry('split')
+    .addConditionalEdges('split', () => ['work', 'ask'])
+    .addEdge('work', 'after-work')
+    .addEdge('after-work', END)
+    .addEdge('ask', END)
+    .compile();
+
+  await graph.invoke({}, { threadId: 'route-after-pause' });
+  const resumed = await graph.resumeWith('route-after-pause', true);
+
+  assert.equal(resumed.status, 'completed');
+  assert.deepEqual(resumed.state.log, ['split', 'worked', 'after-work']);
+});
+
+test('a failed step keeps finished siblings, and continue() retries only the failure', async () => {
+  let workRuns = 0;
+  let flakyRuns = 0;
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('split', () => ({ log: ['split'] }))
+    .addNode('work', () => {
+      workRuns += 1;
+      return { log: ['worked'], count: 1 };
+    })
+    .addNode('flaky', () => {
+      flakyRuns += 1;
+      if (flakyRuns === 1) throw new Error('transient');
+      return { log: ['flaky-ok'] };
+    })
+    .addNode('after-work', () => ({ log: ['after-work'] }))
+    .setEntry('split')
+    .addConditionalEdges('split', () => ['work', 'flaky'])
+    .addEdge('work', 'after-work')
+    .addEdge('flaky', END)
+    .addEdge('after-work', END)
+    .compile();
+
+  await assert.rejects(() => graph.invoke({}, { threadId: 'retry' }), GraphNodeError);
+  const failed = await graph.state('retry');
+  assert.equal(failed?.status, 'failed');
+  assert.deepEqual(failed?.next, ['flaky']);
+  assert.deepEqual(failed?.state.log, ['split', 'worked'], 'the sibling write survived the failure');
+
+  const events = await collect(graph.continue('retry'));
+  const final = events.at(-1);
+  assert.equal(final?.status, 'completed');
+  assert.equal(workRuns, 1, 'the sibling that finished was not run again');
+  assert.equal(flakyRuns, 2);
+  assert.equal(final?.state.count, 1);
+  assert.deepEqual(final?.state.log, ['split', 'worked', 'flaky-ok', 'after-work']);
+  assert.equal((await graph.state('retry'))?.error, undefined);
+});
+
+test('rewinding drops checkpoints from the abandoned timeline', async () => {
+  for (const checkpointer of [
+    new MemoryGraphCheckpointer(),
+    new OperationStoreCheckpointer(new MemoryOperationStore() as never),
+  ]) {
+    const graph = createGraph({ channels: basicChannels() })
+      .addNode('tick', () => ({ count: 1 }))
+      .setEntry('tick')
+      .addConditionalEdges('tick', (state) => (state.count >= 4 ? END : 'tick'))
+      .compile({ checkpointer });
+
+    await graph.invoke({}, { threadId: 'rewind' });
+    assert.equal((await graph.state('rewind'))?.step, 4);
+
+    // Rewind to step 1 but stop after one more step: the old steps 3 and 4 must not reappear.
+    await collect(graph.resumeFrom('rewind', 1, { maxSteps: 2 })).catch(() => undefined);
+    const latest = await graph.state('rewind');
+    assert.equal(latest?.step, 2);
+    assert.deepEqual(
+      (await graph.history('rewind')).map((checkpoint) => checkpoint.step),
+      [2, 1, 0],
+    );
+  }
+});
+
+test('context.report() reaches onProgress, and a throwing listener does not fail the node', async () => {
+  const seen: string[] = [];
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('a', (ctx) => {
+      ctx.report({ message: 'halfway' });
+      return { count: 1 };
+    })
+    .setEntry('a')
+    .addEdge('a', END)
+    .compile({ name: 'reporter' });
+
+  await graph.invoke({}, { threadId: 'progress', onProgress: (p) => seen.push(`${p.node}:${p.step}:${p.message}`) });
+  assert.deepEqual(seen, ['a:1:halfway']);
+  assert.equal((await graph.state('progress'))?.metadata?.graph, 'reporter');
+
+  const result = await graph.invoke(
+    {},
+    {
+      onProgress: () => {
+        throw new Error('listener bug');
+      },
+    },
+  );
+  assert.equal(result.status, 'completed');
+});
+
 // ── Subgraphs ──────────────────────────────────────────────────────
+
+test('a subgraph interrupt pauses the parent, and resuming answers the subgraph', async () => {
+  let draftRuns = 0;
+  const child = createGraph({ channels: basicChannels() })
+    .addNode('draft', () => {
+      draftRuns += 1;
+      return { log: ['drafted'] };
+    })
+    .addNode('review', (ctx) => {
+      const first = ctx.interrupt<string>({ reason: 'Title?' });
+      const second = ctx.interrupt<string>({ reason: 'Tone?' });
+      return { log: [`${first}/${second}`], done: true };
+    })
+    .setEntry('draft')
+    .addEdge('draft', 'review')
+    .addEdge('review', END)
+    .compile();
+
+  let publishRuns = 0;
+  const parent = createGraph({ channels: basicChannels() })
+    .addNode('write', child.asNode())
+    .addNode('publish', () => {
+      publishRuns += 1;
+      return { log: ['published'] };
+    })
+    .setEntry('write')
+    .addEdge('write', 'publish')
+    .addEdge('publish', END)
+    .compile();
+
+  const paused = await parent.invoke({}, { threadId: 'nested' });
+  assert.equal(paused.status, 'awaiting_input', 'the parent must not carry on past a waiting subgraph');
+  assert.equal(paused.interrupt?.reason, 'Title?');
+  assert.equal(publishRuns, 0);
+
+  const second = await parent.resumeWith('nested', 'Launch');
+  assert.equal(second.status, 'awaiting_input');
+  assert.equal(second.interrupt?.reason, 'Tone?');
+
+  const done = await parent.resumeWith('nested', 'warm');
+  assert.equal(done.status, 'completed');
+  assert.deepEqual(done.state.log, ['drafted', 'Launch/warm', 'published']);
+  assert.equal(draftRuns, 1, 'the subgraph continued where it stopped rather than starting over');
+  assert.equal(publishRuns, 1);
+});
 
 test('a compiled graph can be a node in another graph', async () => {
   const child = createGraph({ channels: { log: appendList<string>() } })

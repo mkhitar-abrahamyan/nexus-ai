@@ -1780,8 +1780,8 @@ past its budget — so the numbers stay true rather than aspirational.
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% |
 | `nexus-ai-pro/security` | 40 KB | 7% |
 | `nexus-ai-pro/models` | 35 KB | 6% |
+| `nexus-ai-pro/graph` | 33 KB | 5% |
 | `nexus-ai-pro/images/inputs` | 31 KB | 5% |
-| `nexus-ai-pro/graph` | 30 KB | 5% |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 5% |
 | `nexus-ai-pro/evals` | 23 KB | 4% |
 | `nexus-ai-pro/images/transform` | 22 KB | 4% |

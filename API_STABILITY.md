@@ -281,6 +281,15 @@ The graph casts at that boundary and hands typed state back through `state()` an
 threads (Unreleased; earlier releases created none). `checkpointer: false` disables checkpointing. A
 run started without a `threadId` reports its generated id on the result.
 
+Also Unreleased:
+
+- A paused or failed superstep records its already finished nodes in the optional `completed` field.
+  Those nodes are not run again, and their edges still count when the step completes.
+- Writing checkpoint N drops any stored checkpoints at or after N, so a rewound thread has one
+  timeline. Keeping several branches is planned work (forks), not current behaviour.
+- A subgraph interrupt surfaces as an interrupt of the parent node.
+- `onProgress` receives `context.report()` calls.
+
 Scheduling within a superstep is not a guarantee. Nodes in a fan-out currently run in edge order and
 sequentially; running them concurrently is a valid future change, so a node must not depend on
 observing another node's write within the same superstep — that is what channels are for. The default

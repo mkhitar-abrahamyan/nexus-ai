@@ -106,6 +106,12 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   state: StateOf<S>;
   /** Nodes to run next. Empty means the run is finished. */
   next: string[];
+  /**
+   * Nodes of the pending superstep that already finished before it paused or failed. Their writes
+   * are already in `state`, so they are not run again, but their outgoing edges still count when the
+   * step completes.
+   */
+  completed?: string[];
   status: GraphStatus;
   interrupt?: PendingInterrupt;
   /** Values already supplied for interrupts, keyed by `node:step:index`. */
@@ -149,6 +155,8 @@ export interface GraphRunOptions {
   maxSteps?: number;
   signal?: AbortSignal;
   metadata?: Record<string, unknown>;
+  /** Receives what nodes pass to `context.report()`. A throwing callback never fails the node. */
+  onProgress?: (progress: GraphProgress) => void;
 }
 
 export interface GraphResult<S extends ChannelSchema> {
@@ -180,7 +188,7 @@ export interface CompileOptions {
    */
   checkpointer?: GraphCheckpointer | false;
   maxSteps?: number;
-  /** Identifies this graph in checkpoints and subgraph node names. */
+  /** Identifies this graph. Recorded on every checkpoint as `metadata.graph`. */
   name?: string;
   now?: () => Date;
 }
