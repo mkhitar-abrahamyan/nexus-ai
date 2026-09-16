@@ -579,15 +579,18 @@ in about three seconds, not twelve.
 - `context.attempt` and the stream events report retries.
 - `timeoutMs` aborts a signal scoped to that node.
 
-**Honest install weight.**
-- `size:check` also follows imports of third-party packages. The README table gains a column for
-  dependency code, so `/graph` can be shown to load no third-party code at all.
-- A new `size:install` measures the `node_modules` footprint of a clean install. Today that is about
-  10 MB, of which roughly 7 MB is `zod`, `ajv`, and `@types/node` that every consumer installs.
-- The internal code paths that load the validators go async, so `ajv` and `zod` load only when a
-  request uses schema validation. Their exported synchronous helpers keep static imports until 2.0.0.
-- Internal message validation is rewritten without `zod`, which also takes schema construction off
-  the request path.
+**Honest install weight: landed, except the lazy validators.**
+- `size:check` follows bare imports as well, and the README table now reports what each entry point
+  makes a consumer install. The measurement confirmed the claim for most of the package: `/graph`,
+  `/operations`, `/batch`, `/embeddings`, and every image subpath force no third-party install. The
+  root import, `/core`, `/config`, and `/security` force 3.4 to 4.7 MB.
+- The clean-install test measures and bounds the whole production install: 10.0 MB of `node_modules`,
+  3.0 MB of which is this package.
+- **Deferred to 2.0.0: loading the validators lazily.** `applyResponseFormat` and the schema helpers
+  are synchronous exported functions, and an ESM module cannot load a dependency synchronously on
+  first use, so deferring `ajv` and `zod` behind a dynamic import would mean making public functions
+  async — a breaking change. Moving them to optional peer dependencies in 2.0.0 fixes the install
+  cost properly, and section 18 already carries it.
 
 **Budgets.** `/graph` measured 52 KB after the work, against the 40 KB this section first guessed;
 the estimate was wrong, not the implementation, and the budget file records the real number. The root

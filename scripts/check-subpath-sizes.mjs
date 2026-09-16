@@ -13,8 +13,14 @@
  *
  * Cost is the transitive ESM import graph under `dist/`, which is what Node parses on first import.
  * It deliberately ignores the CommonJS build, since the two track each other.
+ *
+ * Package code is only half of what an install costs. An entry point that imports a third-party
+ * package makes the consumer install that package and everything it depends on, which the per-file
+ * measurement above cannot see, so each row also reports the installed weight of the dependencies it
+ * pulls in. That number is why `/graph` at 52 KB and `/security` at 44 KB are not comparable: one
+ * needs nothing, the other drags in a validator.
  */
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,9 +40,64 @@ function resolveImport(fromFile, specifier) {
   return resolved.endsWith('.js') ? resolved : `${resolved}.js`;
 }
 
+/** Package name from a bare specifier, keeping the scope and dropping any subpath. */
+function packageOf(specifier) {
+  if (!specifier || specifier.startsWith('.') || specifier.startsWith('node:')) return undefined;
+  const parts = specifier.split('/');
+  return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+}
+
+const installedSizes = new Map();
+
+function directorySize(directory) {
+  let bytes = 0;
+  let entries;
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    if (entry.name === 'node_modules') continue;
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) bytes += directorySize(full);
+    else {
+      try {
+        bytes += statSync(full).size;
+      } catch {
+        // A broken symlink costs nothing to install.
+      }
+    }
+  }
+  return bytes;
+}
+
+/** Installed weight of a package plus everything it depends on, counted once each. */
+function installedWeight(names, seen = new Set()) {
+  let bytes = 0;
+  for (const name of names) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const directory = path.join(repoRoot, 'node_modules', name);
+    if (!installedSizes.has(name)) installedSizes.set(name, directorySize(directory));
+    const size = installedSizes.get(name);
+    if (size === 0) continue;
+    bytes += size;
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(path.join(directory, 'package.json'), 'utf8'));
+    } catch {
+      continue;
+    }
+    bytes += installedWeight(Object.keys(manifest.dependencies ?? {}), seen);
+  }
+  return bytes;
+}
+
 /** Every file Node would load when the entry point is imported. */
 function importGraph(entryFile) {
   const seen = new Set();
+  const packages = new Set();
   const stack = [entryFile];
 
   while (stack.length > 0) {
@@ -53,10 +114,16 @@ function importGraph(entryFile) {
     // would penalise exactly the lazy-loading this budget is meant to encourage.
     for (const match of source.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)) {
       const next = resolveImport(file, match[1]);
-      if (next) stack.push(next);
+      if (next) {
+        stack.push(next);
+        continue;
+      }
+      // A bare specifier is a package the consumer has to install, which the file walk cannot see.
+      const dependency = packageOf(match[1]);
+      if (dependency) packages.add(dependency);
     }
   }
-  return seen;
+  return { files: seen, packages };
 }
 
 function measure() {
@@ -68,7 +135,7 @@ function measure() {
     if (!relative) continue;
     const entryFile = path.join(repoRoot, relative);
 
-    const files = importGraph(entryFile);
+    const { files, packages } = importGraph(entryFile);
     let bytes = 0;
     for (const file of files) {
       try {
@@ -77,7 +144,13 @@ function measure() {
         // A declaration-only module leaves no JS file; it costs nothing to import.
       }
     }
-    rows.push({ subpath, kb: Math.round(bytes / 1024), files: files.size });
+    rows.push({
+      subpath,
+      kb: Math.round(bytes / 1024),
+      files: files.size,
+      packages: [...packages].sort(),
+      dependencyKb: Math.round(installedWeight([...packages]) / 1024),
+    });
   }
 
   if (rows.length === 0) {
@@ -95,6 +168,10 @@ function readBudget() {
   }
 }
 
+function formatKb(kb) {
+  return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
+}
+
 function renderTable(rows) {
   const root = rows.find((row) => row.subpath === '.');
   const shown = rows.filter((row) => row.subpath !== '.');
@@ -103,11 +180,15 @@ function renderTable(rows) {
     return percent >= 1 ? `${Math.round(percent)}%` : `${percent.toFixed(1)}%`;
   };
 
+  // A row with no third-party install is the point of the package, so it is worth showing as such.
+  const dependencies = (row) => (row.dependencyKb > 0 ? '+' + formatKb(row.dependencyKb) : 'none');
   const lines = [
-    '| Import | Size | Share of root |',
-    '| --- | --- | --- |',
-    `| \`nexus-ai-pro\` | ${root.kb} KB | 100% |`,
-    ...shown.map((row) => `| \`nexus-ai-pro${row.subpath.slice(1)}\` | ${row.kb} KB | ${share(row.kb)} |`),
+    '| Import | Size | Share of root | Third-party install |',
+    '| --- | --- | --- | --- |',
+    `| \`nexus-ai-pro\` | ${root.kb} KB | 100% | ${dependencies(root)} |`,
+    ...shown.map(
+      (row) => `| \`nexus-ai-pro${row.subpath.slice(1)}\` | ${row.kb} KB | ${share(row.kb)} | ${dependencies(row)} |`,
+    ),
   ];
   return lines.join('\n');
 }
@@ -187,6 +268,10 @@ if (problems.length > 0) {
 
 const root = rows.find((row) => row.subpath === '.');
 const smallest = rows[rows.length - 1];
+const dependencyFree = rows.filter((row) => row.dependencyKb === 0).length;
 console.log(
   `Subpath sizes are within budget: ${rows.length} entry points, root ${root.kb} KB, smallest ${smallest.subpath} at ${smallest.kb} KB.`,
+);
+console.log(
+  `Third-party install cost: ${dependencyFree} of ${rows.length} entry points pull in no dependency at all; the root pulls in ${formatKb(root.dependencyKb)}.`,
 );

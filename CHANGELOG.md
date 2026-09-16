@@ -37,6 +37,16 @@ discovers at run time, and a node can retry or time out on its own.
   carry `interrupts`, and `resumeInterrupts()` answers any subset by id. A single question still works
   exactly as before through `resume()`.
 
+- **Install weight is now measured honestly.** The size table only ever counted this package's own
+  files, so a small entry point could quietly force a large dependency on the consumer.
+  - `npm run size:check` follows bare imports too, and the README table gains a column for what each
+    entry point makes you install. Most entry points force nothing: `/graph`, `/operations`,
+    `/batch`, `/embeddings`, and every image subpath import no third-party package at all. The root
+    import, `/core`, `/config`, and `/security` pull in 3.4 to 4.7 MB, because JSON-schema and Zod
+    validation live there.
+  - The clean-install test now measures and bounds the whole production install: 10.0 MB of
+    `node_modules`, of which 3.0 MB is this package.
+
 ### Fixed
 
 - **A retry no longer lets the process exit while it waits.** The backoff timer was unref'd, so a run

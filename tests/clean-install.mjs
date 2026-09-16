@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,9 +33,23 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // timeout policies — about 65KB unpacked across both builds and their declarations.
 const MAX_PACKED_BYTES = 520_000;
 const MAX_UNPACKED_BYTES = 3_200_000;
+// What a consumer actually installs: this package plus the dependencies it forces on them. Most of
+// the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the
+// README size table reports third-party install cost per entry point.
+const MAX_INSTALLED_BYTES = 12_000_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
+
+function directorySize(directory) {
+  let bytes = 0;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) bytes += directorySize(full);
+    else if (entry.isFile()) bytes += statSync(full).size;
+  }
+  return bytes;
+}
 
 function npmEnv() {
   return {
@@ -181,7 +195,14 @@ for (const [specifier, exportNames] of imports) {
   run(process.execPath, [smokePath], consumerDir);
 
   runNpm(['exec', '--offline', '--', 'nexus', 'help'], consumerDir);
-  console.log('Clean production install smoke test passed.');
+  const installedBytes = directorySize(path.join(consumerDir, 'node_modules'));
+  assert.ok(
+    installedBytes < MAX_INSTALLED_BYTES,
+    `a production install should stay below ${MAX_INSTALLED_BYTES} bytes of node_modules, received ${installedBytes}`,
+  );
+  console.log(
+    `Clean production install smoke test passed. Installed size: ${(installedBytes / 1024 / 1024).toFixed(1)} MB of node_modules, of which ${(packed.unpackedSize / 1024 / 1024).toFixed(1)} MB is this package.`,
+  );
 } catch (error) {
   keepTempDir = true;
   console.error(`Clean install fixture kept at ${tempRoot}`);
