@@ -10,17 +10,21 @@ import type {
   GraphRunOptions,
   GraphStatus,
   GraphStepEvent,
+  GraphTask,
   NodeContext,
   NodeFn,
+  NodeOptions,
   PendingInterrupt,
+  RetryPolicy,
   StateOf,
   StateUpdate,
 } from '../types/graph.js';
-import { END, START } from '../types/graph.js';
+import { END, Send, START } from '../types/graph.js';
 import { MemoryGraphCheckpointer } from './checkpointer.js';
 import {
   GraphInterrupt,
   GraphNodeError,
+  GraphNodeTimeoutError,
   GraphNotInterruptedError,
   GraphStepLimitError,
   GraphThreadNotFoundError,
@@ -29,6 +33,25 @@ import {
 } from './errors.js';
 
 const DEFAULT_MAX_STEPS = 25;
+const DEFAULT_MAX_CONCURRENCY = 16;
+const DEFAULT_RETRY: Required<Omit<RetryPolicy, 'retryOn'>> = {
+  maxAttempts: 1,
+  initialIntervalMs: 250,
+  backoffFactor: 2,
+  maxIntervalMs: 30_000,
+  jitter: true,
+};
+
+interface GraphNodeDefinition<S extends ChannelSchema> {
+  fn: NodeFn<S>;
+  options: NodeOptions;
+}
+
+type TaskOutcome<S extends ChannelSchema> =
+  | { kind: 'ok'; update?: StateUpdate<S>; attempts: number }
+  | { kind: 'interrupt'; interrupt: PendingInterrupt; attempts: number }
+  | { kind: 'aborted'; attempts: number }
+  | { kind: 'failed'; error: unknown; attempts: number };
 
 interface Edge<S extends ChannelSchema> {
   from: string;
@@ -46,7 +69,7 @@ interface Edge<S extends ChannelSchema> {
  * graph.
  */
 export class StateGraph<S extends ChannelSchema> {
-  private readonly nodes = new Map<string, NodeFn<S>>();
+  private readonly nodes = new Map<string, GraphNodeDefinition<S>>();
   private readonly edges: Array<Edge<S>> = [];
 
   constructor(private readonly channels: S) {
@@ -60,7 +83,7 @@ export class StateGraph<S extends ChannelSchema> {
     }
   }
 
-  addNode(name: string, fn: NodeFn<S>): this {
+  addNode(name: string, fn: NodeFn<S>, options: NodeOptions = {}): this {
     const normalized = name.trim();
     if (!normalized) throw new GraphValidationError('A node name must not be empty');
     if (normalized === START || normalized === END) {
@@ -69,7 +92,7 @@ export class StateGraph<S extends ChannelSchema> {
     if (this.nodes.has(normalized)) throw new GraphValidationError(`Node "${normalized}" is already defined`);
     if (typeof fn !== 'function') throw new GraphValidationError(`Node "${normalized}" must be a function`);
 
-    this.nodes.set(normalized, fn);
+    this.nodes.set(normalized, { fn, options });
     return this;
   }
 
@@ -123,6 +146,9 @@ export class StateGraph<S extends ChannelSchema> {
       const node = queue.pop() as string;
       if (reachable.has(node) || node === END) continue;
       reachable.add(node);
+      for (const target of this.nodes.get(node)?.options.ends ?? []) {
+        if (target !== END) queue.push(target);
+      }
       for (const edge of this.edges.filter((item) => item.from === node)) {
         if (edge.to && edge.to !== END) queue.push(edge.to);
         for (const target of Object.values(edge.mapping ?? {})) if (target !== END) queue.push(target);
@@ -147,7 +173,7 @@ export class CompiledGraph<S extends ChannelSchema> {
 
   constructor(
     private readonly channels: S,
-    private readonly nodes: Map<string, NodeFn<S>>,
+    private readonly nodes: Map<string, GraphNodeDefinition<S>>,
     private readonly edges: Array<Edge<S>>,
     private readonly options: CompileOptions,
   ) {
@@ -191,7 +217,8 @@ export class CompiledGraph<S extends ChannelSchema> {
         ...checkpoint,
         status: 'running',
         interrupt: undefined,
-        resolved: { ...checkpoint.resolved, [interruptKey(checkpoint.interrupt)]: value },
+        interrupts: undefined,
+        resolved: { ...checkpoint.resolved, [checkpoint.interrupt.id]: value },
       };
     });
   }
@@ -200,6 +227,50 @@ export class CompiledGraph<S extends ChannelSchema> {
   async resumeWith(threadId: string, value: unknown, runOptions: GraphRunOptions = {}): Promise<GraphResult<S>> {
     let last: GraphStepEvent<S> | undefined;
     for await (const event of this.resume(threadId, value, runOptions)) last = event;
+    return this.toResult(threadId, last);
+  }
+
+  /**
+   * Answers several of a paused step's questions at once, keyed by interrupt id.
+   *
+   * Parallel tasks can each ask something, so one answer is not always enough. Questions left
+   * unanswered are asked again when the step runs.
+   */
+  resumeInterrupts(
+    threadId: string,
+    answers: Record<string, unknown>,
+    runOptions: GraphRunOptions = {},
+  ): AsyncIterable<GraphStepEvent<S>> {
+    return this.run(threadId, runOptions, async () => {
+      const checkpoint = await this.requireCheckpoint(threadId);
+      if (checkpoint.status !== 'awaiting_input' || !checkpoint.interrupt) {
+        throw new GraphNotInterruptedError(threadId, checkpoint.status);
+      }
+      const pending = checkpoint.interrupts ?? [checkpoint.interrupt];
+      const unknown = Object.keys(answers).filter((id) => !pending.some((item) => item.id === id));
+      if (unknown.length > 0) {
+        throw new GraphValidationError(
+          `Thread "${threadId}" has no pending question with id ${unknown.map((id) => `"${id}"`).join(', ')}. Pending: ${pending.map((item) => `"${item.id}"`).join(', ')}.`,
+        );
+      }
+      return {
+        ...checkpoint,
+        status: 'running',
+        interrupt: undefined,
+        interrupts: undefined,
+        resolved: { ...checkpoint.resolved, ...answers },
+      };
+    });
+  }
+
+  /** Like `resumeInterrupts`, but returns the final result rather than the stream. */
+  async resumeInterruptsWith(
+    threadId: string,
+    answers: Record<string, unknown>,
+    runOptions: GraphRunOptions = {},
+  ): Promise<GraphResult<S>> {
+    let last: GraphStepEvent<S> | undefined;
+    for await (const event of this.resumeInterrupts(threadId, answers, runOptions)) last = event;
     return this.toResult(threadId, last);
   }
 
@@ -301,107 +372,211 @@ export class CompiledGraph<S extends ChannelSchema> {
       }
 
       const step = checkpoint.step + 1;
-      const running = [...checkpoint.next];
-      // Nodes of this step that finished before an earlier pause or failure. Their writes are already
+      const allTasks = tasksOf(checkpoint);
+      // Tasks of this step that finished before an earlier pause or failure. Their writes are already
       // in state; they only still count for routing once the step completes.
       const carried = checkpoint.completed ?? [];
+      const pendingTasks = allTasks.filter((task) => !carried.includes(task.id));
+      const failFast = (this.options.onNodeError ?? 'fail-fast') === 'fail-fast';
+      // Aborting this cancels the siblings of a task that failed, and nothing else.
+      const stepAbort = new AbortController();
+      const outcomes: Array<TaskOutcome<S> | undefined> = new Array(pendingTasks.length);
+
+      await runConcurrently(
+        pendingTasks,
+        runOptions.maxConcurrency ?? this.options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
+        async (task, index) => {
+          const outcome = await this.runTask(task, step, threadId, checkpoint, runOptions, stepAbort.signal);
+          outcomes[index] = outcome;
+          if (outcome.kind === 'failed' && failFast) stepAbort.abort(outcome.error);
+        },
+      );
+
       const updates: Array<StateUpdate<S>> = [];
       const finished: string[] = [];
-      let pending: PendingInterrupt | undefined;
+      const interrupts: PendingInterrupt[] = [];
+      const attempts: Record<string, number> = {};
+      let failure: { task: GraphTask; error: unknown } | undefined;
 
-      for (const node of running) {
-        const fn = this.nodes.get(node);
-        if (!fn) throw new GraphValidationError(`Node "${node}" disappeared before it could run`);
-
-        try {
-          const update = await this.runNode(fn, node, step, threadId, checkpoint, runOptions);
-          if (update) updates.push(update);
-          finished.push(node);
-        } catch (error) {
-          if (error instanceof GraphInterrupt) {
-            // Checkpoint what the other branches produced before suspending, so their work is not
-            // repeated when a human answers.
-            pending = {
-              ...error.request,
-              node: error.node,
-              step: error.step,
-              index: error.index,
-              requestedAt: this.now().toISOString(),
-            };
-            break;
-          }
-          // Keep what the siblings that already finished wrote, and carry only the unfinished nodes,
-          // so continue() retries the failure without repeating side effects that already happened.
-          const failed: GraphCheckpoint<S> = {
-            ...checkpoint,
-            state: this.reduce(checkpoint.state, updates),
-            next: running.filter((item) => !finished.includes(item)),
-            completed: [...carried, ...finished],
-            status: 'failed',
-            error: { name: error instanceof Error ? error.name : 'Error', message: describe(error) },
-            createdAt: this.now().toISOString(),
-          };
-          await this.save(failed);
-          throw error instanceof GraphNodeError ? error : new GraphNodeError(node, step, error);
+      // Results are folded in task order, never completion order, so timing cannot change the state a
+      // replay produces.
+      for (const [index, task] of pendingTasks.entries()) {
+        const outcome = outcomes[index];
+        if (!outcome) continue;
+        if (outcome.attempts > 1) attempts[task.id] = outcome.attempts;
+        if (outcome.kind === 'ok') {
+          if (outcome.update) updates.push(outcome.update);
+          finished.push(task.id);
+        } else if (outcome.kind === 'interrupt') {
+          interrupts.push(outcome.interrupt);
+        } else if (outcome.kind === 'failed') {
+          failure ??= { task, error: outcome.error };
         }
+        // An aborted sibling simply stays pending, so it runs again on the next attempt.
       }
 
       const state = this.reduce(checkpoint.state, updates);
+      const unfinished = pendingTasks.filter((task) => !finished.includes(task.id));
+      const completed = [...carried, ...finished];
+      const ranNodes = distinctNodes(allTasks.filter((task) => completed.includes(task.id)));
+      const ranTasks = allTasks.filter((task) => !carried.includes(task.id));
 
-      if (pending) {
-        // Only the nodes that did not finish are carried forward. A sibling branch that already
-        // completed had its writes reduced into the state above, so resuming must not run it again
-        // and duplicate whatever side effect it had.
+      if (failure) {
+        // Keep what the siblings that already finished wrote, and carry only the unfinished tasks, so
+        // continue() retries the failure without repeating side effects that already happened.
+        const failed: GraphCheckpoint<S> = {
+          ...checkpoint,
+          state,
+          ...pausedFields(allTasks, unfinished),
+          completed,
+          status: 'failed',
+          error: {
+            name: failure.error instanceof Error ? failure.error.name : 'Error',
+            message: describe(failure.error),
+          },
+          createdAt: this.now().toISOString(),
+        };
+        await this.save(failed);
+        throw failure.error instanceof GraphNodeError
+          ? failure.error
+          : new GraphNodeError(failure.task.node, step, failure.error);
+      }
+
+      if (interrupts.length > 0) {
         checkpoint = {
           ...checkpoint,
           state,
-          next: running.filter((node) => !finished.includes(node)),
-          completed: [...carried, ...finished],
+          ...pausedFields(allTasks, unfinished),
+          completed,
           status: 'awaiting_input',
-          interrupt: pending,
+          interrupt: interrupts[0],
+          interrupts,
           createdAt: this.now().toISOString(),
         };
         await this.save(checkpoint);
-        yield this.toEvent(checkpoint, running);
+        yield this.toEvent(checkpoint, ranNodes, ranTasks, attempts);
         return;
       }
 
-      // Route from every node of the step, including those that finished before a pause or failure;
+      if (runOptions.signal?.aborted) {
+        checkpoint = {
+          ...checkpoint,
+          state,
+          ...pausedFields(allTasks, unfinished),
+          completed,
+          status: 'interrupted',
+          createdAt: this.now().toISOString(),
+        };
+        await this.save(checkpoint);
+        yield this.toEvent(checkpoint, ranNodes, ranTasks, attempts);
+        return;
+      }
+
+      // Route from every task of the step, including those that finished before a pause or failure;
       // otherwise their outgoing edges would be lost on resume.
-      const next = await this.nextNodes([...carried, ...running], state);
+      const next = await this.nextTasks(ranNodes, state, step);
       checkpoint = {
         threadId,
         step,
         state,
-        next,
+        ...pendingFields(next),
         status: next.length > 0 ? 'running' : 'completed',
         resolved: checkpoint.resolved,
         createdAt: this.now().toISOString(),
         ...(runOptions.metadata ? { metadata: runOptions.metadata } : {}),
       };
       await this.save(checkpoint);
-      yield this.toEvent(checkpoint, running);
+      yield this.toEvent(checkpoint, ranNodes, ranTasks, attempts);
+    }
+  }
+
+  /** Runs one task to a verdict, applying its retry policy and timeout. */
+  private async runTask(
+    task: GraphTask,
+    step: number,
+    threadId: string,
+    checkpoint: GraphCheckpoint<S>,
+    runOptions: GraphRunOptions,
+    stepSignal: AbortSignal,
+  ): Promise<TaskOutcome<S>> {
+    const definition = this.nodes.get(task.node);
+    if (!definition) throw new GraphValidationError(`Node "${task.node}" disappeared before it could run`);
+    const policy = { ...DEFAULT_RETRY, ...this.options.retry, ...definition.options.retry };
+    const timeoutMs = definition.options.timeoutMs;
+    let attempts = 0;
+
+    while (true) {
+      attempts += 1;
+      const timeout = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
+      const sources = [stepSignal, ...(runOptions.signal ? [runOptions.signal] : []), ...(timeout ? [timeout] : [])];
+      const signal = sources.length === 1 ? (sources[0] as AbortSignal) : AbortSignal.any(sources);
+
+      try {
+        const running = this.runNode(definition.fn, task, step, threadId, checkpoint, runOptions, signal, attempts);
+        if (timeout) running.catch(() => undefined);
+        // A node is asked to stop through its signal, but nothing forces it to listen, so the timeout
+        // also has to end the attempt on its own.
+        const update = timeout
+          ? await Promise.race([
+              running,
+              rejectWhenAborted(timeout, () => new GraphNodeTimeoutError(task.node, timeoutMs as number)),
+            ])
+          : await running;
+        return { kind: 'ok', update, attempts };
+      } catch (error) {
+        if (error instanceof GraphInterrupt) {
+          return {
+            kind: 'interrupt',
+            attempts,
+            interrupt: {
+              ...error.request,
+              id: interruptKey({ node: error.node, taskId: error.taskId, step: error.step, index: error.index }),
+              node: error.node,
+              ...(error.taskId === error.node ? {} : { taskId: error.taskId }),
+              step: error.step,
+              index: error.index,
+              requestedAt: this.now().toISOString(),
+            },
+          };
+        }
+        // A cancelled run or a sibling's failure is not this task's fault, so it stays pending rather
+        // than being recorded as the reason the step failed.
+        if (runOptions.signal?.aborted || stepSignal.aborted) return { kind: 'aborted', attempts };
+
+        const failure = timeout?.aborted ? new GraphNodeTimeoutError(task.node, timeoutMs as number) : error;
+        const retryable = policy.retryOn ? policy.retryOn(failure, attempts) : isRetryable(failure);
+        if (attempts >= Math.max(1, policy.maxAttempts) || !retryable) {
+          return { kind: 'failed', error: failure, attempts };
+        }
+        await delay(backoffDelay(policy, attempts), runOptions.signal);
+      }
     }
   }
 
   private async runNode(
     fn: NodeFn<S>,
-    node: string,
+    task: GraphTask,
     step: number,
     threadId: string,
     checkpoint: GraphCheckpoint<S>,
     runOptions: GraphRunOptions,
+    signal: AbortSignal,
+    attempt: number,
   ): Promise<StateUpdate<S> | undefined> {
+    const node = task.node;
     let interruptIndex = 0;
     const context: NodeContext<S> = {
       state: Object.freeze({ ...checkpoint.state }),
       node,
       step,
       threadId,
-      signal: runOptions.signal ?? new AbortController().signal,
+      taskId: task.id,
+      input: task.input,
+      attempt,
+      signal,
       interrupt: <T>(request: Parameters<NodeContext<S>['interrupt']>[0]): T => {
         const index = interruptIndex++;
-        const key = interruptKey({ node, step, index });
+        const key = interruptKey({ node, taskId: task.id, step, index });
         if (checkpoint.resolved && key in checkpoint.resolved) {
           return checkpoint.resolved[key] as T;
         }
@@ -410,7 +585,7 @@ export class CompiledGraph<S extends ChannelSchema> {
             `Node "${node}" called interrupt(), but the graph was compiled without a checkpointer, so there would be nothing to resume from.`,
           );
         }
-        throw new GraphInterrupt(request, node, step, index);
+        throw new GraphInterrupt(request, node, step, index, task.id);
       },
       report: (progress) => {
         if (!runOptions.onProgress) return;
@@ -446,8 +621,29 @@ export class CompiledGraph<S extends ChannelSchema> {
     return next as StateOf<S>;
   }
 
-  private async nextNodes(ran: string[], state: StateOf<S>): Promise<string[]> {
-    const next: string[] = [];
+  /** Follows every edge out of the nodes that ran, producing the next step's tasks. */
+  private async nextTasks(ran: string[], state: StateOf<S>, step: number): Promise<GraphTask[]> {
+    const tasks: GraphTask[] = [];
+    let sends = 0;
+
+    const add = (target: string | Send, from: string): void => {
+      if (target instanceof Send) {
+        if (target.node === END) return;
+        if (!this.nodes.has(target.node)) {
+          throw new GraphValidationError(`Send from "${from}" targets unknown node "${target.node}"`);
+        }
+        // Ids come from the step and the order they were produced, so replaying the same routing
+        // decisions rebuilds exactly the same tasks.
+        tasks.push({ id: `${target.node}#${step + 1}.${sends++}`, node: target.node, input: target.input });
+        return;
+      }
+      if (target === END) return;
+      if (!this.nodes.has(target)) {
+        throw new GraphValidationError(`Router on "${from}" returned unknown target "${target}"`);
+      }
+      if (!tasks.some((task) => task.id === target)) tasks.push({ id: target, node: target });
+    };
+
     for (const node of ran) {
       for (const edge of this.edges) {
         if (edge.from !== node) continue;
@@ -455,18 +651,14 @@ export class CompiledGraph<S extends ChannelSchema> {
         if (edge.router) {
           const decided = await edge.router(Object.freeze({ ...state }));
           for (const target of Array.isArray(decided) ? decided : [decided]) {
-            const resolved = edge.mapping?.[target] ?? target;
-            if (resolved !== END && !this.nodes.has(resolved)) {
-              throw new GraphValidationError(`Router on "${node}" returned unknown target "${target}"`);
-            }
-            if (resolved !== END && !next.includes(resolved)) next.push(resolved);
+            add(typeof target === 'string' ? (edge.mapping?.[target] ?? target) : target, node);
           }
           continue;
         }
-        if (edge.to && edge.to !== END && !next.includes(edge.to)) next.push(edge.to);
+        if (edge.to) add(edge.to, node);
       }
     }
-    return next;
+    return tasks;
   }
 
   private entryNodes(): string[] {
@@ -506,6 +698,7 @@ export class CompiledGraph<S extends ChannelSchema> {
       state: checkpoint.state,
       steps: checkpoint.step,
       ...(checkpoint.interrupt ? { interrupt: checkpoint.interrupt } : {}),
+      ...(checkpoint.interrupts ? { interrupts: checkpoint.interrupts } : {}),
     };
   }
 
@@ -513,14 +706,23 @@ export class CompiledGraph<S extends ChannelSchema> {
     return this.store;
   }
 
-  private toEvent(checkpoint: GraphCheckpoint<S>, nodes: string[]): GraphStepEvent<S> {
+  private toEvent(
+    checkpoint: GraphCheckpoint<S>,
+    nodes: string[],
+    tasks?: GraphTask[],
+    attempts?: Record<string, number>,
+  ): GraphStepEvent<S> {
+    const dynamic = tasks?.some((task) => task.id !== task.node || task.input !== undefined);
     return {
       type: checkpoint.status === 'awaiting_input' ? 'interrupt' : checkpoint.next.length ? 'step' : 'done',
       step: checkpoint.step,
       nodes,
+      ...(dynamic ? { tasks } : {}),
+      ...(attempts && Object.keys(attempts).length > 0 ? { attempts } : {}),
       state: checkpoint.state,
       status: checkpoint.status,
       ...(checkpoint.interrupt ? { interrupt: checkpoint.interrupt } : {}),
+      ...(checkpoint.interrupts?.length ? { interrupts: checkpoint.interrupts } : {}),
     };
   }
 
@@ -534,6 +736,7 @@ export class CompiledGraph<S extends ChannelSchema> {
       state: last.state,
       steps: last.step,
       ...(last.interrupt ? { interrupt: last.interrupt } : {}),
+      ...(last.interrupts ? { interrupts: last.interrupts } : {}),
     };
   }
 }
@@ -549,6 +752,110 @@ function resolveThreadId(requested: string | undefined): string {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** The tasks a checkpoint describes. A plain checkpoint names only nodes, and each is one task. */
+function tasksOf(checkpoint: GraphCheckpoint<ChannelSchema>): GraphTask[] {
+  if (checkpoint.tasks?.length) return checkpoint.tasks;
+  return checkpoint.next.map((node) => ({ id: node, node }));
+}
+
+/**
+ * Writes the pending work onto a checkpoint.
+ *
+ * `tasks` is stored only when it says something `next` cannot: a `Send` input, or two tasks of one
+ * node. A graph that never uses `Send` therefore writes exactly the checkpoint it always did.
+ */
+function pendingFields(tasks: GraphTask[]): { next: string[]; tasks?: GraphTask[] } {
+  const next = tasks.map((task) => task.node);
+  const plain = tasks.every((task) => task.id === task.node && task.input === undefined);
+  return plain ? { next } : { next, tasks };
+}
+
+/**
+ * Writes the pending work of a step that stopped early.
+ *
+ * The whole step's task list is kept, not just what is left, because the tasks that finished are what
+ * `completed` refers to and what the step routes from once it finishes.
+ */
+function pausedFields(all: GraphTask[], unfinished: GraphTask[]): { next: string[]; tasks?: GraphTask[] } {
+  if (all.length === unfinished.length) return pendingFields(unfinished);
+  return { next: unfinished.map((task) => task.node), tasks: all };
+}
+
+function distinctNodes(tasks: GraphTask[]): string[] {
+  const nodes: string[] = [];
+  for (const task of tasks) if (!nodes.includes(task.node)) nodes.push(task.node);
+  return nodes;
+}
+
+/**
+ * Runs tasks with a bounded number in flight, preserving nothing about completion order.
+ *
+ * A single task skips the pool entirely, so a linear graph pays no scheduling cost for a feature it
+ * does not use.
+ */
+async function runConcurrently<T>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return;
+  const bound = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : items.length;
+  if (items.length === 1 || bound === 1) {
+    for (const [index, item] of items.entries()) await worker(item as T, index);
+    return;
+  }
+
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(bound, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      await worker(items[index] as T, index);
+    }
+  });
+  await Promise.all(runners);
+}
+
+function backoffDelay(policy: Required<Omit<RetryPolicy, 'retryOn'>>, attempt: number): number {
+  const raw = policy.initialIntervalMs * policy.backoffFactor ** (attempt - 1);
+  const capped = Math.min(raw, policy.maxIntervalMs);
+  // Jitter keeps simultaneous tasks from retrying in lockstep against the same dependency.
+  return policy.jitter ? Math.round(capped * (0.5 + Math.random() / 2)) : Math.round(capped);
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    // Deliberately not unref'd: a run waiting to retry is work in progress, and the process should
+    // stay alive for it exactly as it does while a node is running.
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
+/** A mistake in the graph itself will fail the same way every time, so retrying only wastes time. */
+/** Rejects when `signal` aborts, so an attempt can end even if the node itself never returns. */
+function rejectWhenAborted(signal: AbortSignal, error: () => Error): Promise<never> {
+  return new Promise((_, reject) => {
+    if (signal.aborted) {
+      reject(error());
+      return;
+    }
+    signal.addEventListener('abort', () => reject(error()), { once: true });
+  });
+}
+
+/** A mistake in the graph itself will fail the same way every time, so retrying only wastes time. */
+function isRetryable(error: unknown): boolean {
+  return !(error instanceof GraphValidationError);
 }
 
 export type { GraphProgress, GraphStatus };

@@ -15,6 +15,64 @@ export const END = '__end__';
 export type GraphStatus = 'running' | 'awaiting_input' | 'completed' | 'failed' | 'interrupted';
 
 /**
+ * Routes to one node with its own input, creating one task per value.
+ *
+ * Fan-out over edges can only name nodes that already exist in the graph. `Send` is how a run decides
+ * at execution time how many copies of a node to run: fifty URLs become fifty tasks of the same node,
+ * each reading its own `context.input`, all in one superstep.
+ */
+export class Send {
+  constructor(
+    readonly node: string,
+    readonly input?: unknown,
+  ) {}
+}
+
+/**
+ * One unit of work in a superstep.
+ *
+ * A plain node produces a task whose id is the node name. A `Send` produces a task with a generated
+ * id and its own input, so several tasks of one node stay distinct across a checkpoint and a resume.
+ */
+export interface GraphTask {
+  id: string;
+  node: string;
+  input?: unknown;
+}
+
+/**
+ * How a node retries. Applied per node, or as the graph default through `compile({ retry })`.
+ *
+ * Defaults to a single attempt: retrying is only safe when the node is idempotent, which the graph
+ * cannot know. Interrupts, aborts, and validation errors are never retried.
+ */
+export interface RetryPolicy {
+  /** Total attempts, including the first. Defaults to 1. */
+  maxAttempts?: number;
+  /** Delay before the second attempt. Defaults to 250 ms. */
+  initialIntervalMs?: number;
+  /** Multiplier applied to each subsequent delay. Defaults to 2. */
+  backoffFactor?: number;
+  /** Ceiling for the delay. Defaults to 30 seconds. */
+  maxIntervalMs?: number;
+  /** Spreads retries of simultaneous tasks rather than aligning them. Defaults to true. */
+  jitter?: boolean;
+  /** Decides whether this error is worth retrying. Defaults to retrying anything else. */
+  retryOn?(error: unknown, attempt: number): boolean;
+}
+
+export interface NodeOptions {
+  retry?: RetryPolicy;
+  /** Aborts the node's signal and fails the attempt when it runs longer than this. */
+  timeoutMs?: number;
+  /**
+   * Nodes this one may reach through `Send`. Declaring them keeps compile-time reachability checks
+   * exact, so a node reached only by `Send` is not reported as unreachable.
+   */
+  ends?: string[];
+}
+
+/**
  * One slot of graph state, plus the rule for combining writes into it.
  *
  * A reducer rather than assignment is what makes parallel branches safe: two nodes running in the
@@ -58,7 +116,11 @@ export interface InterruptRequest {
 }
 
 export interface PendingInterrupt extends InterruptRequest {
+  /** Stable identity of this question, used to answer it through `resumeInterrupts()`. */
+  id: string;
   node: string;
+  /** Task that asked, which differs from `node` only for `Send` tasks. */
+  taskId?: string;
   step: number;
   /** Position of this interrupt within the node, so a node may ask more than one question. */
   index: number;
@@ -71,6 +133,16 @@ export interface NodeContext<S extends ChannelSchema> {
   readonly node: string;
   readonly step: number;
   readonly threadId: string;
+  /** Identifies this task. Equal to `node` unless the task came from a `Send`. */
+  readonly taskId: string;
+  /** Input carried by a `Send`. Undefined for a node reached through an ordinary edge. */
+  readonly input?: unknown;
+  /** Attempt number, starting at 1. Above 1 only when a retry policy is in force. */
+  readonly attempt: number;
+  /**
+   * Aborted when the run is cancelled, when this node exceeds its `timeoutMs`, or when a sibling
+   * task fails under the default `fail-fast` policy.
+   */
   readonly signal: AbortSignal;
   /**
    * Suspends the graph until a human answers.
@@ -97,7 +169,10 @@ export type NodeFn<S extends ChannelSchema> = (
  */
 export type EdgeRouter<S extends ChannelSchema> = (
   state: Readonly<StateOf<S>>,
-) => string | string[] | Promise<string | string[]>;
+) => GraphRouteTarget | Promise<GraphRouteTarget>;
+
+/** What a router may return: node names, `Send`s, or a mix of both. */
+export type GraphRouteTarget = string | Send | Array<string | Send>;
 
 export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   threadId: string;
@@ -107,14 +182,23 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   /** Nodes to run next. Empty means the run is finished. */
   next: string[];
   /**
+   * Tasks to run next, present only when they carry more than their node names: `Send` inputs, or
+   * several tasks of one node. Otherwise `next` says everything, and a plain graph's checkpoint is
+   * exactly what it was before.
+   */
+  tasks?: GraphTask[];
+  /**
    * Nodes of the pending superstep that already finished before it paused or failed. Their writes
    * are already in `state`, so they are not run again, but their outgoing edges still count when the
    * step completes.
    */
   completed?: string[];
   status: GraphStatus;
+  /** First pending question, kept for callers that expect exactly one. */
   interrupt?: PendingInterrupt;
-  /** Values already supplied for interrupts, keyed by `node:step:index`. */
+  /** Every question the paused superstep asked. Parallel tasks can each ask one. */
+  interrupts?: PendingInterrupt[];
+  /** Values already supplied for interrupts, keyed by `taskId:step:index`. */
   resolved?: Record<string, unknown>;
   error?: { name: string; message: string };
   createdAt: string;
@@ -155,6 +239,8 @@ export interface GraphRunOptions {
   maxSteps?: number;
   signal?: AbortSignal;
   metadata?: Record<string, unknown>;
+  /** Overrides the compiled `maxConcurrency` for this run. */
+  maxConcurrency?: number;
   /** Receives what nodes pass to `context.report()`. A throwing callback never fails the node. */
   onProgress?: (progress: GraphProgress) => void;
 }
@@ -164,8 +250,10 @@ export interface GraphResult<S extends ChannelSchema> {
   status: GraphStatus;
   state: StateOf<S>;
   steps: number;
-  /** Present when the run stopped to ask a human. */
+  /** Present when the run stopped to ask a human. The first question when several were asked. */
   interrupt?: PendingInterrupt;
+  /** Every question a paused superstep asked. */
+  interrupts?: PendingInterrupt[];
   error?: { name: string; message: string };
 }
 
@@ -175,12 +263,30 @@ export interface GraphStepEvent<S extends ChannelSchema> {
   step: number;
   /** Nodes that ran in this superstep. */
   nodes: string[];
+  /** Tasks that ran, when any of them carried a `Send` input. */
+  tasks?: GraphTask[];
+  /** Attempts used per task, present only for tasks that needed more than one. */
+  attempts?: Record<string, number>;
   state: StateOf<S>;
   status: GraphStatus;
   interrupt?: PendingInterrupt;
+  interrupts?: PendingInterrupt[];
 }
 
 export interface CompileOptions {
+  /**
+   * Tasks run at once within a superstep. Defaults to 16; `1` runs them one at a time, in order.
+   *
+   * Writes are still reduced in task order whatever the timing, so a replay produces the same state.
+   */
+  maxConcurrency?: number;
+  /** Default retry policy for every node. A node's own policy wins. */
+  retry?: RetryPolicy;
+  /**
+   * What happens to sibling tasks when one fails. `fail-fast` (the default) aborts their signals;
+   * `settle` lets them finish, which is worth it when their work is expensive to repeat.
+   */
+  onNodeError?: 'fail-fast' | 'settle';
   /**
    * Where checkpoints go. Defaults to an in-process `MemoryGraphCheckpointer` holding up to 1,000
    * threads, so interrupts, `state()`, and `history()` work without setup. Pass a persistent

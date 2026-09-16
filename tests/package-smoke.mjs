@@ -73,6 +73,8 @@ const imports = [
     exports: [
       'createGraph',
       'StateGraph',
+      'Send',
+      'GraphNodeTimeoutError',
       'MemoryGraphCheckpointer',
       'OperationStoreCheckpointer',
       'appendList',

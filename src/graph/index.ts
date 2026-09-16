@@ -17,13 +17,14 @@ export {
   GraphError,
   GraphInterrupt,
   GraphNodeError,
+  GraphNodeTimeoutError,
   GraphNotInterruptedError,
   GraphStepLimitError,
   GraphThreadNotFoundError,
   GraphValidationError,
   interruptKey,
 } from './errors.js';
-export { END, START } from '../types/graph.js';
+export { END, Send, START } from '../types/graph.js';
 export type {
   Channel,
   ChannelSchema,
@@ -34,12 +35,16 @@ export type {
   GraphProgress,
   GraphResult,
   GraphRunOptions,
+  GraphRouteTarget,
   GraphStatus,
   GraphStepEvent,
+  GraphTask,
   InterruptRequest,
   NodeContext,
   NodeFn,
+  NodeOptions,
   PendingInterrupt,
+  RetryPolicy,
   StateOf,
   StateUpdate,
 } from '../types/graph.js';

@@ -106,7 +106,7 @@ exactly-once provider execution. Those capabilities will use additive adapters a
 `MemoryAssetStore` is likewise process-local and does not promise cross-process durability or shared
 tenant state.
 
-### Image portability (Unreleased)
+### Image portability (1.10.0)
 
 The following are public under the same 1.x rules. None is exported from the root or from
 `nexus-ai-pro/images`:
@@ -278,10 +278,10 @@ and threading the schema through it would force an annotation on every construct
 The graph casts at that boundary and hands typed state back through `state()` and `history()`.
 
 `compile()` without a checkpointer uses an in-process `MemoryGraphCheckpointer` capped at 1,000
-threads (Unreleased; earlier releases created none). `checkpointer: false` disables checkpointing. A
+threads (since 1.10.0; earlier releases created none). `checkpointer: false` disables checkpointing. A
 run started without a `threadId` reports its generated id on the result.
 
-Also Unreleased:
+Also since 1.10.0:
 
 - A paused or failed superstep records its already finished nodes in the optional `completed` field.
   Those nodes are not run again, and their edges still count when the step completes.
@@ -290,10 +290,28 @@ Also Unreleased:
 - A subgraph interrupt surfaces as an interrupt of the parent node.
 - `onProgress` receives `context.report()` calls.
 
-Scheduling within a superstep is not a guarantee. Nodes in a fan-out currently run in edge order and
-sequentially; running them concurrently is a valid future change, so a node must not depend on
-observing another node's write within the same superstep — that is what channels are for. The default
-`maxSteps` may change; pass it explicitly when a run depends on the bound.
+Scheduling within a superstep is not a guarantee, and Unreleased makes use of that: tasks in a
+superstep now run concurrently, bounded by `maxConcurrency` (default 16, settable per compile and per
+run; `1` is strictly sequential). A node still must not depend on observing another node's write
+within the same superstep — that is what channels are for. What is guaranteed is that writes are
+reduced in task order rather than completion order, so a replay of the same decisions produces the
+same state. The default `maxSteps` and `maxConcurrency` may change; pass them explicitly when a run
+depends on the bound.
+
+Also Unreleased, all additive:
+
+- `Send` creates one task per value, with the task's input on `context.input`. Task ids are derived
+  from the step and the order produced, and appear in the checkpoint's optional `tasks` field, which
+  is written only when it says more than `next` does.
+- `NodeOptions` on `addNode` carries `retry`, `timeoutMs`, and `ends`; `compile({ retry })` sets the
+  default policy. Retrying is off unless asked for. A timeout raises `GraphNodeTimeoutError`.
+- `onNodeError` chooses `fail-fast` (default) or `settle` for the siblings of a failed task.
+- A paused checkpoint and result carry `interrupts`, every question the step asked;
+  `interrupt` remains the first of them. `resumeInterrupts()` and `resumeInterruptsWith()` answer any
+  subset by interrupt id. Interrupt ids are keyed by task, so ids written by earlier releases for
+  ordinary nodes still resolve.
+- `context.taskId` and `context.attempt` are new. Step events carry `tasks` and `attempts` when there
+  is something to report.
 
 ## Deprecation process
 

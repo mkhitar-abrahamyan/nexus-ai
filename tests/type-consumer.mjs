@@ -182,8 +182,8 @@ import { createImageInputResolver } from 'nexus-ai-pro/images/inputs';
 import { combineSafetyPolicies, createOpenAIVisualModeration } from 'nexus-ai-pro/images/moderation';
 import { MediaEvalRunner, MemoryReviewQueue } from 'nexus-ai-pro/images/evals';
 import type { MediaEvalReport } from 'nexus-ai-pro/images/evals';
-import { createGraph, MemoryGraphCheckpointer, appendList, counter, END } from 'nexus-ai-pro/graph';
-import type { GraphResult } from 'nexus-ai-pro/graph';
+import { createGraph, MemoryGraphCheckpointer, appendList, counter, END, Send } from 'nexus-ai-pro/graph';
+import type { GraphResult, GraphTask, NodeOptions, RetryPolicy } from 'nexus-ai-pro/graph';
 import { BatchManager as SubpathBatchManager } from 'nexus-ai-pro/batch';
 import { MockBatchProvider } from 'nexus-ai-pro/batch/mock';
 import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
@@ -490,7 +490,18 @@ const demoGraph = createGraph({ channels: { log: appendList<string>(), turns: co
   .addConditionalEdges('think', (state) => (state.turns >= 2 ? END : 'think'))
   .compile({ checkpointer: new MemoryGraphCheckpointer() });
 const graphRun: Promise<GraphResult<{ log: ReturnType<typeof appendList<string>>; turns: ReturnType<typeof counter> }>> =
-  demoGraph.invoke({}, { threadId: 'consumer-thread' });
+  demoGraph.invoke({}, { threadId: 'consumer-thread', maxConcurrency: 4 });
+const nodeRetry: NodeOptions = { retry: { maxAttempts: 3 } satisfies RetryPolicy, timeoutMs: 5_000, ends: [END] };
+const fanOutGraph = createGraph({ channels: { log: appendList<string>(), turns: counter() } })
+  .addNode('plan', () => ({ turns: 1 }))
+  .addNode('each', (ctx) => ({ log: [String(ctx.input)], turns: ctx.attempt }), nodeRetry)
+  .setEntry('plan')
+  .addConditionalEdges('plan', () => [new Send('each', 'a'), new Send('each', 'b')])
+  .compile({ maxConcurrency: 8, onNodeError: 'settle', retry: { maxAttempts: 2 } });
+const fanOutTasks: Promise<GraphTask[] | undefined> = fanOutGraph
+  .state('consumer-fanout')
+  .then((checkpoint) => checkpoint?.tasks);
+const answered = fanOutGraph.resumeInterruptsWith('consumer-fanout', { 'each#2.0:1:0': true });
 const batchManager = new BatchManager({ providers: { mock: new MockBatchProvider() }, defaultProvider: 'mock' });
 const subpathBatchManager = new SubpathBatchManager();
 const openAiBatch = new OpenAIBatchProvider({ apiKey: 'test' });
@@ -637,6 +648,8 @@ void openAiBatch;
 void anthropicBatch;
 void batchResult;
 void fileStore;
+void fanOutTasks;
+void answered;
 void S3AssetStore;
 void rateLimitStore;
 void breaker;

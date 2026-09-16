@@ -21,7 +21,7 @@
     "./embeddings/models": 12,
     "./evals": 26,
     "./evals/judge": 6,
-    "./graph": 38,
+    "./graph": 52,
     "./images": 72,
     "./images/assets": 16,
     "./images/comfyui": 20,

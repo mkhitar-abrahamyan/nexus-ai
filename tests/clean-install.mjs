@@ -29,8 +29,10 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // 1.10.0 for image portability: the Imagen and ComfyUI adapters, mask transformation with a PNG
 // codec, input resolution, visual moderation, and media evals — about 200KB unpacked across both
 // builds and their declarations, all opt-in subpaths that the root import never loads.
-const MAX_PACKED_BYTES = 500_000;
-const MAX_UNPACKED_BYTES = 3_100_000;
+// Raised again for parallel graphs: concurrent supersteps, Send fan-out, and per-node retry and
+// timeout policies — about 65KB unpacked across both builds and their declarations.
+const MAX_PACKED_BYTES = 520_000;
+const MAX_UNPACKED_BYTES = 3_200_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

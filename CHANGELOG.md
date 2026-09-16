@@ -4,6 +4,44 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Parallel graphs. A fan-out that looks parallel now runs in parallel, a graph can fan out over data it
+discovers at run time, and a node can retry or time out on its own.
+
+### Added
+
+- **Concurrent supersteps.** Every task in a superstep starts together: four branches of 300 ms
+  finish in about 310 ms, where they used to take 1,253 ms. `npm run bench:graph` measures it and
+  fails if the gain disappears.
+  - `maxConcurrency` bounds how many run at once. It defaults to 16, is settable per compile and per
+    run, and `1` restores strictly sequential execution.
+  - Writes are reduced in task order, never completion order, so timing cannot change the state a
+    replay produces.
+  - A superstep with a single task skips the scheduler, so a linear graph pays nothing for this.
+- **`Send`, for fan-out over run-time data.** A router can return `new Send(node, input)` values,
+  creating one task per value, each reading its own `context.input`. Fifty-seven URLs become
+  fifty-seven tasks of one node in one superstep.
+  - Each copy is checkpointed separately, so a resume re-runs only the copies that did not finish.
+  - Task ids come from the step and the order produced, so a replay rebuilds the same tasks.
+  - `addNode(name, fn, { ends })` declares `Send` targets, keeping reachability checks exact.
+- **Per-node retries and timeouts.** `addNode(name, fn, { retry, timeoutMs })`, with
+  `compile({ retry })` as the default for every node.
+  - Retrying is off unless asked for, because only the application knows whether a node is
+    idempotent. Interrupts, aborts, and validation errors are never retried.
+  - `context.attempt` tells a node which try it is on, and step events report the attempts a task
+    needed.
+  - A timeout aborts the node's signal and fails that attempt with `GraphNodeTimeoutError`, even if
+    the node ignores its signal.
+- **`onNodeError`.** When a task fails, its siblings are aborted (`fail-fast`, the default) or left to
+  finish (`settle`). Either way, what they already wrote is kept.
+- **Several questions at once.** Parallel tasks can each interrupt. Paused checkpoints and results
+  carry `interrupts`, and `resumeInterrupts()` answers any subset by id. A single question still works
+  exactly as before through `resume()`.
+
+### Fixed
+
+- **A retry no longer lets the process exit while it waits.** The backoff timer was unref'd, so a run
+  waiting to retry could be abandoned by an otherwise idle process.
+
 ## [1.10.0] - 2026-09-16
 
 Image portability. Three image backends now sit behind one contract: OpenAI, Google Imagen, and a

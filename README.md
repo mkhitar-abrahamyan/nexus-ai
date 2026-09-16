@@ -452,6 +452,58 @@ whether that means overwrite, append, or sum. Assignment would silently drop one
 **Cycles are first-class**, so `maxSteps` is what stands between a mistaken router and an infinite
 loop. Exceeding it names the nodes still pending rather than hanging.
 
+**Branches run in parallel.** Every task in a superstep starts together, so four branches of three
+seconds each finish in about three seconds rather than twelve:
+
+```ts
+.addConditionalEdges('plan', () => ['research-a', 'research-b', 'research-c', 'research-d'])
+```
+
+`maxConcurrency` caps how many run at once — 16 by default, settable per compile and per run, and
+`1` restores strictly sequential execution. Whatever the timing, writes are reduced in task order, so
+a replay produces the same state. A superstep with one task skips the scheduler entirely.
+
+**Fan out over data decided at run time.** Edges can only name nodes that already exist. `Send`
+creates one task per value instead, each reading its own `context.input`:
+
+```ts
+import { Send } from 'nexus-ai-pro/graph';
+
+.addNode('research', async (ctx) => ({ findings: [await fetch(ctx.input as string)] }), { ends: [END] })
+.addConditionalEdges('plan', (state) => state.urls.map((url) => new Send('research', url)))
+```
+
+Fifty-seven URLs become fifty-seven tasks of one node in a single superstep, bounded by
+`maxConcurrency` and checkpointed individually, so a resume re-runs only the copies that did not
+finish. Declaring `ends` keeps compile-time reachability checks exact.
+
+**Retries and timeouts per node.** A node that calls a flaky service can retry on its own, without
+wrapping every node body in the same try/catch:
+
+```ts
+.addNode('fetch', fetchNode, {
+  retry: { maxAttempts: 3, initialIntervalMs: 500, backoffFactor: 2, jitter: true },
+  timeoutMs: 10_000,
+})
+```
+
+Retrying defaults to off, because only you know whether a node is idempotent; `compile({ retry })`
+sets a default for every node. Interrupts, aborts, and validation errors are never retried.
+`context.attempt` tells a node which try it is on, and a timeout aborts the node's signal and fails
+that attempt. When one task fails, its siblings are aborted by default; `onNodeError: 'settle'` lets
+them finish first, and either way what they already wrote is kept.
+
+**Several questions at once.** Parallel tasks can each interrupt. The paused result carries every
+pending question, and they can be answered together or a few at a time:
+
+```ts
+const run = await graph.invoke(input, { threadId });
+await graph.resumeInterruptsWith(threadId, {
+  [run.interrupts[0].id]: true,
+  [run.interrupts[1].id]: 'use the second draft',
+});
+```
+
 **Human in the loop.** A node calls `interrupt()`; the graph checkpoints and stops:
 
 ```ts
@@ -481,7 +533,8 @@ await graph.history(threadId);      // newest first
 graph.resumeFrom(threadId, 3);      // rewind and run forward
 ```
 
-**Durable by construction.** The default checkpointer is in-process. Point it at the operation store
+**Durable by construction.** The default checkpointer is in-process, holding up to 1,000 threads;
+pass `checkpointer: false` to turn checkpointing off. Point it at the operation store
 that already backs durable operations and a thread survives a restart — a different worker resumes
 what another suspended:
 
@@ -1777,10 +1830,10 @@ past its budget — so the numbers stay true rather than aspirational.
 | `nexus-ai-pro/operations` | 49 KB | 8% |
 | `nexus-ai-pro/batch/mock` | 47 KB | 8% |
 | `nexus-ai-pro/providers/cohere` | 46 KB | 8% |
+| `nexus-ai-pro/graph` | 46 KB | 8% |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% |
 | `nexus-ai-pro/security` | 40 KB | 7% |
 | `nexus-ai-pro/models` | 35 KB | 6% |
-| `nexus-ai-pro/graph` | 33 KB | 5% |
 | `nexus-ai-pro/images/inputs` | 31 KB | 5% |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 5% |
 | `nexus-ai-pro/evals` | 23 KB | 4% |

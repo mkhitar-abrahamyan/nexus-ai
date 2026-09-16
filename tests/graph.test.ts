@@ -4,13 +4,14 @@ import { appendList, counter, lastValue, mergeObject, appendSet, reducerChannel 
 import { MemoryGraphCheckpointer, OperationStoreCheckpointer } from '../src/graph/checkpointer.js';
 import {
   GraphNodeError,
+  GraphNodeTimeoutError,
   GraphNotInterruptedError,
   GraphStepLimitError,
   GraphThreadNotFoundError,
   GraphValidationError,
 } from '../src/graph/errors.js';
 import { createGraph } from '../src/graph/graph.js';
-import { END } from '../src/types/graph.js';
+import { END, Send } from '../src/types/graph.js';
 import { MemoryOperationStore } from '../src/operations/store.js';
 
 function basicChannels() {
@@ -809,4 +810,347 @@ test('the memory checkpointer bounds retained history', async () => {
 
   await graph.invoke({}, { threadId: 'bounded' });
   assert.equal((await graph.history('bounded')).length, 3);
+});
+
+// ── Parallel supersteps ────────────────────────────────────────────
+
+function slowNode(ms: number, label: string, log: string[]) {
+  return async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    log.push(label);
+    return { log: [label] };
+  };
+}
+
+test('tasks in one superstep run at the same time', async () => {
+  const order: string[] = [];
+  const build = (maxConcurrency?: number) =>
+    createGraph({ channels: basicChannels() })
+      .addNode('split', () => ({ log: ['split'] }))
+      .addNode('a', slowNode(60, 'a', order))
+      .addNode('b', slowNode(60, 'b', order))
+      .addNode('c', slowNode(60, 'c', order))
+      .addNode('d', slowNode(60, 'd', order))
+      .setEntry('split')
+      .addConditionalEdges('split', () => ['a', 'b', 'c', 'd'])
+      .addEdge('a', END)
+      .addEdge('b', END)
+      .addEdge('c', END)
+      .addEdge('d', END)
+      .compile(maxConcurrency === undefined ? {} : { maxConcurrency });
+
+  const startedParallel = Date.now();
+  const parallel = await build().invoke();
+  const parallelMs = Date.now() - startedParallel;
+
+  order.length = 0;
+  const startedSerial = Date.now();
+  const serial = await build(1).invoke();
+  const serialMs = Date.now() - startedSerial;
+
+  assert.equal(parallel.status, 'completed');
+  // Four 60 ms branches together take about 60 ms, not 240 ms.
+  assert.ok(parallelMs < 150, `expected the four branches to overlap, took ${parallelMs}ms`);
+  assert.ok(serialMs >= 200, `maxConcurrency 1 should run them one at a time, took ${serialMs}ms`);
+
+  // Whatever the timing, writes are reduced in task order, so both runs produce the same state.
+  assert.deepEqual(parallel.state.log, ['split', 'a', 'b', 'c', 'd']);
+  assert.deepEqual(serial.state.log, parallel.state.log);
+});
+
+test('maxConcurrency bounds how many tasks are in flight, and a run can override the compiled limit', async () => {
+  let inFlight = 0;
+  let peak = 0;
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('fan', () => ({ log: ['fan'] }))
+    .addNode('worker', async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight -= 1;
+      return { count: 1 };
+    })
+    .setEntry('fan')
+    .addConditionalEdges('fan', () => Array.from({ length: 9 }, (_, index) => new Send('worker', index)))
+    .addEdge('worker', END)
+    .compile({ maxConcurrency: 3 });
+
+  const bounded = await graph.invoke();
+  assert.equal(bounded.state.count, 9);
+  assert.equal(peak, 3);
+
+  peak = 0;
+  await graph.invoke({}, { maxConcurrency: 9 });
+  assert.equal(peak, 9);
+});
+
+// ── Send ───────────────────────────────────────────────────────────
+
+test('Send fans one node out over a list decided at run time', async () => {
+  const seen: Array<{ input: unknown; taskId: string }> = [];
+  const graph = createGraph({ channels: { ...basicChannels(), urls: lastValue<string[]>([]) } })
+    .addNode('plan', () => ({ urls: ['a.test', 'b.test', 'c.test'] }))
+    .addNode(
+      'research',
+      (ctx) => {
+        seen.push({ input: ctx.input, taskId: ctx.taskId });
+        return { log: [`fetched ${ctx.input}`], count: 1 };
+      },
+      { ends: [END] },
+    )
+    .addNode('report', (ctx) => ({ log: [`report:${ctx.state.count}`] }))
+    .setEntry('plan')
+    .addConditionalEdges('plan', (state) => state.urls.map((url) => new Send('research', url)))
+    .addConditionalEdges('research', () => 'report')
+    .addEdge('report', END)
+    .compile();
+
+  const result = await graph.invoke({}, { threadId: 'send' });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.state.count, 3);
+  assert.deepEqual(
+    seen.map((item) => item.input),
+    ['a.test', 'b.test', 'c.test'],
+  );
+  // Each copy of the node is its own task, so an interrupt or a retry can tell them apart.
+  assert.equal(new Set(seen.map((item) => item.taskId)).size, 3);
+  assert.deepEqual(result.state.log, [
+    'fetched a.test',
+    'fetched b.test',
+    'fetched c.test',
+    // The aggregator runs once, after every branch of the fan-out finished.
+    'report:3',
+  ]);
+});
+
+test('a checkpointed Send survives a resume, and only the unfinished copies run again', async () => {
+  let runs = 0;
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('plan', () => ({ log: ['planned'] }))
+    .addNode(
+      'each',
+      (ctx) => {
+        runs += 1;
+        const approved = ctx.interrupt<boolean>({ reason: `Use ${ctx.input}?` });
+        return { log: [`${ctx.input}:${approved}`] };
+      },
+      { ends: [END] },
+    )
+    .setEntry('plan')
+    .addConditionalEdges('plan', () => [new Send('each', 'x'), new Send('each', 'y')])
+    .compile();
+
+  const paused = await graph.invoke({}, { threadId: 'send-hitl' });
+  assert.equal(paused.status, 'awaiting_input');
+  // Both copies asked, so both questions are pending at once.
+  assert.equal(paused.interrupts?.length, 2);
+  assert.deepEqual(
+    paused.interrupts?.map((item) => item.reason),
+    ['Use x?', 'Use y?'],
+  );
+
+  const stored = await graph.state('send-hitl');
+  assert.deepEqual(
+    stored?.tasks?.map((task) => task.input),
+    ['x', 'y'],
+  );
+
+  const ids = paused.interrupts?.map((item) => item.id) ?? [];
+  const done = await graph.resumeInterruptsWith('send-hitl', { [ids[0] as string]: true, [ids[1] as string]: false });
+
+  assert.equal(done.status, 'completed');
+  assert.deepEqual(done.state.log, ['planned', 'x:true', 'y:false']);
+  assert.equal(runs, 4, 'each copy ran once to ask and once to use its answer');
+});
+
+test('answering one of several questions leaves the rest pending', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('split', () => ({ log: ['split'] }))
+    .addNode('ask-a', (ctx) => ({ log: [`a:${ctx.interrupt<string>({ reason: 'A?' })}`] }))
+    .addNode('ask-b', (ctx) => ({ log: [`b:${ctx.interrupt<string>({ reason: 'B?' })}`] }))
+    .setEntry('split')
+    .addConditionalEdges('split', () => ['ask-a', 'ask-b'])
+    .addEdge('ask-a', END)
+    .addEdge('ask-b', END)
+    .compile();
+
+  const paused = await graph.invoke({}, { threadId: 'two-asks' });
+  assert.equal(paused.interrupts?.length, 2);
+
+  const first = paused.interrupts?.[0]?.id as string;
+  const partial = await graph.resumeInterruptsWith('two-asks', { [first]: 'yes' });
+  assert.equal(partial.status, 'awaiting_input');
+  assert.deepEqual(
+    partial.interrupts?.map((item) => item.reason),
+    ['B?'],
+  );
+
+  const second = partial.interrupts?.[0]?.id as string;
+  const done = await graph.resumeInterruptsWith('two-asks', { [second]: 'no' });
+  assert.deepEqual(done.state.log, ['split', 'a:yes', 'b:no']);
+
+  await assert.rejects(
+    () => graph.resumeInterruptsWith('two-asks', { nonsense: 1 }),
+    GraphNotInterruptedError,
+    'a finished thread has nothing to answer',
+  );
+});
+
+// ── Retries and timeouts ───────────────────────────────────────────
+
+test('a node retries under its policy and reports the attempts it needed', async () => {
+  let attempts = 0;
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode(
+      'flaky',
+      (ctx) => {
+        attempts += 1;
+        if (attempts < 3) throw new Error('upstream hiccup');
+        return { count: ctx.attempt };
+      },
+      { retry: { maxAttempts: 3, initialIntervalMs: 1, jitter: false } },
+    )
+    .setEntry('flaky')
+    .addEdge('flaky', END)
+    .compile();
+
+  const events = await collect(graph.stream({}, { threadId: 'retry-policy' }));
+  assert.equal(attempts, 3);
+  assert.equal(events.at(-1)?.state.count, 3, 'context.attempt tells the node which try this is');
+  assert.deepEqual(events.at(-1)?.attempts, { flaky: 3 });
+});
+
+test('retries stop at maxAttempts, and retryOn can refuse to retry at all', async () => {
+  let runs = 0;
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode(
+      'always-fails',
+      () => {
+        runs += 1;
+        throw new Error('permanent');
+      },
+      { retry: { maxAttempts: 2, initialIntervalMs: 1, jitter: false } },
+    )
+    .setEntry('always-fails')
+    .addEdge('always-fails', END)
+    .compile();
+
+  await assert.rejects(() => graph.invoke({}, { threadId: 'exhausted' }), GraphNodeError);
+  assert.equal(runs, 2);
+
+  let picky = 0;
+  const selective = createGraph({ channels: basicChannels() })
+    .addNode(
+      'fails',
+      () => {
+        picky += 1;
+        throw new Error('do not retry me');
+      },
+      { retry: { maxAttempts: 5, initialIntervalMs: 1, retryOn: (error) => !String(error).includes('do not retry') } },
+    )
+    .setEntry('fails')
+    .addEdge('fails', END)
+    .compile();
+
+  await assert.rejects(() => selective.invoke(), GraphNodeError);
+  assert.equal(picky, 1);
+});
+
+test('a graph-wide retry policy applies to nodes that declare none', async () => {
+  let runs = 0;
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('flaky', () => {
+      runs += 1;
+      if (runs < 2) throw new Error('once');
+      return { count: 1 };
+    })
+    .setEntry('flaky')
+    .addEdge('flaky', END)
+    .compile({ retry: { maxAttempts: 2, initialIntervalMs: 1, jitter: false } });
+
+  const result = await graph.invoke();
+  assert.equal(result.status, 'completed');
+  assert.equal(runs, 2);
+});
+
+test('a node that outruns its timeout fails with its signal aborted', async () => {
+  let aborted = false;
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode(
+      'slow',
+      async (ctx) => {
+        ctx.signal.addEventListener('abort', () => {
+          aborted = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return { count: 1 };
+      },
+      { timeoutMs: 20 },
+    )
+    .setEntry('slow')
+    .addEdge('slow', END)
+    .compile();
+
+  await assert.rejects(
+    () => graph.invoke({}, { threadId: 'timeout' }),
+    (error: unknown) => {
+      assert.ok(error instanceof GraphNodeError);
+      assert.ok(error.cause instanceof GraphNodeTimeoutError);
+      assert.match((error.cause as GraphNodeTimeoutError).message, /20ms timeout/);
+      return true;
+    },
+  );
+  assert.equal(aborted, true, 'the node is told to stop, not merely reported as late');
+});
+
+// ── Failure policy ─────────────────────────────────────────────────
+
+test('a failing task aborts its siblings by default, and settle lets them finish', async () => {
+  const build = (onNodeError?: 'fail-fast' | 'settle') => {
+    const finished: string[] = [];
+    const graph = createGraph({ channels: basicChannels() })
+      .addNode('split', () => ({ log: ['split'] }))
+      .addNode('boom', () => {
+        throw new Error('boom');
+      })
+      .addNode('slow', async (ctx) => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        if (!ctx.signal.aborted) finished.push('slow');
+        return { log: ['slow'] };
+      })
+      .setEntry('split')
+      .addConditionalEdges('split', () => ['boom', 'slow'])
+      .addEdge('boom', END)
+      .addEdge('slow', END)
+      .compile(onNodeError ? { onNodeError } : {});
+    return { graph, finished };
+  };
+
+  const fast = build();
+  await assert.rejects(() => fast.graph.invoke({}, { threadId: 'ff' }), GraphNodeError);
+  assert.deepEqual(fast.finished, [], 'the sibling was told to stop as soon as the other task failed');
+
+  const settled = build('settle');
+  await assert.rejects(() => settled.graph.invoke({}, { threadId: 'settle' }), GraphNodeError);
+  assert.deepEqual(settled.finished, ['slow'], 'settle lets expensive siblings finish before reporting');
+  assert.deepEqual((await settled.graph.state('settle'))?.completed, ['slow']);
+});
+
+test('an unknown Send target is reported with the node that produced it', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('plan', () => ({ log: ['planned'] }))
+    .addNode('real', () => undefined, { ends: [END] })
+    .setEntry('plan')
+    .addConditionalEdges('plan', () => [new Send('ghost', 1)])
+    .compile();
+
+  await assert.rejects(
+    () => graph.invoke(),
+    (error: unknown) => {
+      assert.ok(error instanceof GraphValidationError);
+      assert.match(error.message, /Send from "plan" targets unknown node "ghost"/);
+      return true;
+    },
+  );
 });

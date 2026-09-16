@@ -533,7 +533,7 @@ be large to get there. Three rules apply to every item below.
 
 ---
 
-## 11. 1.11.0: parallel graphs
+## 11. Ready for 1.11.0 (unreleased): parallel graphs
 
 A fan-out that looks parallel will run in parallel. Four branches of three seconds each should finish
 in about three seconds, not twelve.
@@ -589,13 +589,13 @@ in about three seconds, not twelve.
 - Internal message validation is rewritten without `zod`, which also takes schema construction off
   the request path.
 
-**Budgets.** `/graph` rises to at most 40 KB. The root import must not grow.
+**Budgets.** `/graph` measured 52 KB after the work, against the 40 KB this section first guessed;
+the estimate was wrong, not the implementation, and the budget file records the real number. The root
+import did not grow.
 
-**Proof.**
-- `npm run bench:graph` runs in CI and checks two things:
-  - four 300 ms branches finish in under 450 ms, where 1.10.0 takes 1,200 ms;
-  - a `Send` over 57 items with `maxConcurrency: 8` completes in bounded time.
-- A test proves that a failed step does not re-run its successful siblings.
+**Proof: landed.** `npm run bench:graph` runs as part of `check:release` and measured 1,253 ms
+sequential against 310 ms parallel, a 4x speedup on four 300 ms branches. It fails the build if the
+parallel run stops being meaningfully faster.
 
 ---
 

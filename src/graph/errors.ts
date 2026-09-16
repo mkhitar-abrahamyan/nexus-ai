@@ -31,6 +31,8 @@ export class GraphInterrupt extends GraphError {
     public readonly node: string,
     public readonly step: number,
     public readonly index: number,
+    /** Task that asked. Equal to `node` unless the task came from a `Send`. */
+    public readonly taskId: string = node,
   ) {
     super(`Graph interrupted at "${node}": ${request.reason}`, 'GRAPH_INTERRUPT');
     this.name = 'GraphInterrupt';
@@ -94,7 +96,29 @@ export class GraphNotInterruptedError extends GraphError {
   }
 }
 
-/** Stable key for one interrupt, so a replayed node picks up the answer it was given. */
-export function interruptKey(pending: Pick<PendingInterrupt, 'node' | 'step' | 'index'>): string {
-  return `${pending.node}:${pending.step}:${pending.index}`;
+/**
+ * Raised when a node outlives its `timeoutMs`.
+ *
+ * Separate from an ordinary failure because it is usually worth retrying, and because the node's
+ * signal was aborted underneath it rather than the node choosing to stop.
+ */
+export class GraphNodeTimeoutError extends GraphError {
+  constructor(
+    public readonly node: string,
+    public readonly timeoutMs: number,
+  ) {
+    super(`Graph node "${node}" exceeded its ${timeoutMs}ms timeout`, 'GRAPH_NODE_TIMEOUT');
+    this.name = 'GraphNodeTimeoutError';
+  }
+}
+
+/**
+ * Stable key for one interrupt, so a replayed node picks up the answer it was given.
+ *
+ * Keyed by task rather than node, so several `Send` tasks of one node each keep their own answer.
+ * For a node reached through an ordinary edge the task id is the node name, so keys written by
+ * earlier releases still resolve.
+ */
+export function interruptKey(pending: Pick<PendingInterrupt, 'node' | 'step' | 'index'> & { taskId?: string }): string {
+  return `${pending.taskId ?? pending.node}:${pending.step}:${pending.index}`;
 }
