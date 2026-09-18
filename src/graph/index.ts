@@ -24,14 +24,18 @@ export {
   GraphValidationError,
   interruptKey,
 } from './errors.js';
-export { END, Send, START } from '../types/graph.js';
+export { Command, END, Send, START } from '../types/graph.js';
 export type {
   Channel,
   ChannelSchema,
+  CommandTarget,
   CompileOptions,
   EdgeRouter,
+  GraphBreakpoint,
   GraphCheckpoint,
   GraphCheckpointer,
+  GraphDescription,
+  GraphEvent,
   GraphProgress,
   GraphResult,
   GraphRunOptions,
@@ -43,6 +47,7 @@ export type {
   NodeContext,
   NodeFn,
   NodeOptions,
+  NodeResult,
   PendingInterrupt,
   RetryPolicy,
   StateOf,

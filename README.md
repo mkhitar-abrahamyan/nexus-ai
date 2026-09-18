@@ -533,6 +533,98 @@ await graph.history(threadId);      // newest first
 graph.resumeFrom(threadId, 3);      // rewind and run forward
 ```
 
+**Route from inside a node.** When a node already knows where to go — an agent that just picked a
+tool, a triage step that classified a ticket — return a `Command` instead of splitting the decision
+into a separate router:
+
+```ts
+import { Command } from 'nexus-ai-pro/graph';
+
+.addNode('triage', (ctx) =>
+  new Command({ update: { label: classify(ctx.state) }, goto: isUrgent(ctx.state) ? 'page-oncall' : 'queue' }),
+  { ends: ['page-oncall', 'queue'] },
+)
+```
+
+`goto` takes node names or `Send`s, and `ends` keeps compile-time checks and diagrams exact. A node
+inside a subgraph can return `new Command({ graph: Command.PARENT, goto: 'human' })` to hand control
+back to the graph that contains it — how a nested agent escalates.
+
+**Aggregate after branches of different lengths.** `{ defer: true }` holds a node until every other
+pending task has finished, so an aggregator after a two-step branch and a one-step branch runs once,
+after both, rather than once per arrival.
+
+**Pause for inspection.** Breakpoints stop a run before or after chosen nodes, checkpointed, without
+changing the nodes themselves:
+
+```ts
+const graph = builder.compile({ interruptBefore: ['publish'] });
+const paused = await graph.invoke(input, { threadId });   // status: 'interrupted', breakpoint: { when: 'before', ... }
+await graph.updateState(threadId, { draft: fixedDraft }); // correct something first, if needed
+for await (const _ of graph.continue(threadId)) {}         // then carry on
+```
+
+Set them per compile or per run; a run's list replaces the compiled one.
+
+**Edit state, or fork a thread.** `updateState(threadId, update)` merges a correction into the latest
+checkpoint through the channel reducers, leaving any pending question in place.
+`updateState(threadId, update, { asNode: 'research' })` applies it as if that node had produced it,
+so the next step follows that node's edges. `fork(threadId, { step })` copies the history up to a step
+into a new thread and leaves the original untouched, so two answers to the same question can be run
+side by side.
+
+**Watch it run.** `onEvent` receives every task starting, retrying, and finishing with its update,
+every checkpoint written, and whatever a node passes to `context.emit()` — model tokens as they
+stream, a status line, an intermediate result:
+
+```ts
+.addNode('write', async (ctx) => {
+  for await (const token of streamAnswer(ctx.state)) ctx.emit({ token });
+  return { answer };
+})
+
+await graph.invoke(input, {
+  onEvent: (event) => event.type === 'custom' && process.stdout.write((event.data as { token: string }).token),
+});
+```
+
+A listener that throws never fails the run it is watching.
+
+**See the shape.** `graph.describe()` returns nodes, edges, and which routes are decided at run
+time, as plain JSON. `toMermaid()` from `nexus-ai-pro/graph/visualize` draws it — solid arrows are
+always taken, dotted ones are chosen at run time, and subgraphs are drawn inside the node that runs
+them:
+
+```ts
+import { toMermaid } from 'nexus-ai-pro/graph/visualize';
+
+console.log(toMermaid(graph, { highlight: checkpoint.next }));
+```
+
+This diagram is that function's actual output for a research-and-review graph:
+
+```mermaid
+flowchart TD
+  __start__([start])
+  __end__([end])
+  n_plan["plan"]
+  n_research["research<br/><small>retries</small>"]
+  n_summarize["summarize<br/><small>deferred</small>"]
+  n_review["review"]
+  n_publish["publish"]
+  __start__ --> n_plan
+  n_summarize --> n_review
+  n_publish --> __end__
+  n_plan -.-> n_research
+  n_research -.-> n_summarize
+  n_review -.-> n_publish
+  n_review -.-> n_plan
+```
+
+The visualizer is its own subpath and imports no runtime code, so drawing a graph costs nothing to an
+application that only runs one. No image renderer is bundled; any Mermaid renderer turns the output
+into PNG or SVG.
+
 **Durable by construction.** The default checkpointer is in-process, holding up to 1,000 threads;
 pass `checkpointer: false` to turn checkpointing off. Point it at the operation store
 that already backs durable operations and a thread survives a restart — a different worker resumes
@@ -1832,13 +1924,13 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/providers/anthropic` | 70 KB | 11% | none |
 | `nexus-ai-pro/providers/google` | 66 KB | 11% | none |
 | `nexus-ai-pro/images` | 65 KB | 11% | none |
+| `nexus-ai-pro/graph` | 60 KB | 10% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 9% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 8% | none |
 | `nexus-ai-pro/batch/anthropic` | 52 KB | 8% | none |
 | `nexus-ai-pro/operations` | 49 KB | 8% | none |
 | `nexus-ai-pro/batch/mock` | 47 KB | 8% | none |
 | `nexus-ai-pro/providers/cohere` | 46 KB | 8% | none |
-| `nexus-ai-pro/graph` | 46 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% | none |
 | `nexus-ai-pro/security` | 40 KB | 7% | +3.4 MB |
 | `nexus-ai-pro/models` | 35 KB | 6% | none |
@@ -1874,6 +1966,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 1% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 1% | none |
 | `nexus-ai-pro/telephony/realtime-bridge` | 7 KB | 1% | none |
+| `nexus-ai-pro/graph/visualize` | 6 KB | 1.0% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 0.8% | none |
 | `nexus-ai-pro/embeddings/mock` | 5 KB | 0.8% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 0.8% | none |

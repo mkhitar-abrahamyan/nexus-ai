@@ -313,6 +313,21 @@ Also since 1.11.0, all additive:
 - `context.taskId` and `context.attempt` are new. Step events carry `tasks` and `attempts` when there
   is something to report.
 
+Also Unreleased, all additive:
+
+- `Command` (with `Command.PARENT`) may be returned from a node; `NodeResult` names what a node may
+  return. `goto` routes are added to the node's outgoing edges, and a paused checkpoint records them in
+  the optional `gotos` field.
+- `interruptBefore` and `interruptAfter` on compile and run options; a paused checkpoint and result
+  carry `breakpoint`, and step events may have type `breakpoint`.
+- `NodeOptions.defer`, `GraphRunOptions.onEvent` with the `GraphEvent` union, and `context.emit()`.
+  New `GraphEvent` variants may be added in a minor release.
+- `updateState()`, `fork()`, and `describe()` on a compiled graph, and the `nexus-ai-pro/graph/visualize`
+  subpath. The exact Mermaid text `toMermaid()` produces is not a guarantee — diagram layout may
+  improve in a minor release — but `GraphDescription` is a normalized shape.
+- A subgraph node's thread id is `<parent thread>:<task id>`, which equals the previous
+  `<parent thread>:<node>` for any node not reached through `Send`.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

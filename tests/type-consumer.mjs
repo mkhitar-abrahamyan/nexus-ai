@@ -182,8 +182,9 @@ import { createImageInputResolver } from 'nexus-ai-pro/images/inputs';
 import { combineSafetyPolicies, createOpenAIVisualModeration } from 'nexus-ai-pro/images/moderation';
 import { MediaEvalRunner, MemoryReviewQueue } from 'nexus-ai-pro/images/evals';
 import type { MediaEvalReport } from 'nexus-ai-pro/images/evals';
-import { createGraph, MemoryGraphCheckpointer, appendList, counter, END, Send } from 'nexus-ai-pro/graph';
-import type { GraphResult, GraphTask, NodeOptions, RetryPolicy } from 'nexus-ai-pro/graph';
+import { createGraph, MemoryGraphCheckpointer, appendList, counter, END, Send, Command } from 'nexus-ai-pro/graph';
+import type { GraphDescription, GraphEvent, GraphResult, GraphTask, NodeOptions, RetryPolicy } from 'nexus-ai-pro/graph';
+import { toMermaid } from 'nexus-ai-pro/graph/visualize';
 import { BatchManager as SubpathBatchManager } from 'nexus-ai-pro/batch';
 import { MockBatchProvider } from 'nexus-ai-pro/batch/mock';
 import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
@@ -502,6 +503,17 @@ const fanOutTasks: Promise<GraphTask[] | undefined> = fanOutGraph
   .state('consumer-fanout')
   .then((checkpoint) => checkpoint?.tasks);
 const answered = fanOutGraph.resumeInterruptsWith('consumer-fanout', { 'each#2.0:1:0': true });
+const routedGraph = createGraph({ channels: { log: appendList<string>(), turns: counter() } })
+  .addNode('decide', () => new Command({ update: { turns: 1 }, goto: 'act' }), { ends: ['act'] })
+  .addNode('act', () => ({ log: ['acted'] }), { defer: true })
+  .setEntry('decide')
+  .addEdge('act', END)
+  .compile({ interruptBefore: ['act'] });
+const shape: GraphDescription = routedGraph.describe();
+const diagram: string = toMermaid(shape, { direction: 'LR', highlight: ['act'] });
+const edited = routedGraph.updateState('consumer-thread', { turns: 1 }, { asNode: 'decide' });
+const forked: Promise<string> = routedGraph.fork('consumer-thread', { step: 0 });
+const listened = routedGraph.invoke({}, { onEvent: (event: GraphEvent) => void event.type });
 const batchManager = new BatchManager({ providers: { mock: new MockBatchProvider() }, defaultProvider: 'mock' });
 const subpathBatchManager = new SubpathBatchManager();
 const openAiBatch = new OpenAIBatchProvider({ apiKey: 'test' });
@@ -649,6 +661,10 @@ void anthropicBatch;
 void batchResult;
 void fileStore;
 void fanOutTasks;
+void diagram;
+void edited;
+void forked;
+void listened;
 void answered;
 void S3AssetStore;
 void rateLimitStore;

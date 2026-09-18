@@ -4,6 +4,43 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Graph control and introspection. A node can route itself, a run can pause at breakpoints and be
+edited or forked, every task and custom event can be watched as it happens, and a graph can draw
+itself.
+
+### Added
+
+- **`Command`.** A node returns `new Command({ update, goto })` to write state and choose its
+  successors in one step, instead of splitting the decision into a separate router. `goto` takes node
+  names or `Send`s. A route chosen by a task that finished before its step paused is kept on the
+  checkpoint, so it is still followed when the step resumes.
+- **`Command.PARENT`.** A node inside a subgraph hands control back to the graph that contains it. The
+  subgraph's own writes and the update it addressed to the parent are reduced separately, in order,
+  so neither overwrites the other.
+- **Breakpoints.** `interruptBefore` and `interruptAfter`, per compile or per run, pause a run at
+  chosen nodes with status `interrupted` and a `breakpoint` describing where. `continue()` carries on,
+  and does not pause again at the breakpoint it resumes from.
+- **Deferred nodes.** `addNode(name, fn, { defer: true })` holds a node until every other pending task
+  has finished, so an aggregator after branches of different lengths runs once.
+- **`updateState()`.** Merges a correction into a thread's latest checkpoint in place, keeping any
+  pending question; with `asNode`, applies it as that node's output and continues along its edges.
+- **`fork()`.** Copies a thread's history up to a step into a new thread, leaving the original
+  untouched and runnable, and records `metadata.forkedFrom`.
+- **`onEvent` and `context.emit()`.** A run can observe each task starting, retrying, and finishing
+  with its update, every checkpoint written, and custom events a node emits, such as model tokens. A
+  listener that throws never fails the run.
+- **`describe()` and `nexus-ai-pro/graph/visualize`.** `describe()` returns a graph's nodes, edges, and
+  run-time routes as plain JSON, including subgraphs. `toMermaid()` draws it, with optional
+  highlighting of where a thread is; `toGraphJSON()` returns the data. The visualizer imports no
+  runtime code.
+
+### Fixed
+
+- **Parallel copies of a subgraph node no longer share a thread.** `asNode()` keyed the subgraph's
+  thread by node name, so two `Send` copies of one subgraph node in the same step wrote to the same
+  thread. It is now keyed by task; a plain node's task id is its name, so existing threads are
+  unaffected.
+
 ## [1.11.0] - 2026-09-18
 
 Parallel graphs. A fan-out that looks parallel now runs in parallel, a graph can fan out over data it

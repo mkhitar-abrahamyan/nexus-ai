@@ -450,6 +450,16 @@
         "default": "./dist-cjs/graph/index.js"
       }
     },
+    "./graph/visualize": {
+      "import": {
+        "types": "./dist/graph/visualize.d.ts",
+        "default": "./dist/graph/visualize.js"
+      },
+      "require": {
+        "types": "./dist-cjs/graph/visualize.d.ts",
+        "default": "./dist-cjs/graph/visualize.js"
+      }
+    },
     "./ops/circuit-breaker": {
       "import": {
         "types": "./dist/ops/circuit-breaker.d.ts",
@@ -1034,6 +1044,9 @@
       ],
       "graph": [
         "dist-cjs/graph/index.d.ts"
+      ],
+      "graph/visualize": [
+        "dist-cjs/graph/visualize.d.ts"
       ],
       "ops/circuit-breaker": [
         "dist-cjs/ops/circuit-breaker.d.ts"

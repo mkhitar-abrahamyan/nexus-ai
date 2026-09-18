@@ -28,6 +28,36 @@ export class Send {
   ) {}
 }
 
+/** Where a `Command` sends control. */
+export type CommandTarget = string | Send | Array<string | Send>;
+
+/**
+ * Updates state and chooses what runs next, in one return value.
+ *
+ * A router decides where to go after a node from the state that node left behind. When the node
+ * itself already knows — an agent that just picked a tool, a triage step that classified a ticket —
+ * splitting that decision into a separate router means computing it twice. A node that returns a
+ * `Command` writes its update and names its successors together.
+ *
+ * `goto` is added to the node's outgoing edges, so a node that routes by `Command` usually has none;
+ * declare its possible targets with `ends` so compile-time checks and diagrams stay exact.
+ * `graph: Command.PARENT` hands the command to the graph that contains this one as a subgraph, which
+ * is how a nested agent hands control back.
+ */
+export class Command<U = Record<string, unknown>> {
+  static readonly PARENT = '__parent__';
+
+  readonly update?: U;
+  readonly goto?: CommandTarget;
+  readonly graph?: typeof Command.PARENT;
+
+  constructor(options: { update?: U; goto?: CommandTarget; graph?: typeof Command.PARENT }) {
+    this.update = options.update;
+    this.goto = options.goto;
+    this.graph = options.graph;
+  }
+}
+
 /**
  * One unit of work in a superstep.
  *
@@ -66,10 +96,18 @@ export interface NodeOptions {
   /** Aborts the node's signal and fails the attempt when it runs longer than this. */
   timeoutMs?: number;
   /**
-   * Nodes this one may reach through `Send`. Declaring them keeps compile-time reachability checks
-   * exact, so a node reached only by `Send` is not reported as unreachable.
+   * Nodes this one may reach through `Send` or a `Command`. Declaring them keeps compile-time
+   * reachability checks and diagrams exact, so a node reached only that way is not reported as
+   * unreachable.
    */
   ends?: string[];
+  /**
+   * Waits until every other pending task has finished before running.
+   *
+   * For an aggregator after branches of different lengths: without it, the aggregator would run as
+   * soon as the shortest branch reached it, and again for each longer branch.
+   */
+  defer?: boolean;
 }
 
 /**
@@ -154,12 +192,21 @@ export interface NodeContext<S extends ChannelSchema> {
   interrupt<T = unknown>(request: InterruptRequest): T;
   /** Reports progress without writing to state. */
   report(progress: Omit<GraphProgress, 'step' | 'node'>): void;
+  /**
+   * Sends anything to the run's `onEvent` listener as a `custom` event: model tokens as they stream,
+   * intermediate results, a status line. Nothing is written to state or checkpointed.
+   */
+  emit(data: unknown): void;
 }
 
 export type NodeFn<S extends ChannelSchema> = (
   context: NodeContext<S>,
   // biome-ignore lint/suspicious/noConfusingVoidType: `void` here is what lets a node with no return statement satisfy the type; `undefined` would force every side-effect node to write `return undefined`.
-) => Promise<StateUpdate<S> | void> | StateUpdate<S> | void;
+) => Promise<NodeResult<S>> | NodeResult<S>;
+
+/** What a node may return: an update, a `Command`, or nothing. */
+// biome-ignore lint/suspicious/noConfusingVoidType: see NodeFn; `void` lets a side-effect node omit its return.
+export type NodeResult<S extends ChannelSchema> = StateUpdate<S> | Command<StateUpdate<S>> | void;
 
 /**
  * Chooses where to go after a node.
@@ -193,6 +240,11 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
    * step completes.
    */
   completed?: string[];
+  /**
+   * Routes chosen by `Command`s from tasks in `completed`, kept so a paused step still follows them
+   * when it resumes without re-running those tasks. A plain string is a node; an object is a `Send`.
+   */
+  gotos?: Record<string, Array<string | { node: string; input?: unknown }>>;
   status: GraphStatus;
   /** First pending question, kept for callers that expect exactly one. */
   interrupt?: PendingInterrupt;
@@ -201,8 +253,16 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   /** Values already supplied for interrupts, keyed by `taskId:step:index`. */
   resolved?: Record<string, unknown>;
   error?: { name: string; message: string };
+  /** Present when the run paused at a breakpoint rather than to ask a question. */
+  breakpoint?: GraphBreakpoint;
   createdAt: string;
   metadata?: Record<string, unknown>;
+}
+
+/** Where a run paused for debugging. `continue()` carries on from it. */
+export interface GraphBreakpoint {
+  when: 'before' | 'after';
+  nodes: string[];
 }
 
 /**
@@ -241,6 +301,15 @@ export interface GraphRunOptions {
   metadata?: Record<string, unknown>;
   /** Overrides the compiled `maxConcurrency` for this run. */
   maxConcurrency?: number;
+  /** Breakpoints for this run only, replacing the compiled ones. */
+  interruptBefore?: string[];
+  interruptAfter?: string[];
+  /**
+   * Receives fine-grained events as they happen: each task starting, retrying, and finishing with
+   * its update, every checkpoint written, and whatever nodes pass to `context.emit()`. A throwing
+   * listener never fails the run.
+   */
+  onEvent?: (event: GraphEvent) => void;
   /** Receives what nodes pass to `context.report()`. A throwing callback never fails the node. */
   onProgress?: (progress: GraphProgress) => void;
 }
@@ -254,12 +323,24 @@ export interface GraphResult<S extends ChannelSchema> {
   interrupt?: PendingInterrupt;
   /** Every question a paused superstep asked. */
   interrupts?: PendingInterrupt[];
+  /** Present when the run paused at a breakpoint. */
+  breakpoint?: GraphBreakpoint;
+  /** A `Command.PARENT` that ended the run. In memory only; used by `asNode()`. */
+  parentCommand?: Command;
   error?: { name: string; message: string };
 }
 
+/** Fine-grained events delivered to `GraphRunOptions.onEvent`. */
+export type GraphEvent =
+  | { type: 'task_start'; step: number; taskId: string; node: string; attempt: number }
+  | { type: 'task_retry'; step: number; taskId: string; node: string; attempt: number; error: string }
+  | { type: 'task_end'; step: number; taskId: string; node: string; update?: unknown; goto?: string[] }
+  | { type: 'checkpoint'; step: number; status: GraphStatus; next: string[] }
+  | { type: 'custom'; step: number; taskId: string; node: string; data: unknown };
+
 /** One superstep, as seen by `stream()`. */
 export interface GraphStepEvent<S extends ChannelSchema> {
-  type: 'step' | 'interrupt' | 'done';
+  type: 'step' | 'interrupt' | 'breakpoint' | 'done';
   step: number;
   /** Nodes that ran in this superstep. */
   nodes: string[];
@@ -271,9 +352,43 @@ export interface GraphStepEvent<S extends ChannelSchema> {
   status: GraphStatus;
   interrupt?: PendingInterrupt;
   interrupts?: PendingInterrupt[];
+  breakpoint?: GraphBreakpoint;
+  /** A `Command.PARENT` that ended this run, for the graph that contains it. In memory only. */
+  parentCommand?: Command;
+}
+
+/**
+ * A graph's shape, as data: what `describe()` returns and what the visualizer draws.
+ *
+ * Plain JSON, so a UI, a test, or a documentation build can render it without importing the runtime.
+ */
+export interface GraphDescription {
+  name?: string;
+  nodes: Array<{
+    id: string;
+    ends?: string[];
+    defer?: boolean;
+    retry?: boolean;
+    timeoutMs?: number;
+    /** The graph this node runs, when it is a compiled graph used through `asNode()`. */
+    subgraph?: GraphDescription;
+  }>;
+  edges: Array<{
+    from: string;
+    to: string;
+    /** Chosen by a router, a mapping key, or a declared `ends` entry rather than always taken. */
+    conditional?: boolean;
+    label?: string;
+  }>;
+  /** Routers that return names a diagram cannot know in advance: no mapping and no `ends`. */
+  dynamic: string[];
 }
 
 export interface CompileOptions {
+  /** Pause before these nodes run, for inspecting or editing state. `continue()` resumes. */
+  interruptBefore?: string[];
+  /** Pause after these nodes run and their writes are checkpointed. `continue()` resumes. */
+  interruptAfter?: string[];
   /**
    * Tasks run at once within a superstep. Defaults to 16; `1` runs them one at a time, in order.
    *

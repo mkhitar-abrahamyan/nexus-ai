@@ -30,8 +30,10 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // codec, input resolution, visual moderation, and media evals — about 200KB unpacked across both
 // builds and their declarations, all opt-in subpaths that the root import never loads.
 // Raised again for parallel graphs: concurrent supersteps, Send fan-out, and per-node retry and
-// timeout policies — about 65KB unpacked across both builds and their declarations.
-const MAX_PACKED_BYTES = 520_000;
+// timeout policies — about 65KB unpacked across both builds and their declarations. Raised again
+// in 1.12.0 for graph commands, breakpoints, state editing and forks, run events, and the Mermaid
+// visualizer, plus the README documentation for them.
+const MAX_PACKED_BYTES = 540_000;
 const MAX_UNPACKED_BYTES = 3_200_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Most of
 // the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the

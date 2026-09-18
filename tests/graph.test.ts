@@ -11,7 +11,8 @@ import {
   GraphValidationError,
 } from '../src/graph/errors.js';
 import { createGraph } from '../src/graph/graph.js';
-import { END, Send } from '../src/types/graph.js';
+import { toGraphJSON, toMermaid } from '../src/graph/visualize.js';
+import { Command, END, Send } from '../src/types/graph.js';
 import { MemoryOperationStore } from '../src/operations/store.js';
 
 function basicChannels() {
@@ -1153,4 +1154,338 @@ test('an unknown Send target is reported with the node that produced it', async 
       return true;
     },
   );
+});
+
+// ── Commands ───────────────────────────────────────────────────────
+
+test('a Command updates state and routes in one return', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode(
+      'triage',
+      (ctx) => new Command({ update: { log: ['triaged'] }, goto: ctx.state.count > 0 ? 'urgent' : 'normal' }),
+      {
+        ends: ['urgent', 'normal'],
+      },
+    )
+    .addNode('urgent', () => ({ log: ['urgent'] }))
+    .addNode('normal', () => ({ log: ['normal'] }))
+    .setEntry('triage')
+    .addEdge('urgent', END)
+    .addEdge('normal', END)
+    .compile();
+
+  assert.deepEqual((await graph.invoke()).state.log, ['triaged', 'normal']);
+  assert.deepEqual((await graph.invoke({ count: 1 })).state.log, ['triaged', 'urgent']);
+});
+
+test('a Command can fan out with Send, and a node reached only by Command passes compile checks', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('plan', () => new Command({ goto: [new Send('work', 'a'), new Send('work', 'b')] }), { ends: ['work'] })
+    .addNode('work', (ctx) => ({ log: [`did ${ctx.input}`] }), { ends: [END] })
+    .setEntry('plan')
+    .compile();
+
+  assert.deepEqual((await graph.invoke()).state.log, ['did a', 'did b']);
+});
+
+test('a Command route survives a pause in the same step', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('split', () => ({ log: ['split'] }))
+    .addNode('decide', () => new Command({ update: { log: ['decided'] }, goto: 'follow-up' }), { ends: ['follow-up'] })
+    .addNode('ask', (ctx) => ({ done: ctx.interrupt<boolean>({ reason: 'Proceed?' }) }))
+    .addNode('follow-up', () => ({ log: ['followed up'] }))
+    .setEntry('split')
+    .addConditionalEdges('split', () => ['decide', 'ask'])
+    .addEdge('ask', END)
+    .addEdge('follow-up', END)
+    .compile();
+
+  await graph.invoke({}, { threadId: 'command-pause' });
+  const done = await graph.resumeWith('command-pause', true);
+  assert.equal(done.status, 'completed');
+  // "decide" is not re-run on resume, so its route has to come from the checkpoint.
+  assert.deepEqual(done.state.log, ['split', 'decided', 'followed up']);
+});
+
+test('Command.PARENT hands control from a subgraph back to its parent', async () => {
+  const child = createGraph({ channels: basicChannels() })
+    .addNode('try', () => ({ log: ['child tried'] }))
+    .addNode('escalate', () => new Command({ graph: Command.PARENT, goto: 'human', update: { log: ['escalated'] } }))
+    .addNode('unreachable-after-escalation', () => ({ log: ['should not run'] }))
+    .setEntry('try')
+    .addEdge('try', 'escalate')
+    .addEdge('escalate', 'unreachable-after-escalation')
+    .addEdge('unreachable-after-escalation', END)
+    .compile();
+
+  const parent = createGraph({ channels: basicChannels() })
+    .addNode('agent', child.asNode(), { ends: ['human'] })
+    .addNode('human', () => ({ log: ['human took over'] }))
+    .setEntry('agent')
+    .addEdge('human', END)
+    .compile();
+
+  const result = await parent.invoke();
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.state.log, ['child tried', 'escalated', 'human took over']);
+});
+
+test('parallel Send copies of a subgraph node run on separate subgraph threads', async () => {
+  const child = createGraph({ channels: { ...basicChannels(), topic: lastValue<string>('') } })
+    .addNode('ask', (ctx) => ({
+      log: [`${ctx.state.topic}:${ctx.interrupt<string>({ reason: `About ${ctx.state.topic}?` })}`],
+    }))
+    .setEntry('ask')
+    .addEdge('ask', END)
+    .compile();
+
+  const parent = createGraph({ channels: { ...basicChannels(), topic: lastValue<string>('') } })
+    .addNode('fan', () => ({}))
+    .addNode(
+      'research',
+      async (ctx) =>
+        child.asNode<ReturnType<typeof basicChannels> & { topic: ReturnType<typeof lastValue<string>> }>()({
+          ...ctx,
+          state: { ...ctx.state, topic: String(ctx.input) },
+        }),
+      { ends: [END] },
+    )
+    .setEntry('fan')
+    .addConditionalEdges('fan', () => [new Send('research', 'x'), new Send('research', 'y')])
+    .compile();
+
+  const paused = await parent.invoke({}, { threadId: 'per-task' });
+  assert.equal(paused.interrupts?.length, 2);
+  assert.deepEqual(
+    paused.interrupts?.map((item) => item.reason).sort(),
+    ['About x?', 'About y?'],
+    'each copy kept its own subgraph thread, so each asked its own question',
+  );
+});
+
+// ── Breakpoints ────────────────────────────────────────────────────
+
+test('interruptBefore pauses in front of a node, and continue() runs it without pausing again', async () => {
+  let risky = 0;
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('draft', () => ({ log: ['draft'] }))
+    .addNode('publish', () => {
+      risky += 1;
+      return { log: ['published'] };
+    })
+    .setEntry('draft')
+    .addEdge('draft', 'publish')
+    .addEdge('publish', END)
+    .compile({ interruptBefore: ['publish'] });
+
+  const paused = await graph.invoke({}, { threadId: 'bp-before' });
+  assert.equal(paused.status, 'interrupted');
+  assert.deepEqual(paused.breakpoint, { when: 'before', nodes: ['publish'] });
+  assert.equal(risky, 0);
+
+  const events = await collect(graph.continue('bp-before'));
+  assert.equal(events.at(-1)?.status, 'completed');
+  assert.equal(risky, 1);
+});
+
+test('interruptAfter pauses once a node has written, and a run can override the compiled breakpoints', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('a', () => ({ log: ['a'] }))
+    .addNode('b', () => ({ log: ['b'] }))
+    .setEntry('a')
+    .addEdge('a', 'b')
+    .addEdge('b', END)
+    .compile({ interruptAfter: ['a'] });
+
+  const paused = await graph.invoke({}, { threadId: 'bp-after' });
+  assert.equal(paused.status, 'interrupted');
+  assert.deepEqual(paused.breakpoint, { when: 'after', nodes: ['a'] });
+  assert.deepEqual(paused.state.log, ['a']);
+  assert.equal((await collect(graph.continue('bp-after'))).at(-1)?.status, 'completed');
+
+  const unpaused = await graph.invoke({}, { interruptAfter: [] });
+  assert.equal(unpaused.status, 'completed');
+});
+
+// ── Deferred nodes ─────────────────────────────────────────────────
+
+test('a deferred node waits for branches of different lengths and runs once', async () => {
+  let aggregations = 0;
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('split', () => ({}))
+    .addNode('short', () => ({ log: ['short'] }))
+    .addNode('long-1', () => ({ log: ['long-1'] }))
+    .addNode('long-2', () => ({ log: ['long-2'] }))
+    .addNode(
+      'aggregate',
+      (ctx) => {
+        aggregations += 1;
+        return { log: [`aggregate saw ${ctx.state.log.length}`] };
+      },
+      { defer: true },
+    )
+    .setEntry('split')
+    .addConditionalEdges('split', () => ['short', 'long-1'])
+    .addEdge('short', 'aggregate')
+    .addEdge('long-1', 'long-2')
+    .addEdge('long-2', 'aggregate')
+    .addEdge('aggregate', END)
+    .compile();
+
+  const result = await graph.invoke();
+  assert.equal(aggregations, 1);
+  assert.deepEqual(result.state.log, ['short', 'long-1', 'long-2', 'aggregate saw 3']);
+});
+
+// ── Events ─────────────────────────────────────────────────────────
+
+test('onEvent reports tasks, retries, checkpoints, and custom events as they happen', async () => {
+  let attempts = 0;
+  const events: string[] = [];
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode(
+      'stream-tokens',
+      (ctx) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('flaky');
+        for (const token of ['Hel', 'lo']) ctx.emit({ token });
+        return { log: ['Hello'] };
+      },
+      { retry: { maxAttempts: 2, initialIntervalMs: 1, jitter: false } },
+    )
+    .setEntry('stream-tokens')
+    .addEdge('stream-tokens', END)
+    .compile();
+
+  await graph.invoke(
+    {},
+    {
+      onEvent: (event) => {
+        if (event.type === 'custom') events.push(`custom:${(event.data as { token: string }).token}`);
+        else if (event.type === 'checkpoint') events.push(`checkpoint:${event.step}:${event.status}`);
+        else events.push(`${event.type}:${event.node}`);
+      },
+    },
+  );
+
+  assert.deepEqual(events, [
+    'checkpoint:0:running',
+    'task_start:stream-tokens',
+    'task_retry:stream-tokens',
+    'task_start:stream-tokens',
+    'custom:Hel',
+    'custom:lo',
+    'task_end:stream-tokens',
+    'checkpoint:1:completed',
+  ]);
+
+  const quiet = await graph.invoke(
+    {},
+    {
+      onEvent: () => {
+        throw new Error('listener bug');
+      },
+    },
+  );
+  assert.equal(quiet.status, 'completed', 'a broken listener never fails the run');
+});
+
+// ── Editing state and forking ──────────────────────────────────────
+
+test('updateState edits a paused thread in place, and asNode applies an update as that node', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('research', () => ({ log: ['wrong fact'] }))
+    .addNode('review', (ctx) => ({ done: ctx.interrupt<boolean>({ reason: 'OK?' }) }))
+    .addNode('write', (ctx) => ({ log: [`wrote from ${ctx.state.log.length} notes`] }))
+    .setEntry('research')
+    .addEdge('research', 'review')
+    .addEdge('review', 'write')
+    .addEdge('write', END)
+    .compile();
+
+  await graph.invoke({}, { threadId: 'edit' });
+  const edited = await graph.updateState('edit', { log: ['correction'] });
+  assert.equal(edited.status, 'awaiting_input', 'editing in place keeps the question pending');
+  assert.equal(edited.metadata?.source, 'update');
+
+  await assert.rejects(() => graph.updateState('edit', { count: 1 }, { asNode: 'research' }), /waiting for an answer/);
+
+  const done = await graph.resumeWith('edit', true);
+  assert.deepEqual(done.state.log, ['wrong fact', 'correction', 'wrote from 2 notes']);
+
+  const skipped = await graph.updateState('edit', { log: ['manual'] }, { asNode: 'review' });
+  assert.deepEqual(skipped.next, ['write'], 'the next step follows the edges of the node named');
+  await assert.rejects(() => graph.updateState('edit', {}, { asNode: 'ghost' }), /not a node/);
+});
+
+test('fork copies a thread up to a step, and both timelines stay readable and runnable', async () => {
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('tick', () => ({ count: 1 }))
+    .setEntry('tick')
+    .addConditionalEdges('tick', (state) => (state.count >= 3 ? END : 'tick'))
+    .compile();
+
+  await graph.invoke({}, { threadId: 'original' });
+  const forkId = await graph.fork('original', { step: 1, threadId: 'alternative' });
+  assert.equal(forkId, 'alternative');
+
+  const forked = await graph.state('alternative');
+  assert.equal(forked?.step, 1);
+  assert.deepEqual(forked?.metadata?.forkedFrom, { threadId: 'original', step: 1 });
+
+  await graph.updateState('alternative', { count: 10 });
+  const finished = await collect(graph.continue('alternative'));
+  assert.equal(finished.at(-1)?.state.count, 12);
+  assert.equal((await graph.state('original'))?.state.count, 3, 'the original timeline is untouched');
+
+  await assert.rejects(() => graph.fork('original', { threadId: 'alternative' }), /already exists/);
+  await assert.rejects(() => graph.fork('original', { step: 99 }), /no checkpoint at step 99/);
+  await assert.rejects(() => graph.fork('nobody'), GraphThreadNotFoundError);
+});
+
+// ── Describe and visualize ─────────────────────────────────────────
+
+test('describe() returns the shape, and toMermaid renders it with subgraphs and highlights', () => {
+  const child = createGraph({ channels: basicChannels() })
+    .addNode('inner', () => undefined)
+    .setEntry('inner')
+    .addEdge('inner', END)
+    .compile({ name: 'child' });
+
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('plan', () => undefined)
+    .addNode('act', () => undefined, { retry: { maxAttempts: 3 } })
+    .addNode('nested', child.asNode())
+    .addNode('free-router', () => undefined)
+    .addNode('sum', () => undefined, { defer: true })
+    .setEntry('plan')
+    .addConditionalEdges('plan', () => 'go', { go: 'act', skip: 'sum' })
+    .addEdge('act', 'nested')
+    .addEdge('nested', 'free-router')
+    .addConditionalEdges('free-router', () => 'sum')
+    .addEdge('sum', END)
+    .compile({ name: 'demo' });
+
+  const description = graph.describe();
+  assert.equal(description.name, 'demo');
+  assert.deepEqual(description.dynamic, ['free-router']);
+  assert.equal(description.nodes.find((node) => node.id === 'act')?.retry, true);
+  assert.equal(description.nodes.find((node) => node.id === 'sum')?.defer, true);
+  assert.equal(description.nodes.find((node) => node.id === 'nested')?.subgraph?.name, 'child');
+  assert.ok(description.edges.some((edge) => edge.from === 'plan' && edge.to === 'act' && edge.label === 'go'));
+
+  const mermaid = toMermaid(graph, { highlight: ['act'] });
+  assert.match(mermaid, /^flowchart TD/);
+  assert.match(mermaid, /__start__ --> n_plan/);
+  assert.match(mermaid, /n_plan -\.->\|go\| n_act/);
+  assert.match(mermaid, /subgraph n_nested\["nested"\]/);
+  assert.match(mermaid, /n_nested_2f_inner/);
+  assert.match(mermaid, /n_free_2d_router -\.-> /);
+  assert.match(mermaid, /class n_act active/);
+
+  const collapsed = toMermaid(graph, { subgraphs: 'collapse', direction: 'LR' });
+  assert.match(collapsed, /^flowchart LR/);
+  assert.doesNotMatch(collapsed, /subgraph/);
+
+  assert.deepEqual(toGraphJSON(description), description);
 });

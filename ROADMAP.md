@@ -602,7 +602,7 @@ parallel run stops being meaningfully faster.
 
 ---
 
-## 12. 1.12.0: graph control flow and introspection
+## 12. Ready for 1.12.0 (unreleased): graph control flow and introspection
 
 **Commands.**
 - A node can return `new Command({ update, goto, resume, graph })`, which updates state and chooses
@@ -650,11 +650,24 @@ parallel run stops being meaningfully faster.
 - `defer: true` holds a node until every other pending task has finished, so an aggregator waits for
   branches of different lengths.
 
-**Budgets.** `/graph` at most 48 KB; `/graph/visualize` at most 6 KB.
+**What landed, and what moved.** Commands, state editing, visualization, breakpoints, and deferred
+nodes landed as described above. Three items changed shape:
 
-**Proof.**
-- The README graph section includes a live Mermaid diagram, which GitHub renders.
-- A test forks a thread at step 2, edits the state, finishes both timelines, and reads both histories.
+- **Forks are separate threads.** `fork()` copies history into a new thread rather than storing
+  branches inside one thread with checkpoint ids and parent pointers. Both timelines stay readable and
+  runnable, which is what the item was for, without changing either checkpointer's storage format.
+  Branches within one thread remain possible later if a use case needs them.
+- **Streaming modes became one event callback.** `onEvent` delivers task, retry, checkpoint, and
+  custom events, and `context.emit()` carries model tokens, so a caller filters by type instead of
+  choosing modes. `stream()` still yields one event per superstep.
+- **Input and output schemas and per-node caching move to 1.13.0**, alongside the store they would
+  share infrastructure with.
+
+**Budgets.** `/graph/visualize` imports no runtime code at all.
+
+**Proof: landed.** The README graph section includes a Mermaid diagram that is `toMermaid()`'s actual
+output, which GitHub renders. A test forks a thread, edits the fork's state, finishes it, and checks
+that the original timeline is untouched.
 
 ---
 
@@ -693,6 +706,12 @@ parallel run stops being meaningfully faster.
 - The protocol SDK is an optional peer dependency, loaded only by these subpaths.
 - This is how the project reaches a broad tool ecosystem without maintaining its own integration
   catalogue.
+
+**Moved here from 1.12.0.**
+- `createGraph({ channels, input, output })` restricts what a caller may pass in and what comes back;
+  private channels stay internal.
+- Per-node caching, `cache: { key, ttlMs, store }`, through the existing cache adapters imported as
+  types only.
 
 **Budgets.** `/store` at most 8 KB. The two store adapters at most 10 KB each. `/agent` at most 20 KB
 on top of `/graph`. `/mcp` at most 25 KB. `AgentLoop`'s entry point must not grow.
