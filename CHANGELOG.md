@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-09-18
+
 Parallel graphs. A fan-out that looks parallel now runs in parallel, a graph can fan out over data it
 discovers at run time, and a node can retry or time out on its own.
 
@@ -36,7 +38,6 @@ discovers at run time, and a node can retry or time out on its own.
 - **Several questions at once.** Parallel tasks can each interrupt. Paused checkpoints and results
   carry `interrupts`, and `resumeInterrupts()` answers any subset by id. A single question still works
   exactly as before through `resume()`.
-
 - **Install weight is now measured honestly.** The size table only ever counted this package's own
   files, so a small entry point could quietly force a large dependency on the consumer.
   - `npm run size:check` follows bare imports too, and the README table gains a column for what each
@@ -613,7 +614,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.7.0...v1.8.0

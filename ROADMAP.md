@@ -3,10 +3,10 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.10.0**. 76 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **1.11.0**. 76 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, 101 completion
-registry models plus 63 aliases, and 11 embedding models plus 5 aliases. 485 unit tests pass;
-coverage sits at **89.8% lines / 74.9% branches / 84.1% functions** against gates of 82/67/73. CI
+registry models plus 63 aliases, and 11 embedding models plus 5 aliases. 496 unit tests pass;
+coverage sits at **89.9% lines / 75.1% branches / 84.2% functions** against gates of 82/67/73. CI
 verifies lint, format, build, tests, coverage, registry drift, per-subpath size, mock conformance,
 packed-package smoke, API contract, consumer type resolution, and clean install on Node 22 and 24.
 
@@ -18,7 +18,7 @@ Two axes, weighed together: **capability** and **install weight**. A capability 
 importing the whole runtime fails the second test however well it does on the first, so install
 weight is a constraint on every new feature rather than a feature of its own.
 
-Measured from the 1.10.0 build, an entry point costs a fraction of the root import: `/graph` 5%,
+Measured from the 1.11.0 build, an entry point costs a fraction of the root import: `/graph` 8%,
 `/operations` 8%, `/images/stores` 4%, `/ops/circuit-breaker` 1%, `/cache/memory-cache` 0.5%,
 `/streaming` 0.2%. Every new capability gets its own export subpath and stays out of the root,
 and `npm run size:check` fails the build when any entry point grows past its budget.
@@ -533,7 +533,7 @@ be large to get there. Three rules apply to every item below.
 
 ---
 
-## 11. Ready for 1.11.0 (unreleased): parallel graphs
+## 11. Shipped in 1.11.0 — parallel graphs
 
 A fan-out that looks parallel will run in parallel. Four branches of three seconds each should finish
 in about three seconds, not twelve.

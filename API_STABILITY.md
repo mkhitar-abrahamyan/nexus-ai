@@ -290,7 +290,7 @@ Also since 1.10.0:
 - A subgraph interrupt surfaces as an interrupt of the parent node.
 - `onProgress` receives `context.report()` calls.
 
-Scheduling within a superstep is not a guarantee, and Unreleased makes use of that: tasks in a
+Scheduling within a superstep is not a guarantee, and 1.11.0 makes use of that: tasks in a
 superstep now run concurrently, bounded by `maxConcurrency` (default 16, settable per compile and per
 run; `1` is strictly sequential). A node still must not depend on observing another node's write
 within the same superstep — that is what channels are for. What is guaranteed is that writes are
@@ -298,7 +298,7 @@ reduced in task order rather than completion order, so a replay of the same deci
 same state. The default `maxSteps` and `maxConcurrency` may change; pass them explicitly when a run
 depends on the bound.
 
-Also Unreleased, all additive:
+Also since 1.11.0, all additive:
 
 - `Send` creates one task per value, with the task's input on `context.input`. Task ids are derived
   from the step and the order produced, and appear in the checkpoint's optional `tasks` field, which
