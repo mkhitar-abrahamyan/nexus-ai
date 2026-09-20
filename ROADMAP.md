@@ -3,10 +3,10 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.11.0**. 76 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **1.12.0**. 77 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, 101 completion
-registry models plus 63 aliases, and 11 embedding models plus 5 aliases. 496 unit tests pass;
-coverage sits at **89.9% lines / 75.1% branches / 84.2% functions** against gates of 82/67/73. CI
+registry models plus 63 aliases, and 11 embedding models plus 5 aliases. 508 unit tests pass;
+coverage sits at **90.0% lines / 75.6% branches / 84.4% functions** against gates of 82/67/73. CI
 verifies lint, format, build, tests, coverage, registry drift, per-subpath size, mock conformance,
 packed-package smoke, API contract, consumer type resolution, and clean install on Node 22 and 24.
 
@@ -18,7 +18,7 @@ Two axes, weighed together: **capability** and **install weight**. A capability 
 importing the whole runtime fails the second test however well it does on the first, so install
 weight is a constraint on every new feature rather than a feature of its own.
 
-Measured from the 1.11.0 build, an entry point costs a fraction of the root import: `/graph` 8%,
+Measured from the 1.12.0 build, an entry point costs a fraction of the root import: `/graph` 10%,
 `/operations` 8%, `/images/stores` 4%, `/ops/circuit-breaker` 1%, `/cache/memory-cache` 0.5%,
 `/streaming` 0.2%. Every new capability gets its own export subpath and stays out of the root,
 and `npm run size:check` fails the build when any entry point grows past its budget.
@@ -602,7 +602,7 @@ parallel run stops being meaningfully faster.
 
 ---
 
-## 12. Ready for 1.12.0 (unreleased): graph control flow and introspection
+## 12. Shipped in 1.12.0 — graph control flow and introspection
 
 **Commands.**
 - A node can return `new Command({ update, goto, resume, graph })`, which updates state and chooses

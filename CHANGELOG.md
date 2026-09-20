@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-09-20
+
 Graph control and introspection. A node can route itself, a run can pause at breakpoints and be
 edited or forked, every task and custom event can be watched as it happens, and a graph can draw
 itself.
@@ -651,7 +653,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.8.0...v1.9.0

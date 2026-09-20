@@ -1,8 +1,12 @@
 # nexus-ai-pro
 
-The Universal AI Pipeline for Node.js: one typed API for routing, guardrails, caching, context-window management, tools, RAG, evals, jobs, and provider failover.
+The typed AI framework for TypeScript. One API for provider routing and failover, agent graphs that
+run branches in parallel and survive a restart, durable background operations, guardrails, cost
+control, images, voice, and evals.
 
-Use the whole pipeline for production AI features, or turn pieces off when you only need a thin provider wrapper.
+Import the whole runtime, or one piece: every capability has its own entry point with a size budget
+CI enforces, and the table below publishes what each one costs. A graph-only application loads 60 KB
+and installs no third-party package at all.
 
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai

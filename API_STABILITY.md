@@ -313,7 +313,7 @@ Also since 1.11.0, all additive:
 - `context.taskId` and `context.attempt` are new. Step events carry `tasks` and `attempts` when there
   is something to report.
 
-Also Unreleased, all additive:
+Also since 1.12.0, all additive:
 
 - `Command` (with `Command.PARENT`) may be returned from a node; `NodeResult` names what a node may
   return. `goto` routes are added to the node's outgoing edges, and a paused checkpoint records them in
