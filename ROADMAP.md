@@ -3,12 +3,13 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.12.0**. 77 export subpaths, each held to a size budget in CI, 12 completion
-providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, 101 completion
-registry models plus 63 aliases, and 11 embedding models plus 5 aliases. 508 unit tests pass;
-coverage sits at **90.0% lines / 75.6% branches / 84.4% functions** against gates of 82/67/73. CI
-verifies lint, format, build, tests, coverage, registry drift, per-subpath size, mock conformance,
-packed-package smoke, API contract, consumer type resolution, and clean install on Node 22 and 24.
+Status baseline: **1.14.0 released; 1.15.0 prepared and unreleased.** 83 export subpaths, each
+held to a size budget in CI, 12 completion providers, 5 embedding providers, 2 batch providers, 3
+image providers plus a mock, 101 completion registry models plus 63 aliases, and 11 embedding models
+plus 5 aliases. 547 unit tests pass; coverage sits at **90.5% lines / 75.9% branches / 85.5%
+functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry
+drift, per-subpath size, a graph benchmark, mock conformance, packed-package smoke, API contract,
+consumer type resolution, and clean install on Node 22 and 24.
 
 ---
 
@@ -18,10 +19,13 @@ Two axes, weighed together: **capability** and **install weight**. A capability 
 importing the whole runtime fails the second test however well it does on the first, so install
 weight is a constraint on every new feature rather than a feature of its own.
 
-Measured from the 1.12.0 build, an entry point costs a fraction of the root import: `/graph` 10%,
-`/operations` 8%, `/images/stores` 4%, `/ops/circuit-breaker` 1%, `/cache/memory-cache` 0.5%,
-`/streaming` 0.2%. Every new capability gets its own export subpath and stays out of the root,
-and `npm run size:check` fails the build when any entry point grows past its budget.
+Measured from the current build, an entry point costs a fraction of the root import: `/agent` 12%,
+`/graph` 10%, `/operations` 8%, `/evaluate` 5%, `/tracing` 4%, `/mcp` 3%, `/store` 1%,
+`/cache/memory-cache` 0.5%, `/streaming` 0.2%. Dependencies are counted as well as bytes: 79 of the
+83 entry points import no third-party package at all, and the four that do — the root, `/config`,
+`/core`, and `/security` — are the ones that reach the schema validators. Every new capability gets its own export subpath and stays out of the
+root, and `npm run size:check` fails the build when any entry point grows past its budget or picks up
+a dependency it did not have.
 
 Two things this project deliberately does not chase: a large catalogue of third-party integrations,
 and a second language runtime. Both are decided by headcount rather than design, and pursuing either
@@ -176,6 +180,17 @@ a CLI (`scan`, `models`, `eval`, `optimize`), provider conformance fixtures, par
 CommonJS builds with per-condition types and a `typesVersions` map for `node10` resolution, and OIDC
 trusted publishing with provenance.
 
+### 1.15 Memory, agents, MCP, and traces
+
+Delivered in 1.14.0. `nexus-ai-pro/store` gives cross-thread long-term memory with namespaces, TTL,
+and optional vector search, so what an agent learns in one conversation is available in the next.
+`nexus-ai-pro/agent` builds an agent as a compiled graph, which is what makes durable approvals,
+checkpoints, and time travel apply to agents without a second runtime beside the first.
+`nexus-ai-pro/mcp` speaks the protocol in both directions over a JSON-RPC subset written here, so
+breadth of integration costs no dependency. `nexus-ai-pro/tracing` records run trees with feedback,
+cost roll-ups, tail sampling, and alert rules, which is the queryable model the OpenTelemetry
+exporter never provided.
+
 ---
 
 ## 2. Known gaps
@@ -213,25 +228,30 @@ vectors shared across processes, and reranking as a sibling operation.
 ### 2.3 The model registry is still hand-maintained
 
 1.4.0 added `verifiedAt`, `source`, alias staging, and `assertRegistryFreshness()`, so drift is now
-visible. The data itself is still a hand-written TypeScript literal of 99 models and 63 aliases.
-Generation from versioned provider data remains outstanding, and the Claude 5 reasoning bug 1.4.0
-fixed is the kind of error generation would have prevented.
+visible, and the catalogue has since moved out of the TypeScript source into versioned JSON under
+`data/models`, compiled by `npm run registry:generate` and checked for drift in CI. The data itself
+is still written by hand: 101 models and 63 aliases across nine provider files, with provenance
+recorded beside them. Fetching from versioned provider sources remains outstanding, and the Claude 5
+reasoning bug 1.4.0 fixed is the kind of error that fetching would have prevented.
 
 ### 2.4 Durable execution is only half distributed
 
 Closed in 1.6.0 for operations: `OperationHandle` is no longer process-bound, cross-process recovery
 works through lapsed leases, and idempotency keys deduplicate across workers.
 
-Still process-local: `RateLimiter` is an in-memory token bucket with no distributed adapter, there is
-no circuit breaker (health monitoring exists, but nothing opens a circuit), `MemoryAssetStore` holds
-assets in one process, and realtime conversation snapshots and exports live in memory. Provider-state
-replay remains an application responsibility. One caveat on what did land: `RedisOperationStore` is
-atomic only when the client exposes `eval`; without it the compare-and-set degrades to a
-read-compare-write that narrows but does not close the race.
+Closed further since: the rate limiter takes a `RateLimitStore` with a Redis adapter beside the
+in-memory default, and `CircuitBreaker` opens on measured failure instead of only reporting health.
+
+Still process-local: circuit state, so one worker's open circuit is invisible to the rest — the first
+thing section 16 fixes. `MemoryAssetStore` holds assets in one process, and realtime conversation
+snapshots and exports live in memory. Provider-state replay remains an application responsibility.
+One caveat on what did land: `RedisOperationStore` is atomic only when the client exposes `eval`;
+without it the compare-and-set degrades to a read-compare-write that narrows but does not close the
+race.
 
 ### 2.5 Image family blockers
 
-Closed in code for 1.10.0, not yet released:
+Closed in 1.10.0:
 
 - masks, on all three backends;
 - a second hosted wire protocol, Imagen;
@@ -241,9 +261,11 @@ Closed in code for 1.10.0, not yet released:
 Filesystem and S3 asset stores and the durable operation state machine shipped in 1.7.0 and 1.6.0.
 
 What still blocks promotion is verification, not code. Every adapter has been tested against recorded
-wire shapes, but none has passed live conformance. OpenAI generation still refuses `aspectRatio`,
-`negativePrompt`, `seed`, and `references`. The upstream API does not accept them, so a portable
-application should route those requests to Imagen or ComfyUI.
+wire shapes, but none has passed live conformance, and a suite that only runs where credentials exist
+does not run often enough to gate a promotion. Record and replay in section 16 is what gives it a
+home in CI, and promotion is decided there rather than postponed again. OpenAI generation still
+refuses `aspectRatio`, `negativePrompt`, `seed`, and `references`. The upstream API does not accept
+them, so a portable application should route those requests to Imagen or ComfyUI.
 
 ### 2.6 Realtime family limitations
 
@@ -259,20 +281,23 @@ local estimate, and a published latency benchmark methodology remain follow-on w
 
 1.4.0 closed the worst of these: the agent loop went from 40% to 95% line coverage, the rules router
 from 34% to 91%, and the evaluation metric library from 40% (5% of functions) to 99%. 1.5.0 took
-`embeddings/providers.ts` from 37% to 99% and landed the new embeddings family at 95–100% across its
-seven files. What is still thin:
+`embeddings/providers.ts` from 37% to 99%. Everything added since lands high — the store, agents,
+MCP, tracing, and evaluation sit between 88% and 100% lines — and `ops/rate-limiter.ts` and
+`ops/circuit-breaker.ts` are now at 100%. What is still thin, measured on the current build:
 
 | Area | Lines | Note |
 | --- | --- | --- |
-| `hallucination/rag.ts`, `verification.ts` | 38% / 47% | Grounding claims deserve tests. |
-| `workflow/chains.ts`, `domain.ts` | 51% / 50% | |
-| `security/pii-detector.ts`, `semantic-injection-classifier.ts` | 49% / 49% | Security-relevant. |
+| `hallucination/rag.ts`, `verification.ts` | 38% / 61% | Grounding claims deserve tests. |
+| `rag/file-ingestion.ts`, `ingestion.ts` | 43% / 55% | |
+| `ops/otel-tracing.ts` | 44% | The exporter; the run trees beside it are covered. |
+| `optimizer/densifier.ts`, `budget.ts` | 46% / 49% | |
 | `jobs/queue.ts`, `batch.ts` | 47% / 53% | |
-| `rag/file-ingestion.ts` | 43% | |
-| `ops/otel-tracing.ts`, `rate-limiter.ts` | 44% / 55% | |
+| `security/pii-detector.ts`, `semantic-injection-classifier.ts` | 49% / 49% | Security-relevant. |
+| `workflow/chains.ts`, `domain.ts` | 51% / 50% | |
+| `providers/{mistral,groq,openrouter,azure-openai}.ts` | 48–60% | Request shaping is covered; error and stream paths are not. |
 
 Provider conformance runs against fixtures but has no record/replay corpus, so most real provider
-behavior is only verified when credentials are present.
+behavior is only verified when credentials are present. Section 16 closes that.
 
 ---
 
@@ -455,7 +480,7 @@ Google Imagen, and ComfyUI. Everything below is implemented and tested.
 
   Scores in an uncertainty band go to a human-review queue.
 - **Modality cleanup: deferred to 2.0.** Splitting `inputModalities` from `outputModalities` is a
-  breaking registry change, and it is listed in section 18.
+  breaking registry change, and it is listed in section 19.
 
 - **Graph and agent correctness: all nine fixed.** Fixing number 5 also exposed a related defect
   that is now fixed: after a paused step resumed, the outgoing edges of siblings that had already
@@ -516,7 +541,7 @@ be large to get there. Three rules apply to every item below.
    - Ship the change additively in 1.x wherever possible.
    - Anything that must break is marked `@deprecated` and noted in the changelog at least one minor
      release before 2.0.0.
-   - Every breaking item is collected in section 18.
+   - Every breaking item is collected in section 19.
 
 | Release | Theme | Gap it closes | Proof it ships |
 | --- | --- | --- | --- |
@@ -524,10 +549,11 @@ be large to get there. Three rules apply to every item below.
 | 1.11.0 | Parallel graphs | Parallel nodes, dynamic fan-out, per-node retries; dependency cost shown | Graph benchmark in CI; size table with a dependency column |
 | 1.12.0 | Graph control and introspection | Control commands, state editing and forks, visualization, mature subgraphs | Mermaid diagram rendered in the README; fork-and-edit test |
 | 1.14.0 | Memory, agents, MCP, traces | Cross-thread memory, agents with durable approvals, MCP tools, run trees with feedback and alerts | Agent that survives a restart, remembers across threads, and records its run tree |
-| 1.15.0 | Evaluation platform | Datasets, experiments, comparisons, online eval, annotation queues | CI gate that fails a pull request on a measured regression |
-| 1.16.0 | Prompt and config versioning | Versioned prompts with environments and gated promotion | Promotion blocked until an experiment passes |
-| 1.17.0 | Self-hosted agent server | Deployment: runs, threads, background work, horizontal scale | Two replicas; a run survives killing the one that started it |
-| 1.18.0 | Local studio | UIs for traces, threads, approvals, experiments, prompts | `npx` studio against the example application |
+| 1.15.0 | Evaluation | Datasets, experiments, comparisons with a verdict, online evaluation, annotation queues | A seeded change reported as `better` or `unchanged`, and the same verdict twice |
+| 1.16.0 | Shared state, command line, promotion | Circuit state and stores shared across processes; evaluation and traces usable from a terminal; provider fixtures | A thread started on one worker finished by another; a gate that fails a pull request on a regression |
+| 1.17.0 | Prompt and config versioning | Versioned prompts with environments and gated promotion | Promotion blocked until an experiment passes |
+| 1.18.0 | Self-hosted agent server | Deployment: runs, threads, background work, horizontal scale | Two replicas; a run survives killing the one that started it |
+| 1.19.0 | Local studio | UIs for traces, threads, approvals, experiments, prompts | `npx` studio against the example application |
 | 2.0.0 | Consolidation | One lifecycle, slim root, optional validators, stable surfaces | Migration guide and codemod; install-footprint targets met |
 
 ---
@@ -589,7 +615,7 @@ in about three seconds, not twelve.
   are synchronous exported functions, and an ESM module cannot load a dependency synchronously on
   first use, so deferring `ajv` and `zod` behind a dynamic import would mean making public functions
   async — a breaking change. Moving them to optional peer dependencies in 2.0.0 fixes the install
-  cost properly, and section 18 already carries it.
+  cost properly, and section 19 already carries it.
 
 **Budgets.** `/graph` measured 52 KB after the work, against the 40 KB this section first guessed;
 the estimate was wrong, not the implementation, and the budget file records the real number. The root
@@ -659,8 +685,9 @@ nodes landed as described above. Three items changed shape:
 - **Streaming modes became one event callback.** `onEvent` delivers task, retry, checkpoint, and
   custom events, and `context.emit()` carries model tokens, so a caller filters by type instead of
   choosing modes. `stream()` still yields one event per superstep.
-- **Input and output schemas and per-node caching move to 1.13.0**, alongside the store they would
-  share infrastructure with.
+- **Input and output schemas and per-node caching moved to the next release**, alongside the store
+  they would share infrastructure with. They did not land there either; they are now in section 16,
+  which is where the rest of the twice-deferred work is scheduled.
 
 **Budgets.** `/graph/visualize` imports no runtime code at all.
 
@@ -677,8 +704,9 @@ that the original timeline is untouched.
   `search(namespacePrefix, { query, filter, limit, offset })`, and `listNamespaces`.
 - Semantic search is opt-in through an injected embedding function, so the store never imports the
   embeddings runtime.
-- Adapters: `MemoryStore`, `/store/redis`, and `/store/postgres` (with pgvector when available). All
-  use injected client-like interfaces, as the Redis operation store does.
+- Adapters: `MemoryStore` and `/store/redis`, both through injected client-like interfaces, as the
+  Redis operation store does. The Postgres adapter, with pgvector when available, moved out of this
+  release and is now in section 16 with the rest of that family.
 - Tenant scoping, TTL sweeping, and a namespace authorization hook.
 - `compile({ store })` exposes the store to nodes as `context.store`, which is how memory crosses
   threads.
@@ -706,14 +734,13 @@ that the original timeline is untouched.
 - This is how the project reaches a broad tool ecosystem without maintaining its own integration
   catalogue.
 
-**Moved here from 1.12.0.**
-- `createGraph({ channels, input, output })` restricts what a caller may pass in and what comes back;
-  private channels stay internal.
-- Per-node caching, `cache: { key, ttlMs, store }`, through the existing cache adapters imported as
-  types only.
-
 **What landed, and what moved.** The store, the agent, and MCP in both directions landed as
-described. Three adjustments:
+described. Four adjustments:
+
+- **The two graph items carried from 1.12.0 did not land.** `createGraph({ channels, input, output })`
+  and per-node caching were listed in this release's plan and are not in the shipped API;
+  `createGraph()` still takes `{ channels }` alone and `NodeOptions` has no `cache`. Recording that
+  here rather than leaving the plan to read as a claim: both are in section 16.
 
 - **Postgres is not in this release.** `MemoryStore` and `RedisStore` ship; a Postgres adapter with
   pgvector is worth doing against a real database rather than a mocked client, so it moves to 1.14.0
@@ -754,9 +781,10 @@ memory, which exercises both halves of the protocol in one test.
 **Storage and export.**
 - `MemoryTraceStore`.
 - `JsonlTraceStore`, with file rotation.
-- `/tracing/postgres`, through a client interface.
-- The existing OpenTelemetry exporter.
+- The OpenTelemetry exporter that already existed, now fed by the run model rather than replacing
+  it.
 - Export uses a batching queue with backpressure and an explicit drop policy.
+- A Postgres trace store moved out of this release; it is in section 16 with the other adapters.
 
 **Privacy and cost control.**
 - Per-field input and output redaction, with PII detection loaded lazily.
@@ -778,16 +806,18 @@ memory, which exercises both halves of the protocol in one test.
 **What landed, and what moved.** The run model, instrumentation, storage, privacy, querying,
 comparison, feedback, and alerts landed. Four items moved, each for a reason:
 
-- **The Postgres trace store and the Postgres store adapter move to 1.15.0.** Both need the same
-  client interface and both deserve to be written against a real database rather than a mocked
-  client; 1.15.0 already brings a dataset store that shares it.
-- **The `nexus traces` CLI moves to 1.15.0**, where the evaluation CLI is being built and the two can
-  share argument parsing and output formatting. `formatTree()` already prints a run tree, which is
-  what the command would do.
+- **The Postgres trace store and the Postgres store adapter moved on**, first to 1.15.0 and then,
+  when evaluation filled that release, to 1.16.0. Both need the same client interface and both
+  deserve to be written against a real database rather than a mocked client. They are now the first
+  item of section 16 rather than a line at the end of someone else's release.
+- **The `nexus traces` CLI moved on with them**, for the same reason: it shares argument parsing and
+  output formatting with the evaluation commands, and those are built in section 16. `formatTree()`
+  already prints a run tree, which is what the command would do.
 - **Realtime sessions are still outside the traced path.** A persistent session's unit of work is an
   event stream rather than a discrete call, which is the same reason gap 2.1 has always excluded it;
   deciding what a realtime "run" is belongs with that work, not beside it.
-- **A distributed circuit breaker moves to 1.15.0**, with the other shared-state adapters.
+- **A distributed circuit breaker moved on too**, and is in section 16 with the other shared-state
+  adapters.
 
 The release also carried the three items deferred from section 13: the bundled agent middleware
 (`summarizeHistory`, `redactMessages`, `limitToolCalls`) and `agentAsTool()` for delegation.
@@ -802,84 +832,136 @@ third compares two traces of the same shape and reports the step whose output ch
 
 ---
 
-## 15. Ready for 1.15.0 (unreleased): evaluation platform
+## 15. Ready for 1.15.0 (unreleased): evaluation
 
-**What landed, and what moved again.** The evaluation entry point, datasets, evaluators, experiment
-comparison, online evaluation, and annotation queues landed. Five items did not, and each is worth
-saying plainly rather than quietly dropping:
+One entry point, `nexus-ai-pro/evaluate`, measured at 33 KB with no third-party import.
 
-- **The Postgres adapters, the CLI, and the distributed circuit breaker moved again, to 1.16.0.**
-  They were carried into this release from 1.13.0 and 1.14.0 and deferred a second time; the
-  evaluation work filled the release on its own. A thing deferred twice is a thing to schedule
-  deliberately, so they are the first items of 1.16.0 rather than an appendix to it.
-- **`EvalRunner` and `MediaEvalRunner` are not yet rebuilt on `evaluate()`.** Both keep working
-  unchanged. Rebuilding them is an internal change with no user-visible effect, so it waits rather
-  than adding risk to a release that already introduces a new entry point.
-- **Record and replay of provider responses moved to 1.16.0**, with the CLI it shares fixtures with.
-  Image promotion still waits on live conformance, which that work enables.
-
-**One evaluation entry point** (`nexus-ai-pro/evaluate`).
-- `evaluate(target, dataset, evaluators, { concurrency, repetitions, experiment, metadata })` accepts
-  any target: a completion, an agent, a graph, an image operation, or plain code.
-- `EvalRunner` and `MediaEvalRunner` keep their APIs and are rebuilt on top of it.
+**One evaluation contract, whatever is being evaluated.**
+- `evaluate(target, dataset, evaluators, options)` accepts any target: a completion, an agent, a
+  graph, an image operation, or plain code.
+- Examples run concurrently, with repetitions for a target that is not deterministic, a timeout per
+  example, and per-metric statistics including a 95% interval.
+- A target that throws is recorded as a failed example; an evaluator that throws is recorded as a
+  failed measurement. Neither voids the experiment.
 
 **Datasets.**
-- Versioned examples with inputs, reference outputs, metadata, and splits.
-- `DatasetStore` adapters: memory, JSONL files, and Postgres.
-- Versions can be pinned by tag.
-- Datasets can be built from traces: "add this production run to the regression set."
+- Versioned by content: change an example and the version changes with it, so two experiments are
+  comparable only when they really ran over the same data.
+- Inputs, reference outputs, metadata, splits, and tags, with `splitOf()` for train and test splits.
+- `MemoryDatasetStore`, and `FileDatasetStore`, which writes one reviewable JSON file per version.
+- `datasetFromTraces()` turns recorded runs into examples, each keeping the run it came from, so
+  yesterday's production failure becomes tomorrow's regression test.
 
-**Evaluators.**
-- Code evaluators, the existing LLM judge, and pairwise comparison.
-- Summary evaluators over a whole experiment.
-- Trajectory evaluators for agents and graphs: expected tool sequence and node path.
-- Similarity through an injected embedder, plus the existing metric library.
+**Evaluators.** `exactMatch`, `contains`, `mustNotMatch`, `completed`, `underLatency`,
+`embeddingSimilarity` through any injected embedder, `pairwise` for side-by-side judgements, and
+`trajectory`, which scores how an answer was reached rather than only what it said. `passRate` and
+`totalCost` summarize a whole experiment. The existing LLM judge plugs in as one more evaluator.
 
-**Experiments and comparisons.**
-- Results are stored with repetition statistics, reusing the media evaluation stats.
-- `compareExperiments(baseline, candidate)` reports per-example differences, with paired bootstrap
-  confidence intervals and a regression verdict.
-- Backtesting replays stored production traces against a new version.
-- `nexus eval run`, `nexus eval compare`, and `nexus eval gate --fail-on-regression` give CI a real
-  quality gate.
+**Comparisons that give a verdict.** `compareExperiments()` runs a seeded paired bootstrap over the
+per-example differences and gives each metric a 95% interval; a metric whose interval spans zero is
+reported as `unchanged` rather than as an improvement. The report names the examples that moved most,
+the failures that are new, the ones that were fixed, and any dataset-version mismatch.
+`formatComparison()` renders it for a pull-request comment or a CI log.
 
-**Online evaluation.**
-- Sampling rules select traces from the trace store.
-- Evaluators run asynchronously through the operation runner, with leases and retries.
-- Scores return as trace feedback, and alert rules can watch them.
-
-**Annotation queues.**
-- A generic `AnnotationQueue` extends the image review queue into rubrics, reviewer leases through
-  the operation store, and consensus. Reviewed items feed back into datasets.
-
-**Record and replay.**
-- Provider responses are recorded once and replayed in tests, so conformance and evaluations run
-  without credentials.
-- This is backlog item 10, and it gives image promotion a repeatable gate. The image family leaves
-  experimental in the first release after the live conformance suite passes against every hosted
-  backend.
+**Online evaluation and review.** `evaluateOnline()` samples traces, scores them, and writes the
+scores back as feedback that an alert rule can watch. `AnnotationQueue` holds what people owe:
+rubrics, per-reviewer claims that expire so a closed tab strands nothing, consensus when one opinion
+is not enough, and `toExamples()`, which turns reviewed items back into dataset examples.
 
 **Budgets.** `/evaluate` imports no third-party package. The size table records the measured figure.
 
-**Proof: landed as tests, not a CLI.** One test shows a clear improvement reported as `better` with
-an interval that excludes zero, while a single example moving by 0.1 across twenty is reported as
-`unchanged` — the distinction a quality gate exists to make. Another shows a regression caught with
-the new failures named, and the same verdict produced twice from the same inputs. A third runs online
-evaluation over recorded runs, writes feedback, and routes the uncertain one to a review queue.
+**Proof: landed as tests, not as a CLI.** One test shows a clear improvement reported as `better`
+with an interval that excludes zero, while a single example moving by 0.1 across twenty is reported
+as `unchanged` — the distinction a quality gate exists to make. Another shows a regression caught
+with the new failures named, and the same verdict produced twice from the same inputs. A third runs
+online evaluation over recorded runs, writes feedback, and routes the uncertain one to a review
+queue.
+
+### What did not land, and where it went
+
+- **The Postgres adapters, the command-line work, record and replay, and the distributed circuit
+  breaker moved to 1.16.0.** They were carried into this release from 1.13.0 and 1.14.0 and deferred
+  a second time; evaluation filled the release on its own. A thing deferred twice is a thing to
+  schedule deliberately, so 1.16.0 is built around them rather than appending them to another theme.
+- **A Postgres `DatasetStore` and `ExperimentStore`** belong to that adapter family and move with it.
+  Memory and file stores cover everything that does not need a database.
+- **`EvalRunner` and `MediaEvalRunner` are not yet rebuilt on `evaluate()`.** Both keep working
+  unchanged. Rebuilding them is an internal change with no user-visible effect, so it waits rather
+  than adding risk to a release that already introduces a new entry point.
+- **Backtesting and a `--fail-on-regression` gate** need the command line and record/replay, and move
+  with them. The same gate is available today as a few lines around `compareExperiments()`.
 
 ---
 
-## 16. 1.16.0: prompt and configuration versioning
+## 16. 1.16.0: shared state, the command line, and promotion
 
-**Carried over, and scheduled first.** These were deferred from 1.13.0 and again from 1.15.0, so they
-come before the prompt work rather than after it:
+Six items have now been deferred twice: four shared-state and tooling items carried from 1.13.0 and
+1.14.0, and two graph items carried from 1.12.0. This release is built around them instead of
+carrying them a third time, and the four large ones make a coherent theme on their own — everything
+in them is state shared between processes, or the ability to see that state from a terminal.
 
-- a Postgres adapter shared by the store, the trace store, the dataset store, and the experiment
-  store;
-- the `nexus eval` and `nexus traces` CLI commands, sharing argument parsing and output formatting;
-- record and replay of provider responses, which lets conformance and evaluation run without
-  credentials and unblocks image promotion;
-- a distributed circuit breaker, with the other shared-state adapters.
+**One Postgres adapter family.**
+- One connection contract, injected rather than imported. An adapter takes a client interface with a
+  `query()` method, so `pg`, `postgres.js`, a pool, or a serverless driver all work, and none of them
+  becomes a dependency of this package.
+- Adapters for the operation store, the long-term store, the trace store, the dataset store, and the
+  experiment store, each on its own subpath so a consumer pays only for the one it imports.
+- One migration file per adapter, applied by the command line or by the application's own tooling.
+  Nothing creates a schema implicitly at import.
+- The conformance suite each store adapter already passes runs against Postgres too, skipped when no
+  connection string is present rather than silently passing.
+
+**Distributed circuit state.** `CircuitBreaker` gains the store interface the rate limiter already
+has: in-memory by default, with Redis and Postgres adapters beside it. A provider that fails in one
+worker opens the circuit for the rest, and a half-open probe is claimed by one worker at a time so a
+recovering provider is not hit by every replica at once. The per-process breaker stays the default,
+because a single-process consumer should not pay for coordination it does not need.
+
+**The command line grows up.** `nexus` already ships with `scan`, `models`, `eval`, and `optimize`.
+- `nexus eval run`, `nexus eval compare`, and `nexus eval gate --fail-on-regression` over the
+  evaluation entry point, so a pull request fails on a measured regression without a bespoke script.
+  Today's `nexus eval` keeps its behaviour and is re-implemented on `evaluate()`.
+- `nexus traces list`, `show`, and `export`, with filters over the trace store and a run tree printed
+  as a tree.
+- Shared argument parsing, shared output formatting, and `--json` on every command, so output can be
+  piped into something else.
+- The command line stays out of the library graph: it is the `bin` entry, and no subpath imports it.
+
+**Record and replay of provider responses.**
+- A recording transport captures real provider traffic once, with credentials and personal data
+  redacted on the way out, and writes it as fixture files.
+- A replay transport serves it back deterministically, so conformance suites and evaluations run in
+  CI with no credentials present.
+- Fixtures are ordinary files, reviewable in a pull request, and a stale one fails loudly rather than
+  falling through to a live call.
+
+**Image promotion, decided.** With replay in place the conformance suite runs on every pull request
+from fixtures, and against live credentials on demand. If it passes on all three backends the image
+family leaves experimental in this release. If it does not, what failed is written down here instead
+of the promotion being quietly dropped again.
+
+**`EvalRunner` and `MediaEvalRunner` rebuilt on `evaluate()`.** Their public APIs do not change; the
+second implementation goes away.
+
+**Two small graph items, outstanding since 1.12.0.**
+- `createGraph({ channels, input, output })` restricts what a caller may pass in and what comes back,
+  so private channels stay internal. Both fields are optional, and a graph that declares neither
+  behaves exactly as it does today.
+- Per-node caching, `cache: { key, ttlMs, store }`, through the existing cache adapters, imported as
+  types only so the graph runtime does not grow for graphs that never cache.
+
+**Budgets.** Each Postgres adapter at most 12 KB, with no third-party import. The breaker's store
+adapters sit on their own subpaths, so the per-process default does not grow. The command line is not
+an entry point and is not counted in the subpath table, but it counts against the packed ceiling.
+
+**Proof.** A graph thread started on one worker is finished by another through Postgres. A provider
+failure in one process opens the circuit in a second. `nexus eval gate` fails on a seeded regression
+and passes on noise of the same size. The image conformance suite runs green with no credentials in
+the environment.
+
+---
+
+## 17. 1.17.0: prompt and configuration versioning
 
 **Templates.** Message templates with typed variables, partials, and a model configuration bundled
 with each version.
@@ -889,7 +971,7 @@ with each version.
 - History, diffs, and rollback.
 - Promotion can require a named experiment to pass first.
 - Webhooks fire on promotion.
-- Storage adapters: memory, files, Redis, and Postgres.
+- Storage adapters: memory, files, Redis, and Postgres, reusing the adapter family from section 16.
 
 **Serving.**
 - A client cache with a TTL and stale-while-revalidate.
@@ -897,7 +979,7 @@ with each version.
 - A/B serving with sticky assignment. Every trace records the prompt version it used.
 
 **Headless playground.** Run a prompt version against dataset examples; the output is a stored
-experiment.
+experiment, comparable with every other experiment.
 
 **Budgets.** `/prompts` at most 12 KB. The storage adapters sit on their own subpaths.
 
@@ -906,9 +988,9 @@ names the prompt version it ran. A simulated registry outage keeps serving the c
 
 ---
 
-## 17. 1.17.0 and 1.18.0: self-hosted server and local studio
+## 18. 1.18.0 and 1.19.0: self-hosted server and local studio
 
-### 1.17.0: agent server (`nexus-ai-pro/server`, experimental)
+### 1.18.0: agent server (`nexus-ai-pro/server`, experimental)
 
 **API.**
 - REST and server-sent events for assistants, threads, runs, and cron jobs, over Node `http`.
@@ -933,7 +1015,7 @@ names the prompt version it ran. A simulated registry outage keeps serving the c
 **Proof.** A Compose example runs two replicas with Redis. A run keeps going after the replica that
 started it is killed, and a reconnecting client resumes its event stream.
 
-### 1.18.0: local studio (separate package)
+### 1.19.0: local studio (separate package)
 
 **Packaging.** A separate npm package, so the core install never carries a UI. Its name is still to
 be decided.
@@ -956,9 +1038,9 @@ approval waiting in the inbox, and an experiment comparison.
 
 ---
 
-## 18. 2.0.0: consolidation
+## 19. 2.0.0: consolidation
 
-2.0.0 ships once 1.11.0 through 1.18.0 are released, each experimental surface has had at least one
+2.0.0 ships once 1.11.0 through 1.19.0 are released, each experimental surface has had at least one
 minor release to settle, and every removal below has been deprecated in a 1.x release.
 
 **Breaking changes.**
@@ -978,12 +1060,12 @@ minor release to settle, and every removal below has been deprecated in a 1.x re
 - True mixed text-and-asset outputs, so a tool result can pass asset references instead of base64
   JSON.
 - **A slim root import.** The root exports the core client, config builders, types, and errors, and
-  every family is reached through its subpath. Target: at most 250 KB, down from 674 KB.
+  every family is reached through its subpath. Target: at most 250 KB, down from 612 KB.
 - **Optional validators and types.**
   - `zod`, `ajv`, and `ajv-formats` become optional peer dependencies, needed only when a caller
     passes a schema.
   - `@types/node` becomes an optional peer.
-  - Target: a graph-only consumer installs at most 3.5 MB, down from about 10 MB.
+  - Target: a graph-only consumer installs at most 3.5 MB, down from about 10.4 MB.
 - **Checkpoint schema v2.**
   - Task and checkpoint ids become required.
   - `interrupt` gives way to `interrupts`.
@@ -1004,10 +1086,11 @@ moves to Node 24.
 
 ---
 
-## 19. Longer-term backlog
+## 20. Longer-term backlog
 
-**Absorbed by the releases above.** MCP adapters, human approval checkpoints, prompt and workflow
-versioning, record and replay fixtures, and the local control plane.
+**Absorbed by the releases above.** MCP adapters, human approval checkpoints, long-term memory, an
+evaluation platform, prompt and workflow versioning, record and replay fixtures, and the local
+control plane.
 
 **Remaining:**
 1. Video generation through the same asynchronous operation, job, and asset contracts.
@@ -1022,7 +1105,9 @@ versioning, record and replay fixtures, and the local control plane.
 7. Browser and edge builds: Node filesystem, crypto, DNS, and stream dependencies isolated behind
    adapters, so that compatibility is explicit.
 8. Streaming reads and writes for the filesystem and S3 asset stores.
-9. Vector store adapters for retrieval (pgvector, Qdrant) through injected client interfaces.
+9. Vector store adapters for retrieval (pgvector, Qdrant) through injected client interfaces. The
+   Postgres adapter family in section 16 carries most of the cost of the first one, so this becomes
+   a small addition rather than a release of its own.
 
 **Deliberately not planned.**
 - A hosted service. Deployment stays self-hosted through the server and templates.
@@ -1031,7 +1116,7 @@ versioning, record and replay fixtures, and the local control plane.
 
 ---
 
-## 20. Design notes carried forward
+## 21. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -1083,7 +1168,7 @@ await ai.images.edit({
 
 ---
 
-## 21. How an item graduates
+## 22. How an item graduates
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.
