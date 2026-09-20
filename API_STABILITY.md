@@ -355,6 +355,23 @@ subpaths are public and follow the 1.x rules. None is exported from the root imp
 - `AgentLoop`, `tool()`, and `ToolExecutor` keep their behaviour and are re-exported from
   `nexus-ai-pro/agent` as well as the root.
 
+## Evaluation stage (Unreleased)
+
+`nexus-ai-pro/evaluate` is public and follows the 1.x rules, and is not exported from the root.
+`Dataset`, `DatasetExample`, `Experiment`, `ExampleResult`, `MetricSummary`, and the comparison shapes
+are normalized; new optional fields and new bundled evaluators may be added in a minor release.
+
+- A dataset version is derived from example content. The hash itself is an implementation detail, but
+  the guarantee is not: identical examples produce identical versions, and any change produces a
+  different one.
+- `compareExperiments()` is statistical. Its intervals come from a seeded paired bootstrap, so the
+  same inputs give the same verdict; the exact interval bounds may change if the method improves, and
+  a verdict is a judgement about evidence rather than a compatibility guarantee.
+- `evaluate()` reports a target's failure as a failed example and an evaluator's failure as a failed
+  measurement; neither throws.
+- The existing `EvalRunner` and `MediaEvalRunner` keep their APIs unchanged. Rebuilding them on this
+  entry point is a later, internal change.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

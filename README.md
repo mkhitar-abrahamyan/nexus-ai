@@ -724,6 +724,7 @@ The Model Context Protocol, both directions, implemented directly rather than th
 ```ts
 import { McpClient, createStdioTransport } from 'nexus-ai-pro/mcp';
 import { Tracer, MemoryTraceStore } from 'nexus-ai-pro/tracing';
+import { evaluate, createDataset, compareExperiments } from 'nexus-ai-pro/evaluate';
 
 const client = new McpClient(createStdioTransport({ command: 'npx', args: ['-y', 'some-mcp-server'] }));
 const agent = createAgent({ client: ai, tools: await client.toNexusTools({ prefix: 'files' }) });
@@ -809,6 +810,93 @@ setInterval(() => void alerts.evaluate(), 60_000);
 
 An alert names the rule, the measured value, and three runs that contributed, so the next step is
 reading them rather than starting an investigation.
+
+## Evaluation
+
+One entry point for evaluating anything: a completion, an agent, a graph, an image operation, or
+plain code. A dataset of examples, a target that turns an example into an output, evaluators that
+score it, and a stored experiment a later run can be compared against.
+
+```ts
+import { evaluate, createDataset, exactMatch, contains, trajectory, passRate } from 'nexus-ai-pro/evaluate';
+
+const dataset = createDataset({
+  name: 'support-questions',
+  examples: [
+    { id: 'refund', inputs: { question: 'how do I get a refund?' }, expected: 'Open the order and choose refund.' },
+    { id: 'hours', inputs: { question: 'when are you open?' }, expected: 'Weekdays, nine to five.' },
+  ],
+});
+
+const experiment = await evaluate(
+  (inputs) => agent.invoke(agentInput(inputs.question)),
+  dataset,
+  [contains(['refund']), trajectory({ expected: ['search_orders'] })],
+  { repetitions: 3, concurrency: 4, summary: [passRate()], store: experiments },
+);
+```
+
+**A dataset is versioned by its content**, so two experiments are comparable only when they really
+ran over the same examples. Change an example and the version changes with it.
+
+**Datasets can come from production.** `datasetFromTraces({ store, query: { status: 'error' } })`
+turns recorded runs into examples, each keeping the run it came from — the request that failed
+yesterday becomes tomorrow's regression test.
+
+**Evaluators are ordinary functions.** Bundled: `exactMatch`, `contains`, `mustNotMatch`, `completed`,
+`underLatency`, `embeddingSimilarity` through any embedder, `pairwise` for side-by-side judgements,
+and `trajectory`, which scores *how* an answer was reached — an agent that gets the right answer by
+calling the refund tool three times is not working. The LLM judge from `nexus-ai-pro/evals/judge`
+plugs in as one more evaluator.
+
+### Was the change real?
+
+```ts
+import { compareExperiments, formatComparison } from 'nexus-ai-pro/evaluate';
+
+const comparison = compareExperiments(baseline, candidate);
+console.log(formatComparison(comparison));
+if (comparison.regressed) process.exit(1);
+```
+
+A mean that moves from 0.81 to 0.83 says nothing on its own; with twenty examples that is noise, and
+shipping on it makes a quality gate a coin toss. The verdict comes from a **paired bootstrap** over
+the per-example differences, which assumes nothing about how the scores are distributed, and the
+pairing removes the variation caused by the examples themselves. A metric whose interval spans zero
+is reported as `unchanged`, not as an improvement. The bootstrap is seeded, so CI gives the same
+verdict twice.
+
+The report names the examples that moved most, the failures that are new, and the ones that were
+fixed. A comparison across different dataset versions says so rather than pretending it is like for
+like.
+
+### The runs you did not think of
+
+```ts
+import { evaluateOnline, AnnotationQueue } from 'nexus-ai-pro/evaluate';
+
+const queue = new AnnotationQueue({
+  rubric: [{ key: 'helpful', prompt: 'Did this answer the question?', type: 'boolean' }],
+  consensus: 2,
+});
+
+await evaluateOnline({
+  store: traceStore,
+  evaluators: [mustNotMatch([/i cannot help/i])],
+  sampleRate: 0.1,
+  reviewQueue: queue,
+  reviewWhen: (scores) => scores.some((score) => score.passed === false),
+});
+```
+
+A dataset tells you whether a change works on the cases you thought of; online evaluation tells you
+how it is doing on the rest. Scores are written back as feedback on the run, so an alert rule can
+watch them, and anything uncertain goes to a person.
+
+**The review queue keeps track of what people owe you.** Claims expire, so a reviewer who closes the
+tab does not strand an item; `consensus` lets two reviewers see the same item when one opinion is not
+enough; and `toExamples()` turns reviewed items into dataset examples, which closes the loop from a
+production failure to a permanent regression test.
 
 ## Provider Batch Tiers
 
@@ -2094,6 +2182,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% | none |
 | `nexus-ai-pro/security` | 40 KB | 7% | +3.4 MB |
 | `nexus-ai-pro/models` | 35 KB | 6% | none |
+| `nexus-ai-pro/evaluate` | 33 KB | 5% | none |
 | `nexus-ai-pro/images/inputs` | 31 KB | 5% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 5% | none |
 | `nexus-ai-pro/tracing` | 26 KB | 4% | none |

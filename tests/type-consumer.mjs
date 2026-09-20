@@ -190,6 +190,16 @@ import { MemoryStore, type Store, type StoreItem } from 'nexus-ai-pro/store';
 import { RedisStore } from 'nexus-ai-pro/store/redis';
 import { McpClient, McpServer, type McpTransport } from 'nexus-ai-pro/mcp';
 import { Tracer, MemoryTraceStore, traceGraph, AlertEvaluator, type Run, type TraceStore } from 'nexus-ai-pro/tracing';
+import {
+  evaluate,
+  createDataset,
+  compareExperiments,
+  exactMatch,
+  passRate,
+  AnnotationQueue,
+  MemoryExperimentStore,
+  type Experiment,
+} from 'nexus-ai-pro/evaluate';
 import { BatchManager as SubpathBatchManager } from 'nexus-ai-pro/batch';
 import { MockBatchProvider } from 'nexus-ai-pro/batch/mock';
 import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
@@ -541,6 +551,17 @@ const traced: Promise<string> = tracer.trace({ name: 'demo', kind: 'chain' }, ()
 const graphTracing = traceGraph(tracer, { name: 'demo-graph' });
 const alerts = new AlertEvaluator(traceStore, [{ name: 'errors', metric: 'errorRate', threshold: 0.1 }]);
 const firstRun: Promise<Run | undefined> = Promise.resolve(traceStore.query({ limit: 1 })).then((runs) => runs[0]);
+const evalDataset = createDataset<{ q: string }, string>({
+  name: 'consumer',
+  examples: [{ inputs: { q: 'hi' }, expected: 'hello' }],
+});
+const experiment: Promise<Experiment> = evaluate(async (inputs) => inputs.q, evalDataset, [exactMatch()], {
+  summary: [passRate()],
+  store: new MemoryExperimentStore(),
+  repetitions: 2,
+});
+const comparison = experiment.then((candidate) => compareExperiments(candidate, candidate));
+const reviewQueue = new AnnotationQueue({ rubric: [{ key: 'ok', prompt: 'Good?', type: 'boolean' }] });
 const batchManager = new BatchManager({ providers: { mock: new MockBatchProvider() }, defaultProvider: 'mock' });
 const subpathBatchManager = new SubpathBatchManager();
 const openAiBatch = new OpenAIBatchProvider({ apiKey: 'test' });
@@ -701,6 +722,8 @@ void traced;
 void graphTracing;
 void alerts;
 void firstRun;
+void comparison;
+void reviewQueue;
 void answered;
 void S3AssetStore;
 void rateLimitStore;

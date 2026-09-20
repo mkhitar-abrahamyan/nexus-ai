@@ -35,8 +35,10 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // visualizer, plus the README documentation for them.
 // Raised again in 1.14.0 for long-term memory (the store and its Redis adapter), agents on graphs,
 // MCP in both directions, and the tracing family, all opt-in subpaths the root import never loads.
-const MAX_PACKED_BYTES = 580_000;
-const MAX_UNPACKED_BYTES = 3_500_000;
+// Raised again for the evaluation family: datasets, evaluators, experiment comparison, online
+// evaluation, and review queues, on their own subpath.
+const MAX_PACKED_BYTES = 600_000;
+const MAX_UNPACKED_BYTES = 3_600_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Most of
 // the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the
 // README size table reports third-party install cost per entry point.

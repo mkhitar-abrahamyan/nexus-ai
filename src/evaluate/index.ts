@@ -1,0 +1,57 @@
+export {
+  type CompareOptions,
+  compareExperiments,
+  type ExampleComparison,
+  type ExperimentComparison,
+  formatComparison,
+  type MetricComparison,
+  scoreMap,
+} from './compare.js';
+export {
+  contentVersion,
+  createDataset,
+  type CreateDatasetOptions,
+  datasetFromTraces,
+  FileDatasetStore,
+  type FromTracesOptions,
+  MemoryDatasetStore,
+  MemoryExperimentStore,
+  splitOf,
+} from './datasets.js';
+export {
+  completed,
+  contains,
+  embeddingSimilarity,
+  exactMatch,
+  mustNotMatch,
+  pairwise,
+  passRate,
+  totalCost,
+  trajectory,
+  type TrajectoryOptions,
+  underLatency,
+} from './evaluators.js';
+export {
+  AnnotationQueue,
+  type AnnotationQueueOptions,
+  evaluateOnline,
+  type OnlineEvaluationOptions,
+  type OnlineEvaluationReport,
+  type ReviewAnswer,
+  type ReviewItem,
+  type ReviewQuestion,
+} from './review.js';
+export { evaluate, type EvaluateOptions, type EvaluationTarget, stats, summarize } from './run.js';
+export type {
+  Dataset,
+  DatasetExample,
+  DatasetStore,
+  EvaluationContext,
+  EvaluationScore,
+  Evaluator,
+  ExampleResult,
+  Experiment,
+  ExperimentStore,
+  MetricSummary,
+  SummaryEvaluator,
+} from '../types/evaluate.js';

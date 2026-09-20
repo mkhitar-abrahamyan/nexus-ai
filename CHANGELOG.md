@@ -4,6 +4,38 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Evaluation. One entry point for evaluating anything, datasets versioned by their content, experiments
+that can be compared with a verdict rather than a vibe, and the loop from a production failure back to
+a permanent regression test.
+
+### Added
+
+- **`nexus-ai-pro/evaluate`.** `evaluate(target, dataset, evaluators, options)` accepts any target: a
+  completion, an agent, a graph, an image operation, or plain code.
+  - Examples run concurrently, with repetitions for a target that is not deterministic, a timeout per
+    example, and per-metric statistics including a 95% interval.
+  - A target that throws is recorded as a failed example; an evaluator that throws is recorded as a
+    failed measurement. Neither voids the experiment.
+- **Datasets versioned by content.** Change an example and the version changes with it, so two
+  experiments are comparable only when they ran over the same data. `MemoryDatasetStore` and
+  `FileDatasetStore` (one reviewable JSON file per version), plus `splitOf()` for train and test
+  splits.
+- **`datasetFromTraces()`.** Turns recorded runs into examples, each keeping the run it came from, so
+  yesterday's production failure becomes tomorrow's regression test.
+- **Bundled evaluators.** `exactMatch`, `contains`, `mustNotMatch`, `completed`, `underLatency`,
+  `embeddingSimilarity` through any injected embedder, `pairwise` for side-by-side judgements, and
+  `trajectory`, which scores how an answer was reached rather than only what it said. `passRate` and
+  `totalCost` summarize a whole experiment.
+- **`compareExperiments()` with a real verdict.** A paired bootstrap over per-example differences
+  gives each metric a 95% interval; a metric whose interval spans zero is `unchanged` rather than an
+  improvement. The bootstrap is seeded, so a CI gate cannot flip between runs. The report names the
+  examples that moved most, the failures that are new, the ones that were fixed, and any dataset
+  version mismatch. `formatComparison()` prints it for a pull request.
+- **`evaluateOnline()`.** Scores sampled production runs, writes the scores back as trace feedback so
+  alert rules can watch them, and sends uncertain results to people.
+- **`AnnotationQueue`.** Review work with a rubric, claims that expire so nothing is stranded,
+  consensus across several reviewers, and `toExamples()` to turn reviewed items into dataset examples.
+
 ## [1.14.0] - 2026-09-20
 
 The memory, agent, and MCP work planned for 1.13.0 ships here together with tracing, so no 1.13.0 was

@@ -90,6 +90,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/store/redis', exports: ['RedisStore'] },
   { specifier: 'nexus-ai-pro/mcp', exports: ['McpClient', 'McpServer', 'createStdioTransport', 'McpError'] },
   {
+    specifier: 'nexus-ai-pro/evaluate',
+    exports: ['evaluate', 'createDataset', 'compareExperiments', 'AnnotationQueue', 'exactMatch', 'trajectory'],
+  },
+  {
     specifier: 'nexus-ai-pro/tracing',
     exports: ['Tracer', 'MemoryTraceStore', 'JsonlTraceStore', 'traceGraph', 'AlertEvaluator', 'compareTraces'],
   },

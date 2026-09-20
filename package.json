@@ -510,6 +510,16 @@
         "default": "./dist-cjs/tracing/index.js"
       }
     },
+    "./evaluate": {
+      "import": {
+        "types": "./dist/evaluate/index.d.ts",
+        "default": "./dist/evaluate/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/evaluate/index.d.ts",
+        "default": "./dist-cjs/evaluate/index.js"
+      }
+    },
     "./ops/circuit-breaker": {
       "import": {
         "types": "./dist/ops/circuit-breaker.d.ts",
@@ -1135,6 +1145,9 @@
       ],
       "tracing": [
         "dist-cjs/tracing/index.d.ts"
+      ],
+      "evaluate": [
+        "dist-cjs/evaluate/index.d.ts"
       ],
       "ops/circuit-breaker": [
         "dist-cjs/ops/circuit-breaker.d.ts"

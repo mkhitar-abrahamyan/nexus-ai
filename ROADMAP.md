@@ -802,12 +802,21 @@ third compares two traces of the same shape and reports the step whose output ch
 
 ---
 
-## 15. 1.15.0: evaluation platform
+## 15. Ready for 1.15.0 (unreleased): evaluation platform
 
-**Moved here from 1.13.0 and 1.14.0.**
-- A Postgres adapter shared by the store, the trace store, and the dataset store.
-- The `nexus traces` CLI, alongside the evaluation CLI.
-- A distributed circuit breaker, with the other shared-state adapters.
+**What landed, and what moved again.** The evaluation entry point, datasets, evaluators, experiment
+comparison, online evaluation, and annotation queues landed. Five items did not, and each is worth
+saying plainly rather than quietly dropping:
+
+- **The Postgres adapters, the CLI, and the distributed circuit breaker moved again, to 1.16.0.**
+  They were carried into this release from 1.13.0 and 1.14.0 and deferred a second time; the
+  evaluation work filled the release on its own. A thing deferred twice is a thing to schedule
+  deliberately, so they are the first items of 1.16.0 rather than an appendix to it.
+- **`EvalRunner` and `MediaEvalRunner` are not yet rebuilt on `evaluate()`.** Both keep working
+  unchanged. Rebuilding them is an internal change with no user-visible effect, so it waits rather
+  than adding risk to a release that already introduces a new entry point.
+- **Record and replay of provider responses moved to 1.16.0**, with the CLI it shares fixtures with.
+  Image promotion still waits on live conformance, which that work enables.
 
 **One evaluation entry point** (`nexus-ai-pro/evaluate`).
 - `evaluate(target, dataset, evaluators, { concurrency, repetitions, experiment, metadata })` accepts
@@ -850,15 +859,27 @@ third compares two traces of the same shape and reports the step whose output ch
   experimental in the first release after the live conformance suite passes against every hosted
   backend.
 
-**Budgets.** `/evaluate` at most 25 KB. Stores and the CLI stay on their own subpaths.
+**Budgets.** `/evaluate` imports no third-party package. The size table records the measured figure.
 
-**Proof.** An example pull request changes a prompt, and `nexus eval gate` fails it with a
-per-example diff and a confidence interval. An online evaluator scores sampled traces in a running
-example.
+**Proof: landed as tests, not a CLI.** One test shows a clear improvement reported as `better` with
+an interval that excludes zero, while a single example moving by 0.1 across twenty is reported as
+`unchanged` — the distinction a quality gate exists to make. Another shows a regression caught with
+the new failures named, and the same verdict produced twice from the same inputs. A third runs online
+evaluation over recorded runs, writes feedback, and routes the uncertain one to a review queue.
 
 ---
 
 ## 16. 1.16.0: prompt and configuration versioning
+
+**Carried over, and scheduled first.** These were deferred from 1.13.0 and again from 1.15.0, so they
+come before the prompt work rather than after it:
+
+- a Postgres adapter shared by the store, the trace store, the dataset store, and the experiment
+  store;
+- the `nexus eval` and `nexus traces` CLI commands, sharing argument parsing and output formatting;
+- record and replay of provider responses, which lets conformance and evaluation run without
+  credentials and unblocks image promotion;
+- a distributed circuit breaker, with the other shared-state adapters.
 
 **Templates.** Message templates with typed variables, partials, and a model configuration bundled
 with each version.

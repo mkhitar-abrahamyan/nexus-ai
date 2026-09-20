@@ -284,6 +284,7 @@ const expectedSubpaths = [
   './store/redis',
   './mcp',
   './tracing',
+  './evaluate',
   './ops/circuit-breaker',
   './ops/rate-limit-adapters',
   './batch',

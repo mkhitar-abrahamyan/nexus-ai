@@ -22,6 +22,7 @@
     "./embeddings/models": 12,
     "./evals": 26,
     "./evals/judge": 6,
+    "./evaluate": 38,
     "./graph": 66,
     "./graph/visualize": 8,
     "./images": 72,
