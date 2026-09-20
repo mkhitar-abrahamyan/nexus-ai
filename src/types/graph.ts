@@ -7,6 +7,8 @@
  * is, so a different process can pick it up.
  */
 
+import type { Store } from './store.js';
+
 /** Entry sentinel. An edge from `START` names the first node. */
 export const START = '__start__';
 /** Terminal sentinel. An edge to `END` finishes that branch. */
@@ -190,6 +192,13 @@ export interface NodeContext<S extends ChannelSchema> {
    * code either way.
    */
   interrupt<T = unknown>(request: InterruptRequest): T;
+  /**
+   * Long-term memory, present when the graph was compiled with a store.
+   *
+   * State is this thread's; the store is everything else the application remembers — across threads,
+   * users, and runs.
+   */
+  readonly store?: Store;
   /** Reports progress without writing to state. */
   report(progress: Omit<GraphProgress, 'step' | 'node'>): void;
   /**
@@ -199,10 +208,7 @@ export interface NodeContext<S extends ChannelSchema> {
   emit(data: unknown): void;
 }
 
-export type NodeFn<S extends ChannelSchema> = (
-  context: NodeContext<S>,
-  // biome-ignore lint/suspicious/noConfusingVoidType: `void` here is what lets a node with no return statement satisfy the type; `undefined` would force every side-effect node to write `return undefined`.
-) => Promise<NodeResult<S>> | NodeResult<S>;
+export type NodeFn<S extends ChannelSchema> = (context: NodeContext<S>) => Promise<NodeResult<S>> | NodeResult<S>;
 
 /** What a node may return: an update, a `Command`, or nothing. */
 // biome-ignore lint/suspicious/noConfusingVoidType: see NodeFn; `void` lets a side-effect node omit its return.
@@ -385,6 +391,8 @@ export interface GraphDescription {
 }
 
 export interface CompileOptions {
+  /** Long-term memory handed to every node as `context.store`. */
+  store?: Store;
   /** Pause before these nodes run, for inspecting or editing state. `continue()` resumes. */
   interruptBefore?: string[];
   /** Pause after these nodes run and their writes are checkpointed. `continue()` resumes. */

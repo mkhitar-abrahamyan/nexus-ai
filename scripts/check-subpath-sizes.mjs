@@ -181,7 +181,7 @@ function renderTable(rows) {
   };
 
   // A row with no third-party install is the point of the package, so it is worth showing as such.
-  const dependencies = (row) => (row.dependencyKb > 0 ? '+' + formatKb(row.dependencyKb) : 'none');
+  const dependencies = (row) => (row.dependencyKb > 0 ? `+${formatKb(row.dependencyKb)}` : 'none');
   const lines = [
     '| Import | Size | Share of root | Third-party install |',
     '| --- | --- | --- | --- |',

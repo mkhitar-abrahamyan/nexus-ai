@@ -460,6 +460,46 @@
         "default": "./dist-cjs/graph/visualize.js"
       }
     },
+    "./agent": {
+      "import": {
+        "types": "./dist/agent/index.d.ts",
+        "default": "./dist/agent/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/agent/index.d.ts",
+        "default": "./dist-cjs/agent/index.js"
+      }
+    },
+    "./store": {
+      "import": {
+        "types": "./dist/store/index.d.ts",
+        "default": "./dist/store/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/store/index.d.ts",
+        "default": "./dist-cjs/store/index.js"
+      }
+    },
+    "./store/redis": {
+      "import": {
+        "types": "./dist/store/redis.d.ts",
+        "default": "./dist/store/redis.js"
+      },
+      "require": {
+        "types": "./dist-cjs/store/redis.d.ts",
+        "default": "./dist-cjs/store/redis.js"
+      }
+    },
+    "./mcp": {
+      "import": {
+        "types": "./dist/mcp/index.d.ts",
+        "default": "./dist/mcp/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/mcp/index.d.ts",
+        "default": "./dist-cjs/mcp/index.js"
+      }
+    },
     "./ops/circuit-breaker": {
       "import": {
         "types": "./dist/ops/circuit-breaker.d.ts",
@@ -1070,6 +1110,18 @@
       ],
       "graph/visualize": [
         "dist-cjs/graph/visualize.d.ts"
+      ],
+      "agent": [
+        "dist-cjs/agent/index.d.ts"
+      ],
+      "store": [
+        "dist-cjs/store/index.d.ts"
+      ],
+      "store/redis": [
+        "dist-cjs/store/redis.d.ts"
+      ],
+      "mcp": [
+        "dist-cjs/mcp/index.d.ts"
       ],
       "ops/circuit-breaker": [
         "dist-cjs/ops/circuit-breaker.d.ts"

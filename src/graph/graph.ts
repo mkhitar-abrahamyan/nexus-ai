@@ -812,6 +812,7 @@ export class CompiledGraph<S extends ChannelSchema> {
       input: task.input,
       attempt,
       signal,
+      ...(this.options.store ? { store: this.options.store } : {}),
       interrupt: <T>(request: Parameters<NodeContext<S>['interrupt']>[0]): T => {
         const index = interruptIndex++;
         const key = interruptKey({ node, taskId: task.id, step, index });

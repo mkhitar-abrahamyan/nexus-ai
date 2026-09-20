@@ -279,6 +279,10 @@ const expectedSubpaths = [
   './operations/webhooks',
   './graph',
   './graph/visualize',
+  './agent',
+  './store',
+  './store/redis',
+  './mcp',
   './ops/circuit-breaker',
   './ops/rate-limit-adapters',
   './batch',
@@ -364,6 +368,10 @@ for (const embeddingIntegrationExport of [
     false,
     `${embeddingIntegrationExport} should remain opt-in through the embeddings subpath`,
   );
+}
+
+for (const optInFamilyExport of ['createAgent', 'MemoryStore', 'RedisStore', 'McpClient', 'McpServer', 'toMermaid']) {
+  assert.equal(optInFamilyExport in root, false, `${optInFamilyExport} should remain opt-in through its subpath`);
 }
 
 for (const imageIntegrationExport of [

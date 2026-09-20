@@ -328,6 +328,25 @@ Also since 1.12.0, all additive:
 - A subgraph node's thread id is `<parent thread>:<task id>`, which equals the previous
   `<parent thread>:<node>` for any node not reached through `Send`.
 
+## Agent, store, and MCP stages (Unreleased)
+
+The `nexus-ai-pro/agent`, `nexus-ai-pro/store`, `nexus-ai-pro/store/redis`, and `nexus-ai-pro/mcp`
+subpaths are public and follow the 1.x rules. None is exported from the root import.
+
+- `createAgent()` returns a compiled graph, so the graph guarantees above apply to an agent: a
+  superstep is atomic with respect to checkpointing, a finished task is never re-run by a resume, and
+  an approval survives a restart. The agent's state channels (`messages`, `iterations`, `answer`,
+  `stopReason`) are a normalized shape; what a model decides to put in them is not.
+- `Store` is the contract; `MemoryStore` and `RedisStore` implement it. Ranking from a semantic search
+  depends on the embedding function a caller injects and is not a guarantee. `MemoryStore` is
+  process-local and bounded, and drops the least recently written item past `maxItems`.
+- The MCP subpath implements a subset of the Model Context Protocol: initialize, tools, resources, and
+  prompts, over stdio and HTTP. Protocol versions and server behaviour are upstream contracts outside
+  this policy. Server-initiated streaming, sampling, and roots are not implemented; new methods may be
+  added in a minor release.
+- `AgentLoop`, `tool()`, and `ToolExecutor` keep their behaviour and are re-exported from
+  `nexus-ai-pro/agent` as well as the root.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

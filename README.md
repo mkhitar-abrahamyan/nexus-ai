@@ -655,6 +655,93 @@ private to the subgraph.
 
 The graph is not in the root import. It costs nothing to a user who does not build graphs.
 
+## Agents
+
+An agent is a graph, so everything above applies to it: checkpoints, human approval, parallel work,
+forks, events, and a diagram.
+
+```ts
+import { createAgent, agentInput, tool } from 'nexus-ai-pro/agent';
+
+const agent = createAgent({
+  client: ai,                      // anything with complete(); NexusAI qualifies
+  systemPrompt: 'You are a support engineer.',
+  tools: [refundTool, emailTool],
+  interruptOn: { send_email: true }, // this one waits for a human
+  store,                             // long-term memory, below
+  checkpointer,                      // survives a restart
+});
+
+const run = await agent.invoke(agentInput('Refund order 1182 and tell the customer'), { threadId });
+run.state.answer;      // the final text
+run.state.stopReason;  // 'completed' | 'max_iterations'
+```
+
+**Tool calls run in parallel.** Each call the model requests becomes its own task, bounded by
+`toolConcurrency`, so three lookups take as long as the slowest one.
+
+**Approval is an interrupt, not a callback.** A tool listed in `interruptOn` pauses the run and
+checkpoints it. The answer can approve, refuse with a reason the model sees, or approve with
+corrected arguments:
+
+```ts
+if (run.status === 'awaiting_input') {
+  await agent.resumeWith(threadId, { approved: true, args: { to: 'billing@example.com' } });
+}
+```
+
+Because it is a checkpoint, the approval can arrive days later, from another process.
+
+**Middleware** wraps the parts worth controlling: `beforeModel` adjusts the request, `afterModel`
+inspects or replaces the response, and `wrapToolCall` surrounds each tool call for logging, timing,
+or policy. `AgentLoop` remains for the simple case that needs none of this.
+
+## Long-term Memory
+
+A checkpoint remembers one conversation. A store remembers across them:
+
+```ts
+import { MemoryStore } from 'nexus-ai-pro/store';
+
+const store = new MemoryStore({ index: { embed, fields: ['text'] } });   // embed is yours
+await store.put(['tenant-7', 'users', 'alice'], 'tone', { text: 'prefers brief answers' });
+
+// In any node or tool, in any thread, later:
+const memories = await context.store.search(['tenant-7', 'users', 'alice'], { query: 'how do they like answers?' });
+```
+
+Namespaces are tuples, so `['tenant-7', 'users', 'alice']` is both a place to put something and a
+prefix to search. Items can expire with `ttlMs`, be filtered by field, and be ranked semantically by
+any embedding function you inject — the store never imports the embeddings runtime, and without an
+index a query falls back to matching text. `RedisStore` from `nexus-ai-pro/store/redis` carries the
+same contract across processes through a client-like interface, so no Redis package is a dependency
+here.
+
+## MCP
+
+The Model Context Protocol, both directions, implemented directly rather than through an SDK:
+
+```ts
+import { McpClient, createStdioTransport } from 'nexus-ai-pro/mcp';
+
+const client = new McpClient(createStdioTransport({ command: 'npx', args: ['-y', 'some-mcp-server'] }));
+const agent = createAgent({ client: ai, tools: await client.toNexusTools({ prefix: 'files' }) });
+```
+
+That is how this package reaches a broad tool ecosystem without maintaining a catalogue of
+integrations: anything exposed over MCP becomes tools an agent can call. The server direction lends
+your tools out the same way, so a tool written once with `tool()` serves an agent here and an editor
+elsewhere:
+
+```ts
+import { McpServer, createStdioServerTransport } from 'nexus-ai-pro/mcp';
+
+await new McpServer({ name: 'my-app', tools: [refundTool] }).connect(createStdioServerTransport());
+```
+
+Stdio and HTTP transports are included, and the transport is an interface, so a test can wire a
+client to a server in memory.
+
 ## Provider Batch Tiers
 
 Both OpenAI and Anthropic sell an asynchronous tier at roughly half price, in exchange for a
@@ -1925,6 +2012,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/providers/llamacpp` | 77 KB | 13% | none |
 | `nexus-ai-pro/providers/lmstudio` | 77 KB | 13% | none |
 | `nexus-ai-pro/providers/openai` | 77 KB | 13% | none |
+| `nexus-ai-pro/agent` | 72 KB | 12% | none |
 | `nexus-ai-pro/providers/anthropic` | 70 KB | 11% | none |
 | `nexus-ai-pro/providers/google` | 66 KB | 11% | none |
 | `nexus-ai-pro/images` | 65 KB | 11% | none |
@@ -1948,6 +2036,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/images/openai` | 19 KB | 3% | none |
 | `nexus-ai-pro/realtime/mock` | 19 KB | 3% | none |
 | `nexus-ai-pro/voice` | 18 KB | 3% | none |
+| `nexus-ai-pro/mcp` | 18 KB | 3% | none |
 | `nexus-ai-pro/images/comfyui` | 17 KB | 3% | none |
 | `nexus-ai-pro/embeddings/adapters` | 17 KB | 3% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 3% | none |
@@ -1961,6 +2050,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/images/mock` | 12 KB | 2% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 2% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 2% | none |
+| `nexus-ai-pro/store/redis` | 11 KB | 2% | none |
 | `nexus-ai-pro/providers` | 10 KB | 2% | none |
 | `nexus-ai-pro/providers/base` | 10 KB | 2% | none |
 | `nexus-ai-pro/embeddings/models` | 10 KB | 2% | none |
@@ -1971,6 +2061,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/capabilities` | 8 KB | 1% | none |
 | `nexus-ai-pro/telephony/realtime-bridge` | 7 KB | 1% | none |
 | `nexus-ai-pro/graph/visualize` | 6 KB | 1.0% | none |
+| `nexus-ai-pro/store` | 6 KB | 1.0% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 0.8% | none |
 | `nexus-ai-pro/embeddings/mock` | 5 KB | 0.8% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 0.8% | none |

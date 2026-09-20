@@ -185,6 +185,10 @@ import type { MediaEvalReport } from 'nexus-ai-pro/images/evals';
 import { createGraph, MemoryGraphCheckpointer, appendList, counter, END, Send, Command } from 'nexus-ai-pro/graph';
 import type { GraphDescription, GraphEvent, GraphResult, GraphTask, NodeOptions, RetryPolicy } from 'nexus-ai-pro/graph';
 import { toMermaid } from 'nexus-ai-pro/graph/visualize';
+import { createAgent, agentInput, type AgentMiddleware, type AgentState } from 'nexus-ai-pro/agent';
+import { MemoryStore, type Store, type StoreItem } from 'nexus-ai-pro/store';
+import { RedisStore } from 'nexus-ai-pro/store/redis';
+import { McpClient, McpServer, type McpTransport } from 'nexus-ai-pro/mcp';
 import { BatchManager as SubpathBatchManager } from 'nexus-ai-pro/batch';
 import { MockBatchProvider } from 'nexus-ai-pro/batch/mock';
 import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
@@ -514,6 +518,22 @@ const diagram: string = toMermaid(shape, { direction: 'LR', highlight: ['act'] }
 const edited = routedGraph.updateState('consumer-thread', { turns: 1 }, { asNode: 'decide' });
 const forked: Promise<string> = routedGraph.fork('consumer-thread', { step: 0 });
 const listened = routedGraph.invoke({}, { onEvent: (event: GraphEvent) => void event.type });
+const memoryStore: Store = new MemoryStore({ maxItems: 100 });
+const storedItem: Promise<StoreItem<{ text: string }> | undefined> = memoryStore.get(['users', 'a'], 'tone') as never;
+const redisStore = new RedisStore({} as never, { prefix: 'app' });
+const agentMiddleware: AgentMiddleware = { afterModel: ({ state }: { state: AgentState }) => void state.iterations };
+const typedAgent = createAgent({
+  client: { complete: async () => ({}) as never },
+  tools: [],
+  store: memoryStore,
+  middleware: [agentMiddleware],
+  interruptOn: { send_email: true },
+});
+const agentRun = typedAgent.invoke(agentInput('hello'), { threadId: 'consumer-agent' });
+const mcpTransport: McpTransport = { send: () => undefined, onMessage: () => undefined, close: () => undefined };
+const mcpClient = new McpClient(mcpTransport);
+const mcpTools = mcpClient.toNexusTools({ prefix: 'files' });
+const mcpServer = new McpServer({ name: 'consumer' });
 const batchManager = new BatchManager({ providers: { mock: new MockBatchProvider() }, defaultProvider: 'mock' });
 const subpathBatchManager = new SubpathBatchManager();
 const openAiBatch = new OpenAIBatchProvider({ apiKey: 'test' });
@@ -665,6 +685,11 @@ void diagram;
 void edited;
 void forked;
 void listened;
+void storedItem;
+void redisStore;
+void agentRun;
+void mcpTools;
+void mcpServer;
 void answered;
 void S3AssetStore;
 void rateLimitStore;

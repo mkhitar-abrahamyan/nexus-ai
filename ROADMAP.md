@@ -671,7 +671,7 @@ that the original timeline is untouched.
 
 ---
 
-## 13. 1.13.0: long-term memory, agents on graphs, and MCP
+## 13. Ready for 1.13.0 (unreleased): long-term memory, agents on graphs, and MCP
 
 **Store** (`nexus-ai-pro/store`).
 - Operations: `put(namespace, key, value, { ttlMs, index })`, `get`, `delete`,
@@ -713,14 +713,26 @@ that the original timeline is untouched.
 - Per-node caching, `cache: { key, ttlMs, store }`, through the existing cache adapters imported as
   types only.
 
-**Budgets.** `/store` at most 8 KB. The two store adapters at most 10 KB each. `/agent` at most 20 KB
-on top of `/graph`. `/mcp` at most 25 KB. `AgentLoop`'s entry point must not grow.
+**What landed, and what moved.** The store, the agent, and MCP in both directions landed as
+described. Three adjustments:
 
-**Proof.** A runnable example shows three things:
-- an agent that remembers a preference from an earlier thread through the store;
-- a pause for approval before a side-effecting tool, where the process is killed and the approval
-  resumes the run from Redis;
-- tools called from a local MCP server.
+- **Postgres is not in this release.** `MemoryStore` and `RedisStore` ship; a Postgres adapter with
+  pgvector is worth doing against a real database rather than a mocked client, so it moves to 1.14.0
+  with the trace store, which needs the same adapter.
+- **Multi-agent helpers move to 1.14.0.** An agent is a compiled graph, so it already works as a
+  subgraph node and can hand control back with `Command.PARENT`; named `handoff()` helpers are sugar
+  on top, and are better designed once the tracing work shows what a multi-agent run looks like.
+- **Bundled middleware is a seam, not a set.** `beforeModel`, `afterModel`, and `wrapToolCall` ship;
+  the summarization and redaction middleware move to 1.14.0, where the context and security modules
+  they wrap are already being touched.
+
+**Budgets.** `/store` and `/mcp` import no third-party package; `/agent` costs the graph runtime plus
+its own code. The size table records the measured figures.
+
+**Proof: landed as tests rather than an example script.** The suite covers an agent that pauses for
+approval and resumes with corrected arguments, a graph node reading memory written by an earlier
+thread, and an MCP client calling tools through an MCP server — the two sides wired to each other in
+memory, which exercises both halves of the protocol in one test.
 
 ---
 

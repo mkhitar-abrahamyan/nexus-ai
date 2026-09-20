@@ -4,6 +4,39 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Memory, agents, and MCP. An agent is now a graph rather than a loop, so it inherits approvals,
+parallel tool calls, and durability. A store gives it memory that outlives a thread, and MCP connects
+it to tools this package does not have to ship.
+
+### Added
+
+- **`nexus-ai-pro/agent` and `createAgent()`.** Returns a compiled graph, so an agent gets
+  checkpoints, resume, forks, events, and a diagram from the graph runtime rather than from code
+  written twice.
+  - Tool calls run as parallel tasks, bounded by `toolConcurrency`.
+  - `interruptOn` makes a tool wait for a human. The approval is a checkpoint, so it can arrive days
+    later from another process, and it can approve, refuse with a reason the model sees, or approve
+    with corrected arguments.
+  - Middleware wraps the model call (`beforeModel`, `afterModel`) and each tool call
+    (`wrapToolCall`).
+  - `stopReason` distinguishes a finished answer from one that ran out of iterations, and malformed
+    tool arguments never reach a tool.
+  - `AgentLoop` is unchanged, for the case that wants none of this.
+- **`nexus-ai-pro/store`, long-term memory.** Namespaced tuples, `put`/`get`/`delete`/`search`/
+  `listNamespaces`, TTLs, and field filters.
+  - Semantic search ranks by any embedding function you inject, so the store never imports the
+    embeddings runtime; without an index, a query matches text.
+  - `MemoryStore` is bounded, like the graph's memory checkpointer. `RedisStore`
+    (`nexus-ai-pro/store/redis`) shares memory across processes through a client-like interface.
+  - `compile({ store })` hands it to every node as `context.store`.
+- **`nexus-ai-pro/mcp`, both directions of the Model Context Protocol.** Implemented directly, with
+  no protocol SDK dependency.
+  - `McpClient` lists and calls tools, reads resources and prompts, and `toNexusTools()` turns a
+    server's tools into tools an agent can call, with optional name prefixes.
+  - `McpServer` exposes this application's tools and resources to other assistants.
+  - Stdio and HTTP transports are included, and the transport is an interface, so a client and a
+    server can be wired together in memory for a test.
+
 ## [1.12.0] - 2026-09-20
 
 Graph control and introspection. A node can route itself, a run can pause at breakpoints and be
