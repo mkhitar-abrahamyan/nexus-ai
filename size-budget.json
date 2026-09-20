@@ -3,7 +3,7 @@
   "measuredAt": "2026-09-20",
   "maxKb": {
     ".": 674,
-    "./agent": 80,
+    "./agent": 84,
     "./batch": 130,
     "./batch/anthropic": 58,
     "./batch/mock": 52,
@@ -79,6 +79,7 @@
     "./telephony": 22,
     "./telephony/realtime-bridge": 8,
     "./telephony/twilio": 24,
+    "./tracing": 30,
     "./voice": 20,
     "./voice/openai": 10,
     "./voice/session": 14,

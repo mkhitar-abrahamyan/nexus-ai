@@ -4,9 +4,15 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-Memory, agents, and MCP. An agent is now a graph rather than a loop, so it inherits approvals,
-parallel tool calls, and durability. A store gives it memory that outlives a thread, and MCP connects
-it to tools this package does not have to ship.
+## [1.14.0] - 2026-09-20
+
+The memory, agent, and MCP work planned for 1.13.0 ships here together with tracing, so no 1.13.0 was
+published.
+
+Memory, agents, MCP, and traces. An agent is now a graph rather than a loop, so it inherits
+approvals, parallel tool calls, and durability. A store gives it memory that outlives a thread, MCP
+connects it to tools this package does not have to ship, and every run can be recorded as a tree you
+can search, compare, and alert on.
 
 ### Added
 
@@ -29,6 +35,31 @@ it to tools this package does not have to ship.
   - `MemoryStore` is bounded, like the graph's memory checkpointer. `RedisStore`
     (`nexus-ai-pro/store/redis`) shares memory across processes through a client-like interface.
   - `compile({ store })` hands it to every node as `context.store`.
+- **`nexus-ai-pro/tracing`, run trees you can query.** Metrics say how it is going; a trace says what
+  happened.
+  - Every family has a run kind: model, tool, graph, node, agent, retriever, embedding, image, voice,
+    realtime, operation. A run carries inputs, outputs, timing, tokens, cost, tags, and errors.
+  - `traceGraph()` turns the graph's own event stream into a run tree, so nothing inside the graph
+    knows about tracing and an untraced run pays nothing. `traceModelClient()` nests each model call
+    inside the node that made it, with its tokens and cost.
+  - Tail sampling keeps every error, slow run, and expensive run whatever the head rate is, because
+    the decision is made when a trace finishes.
+  - Redaction runs before storage: hidden fields are never written, and a `redact` hook gets the last
+    word.
+  - `MemoryTraceStore` is bounded; `JsonlTraceStore` appends to a file that survives a restart and can
+    be read back, pruned, and rotated.
+  - Queries filter by kind, status, name, model, tags, metadata, latency, cost, time, and feedback.
+    `tree()` assembles a trace, `formatTree()` prints it, and `compareTraces()` reports what changed
+    between two runs of the same shape.
+  - `recordFeedback()` attaches scores from people or from evaluators.
+  - `AlertEvaluator` runs rules over stored runs — error rate, latency percentiles, cost, count — and
+    every alert carries the runs that tripped it. `createWebhookNotifier()` posts them.
+- **Bundled agent middleware.** `summarizeHistory` keeps a long transcript from growing without
+  bound, `redactMessages` keeps secrets out of provider requests and responses, and `limitToolCalls`
+  caps how often a tool may run.
+- **`agentAsTool()`.** Gives one agent to another as a tool, so a supervisor can delegate while
+  keeping control. Each agent keeps its own memory, approvals, and thread.
+
 - **`nexus-ai-pro/mcp`, both directions of the Model Context Protocol.** Implemented directly, with
   no protocol SDK dependency.
   - `McpClient` lists and calls tools, reads resources and prompts, and `toNexusTools()` turns a
@@ -686,7 +717,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.12.0...v1.14.0
 [1.12.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.9.0...v1.10.0

@@ -33,10 +33,10 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // timeout policies — about 65KB unpacked across both builds and their declarations. Raised again
 // in 1.12.0 for graph commands, breakpoints, state editing and forks, run events, and the Mermaid
 // visualizer, plus the README documentation for them.
-// Raised again in 1.13.0 for long-term memory (the store and its Redis adapter), agents on graphs,
-// and MCP in both directions, all opt-in subpaths the root import never loads.
-const MAX_PACKED_BYTES = 570_000;
-const MAX_UNPACKED_BYTES = 3_400_000;
+// Raised again in 1.14.0 for long-term memory (the store and its Redis adapter), agents on graphs,
+// MCP in both directions, and the tracing family, all opt-in subpaths the root import never loads.
+const MAX_PACKED_BYTES = 580_000;
+const MAX_UNPACKED_BYTES = 3_500_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Most of
 // the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the
 // README size table reports third-party install cost per entry point.

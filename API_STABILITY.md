@@ -328,7 +328,7 @@ Also since 1.12.0, all additive:
 - A subgraph node's thread id is `<parent thread>:<task id>`, which equals the previous
   `<parent thread>:<node>` for any node not reached through `Send`.
 
-## Agent, store, and MCP stages (Unreleased)
+## Agent, store, MCP, and tracing stages (1.14.0)
 
 The `nexus-ai-pro/agent`, `nexus-ai-pro/store`, `nexus-ai-pro/store/redis`, and `nexus-ai-pro/mcp`
 subpaths are public and follow the 1.x rules. None is exported from the root import.
@@ -344,6 +344,14 @@ subpaths are public and follow the 1.x rules. None is exported from the root imp
   prompts, over stdio and HTTP. Protocol versions and server behaviour are upstream contracts outside
   this policy. Server-initiated streaming, sampling, and roots are not implemented; new methods may be
   added in a minor release.
+- `nexus-ai-pro/tracing` is public: `Tracer`, the `TraceStore` contract, `MemoryTraceStore`,
+  `JsonlTraceStore`, `traceGraph()`, `traceModelClient()`, `compareTraces()`, and `AlertEvaluator`.
+  The `Run`, `RunTree`, and `RunQuery` shapes are normalized; what a model puts in a run's inputs and
+  outputs is not. New `RunKind` values and query fields may be added in a minor release. Sampling is
+  probabilistic by definition, so which traces are kept is not a guarantee, but the tail rules are:
+  an error, a run past `keepSlowerThanMs`, or one past `keepCostlierThan` is always kept.
+- `agentAsTool()` and the bundled middleware (`summarizeHistory`, `redactMessages`, `limitToolCalls`)
+  are public and additive.
 - `AgentLoop`, `tool()`, and `ToolExecutor` keep their behaviour and are re-exported from
   `nexus-ai-pro/agent` as well as the root.
 

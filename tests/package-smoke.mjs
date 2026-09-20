@@ -89,6 +89,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/store', exports: ['MemoryStore', 'cosine'] },
   { specifier: 'nexus-ai-pro/store/redis', exports: ['RedisStore'] },
   { specifier: 'nexus-ai-pro/mcp', exports: ['McpClient', 'McpServer', 'createStdioTransport', 'McpError'] },
+  {
+    specifier: 'nexus-ai-pro/tracing',
+    exports: ['Tracer', 'MemoryTraceStore', 'JsonlTraceStore', 'traceGraph', 'AlertEvaluator', 'compareTraces'],
+  },
   { specifier: 'nexus-ai-pro/batch', exports: ['BatchManager', 'MockBatchProvider', 'BatchValidationError'] },
   { specifier: 'nexus-ai-pro/batch/openai', exports: ['OpenAIBatchProvider'] },
   { specifier: 'nexus-ai-pro/batch/anthropic', exports: ['AnthropicBatchProvider'] },

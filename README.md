@@ -723,6 +723,7 @@ The Model Context Protocol, both directions, implemented directly rather than th
 
 ```ts
 import { McpClient, createStdioTransport } from 'nexus-ai-pro/mcp';
+import { Tracer, MemoryTraceStore } from 'nexus-ai-pro/tracing';
 
 const client = new McpClient(createStdioTransport({ command: 'npx', args: ['-y', 'some-mcp-server'] }));
 const agent = createAgent({ client: ai, tools: await client.toNexusTools({ prefix: 'files' }) });
@@ -741,6 +742,73 @@ await new McpServer({ name: 'my-app', tools: [refundTool] }).connect(createStdio
 
 Stdio and HTTP transports are included, and the transport is an interface, so a test can wire a
 client to a server in memory.
+
+## Traces
+
+Metrics say how it is going. A trace says what happened: the run tree of one request, with its
+inputs, outputs, tokens, cost, and errors, stored where you can search it.
+
+```ts
+import { Tracer, MemoryTraceStore, traceGraph, traceModelClient } from 'nexus-ai-pro/tracing';
+
+const tracer = new Tracer({
+  store: new MemoryTraceStore(),               // or JsonlTraceStore({ file })
+  sampling: { rate: 0.05, keepErrors: true },  // 5% of traces, plus every failure
+  redaction: { hideFields: ['apiKey', 'user.email'] },
+});
+
+const tracing = traceGraph(tracer, { name: 'support-agent', kind: 'agent' });
+const agent = createAgent({ client: traceModelClient(ai, tracer, { parent: () => tracing.runFor('model') }) });
+
+const run = await agent.invoke(agentInput(question), { threadId, ...tracing.runOptions });
+await tracing.finish(run);
+```
+
+**Nothing inside the graph knows about tracing.** The graph already reports every task starting,
+retrying, and finishing; a trace is that stream written down as a tree. An application that does not
+trace creates no context, allocates nothing, and does no per-call work.
+
+**Tail sampling keeps what matters.** A 5% rate still records every error, every run slower than a
+threshold, and every run more expensive than one, because the decision is made when the trace
+finishes rather than when it starts.
+
+**Redaction happens before storage**, so a field you hide is never written, and a `redact` hook gets
+the last word on every run.
+
+**Then ask questions of it:**
+
+```ts
+const failures = await store.query({ status: 'error', kind: 'model', since: yesterday, minLatencyMs: 2000 });
+const tree = await store.tree(failures[0].traceId);
+console.log(formatTree(tree));
+
+await tracer.recordFeedback(runId, { key: 'thumbs', score: 0, source: 'user' });
+```
+
+`compareTraces(a, b)` lays two runs of the same shape side by side and reports what changed — the
+step that got slower, the tool that stopped being called, the output that differs — which is how
+"it worked yesterday" becomes an answerable question.
+
+**Alerts** run the same queries on a timer, and carry the runs that tripped them:
+
+```ts
+import { AlertEvaluator, createWebhookNotifier } from 'nexus-ai-pro/tracing';
+
+const alerts = new AlertEvaluator(
+  store,
+  [
+    { name: 'error rate', metric: 'errorRate', threshold: 0.05, minRuns: 20 },
+    { name: 'p95 latency', metric: 'latencyP95', threshold: 8000 },
+    { name: 'hourly spend', metric: 'cost', threshold: 25, windowMs: 3_600_000 },
+  ],
+  { notifier: createWebhookNotifier({ url: process.env.ALERT_WEBHOOK! }) },
+);
+
+setInterval(() => void alerts.evaluate(), 60_000);
+```
+
+An alert names the rule, the measured value, and three runs that contributed, so the next step is
+reading them rather than starting an investigation.
 
 ## Provider Batch Tiers
 
@@ -2012,7 +2080,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/providers/llamacpp` | 77 KB | 13% | none |
 | `nexus-ai-pro/providers/lmstudio` | 77 KB | 13% | none |
 | `nexus-ai-pro/providers/openai` | 77 KB | 13% | none |
-| `nexus-ai-pro/agent` | 72 KB | 12% | none |
+| `nexus-ai-pro/agent` | 76 KB | 12% | none |
 | `nexus-ai-pro/providers/anthropic` | 70 KB | 11% | none |
 | `nexus-ai-pro/providers/google` | 66 KB | 11% | none |
 | `nexus-ai-pro/images` | 65 KB | 11% | none |
@@ -2028,6 +2096,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/models` | 35 KB | 6% | none |
 | `nexus-ai-pro/images/inputs` | 31 KB | 5% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 5% | none |
+| `nexus-ai-pro/tracing` | 26 KB | 4% | none |
 | `nexus-ai-pro/evals` | 23 KB | 4% | none |
 | `nexus-ai-pro/images/transform` | 22 KB | 4% | none |
 | `nexus-ai-pro/images/stores` | 22 KB | 4% | none |

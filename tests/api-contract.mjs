@@ -283,6 +283,7 @@ const expectedSubpaths = [
   './store',
   './store/redis',
   './mcp',
+  './tracing',
   './ops/circuit-breaker',
   './ops/rate-limit-adapters',
   './batch',
@@ -370,7 +371,16 @@ for (const embeddingIntegrationExport of [
   );
 }
 
-for (const optInFamilyExport of ['createAgent', 'MemoryStore', 'RedisStore', 'McpClient', 'McpServer', 'toMermaid']) {
+for (const optInFamilyExport of [
+  'createAgent',
+  'MemoryStore',
+  'RedisStore',
+  'McpClient',
+  'McpServer',
+  'toMermaid',
+  'Tracer',
+  'MemoryTraceStore',
+]) {
   assert.equal(optInFamilyExport in root, false, `${optInFamilyExport} should remain opt-in through its subpath`);
 }
 

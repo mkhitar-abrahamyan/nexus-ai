@@ -1,6 +1,14 @@
 export { AgentLoop, type AgentModelClient as AgentLoopModelClient } from './loop.js';
 export { tool, ToolExecutor } from './tool.js';
 export {
+  limitToolCalls,
+  redactMessages,
+  type RedactOptions,
+  summarizeHistory,
+  type SummarizeOptions,
+} from './middleware.js';
+export {
+  agentAsTool,
   agentInput,
   type AgentApproval,
   type AgentApprovalPolicy,

@@ -232,6 +232,41 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
   });
 }
 
+/**
+ * Turns an agent into a tool another agent can call.
+ *
+ * The simplest multi-agent shape: a supervisor keeps control and delegates, rather than handing over
+ * the conversation. The specialist runs as its own graph, with its own memory and approvals, and
+ * returns its answer as the tool result.
+ */
+export function agentAsTool(options: {
+  agent: AgentGraph;
+  name: string;
+  description: string;
+  /** Threads the specialist's runs, so its work is resumable too. Defaults to a fresh thread. */
+  threadId?: (goal: string) => string;
+}): ToolDefinition {
+  return {
+    name: options.name,
+    description: options.description,
+    parameters: {
+      type: 'object',
+      properties: { goal: { type: 'string', description: 'What this agent should do' } },
+      required: ['goal'],
+    },
+    execute: async (args: Record<string, unknown>) => {
+      const goal = String(args.goal ?? '');
+      const result = await options.agent.invoke(agentInput(goal), {
+        ...(options.threadId ? { threadId: options.threadId(goal) } : {}),
+      });
+      if (result.status === 'awaiting_input') {
+        return `The ${options.name} agent is waiting for a human: ${result.interrupt?.reason ?? 'approval needed'}`;
+      }
+      return result.state.answer;
+    },
+  };
+}
+
 /** Turns a tool result into the message the model reads next. */
 function toolMessage(call: ToolCall, result: AgentToolResult): Message {
   return {

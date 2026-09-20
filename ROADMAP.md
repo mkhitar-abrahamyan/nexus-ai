@@ -523,8 +523,7 @@ be large to get there. Three rules apply to every item below.
 | 1.10.0 | Image portability, graph correctness | Masks and three image backends; documented graph behaviour made true | Masked-edit conformance on three backends; regression tests for the nine defects |
 | 1.11.0 | Parallel graphs | Parallel nodes, dynamic fan-out, per-node retries; dependency cost shown | Graph benchmark in CI; size table with a dependency column |
 | 1.12.0 | Graph control and introspection | Control commands, state editing and forks, visualization, mature subgraphs | Mermaid diagram rendered in the README; fork-and-edit test |
-| 1.13.0 | Memory, agents, MCP | Cross-thread memory, agents with durable approvals, MCP tools | Agent that survives a restart and remembers across threads |
-| 1.14.0 | Queryable traces | Run trees across every family, feedback, alerts | `nexus traces` showing a full agent run tree |
+| 1.14.0 | Memory, agents, MCP, traces | Cross-thread memory, agents with durable approvals, MCP tools, run trees with feedback and alerts | Agent that survives a restart, remembers across threads, and records its run tree |
 | 1.15.0 | Evaluation platform | Datasets, experiments, comparisons, online eval, annotation queues | CI gate that fails a pull request on a measured regression |
 | 1.16.0 | Prompt and config versioning | Versioned prompts with environments and gated promotion | Promotion blocked until an experiment passes |
 | 1.17.0 | Self-hosted agent server | Deployment: runs, threads, background work, horizontal scale | Two replicas; a run survives killing the one that started it |
@@ -671,7 +670,7 @@ that the original timeline is untouched.
 
 ---
 
-## 13. Ready for 1.13.0 (unreleased): long-term memory, agents on graphs, and MCP
+## 13. Shipped in 1.14.0 — long-term memory, agents on graphs, and MCP
 
 **Store** (`nexus-ai-pro/store`).
 - Operations: `put(namespace, key, value, { ttlMs, index })`, `get`, `delete`,
@@ -736,7 +735,7 @@ memory, which exercises both halves of the protocol in one test.
 
 ---
 
-## 14. 1.14.0: queryable traces
+## 14. Shipped in 1.14.0 — queryable traces
 
 **Run model.**
 - A run has an id, a trace id, and a parent, plus kind, inputs, outputs, error, timing, tokens, cost,
@@ -776,19 +775,39 @@ memory, which exercises both halves of the protocol in one test.
 - The repository gains Grafana dashboards and Prometheus alert rules. They live in the repository
   only and are not shipped in the package.
 
-**Also in scope.** Circuit-breaker state through a distributed adapter, closing the per-process
-caveat in gap 2.4.
+**What landed, and what moved.** The run model, instrumentation, storage, privacy, querying,
+comparison, feedback, and alerts landed. Four items moved, each for a reason:
 
-**Budgets.** `/tracing` at most 12 KB. Adding tracing must not grow any other entry point's static
-import cost.
+- **The Postgres trace store and the Postgres store adapter move to 1.15.0.** Both need the same
+  client interface and both deserve to be written against a real database rather than a mocked
+  client; 1.15.0 already brings a dataset store that shares it.
+- **The `nexus traces` CLI moves to 1.15.0**, where the evaluation CLI is being built and the two can
+  share argument parsing and output formatting. `formatTree()` already prints a run tree, which is
+  what the command would do.
+- **Realtime sessions are still outside the traced path.** A persistent session's unit of work is an
+  event stream rather than a discrete call, which is the same reason gap 2.1 has always excluded it;
+  deciding what a realtime "run" is belongs with that work, not beside it.
+- **A distributed circuit breaker moves to 1.15.0**, with the other shared-state adapters.
 
-**Proof.** `nexus traces tail` and `nexus traces show <id>` print the run tree of an agent, with
-graph nodes, tool calls, model calls, tokens, and cost. A test shows tail sampling keeping every error
-at a 1% head rate.
+The release also carried the three items deferred from section 13: the bundled agent middleware
+(`summarizeHistory`, `redactMessages`, `limitToolCalls`) and `agentAsTool()` for delegation.
+
+**Budgets.** `/tracing` imports no third-party package, and no other entry point grew: nothing else
+imports it.
+
+**Proof: landed as tests.** One test traces an agent run end to end and asserts the shape of the
+tree — the agent run, a node run per task, and each model call nested inside the node that made it,
+carrying its tokens and cost. Another shows tail sampling keeping a failure at a 0% head rate, and a
+third compares two traces of the same shape and reports the step whose output changed.
 
 ---
 
 ## 15. 1.15.0: evaluation platform
+
+**Moved here from 1.13.0 and 1.14.0.**
+- A Postgres adapter shared by the store, the trace store, and the dataset store.
+- The `nexus traces` CLI, alongside the evaluation CLI.
+- A distributed circuit breaker, with the other shared-state adapters.
 
 **One evaluation entry point** (`nexus-ai-pro/evaluate`).
 - `evaluate(target, dataset, evaluators, { concurrency, repetitions, experiment, metadata })` accepts
