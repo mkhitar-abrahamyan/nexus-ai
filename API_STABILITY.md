@@ -355,7 +355,7 @@ subpaths are public and follow the 1.x rules. None is exported from the root imp
 - `AgentLoop`, `tool()`, and `ToolExecutor` keep their behaviour and are re-exported from
   `nexus-ai-pro/agent` as well as the root.
 
-## Evaluation stage (Unreleased)
+## Evaluation stage (1.15.0)
 
 `nexus-ai-pro/evaluate` is public and follows the 1.x rules, and is not exported from the root.
 `Dataset`, `DatasetExample`, `Experiment`, `ExampleResult`, `MetricSummary`, and the comparison shapes

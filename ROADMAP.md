@@ -3,7 +3,7 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.14.0 released; 1.15.0 prepared and unreleased.** 83 export subpaths, each
+Status baseline: **1.15.0**. 83 export subpaths, each
 held to a size budget in CI, 12 completion providers, 5 embedding providers, 2 batch providers, 3
 image providers plus a mock, 101 completion registry models plus 63 aliases, and 11 embedding models
 plus 5 aliases. 547 unit tests pass; coverage sits at **90.5% lines / 75.9% branches / 85.5%
@@ -832,7 +832,7 @@ third compares two traces of the same shape and reports the step whose output ch
 
 ---
 
-## 15. Ready for 1.15.0 (unreleased): evaluation
+## 15. Shipped in 1.15.0 — evaluation
 
 One entry point, `nexus-ai-pro/evaluate`, measured at 33 KB with no third-party import.
 

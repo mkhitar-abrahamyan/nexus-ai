@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-09-21
+
 Evaluation. One entry point for evaluating anything, datasets versioned by their content, experiments
 that can be compared with a verdict rather than a vibe, and the loop from a production failure back to
 a permanent regression test.
@@ -749,7 +751,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.12.0...v1.14.0
 [1.12.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.10.0...v1.11.0
