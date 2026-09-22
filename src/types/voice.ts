@@ -1,4 +1,4 @@
-import type { CompletionRequest, Message, ToolDefinition } from './messages.js';
+import type { BinaryBuffer, CompletionRequest, Message, ToolDefinition } from './messages.js';
 import type { NexusResponse } from './response.js';
 
 /** Audio encodings voice providers accept and produce. */
@@ -11,7 +11,7 @@ export type VoiceAudioFormat = 'mp3' | 'wav' | 'opus' | 'aac' | 'flac' | 'pcm' |
 export type VoiceAudioInput =
   | { path: string; filename?: string; mimeType?: string }
   | { url: string; filename?: string; mimeType?: string }
-  | { buffer: Buffer | Uint8Array | ArrayBuffer; filename?: string; mimeType?: string }
+  | { buffer: BinaryBuffer | Uint8Array | ArrayBuffer; filename?: string; mimeType?: string }
   | { base64: string; filename?: string; mimeType?: string }
   | { stream: NodeJS.ReadableStream; filename?: string; mimeType?: string };
 

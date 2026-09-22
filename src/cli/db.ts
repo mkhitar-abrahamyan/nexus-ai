@@ -1,7 +1,7 @@
 import { type PostgresAdapter, postgresMigration } from '../postgres/index.js';
 import { CliUsageError, listFlag, numberFlag, type ParsedArgs } from './args.js';
 
-const ADAPTERS: readonly PostgresAdapter[] = ['operations', 'store', 'traces', 'evaluation', 'circuits'];
+const ADAPTERS: readonly PostgresAdapter[] = ['operations', 'store', 'traces', 'evaluation', 'circuits', 'prompts'];
 
 /**
  * `nexus db sql` prints the Postgres schema for the chosen adapters.

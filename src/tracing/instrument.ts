@@ -172,6 +172,8 @@ export function traceModelClient<T extends ModelClientLike>(
             provider: response.meta?.providerUsed,
             model: response.meta?.modelUsed,
             finishReason: response.finishReason,
+            // A request rendered from a prompt carries its version, so a trace answers "which prompt ran".
+            ...(request.metadata?.prompt === undefined ? {} : { prompt: request.metadata.prompt }),
           },
         });
         return response;

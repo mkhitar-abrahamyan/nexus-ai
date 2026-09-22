@@ -478,6 +478,7 @@ export type {
   TextContent,
   ImageContent,
   AudioContent,
+  BinaryBuffer,
   VideoContent,
   ToolChoice,
   ToolDefinition,

@@ -488,7 +488,7 @@ test('the combined migration script runs on an empty database and the helpers re
     const { rows } = await fresh.query<{ count: number }>(
       "select count(*)::int as count from information_schema.tables where table_name like 'nexus_%'",
     );
-    assert.equal(rows[0]?.count, 6);
+    assert.equal(rows[0]?.count, 9, 'six tables, plus three for prompts');
     assert.doesNotMatch(postgresMigration({ adapters: ['traces'] }), /nexus_operations/);
   } finally {
     await fresh.close();

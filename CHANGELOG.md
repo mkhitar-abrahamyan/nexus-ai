@@ -4,6 +4,52 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Prompt versioning, and documentation you can navigate. Prompts are defined with typed variables,
+versioned by their content, promoted between labels only after their gates agree, and served through
+registry outages; every feature now has its own guide, and the README is an overview that links to them.
+
+### Added
+
+- **Prompt templates** (`nexus-ai-pro/prompts`). `definePrompt()` types a prompt's variables from its
+  template text, so a missing or misspelled variable is a compile-time error. Templates support dot
+  paths, partials, placeholders for whole messages, defaults, and a request configuration versioned
+  with the prompt. `promptVersion()` derives a version from the content, identical in every runtime.
+- **A prompt registry** (`nexus-ai-pro/prompts/registry`). `PromptRegistry` commits versions, points
+  labels such as `staging` and `production` at them, and records every change. `promote()` runs the
+  gates registered for the destination label: `experimentGate()` requires a passing experiment for
+  the exact version, with thresholds and an optional no-regression check, and `servedByGate()` requires
+  a version to be served by another label first. `rollback()`, `split()` for sticky A/B tests, and
+  `diff()` with `formatPromptDiff()` complete it. Label writes are compare-and-set, and changes can be
+  posted to signed webhooks, verified with `verifyPromptWebhook()`.
+- **`evaluatePrompt()`**, the headless playground: runs a prompt version over a dataset and stores an
+  experiment tagged with that version, which is what `experimentGate()` looks for.
+- **A serving client** (`nexus-ai-pro/prompts/client`). `PromptClient` caches labels with a TTL and a
+  stale-while-revalidate window, shares concurrent refreshes, keeps serving the last version seen when
+  the registry is unreachable, falls back to prompts bundled in code on a cold start, and picks a
+  sticky A/B arm per key.
+- **Prompt stores**: `MemoryPromptStore`, `FilePromptStore` (`/prompts/file`), `RedisPromptStore`
+  (`/prompts/redis`), and `PostgresPromptStore` (`/postgres/prompts`), all tested against one
+  contract. `postgresMigration()` and `nexus db sql` include the prompt tables.
+- A model call traced with `traceModelClient()` records the prompt name, version, label, and arm it
+  was rendered from.
+- **A guide for every feature**, under `docs/`. Each guide covers every export of its entry points and
+  ends with a reference generated from the doc comments. `npm run docs:guides` fails when an export
+  is not named in a guide or a reference is stale, and runs in `npm test`; `npm run docs:update`
+  regenerates the references.
+- `BinaryBuffer`: Node's `Buffer` when Node's types are loaded, otherwise `Uint8Array`.
+
+### Changed
+
+- The README is an overview that links to the guides; the moved sections live in `docs/`, and the
+  size table is in `docs/packaging.md`.
+- The combined Postgres migration creates three more tables, for prompts.
+
+### Fixed
+
+- The message types referred to Node's `Buffer` and `NodeJS.ReadableStream`, so a project without
+  Node's type definitions, such as a browser app, failed to type-check anything that reached them.
+  They now compile either way, and are unchanged for Node projects.
+
 ## [1.16.0] - 2026-09-22
 
 Shared state and the command line. Everything that has to outlive a process or be shared between

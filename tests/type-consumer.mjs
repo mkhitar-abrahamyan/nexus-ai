@@ -213,6 +213,12 @@ import {
   type PostgresLikeClient,
 } from 'nexus-ai-pro/postgres';
 import { PostgresStore as SubpathPostgresStore } from 'nexus-ai-pro/postgres/store';
+import { PostgresPromptStore } from 'nexus-ai-pro/postgres/prompts';
+import { definePrompt, type PromptVersion, type RenderedPrompt } from 'nexus-ai-pro/prompts';
+import { PromptClient } from 'nexus-ai-pro/prompts/client';
+import { PromptRegistry, experimentGate, servedByGate, evaluatePrompt, formatPromptDiff } from 'nexus-ai-pro/prompts/registry';
+import { FilePromptStore } from 'nexus-ai-pro/prompts/file';
+import { RedisPromptStore } from 'nexus-ai-pro/prompts/redis';
 import { MemoryCircuitStateStore, RedisCircuitStateStore } from 'nexus-ai-pro/ops/circuit-store';
 import { recordingFetch, replayFetch, type RecordedExchange } from 'nexus-ai-pro/testing/record';
 import { BatchManager as SubpathBatchManager } from 'nexus-ai-pro/batch';
@@ -584,6 +590,32 @@ const postgresTraces: TraceStore = new PostgresTraceStore(pool);
 const postgresDatasets = new PostgresDatasetStore(pool);
 const postgresExperiments = new PostgresExperimentStore(pool);
 const sharedCircuits = new PostgresCircuitStateStore(pool);
+const triage = definePrompt({
+  name: 'triage',
+  messages: [
+    { role: 'system', content: 'Triage for {{team}}.' },
+    { placeholder: 'history', optional: true },
+    { role: 'user', content: '{{ticket.body}}' },
+  ],
+  defaults: { team: 'support' },
+  config: { model: 'gpt-5.4-mini' },
+});
+const triageRequest: RenderedPrompt = triage.render({ ticket: { body: 'down' } });
+// @ts-expect-error a variable without a default is required
+triage.render({ team: 'billing' });
+const promptRegistry = new PromptRegistry({
+  store: new PostgresPromptStore(pool),
+  gates: { production: [servedByGate('staging'), experimentGate({ store: new MemoryExperimentStore(), thresholds: { correctness: 0.9 } })] },
+});
+const committed: Promise<PromptVersion> = promptRegistry.commit(triage, { label: 'staging' });
+const promptClient = new PromptClient({ source: promptRegistry.store, ttlMs: 30_000, fallbacks: [triage] });
+const served: Promise<RenderedPrompt> = promptClient.render('triage', { ticket: { body: 'x' } }, { key: 'user-1' });
+const promptFiles = new FilePromptStore('./prompts');
+const promptRedis = new RedisPromptStore({
+  hsetnx: async () => 1, hset: async () => 1, hget: async () => null, hvals: async () => [], hdel: async () => 1,
+  lpush: async () => 1, lrange: async () => [], ltrim: async () => 'OK', sadd: async () => 1, smembers: async () => [],
+});
+void [triageRequest, committed, served, promptFiles, promptRedis, evaluatePrompt, formatPromptDiff];
 const schema: string = postgresMigration({ adapters: ['traces', 'circuits'] });
 const sharedBreaker = new CircuitBreaker({ enabled: true, store: new MemoryCircuitStateStore(), workerId: 'api-1' });
 const redisCircuits = new RedisCircuitStateStore({
@@ -822,6 +854,16 @@ void unsubscribeRealtime;
     `
 import { createRealtimeSession } from 'nexus-ai-pro/realtime/session';
 import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
+import { definePrompt } from 'nexus-ai-pro/prompts';
+import { PromptClient } from 'nexus-ai-pro/prompts/client';
+
+// Templates and serving compile with browser types only: no Node API reaches either entry point.
+const greeting = definePrompt({ name: 'greeting', messages: [{ role: 'user', content: 'Hello {{name}}' }] });
+const browserPrompts = new PromptClient({
+  source: { getLabel: async () => undefined, getVersion: async () => undefined },
+  fallbacks: [greeting],
+});
+void [greeting.render({ name: 'Ada' }), browserPrompts.render('greeting', { name: 'Ada' }), greeting.version()];
 
 const transport = new OpenAIWebRTCTransport({ sessionEndpoint: '/api/realtime/session' });
 const session = createRealtimeSession({ model: 'gpt-realtime', transport });

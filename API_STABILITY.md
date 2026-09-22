@@ -412,6 +412,20 @@ The `nexus-ai-pro/postgres` subpaths, `nexus-ai-pro/ops/circuit-store`, and
   so recordings made with one release keep replaying with the next. A change that would invalidate
   recordings waits for 2.0.
 
+## Prompt stages (Unreleased)
+
+The `nexus-ai-pro/prompts` subpaths and `nexus-ai-pro/postgres/prompts` are experimental in
+production readiness, as the image family is: their exported types, functions, and classes follow the
+1.x semantic versioning rules, and the experimental label does not permit an incompatible minor or
+patch release. None is exported from the root.
+
+- The content version algorithm is a guarantee. `promptVersion()` gives the same version for the
+  same content in every 1.x release, so an upgrade never re-versions a committed prompt.
+- Version, label, and history records only gain fields in the 1.x line, and the Postgres schema
+  follows the additive rule above.
+- The wording of gate reasons, of the note a forced promotion records, and of `formatPromptDiff()`
+  output is for people and may improve in any release.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

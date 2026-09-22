@@ -570,6 +570,66 @@
         "default": "./dist-cjs/postgres/evaluate.js"
       }
     },
+    "./prompts": {
+      "import": {
+        "types": "./dist/prompts/index.d.ts",
+        "default": "./dist/prompts/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/prompts/index.d.ts",
+        "default": "./dist-cjs/prompts/index.js"
+      }
+    },
+    "./prompts/client": {
+      "import": {
+        "types": "./dist/prompts/client.d.ts",
+        "default": "./dist/prompts/client.js"
+      },
+      "require": {
+        "types": "./dist-cjs/prompts/client.d.ts",
+        "default": "./dist-cjs/prompts/client.js"
+      }
+    },
+    "./prompts/registry": {
+      "import": {
+        "types": "./dist/prompts/registry-entry.d.ts",
+        "default": "./dist/prompts/registry-entry.js"
+      },
+      "require": {
+        "types": "./dist-cjs/prompts/registry-entry.d.ts",
+        "default": "./dist-cjs/prompts/registry-entry.js"
+      }
+    },
+    "./prompts/file": {
+      "import": {
+        "types": "./dist/prompts/file.d.ts",
+        "default": "./dist/prompts/file.js"
+      },
+      "require": {
+        "types": "./dist-cjs/prompts/file.d.ts",
+        "default": "./dist-cjs/prompts/file.js"
+      }
+    },
+    "./prompts/redis": {
+      "import": {
+        "types": "./dist/prompts/redis.d.ts",
+        "default": "./dist/prompts/redis.js"
+      },
+      "require": {
+        "types": "./dist-cjs/prompts/redis.d.ts",
+        "default": "./dist-cjs/prompts/redis.js"
+      }
+    },
+    "./postgres/prompts": {
+      "import": {
+        "types": "./dist/postgres/prompts.d.ts",
+        "default": "./dist/postgres/prompts.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/prompts.d.ts",
+        "default": "./dist-cjs/postgres/prompts.js"
+      }
+    },
     "./postgres/circuits": {
       "import": {
         "types": "./dist/postgres/circuits.d.ts",
@@ -938,6 +998,8 @@
     "example:realtime": "tsx examples/realtime-scheduling.ts",
     "size:check": "node scripts/check-subpath-sizes.mjs",
     "docs:check": "node scripts/check-doc-coverage.mjs",
+    "docs:guides": "node scripts/check-guide-coverage.mjs",
+    "docs:update": "node scripts/check-guide-coverage.mjs --update",
     "size:update": "node scripts/check-subpath-sizes.mjs --update",
     "registry:generate": "node scripts/generate-model-registry.mjs",
     "registry:check": "node scripts/generate-model-registry.mjs --check",
@@ -948,7 +1010,7 @@
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
     "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
     "typecheck:examples:browser": "tsc -p tsconfig.examples.browser.json --noEmit",
-    "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:conformance:images && npm run size:check && npm run docs:check && npm run test:smoke && npm run test:api && npm run test:types",
+    "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:conformance:images && npm run size:check && npm run docs:check && npm run docs:guides && npm run test:smoke && npm run test:api && npm run test:types",
     "test:unit": "node --import tsx --test tests/unit.ts tests/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-lines=82 --test-coverage-branches=67 --test-coverage-functions=73 tests/unit.ts tests/*.test.ts",
     "test:smoke": "node tests/package-smoke.mjs",
@@ -994,6 +1056,8 @@
     "evals",
     "guardrails",
     "prompt-injection",
+    "prompt-management",
+    "prompt-versioning",
     "cost-tracking",
     "observability",
     "openai",
@@ -1253,6 +1317,24 @@
       ],
       "postgres/evaluate": [
         "dist-cjs/postgres/evaluate.d.ts"
+      ],
+      "prompts": [
+        "dist-cjs/prompts/index.d.ts"
+      ],
+      "prompts/client": [
+        "dist-cjs/prompts/client.d.ts"
+      ],
+      "prompts/registry": [
+        "dist-cjs/prompts/registry-entry.d.ts"
+      ],
+      "prompts/file": [
+        "dist-cjs/prompts/file.d.ts"
+      ],
+      "prompts/redis": [
+        "dist-cjs/prompts/redis.d.ts"
+      ],
+      "postgres/prompts": [
+        "dist-cjs/postgres/prompts.d.ts"
       ],
       "postgres/circuits": [
         "dist-cjs/postgres/circuits.d.ts"

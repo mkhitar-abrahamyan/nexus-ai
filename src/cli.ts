@@ -438,7 +438,7 @@ Usage:
                     [--min-cost n] [--feedback-key k] [--limit 20] [--offset n] [--json]
   nexus traces show <traceId> --store <runs.jsonl|store.mjs> [--json]
   nexus traces export --store <runs.jsonl|store.mjs> [--out runs.jsonl] [same filters as list]
-  nexus db sql [--adapters operations,store,traces,evaluation,circuits] [--vector-dimensions 1536]
+  nexus db sql [--adapters operations,store,traces,evaluation,circuits,prompts] [--vector-dimensions 1536]
   nexus optimize [request.json|prompt.txt] [--model gpt-5-mini] [--max-input-tokens 4000] [--densify] [--json]
 
 Eval files can export { cases, client } or { cases, config }. JSON cases may use "expected", "contains", and "match": "includes" | "exact" | "regex".

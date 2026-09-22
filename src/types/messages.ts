@@ -1,5 +1,22 @@
 import type { CacheTtl, ReasoningEffort } from './providers.js';
 
+declare global {
+  namespace NodeJS {
+    /**
+     * Node's readable stream. Declared empty here so these types compile without Node's type
+     * definitions, such as in a browser project; with them, this merges into Node's declaration and
+     * changes nothing.
+     */
+    interface ReadableStream {}
+  }
+}
+
+/**
+ * Node's `Buffer` when Node's type definitions are loaded, and `Uint8Array` otherwise, so the
+ * message types compile in a browser project as well as on a server.
+ */
+export type BinaryBuffer = typeof globalThis extends { Buffer: { prototype: infer B } } ? B : Uint8Array;
+
 /** Who a message is from: instructions, the user, the model, or a tool result. */
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -28,7 +45,7 @@ export interface ImageContent {
   source:
     | { path: string }
     | { url: string }
-    | { buffer: Buffer; mimeType?: string }
+    | { buffer: BinaryBuffer; mimeType?: string }
     | { base64: string; mimeType?: string };
 }
 
@@ -41,7 +58,7 @@ export interface AudioContent {
   /** Where the audio comes from: a file path, a buffer, a stream, or a transcript. */
   source:
     | { path: string }
-    | { buffer: Buffer; format?: string }
+    | { buffer: BinaryBuffer; format?: string }
     | { stream: NodeJS.ReadableStream; format?: string; sampleRate?: number }
     | { transcript: string };
 }

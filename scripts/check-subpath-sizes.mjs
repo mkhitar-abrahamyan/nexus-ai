@@ -9,7 +9,7 @@
  *
  *   node scripts/check-subpath-sizes.mjs            # fail if an entry point exceeded its budget
  *   node scripts/check-subpath-sizes.mjs --update   # rewrite the budget from current measurements
- *   node scripts/check-subpath-sizes.mjs --table    # print the markdown table for the README
+ *   node scripts/check-subpath-sizes.mjs --table    # print the markdown table for the packaging guide
  *
  * Cost is the transitive ESM import graph under `dist/`, which is what Node parses on first import.
  * It deliberately ignores the CommonJS build, since the two track each other.
@@ -26,7 +26,8 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const budgetFile = path.join(repoRoot, 'size-budget.json');
-const readmeFile = path.join(repoRoot, 'README.md');
+// The table lives in the packaging guide, which the README links to.
+const readmeFile = path.join(repoRoot, 'docs', 'packaging.md');
 
 const TABLE_START = '<!-- size-table:start -->';
 const TABLE_END = '<!-- size-table:end -->';
@@ -221,7 +222,7 @@ if (mode === 'update') {
     );
     writeFileSync(readmeFile, updated, 'utf8');
   }
-  console.log(`Wrote budgets for ${rows.length} subpaths, and refreshed the README table.`);
+  console.log(`Wrote budgets for ${rows.length} subpaths, and refreshed the size table in docs/packaging.md.`);
   process.exit(0);
 }
 
@@ -251,12 +252,12 @@ for (const subpath of Object.keys(budget.maxKb)) {
   }
 }
 
-// The README table is a published claim, so a stale one is a correctness problem.
+// The size table is a published claim, so a stale one is a correctness problem.
 const readme = readFileSync(readmeFile, 'utf8');
 if (readme.includes(TABLE_START)) {
   const current = readme.slice(readme.indexOf(TABLE_START) + TABLE_START.length, readme.indexOf(TABLE_END));
   if (current.trim() !== renderTable(rows).trim()) {
-    problems.push('The README size table is out of date. Run: npm run size:update');
+    problems.push('The size table in docs/packaging.md is out of date. Run: npm run size:update');
   }
 }
 
