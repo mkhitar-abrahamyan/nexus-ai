@@ -11,18 +11,27 @@ import type { RateLimiter } from './rate-limiter.js';
  * records nothing.
  */
 export interface FamilyRuntime {
+  /** Where metrics go. */
   metrics?: MetricsCollector;
+  /** Where audit events go. */
   auditLogger?: AuditLogger;
+  /** The rate limiter shared with text completions. */
   rateLimiter?: RateLimiter;
+  /** The rate-limit policy. */
   rateLimit?: RateLimitConfig;
 }
 
+/** What one family call is, for metrics labels, the audit log, and the rate limit. */
 export interface FamilyCallDescriptor {
   /** Operation name recorded as a metric label, such as `transcribe` or `images.generate`. */
   operation: string;
+  /** The provider called. */
   provider?: string;
+  /** The model called. */
   model?: string;
+  /** The user it is for, for per-user rate limits. */
   userId?: string;
+  /** The request id, for the audit log. */
   requestId?: string;
   /** Extra fields for the audit event. Never include raw media or credentials. */
   metadata?: Record<string, unknown>;
@@ -60,6 +69,7 @@ export class FamilyTelemetry {
     return !this.metrics && !this.auditLogger && !this.rateLimiter;
   }
 
+  /** Runs a call inside the rate limit, audit log, and metrics. */
   async run<T>(call: FamilyCallDescriptor, fn: () => Promise<T>): Promise<T> {
     const labels = this.labels(call);
     const startedAt = Date.now();

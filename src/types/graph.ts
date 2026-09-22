@@ -7,6 +7,7 @@
  * is, so a different process can pick it up.
  */
 
+import type { CacheAdapter } from '../cache/adapters.js';
 import type { Store } from './store.js';
 
 /** Entry sentinel. An edge from `START` names the first node. */
@@ -14,6 +15,10 @@ export const START = '__start__';
 /** Terminal sentinel. An edge to `END` finishes that branch. */
 export const END = '__end__';
 
+/**
+ * Where a run stands: running, paused to ask a human, finished, failed, or stopped at a breakpoint
+ * or by a signal.
+ */
 export type GraphStatus = 'running' | 'awaiting_input' | 'completed' | 'failed' | 'interrupted';
 
 /**
@@ -25,7 +30,9 @@ export type GraphStatus = 'running' | 'awaiting_input' | 'completed' | 'failed' 
  */
 export class Send {
   constructor(
+    /** The node to run. */
     readonly node: string,
+    /** What the task receives as `context.input`. */
     readonly input?: unknown,
   ) {}
 }
@@ -47,10 +54,14 @@ export type CommandTarget = string | Send | Array<string | Send>;
  * is how a nested agent hands control back.
  */
 export class Command<U = Record<string, unknown>> {
+  /** Addresses the graph that contains this one, from inside a subgraph. */
   static readonly PARENT = '__parent__';
 
+  /** State to write, reduced through the channels like any update. */
   readonly update?: U;
+  /** Where to go next, replacing the node's outgoing edges for this step. */
   readonly goto?: CommandTarget;
+  /** `Command.PARENT` to apply the command to the containing graph instead of this one. */
   readonly graph?: typeof Command.PARENT;
 
   constructor(options: { update?: U; goto?: CommandTarget; graph?: typeof Command.PARENT }) {
@@ -67,8 +78,11 @@ export class Command<U = Record<string, unknown>> {
  * id and its own input, so several tasks of one node stay distinct across a checkpoint and a resume.
  */
 export interface GraphTask {
+  /** Unique within its step: the node name, or `node#step.n` for a task created by `Send`. */
   id: string;
+  /** The node the task runs. */
   node: string;
+  /** The task's `Send` input. */
   input?: unknown;
 }
 
@@ -93,7 +107,9 @@ export interface RetryPolicy {
   retryOn?(error: unknown, attempt: number): boolean;
 }
 
+/** How a node runs: retries, a timeout, where it may route, deferral, and caching. */
 export interface NodeOptions {
+  /** Retries failed attempts, overriding the graph's default policy. */
   retry?: RetryPolicy;
   /** Aborts the node's signal and fails the attempt when it runs longer than this. */
   timeoutMs?: number;
@@ -110,6 +126,42 @@ export interface NodeOptions {
    * soon as the shortest branch reached it, and again for each longer branch.
    */
   defer?: boolean;
+  /**
+   * Reuses this node's result when it would see exactly what it saw before.
+   *
+   * Worth it for a node that is expensive and deterministic in its state and input: a retrieval, a
+   * classification, a model call at temperature zero. Only completed results are kept. A failure,
+   * an interrupt, a node that consumed an interrupt's answer, and a command for a parent graph always
+   * run again, because their results depend on something the key cannot see.
+   */
+  cache?: NodeCachePolicy;
+}
+
+/** How a node reuses its results: the key, how long a result lasts, and where results are kept. */
+export interface NodeCachePolicy {
+  /**
+   * Builds the key. Defaults to a hash of the graph name, the node, the whole state it reads, and
+   * its `Send` input, which is always correct and sometimes too specific: a node that reads one
+   * channel of a growing state should key on that channel. Return `undefined` to skip the cache for
+   * one call.
+   */
+  key?: (context: { node: string; state: unknown; input?: unknown }) => string | undefined;
+  /** How long a result is reused. Defaults to 5 minutes. A store taking seconds gets it rounded up. */
+  ttlMs?: number;
+  /**
+   * Where results are kept: any cache adapter, such as Redis to share results across workers. The
+   * cached update must survive that store's serialization. Defaults to the graph's `cache`, then to
+   * a bounded in-process map created only when a node first uses it.
+   */
+  store?: CacheAdapter<NodeCacheEntry>;
+}
+
+/** A cached node result: the writes it made and where it routed. */
+export interface NodeCacheEntry {
+  /** The updates the node returned, in order. */
+  updates: unknown[];
+  /** Routes the node chose, including `Send` targets and their inputs. */
+  goto?: Array<string | { node: string; input?: unknown }>;
 }
 
 /**
@@ -126,6 +178,7 @@ export interface Channel<T> {
   initial?(): T;
 }
 
+/** A graph's state channels, by name. */
 export type ChannelSchema = Record<string, Channel<unknown>>;
 
 /** The state object a schema describes. */
@@ -136,9 +189,23 @@ export type StateOf<S extends ChannelSchema> = {
 /** What a node may write back. Omitted channels are left untouched. */
 export type StateUpdate<S extends ChannelSchema> = Partial<StateOf<S>>;
 
+/**
+ * What a caller may pass to `invoke()`: the graph's input channels, or every channel by default.
+ *
+ * A graph declared with no input at all takes `Record<string, never>` rather than `{}`, because `{}`
+ * would accept any object and let a forbidden write through the types.
+ */
+export type GraphInput<S extends ChannelSchema, I extends keyof S = keyof S> = [I] extends [never]
+  ? Record<string, never>
+  : Partial<Pick<StateOf<S>, I>>;
+
+/** Progress a node reported through `context.report()`. */
 export interface GraphProgress {
+  /** The step the node ran in. */
   step: number;
+  /** The node that reported it. */
   node: string;
+  /** What the node said it is doing. */
   message?: string;
 }
 
@@ -155,23 +222,31 @@ export interface InterruptRequest {
   payload?: unknown;
 }
 
+/** A question a node asked through `interrupt()`, waiting for an answer. */
 export interface PendingInterrupt extends InterruptRequest {
   /** Stable identity of this question, used to answer it through `resumeInterrupts()`. */
   id: string;
+  /** The node that asked. */
   node: string;
   /** Task that asked, which differs from `node` only for `Send` tasks. */
   taskId?: string;
+  /** The step it was asked in. */
   step: number;
   /** Position of this interrupt within the node, so a node may ask more than one question. */
   index: number;
+  /** ISO-8601 time it was asked. */
   requestedAt: string;
 }
 
+/** What a node receives when it runs. */
 export interface NodeContext<S extends ChannelSchema> {
   /** Current state. Frozen: a node writes by returning an update, never by mutation. */
   readonly state: Readonly<StateOf<S>>;
+  /** The node's name. */
   readonly node: string;
+  /** The current superstep, starting at 0. */
   readonly step: number;
+  /** The thread this run belongs to. */
   readonly threadId: string;
   /** Identifies this task. Equal to `node` unless the task came from a `Send`. */
   readonly taskId: string;
@@ -208,6 +283,7 @@ export interface NodeContext<S extends ChannelSchema> {
   emit(data: unknown): void;
 }
 
+/** A node: reads state from its context and returns an update, a `Command`, or nothing. */
 export type NodeFn<S extends ChannelSchema> = (context: NodeContext<S>) => Promise<NodeResult<S>> | NodeResult<S>;
 
 /** What a node may return: an update, a `Command`, or nothing. */
@@ -227,10 +303,15 @@ export type EdgeRouter<S extends ChannelSchema> = (
 /** What a router may return: node names, `Send`s, or a mix of both. */
 export type GraphRouteTarget = string | Send | Array<string | Send>;
 
+/**
+ * A graph's full state after a superstep, which is everything needed to resume the run elsewhere.
+ */
 export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
+  /** The thread it belongs to. */
   threadId: string;
   /** Supersteps completed. The checkpoint after step N describes the state entering step N+1. */
   step: number;
+  /** Every channel's value. */
   state: StateOf<S>;
   /** Nodes to run next. Empty means the run is finished. */
   next: string[];
@@ -251,6 +332,7 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
    * when it resumes without re-running those tasks. A plain string is a node; an object is a `Send`.
    */
   gotos?: Record<string, Array<string | { node: string; input?: unknown }>>;
+  /** Where the run stands. */
   status: GraphStatus;
   /** First pending question, kept for callers that expect exactly one. */
   interrupt?: PendingInterrupt;
@@ -258,16 +340,21 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   interrupts?: PendingInterrupt[];
   /** Values already supplied for interrupts, keyed by `taskId:step:index`. */
   resolved?: Record<string, unknown>;
+  /** Why the run failed, when it did. */
   error?: { name: string; message: string };
   /** Present when the run paused at a breakpoint rather than to ask a question. */
   breakpoint?: GraphBreakpoint;
+  /** ISO-8601 time the checkpoint was written. */
   createdAt: string;
+  /** Application data, including `graph` when the graph was compiled with a name. */
   metadata?: Record<string, unknown>;
 }
 
 /** Where a run paused for debugging. `continue()` carries on from it. */
 export interface GraphBreakpoint {
+  /** Whether the pause came before the nodes ran or after they did. */
   when: 'before' | 'after';
+  /** The nodes the breakpoint is for. */
   nodes: string[];
 }
 
@@ -283,14 +370,17 @@ export interface GraphBreakpoint {
  * so a graph inherits Redis persistence without this module depending on that runtime.
  */
 export interface GraphCheckpointer {
+  /** Stores a checkpoint, replacing any at the same step or later. */
   put(checkpoint: GraphCheckpoint): Promise<void> | void;
   /** Latest checkpoint for a thread, or the one at `step` when given. */
   get(threadId: string, step?: number): Promise<GraphCheckpoint | undefined> | GraphCheckpoint | undefined;
   /** Newest first. Used for time travel and for showing an operator what happened. */
   history(threadId: string, limit?: number): Promise<GraphCheckpoint[]> | GraphCheckpoint[];
+  /** Deletes every checkpoint of a thread. */
   delete?(threadId: string): Promise<void> | void;
 }
 
+/** Options for one run of a compiled graph. */
 export interface GraphRunOptions {
   /**
    * Identifies the run. Reusing one resumes that thread rather than starting a second.
@@ -303,12 +393,15 @@ export interface GraphRunOptions {
    * A cycle is a feature here, so the limit is what keeps a buggy router from looping forever.
    */
   maxSteps?: number;
+  /** Stops the run. Tasks in flight see the signal. */
   signal?: AbortSignal;
+  /** Application data recorded on every checkpoint of the run. */
   metadata?: Record<string, unknown>;
   /** Overrides the compiled `maxConcurrency` for this run. */
   maxConcurrency?: number;
   /** Breakpoints for this run only, replacing the compiled ones. */
   interruptBefore?: string[];
+  /** Pauses after these nodes run and their writes are checkpointed. */
   interruptAfter?: string[];
   /**
    * Receives fine-grained events as they happen: each task starting, retrying, and finishing with
@@ -320,10 +413,15 @@ export interface GraphRunOptions {
   onProgress?: (progress: GraphProgress) => void;
 }
 
-export interface GraphResult<S extends ChannelSchema> {
+/** The outcome of a run. */
+export interface GraphResult<S extends ChannelSchema, O extends keyof S = keyof S> {
+  /** The thread the run belongs to. Generated when the run was started without one. */
   threadId: string;
+  /** Where the run stands. */
   status: GraphStatus;
-  state: StateOf<S>;
+  /** State after the run: the graph's output channels when it declared any, every channel otherwise. */
+  state: Pick<StateOf<S>, O>;
+  /** Supersteps completed. */
   steps: number;
   /** Present when the run stopped to ask a human. The first question when several were asked. */
   interrupt?: PendingInterrupt;
@@ -333,6 +431,7 @@ export interface GraphResult<S extends ChannelSchema> {
   breakpoint?: GraphBreakpoint;
   /** A `Command.PARENT` that ended the run. In memory only; used by `asNode()`. */
   parentCommand?: Command;
+  /** Why the run failed, when it did. */
   error?: { name: string; message: string };
 }
 
@@ -340,13 +439,27 @@ export interface GraphResult<S extends ChannelSchema> {
 export type GraphEvent =
   | { type: 'task_start'; step: number; taskId: string; node: string; attempt: number }
   | { type: 'task_retry'; step: number; taskId: string; node: string; attempt: number; error: string }
-  | { type: 'task_end'; step: number; taskId: string; node: string; update?: unknown; goto?: string[] }
+  | {
+      type: 'task_end';
+      step: number;
+      taskId: string;
+      node: string;
+      update?: unknown;
+      goto?: string[];
+      /** True when the result came from the node's cache and the node did not run. */
+      cached?: boolean;
+    }
   | { type: 'checkpoint'; step: number; status: GraphStatus; next: string[] }
   | { type: 'custom'; step: number; taskId: string; node: string; data: unknown };
 
 /** One superstep, as seen by `stream()`. */
 export interface GraphStepEvent<S extends ChannelSchema> {
+  /**
+   * `step` for an ordinary superstep, then `interrupt`, `breakpoint`, or `done` for the one that
+   * ended the run.
+   */
   type: 'step' | 'interrupt' | 'breakpoint' | 'done';
+  /** The superstep this event describes. */
   step: number;
   /** Nodes that ran in this superstep. */
   nodes: string[];
@@ -354,10 +467,15 @@ export interface GraphStepEvent<S extends ChannelSchema> {
   tasks?: GraphTask[];
   /** Attempts used per task, present only for tasks that needed more than one. */
   attempts?: Record<string, number>;
+  /** State after the superstep. */
   state: StateOf<S>;
+  /** Where the run stands. */
   status: GraphStatus;
+  /** The first question asked, when the step paused for input. */
   interrupt?: PendingInterrupt;
+  /** Every question asked, when the step paused for input. */
   interrupts?: PendingInterrupt[];
+  /** The breakpoint the step stopped at. */
   breakpoint?: GraphBreakpoint;
   /** A `Command.PARENT` that ended this run, for the graph that contains it. In memory only. */
   parentCommand?: Command;
@@ -369,16 +487,21 @@ export interface GraphStepEvent<S extends ChannelSchema> {
  * Plain JSON, so a UI, a test, or a documentation build can render it without importing the runtime.
  */
 export interface GraphDescription {
+  /** The graph's name, when it was compiled with one. */
   name?: string;
+  /** Every node, with its options. */
   nodes: Array<{
     id: string;
     ends?: string[];
     defer?: boolean;
     retry?: boolean;
     timeoutMs?: number;
+    /** True when the node reuses results through `cache`. */
+    cache?: boolean;
     /** The graph this node runs, when it is a compiled graph used through `asNode()`. */
     subgraph?: GraphDescription;
   }>;
+  /** Every static and conditional edge. */
   edges: Array<{
     from: string;
     to: string;
@@ -388,11 +511,21 @@ export interface GraphDescription {
   }>;
   /** Routers that return names a diagram cannot know in advance: no mapping and no `ends`. */
   dynamic: string[];
+  /** Channels a caller may set, when the graph restricts them. */
+  input?: string[];
+  /** Channels a caller gets back, when the graph restricts them. */
+  output?: string[];
 }
 
+/**
+ * Options applied when a graph is compiled: stores, breakpoints, concurrency, retries, and failure
+ * handling.
+ */
 export interface CompileOptions {
   /** Long-term memory handed to every node as `context.store`. */
   store?: Store;
+  /** Default store for nodes that declare `cache` without their own. */
+  cache?: CacheAdapter<NodeCacheEntry>;
   /** Pause before these nodes run, for inspecting or editing state. `continue()` resumes. */
   interruptBefore?: string[];
   /** Pause after these nodes run and their writes are checkpointed. `continue()` resumes. */
@@ -416,8 +549,10 @@ export interface CompileOptions {
    * checkpointer to survive restarts, or `false` to write no checkpoints at all.
    */
   checkpointer?: GraphCheckpointer | false;
+  /** Supersteps allowed before the run fails with `GraphStepLimitError`. Defaults to 25. */
   maxSteps?: number;
   /** Identifies this graph. Recorded on every checkpoint as `metadata.graph`. */
   name?: string;
+  /** Replaces the system clock, for tests. */
   now?: () => Date;
 }

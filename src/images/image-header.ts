@@ -8,13 +8,19 @@
 
 export type SniffedImageFormat = 'png' | 'jpeg' | 'gif' | 'webp' | 'avif' | 'bmp';
 
+/** An image format recognised from its first bytes. */
 export interface SniffedImage {
+  /** The format. */
   format: SniffedImageFormat;
+  /** Its MIME type. */
   mimeType: string;
 }
 
+/** Image dimensions read from a header. */
 export interface ImageDimensionsInfo {
+  /** Width in pixels. */
   width: number;
+  /** Height in pixels. */
   height: number;
 }
 

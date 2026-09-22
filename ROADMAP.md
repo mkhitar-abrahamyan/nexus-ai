@@ -3,12 +3,12 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.15.0**. 83 export subpaths, each
+Status baseline: **1.16.0**. 91 export subpaths, each
 held to a size budget in CI, 12 completion providers, 5 embedding providers, 2 batch providers, 3
 image providers plus a mock, 101 completion registry models plus 63 aliases, and 11 embedding models
-plus 5 aliases. 547 unit tests pass; coverage sits at **90.5% lines / 75.9% branches / 85.5%
+plus 5 aliases. 604 unit tests pass; coverage sits at **91.7% lines / 76.9% branches / 86.6%
 functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry
-drift, per-subpath size, a graph benchmark, mock conformance, packed-package smoke, API contract,
+drift, per-subpath size, documentation coverage, a graph benchmark, mock conformance, packed-package smoke, API contract,
 consumer type resolution, and clean install on Node 22 and 24.
 
 ---
@@ -19,10 +19,10 @@ Two axes, weighed together: **capability** and **install weight**. A capability 
 importing the whole runtime fails the second test however well it does on the first, so install
 weight is a constraint on every new feature rather than a feature of its own.
 
-Measured from the current build, an entry point costs a fraction of the root import: `/agent` 12%,
-`/graph` 10%, `/operations` 8%, `/evaluate` 5%, `/tracing` 4%, `/mcp` 3%, `/store` 1%,
-`/cache/memory-cache` 0.5%, `/streaming` 0.2%. Dependencies are counted as well as bytes: 79 of the
-83 entry points import no third-party package at all, and the four that do — the root, `/config`,
+Measured from the current build, an entry point costs a fraction of the root import: `/agent` 11%,
+`/graph` 9%, `/operations` 7%, `/evaluate` 5%, `/tracing` 4%, `/mcp` 2%, `/store` 1%,
+`/cache/memory-cache` 0.5%, `/streaming` 0.2%. Dependencies are counted as well as bytes: 87 of the
+91 entry points import no third-party package at all, and the four that do — the root, `/config`,
 `/core`, and `/security` — are the ones that reach the schema validators. Every new capability gets its own export subpath and stays out of the
 root, and `npm run size:check` fails the build when any entry point grows past its budget or picks up
 a dependency it did not have.
@@ -893,75 +893,77 @@ queue.
 
 ---
 
-## 16. 1.16.0: shared state, the command line, and promotion
+## 16. Shipped in 1.16.0 — shared state and the command line
 
-Six items have now been deferred twice: four shared-state and tooling items carried from 1.13.0 and
-1.14.0, and two graph items carried from 1.12.0. This release is built around them instead of
-carrying them a third time, and the four large ones make a coherent theme on their own — everything
-in them is state shared between processes, or the ability to see that state from a terminal.
+Six items that had been deferred twice landed together: four shared-state and tooling items carried
+from 1.13.0 and 1.14.0, and two graph items carried from 1.12.0.
 
 **One Postgres adapter family.**
-- One connection contract, injected rather than imported. An adapter takes a client interface with a
-  `query()` method, so `pg`, `postgres.js`, a pool, or a serverless driver all work, and none of them
-  becomes a dependency of this package.
-- Adapters for the operation store, the long-term store, the trace store, the dataset store, and the
-  experiment store, each on its own subpath so a consumer pays only for the one it imports.
-- One migration file per adapter, applied by the command line or by the application's own tooling.
-  Nothing creates a schema implicitly at import.
-- The conformance suite each store adapter already passes runs against Postgres too, skipped when no
-  connection string is present rather than silently passing.
+- One injected connection contract: anything with `query(text, values)` resolving to `{ rows }`, so
+  `pg`, a pool, a serverless driver, or PGlite all work, and `fromPostgresJs()` adapts `postgres.js`.
+  No driver becomes a dependency.
+- Adapters for the operation store, the long-term store (with pgvector when dimensions are given),
+  the trace store, the dataset and experiment stores, and shared circuit state, each on its own
+  subpath.
+- One migration per adapter, and `postgresMigration()` to combine them. Nothing creates a schema at
+  import.
+- Tested against real Postgres in-process, so the suite needs no server and never silently passes.
 
-**Distributed circuit state.** `CircuitBreaker` gains the store interface the rate limiter already
-has: in-memory by default, with Redis and Postgres adapters beside it. A provider that fails in one
-worker opens the circuit for the rest, and a half-open probe is claimed by one worker at a time so a
-recovering provider is not hit by every replica at once. The per-process breaker stays the default,
-because a single-process consumer should not pay for coordination it does not need.
+**Distributed circuit state.** `CircuitBreaker` takes a `store`, with `MemoryCircuitStateStore`,
+`RedisCircuitStateStore`, and the Postgres adapter. A failure in one worker opens the circuit for the
+rest, and a half-open probe is leased to one worker at a time. Without a store the breaker is the
+per-process one it always was, and the coordination code is never loaded.
 
-**The command line grows up.** `nexus` already ships with `scan`, `models`, `eval`, and `optimize`.
-- `nexus eval run`, `nexus eval compare`, and `nexus eval gate --fail-on-regression` over the
-  evaluation entry point, so a pull request fails on a measured regression without a bespoke script.
-  Today's `nexus eval` keeps its behaviour and is re-implemented on `evaluate()`.
-- `nexus traces list`, `show`, and `export`, with filters over the trace store and a run tree printed
-  as a tree.
-- Shared argument parsing, shared output formatting, and `--json` on every command, so output can be
-  piped into something else.
-- The command line stays out of the library graph: it is the `bin` entry, and no subpath imports it.
+**The command line.** `nexus eval run`, `compare`, and `gate --fail-on-regression`; `nexus traces
+list`, `show`, and `export`; and `nexus db sql` to print migrations. Shared argument parsing, `--json`
+on every command, and exit code 2 for usage errors. No subpath imports the command line.
 
-**Record and replay of provider responses.**
-- A recording transport captures real provider traffic once, with credentials and personal data
-  redacted on the way out, and writes it as fixture files.
-- A replay transport serves it back deterministically, so conformance suites and evaluations run in
-  CI with no credentials present.
-- Fixtures are ordinary files, reviewable in a pull request, and a stale one fails loudly rather than
-  falling through to a live call.
+**Record and replay.** `nexus-ai-pro/testing/record` captures provider traffic once, with credential
+headers and query parameters removed and a `redact` hook for the rest, writes one reviewable file per
+exchange, and replays it with no network. An unrecorded request fails with `FixtureMissingError`
+rather than reaching the live API.
 
-**Image promotion, decided.** With replay in place the conformance suite runs on every pull request
-from fixtures, and against live credentials on demand. If it passes on all three backends the image
-family leaves experimental in this release. If it does not, what failed is written down here instead
-of the promotion being quietly dropped again.
+**`EvalRunner` and `MediaEvalRunner` rebuilt on `evaluate()`,** loaded on first run, so neither entry
+point grew. Their results and errors are unchanged.
 
-**`EvalRunner` and `MediaEvalRunner` rebuilt on `evaluate()`.** Their public APIs do not change; the
-second implementation goes away.
+**The two graph items.** `createGraph({ channels, input, output })` restricts what a caller passes in
+and what comes back, in the types and at run time. Per-node caching, `cache: { key, ttlMs, store }`,
+through the cache adapters, loaded only by graphs that cache.
 
-**Two small graph items, outstanding since 1.12.0.**
-- `createGraph({ channels, input, output })` restricts what a caller may pass in and what comes back,
-  so private channels stay internal. Both fields are optional, and a graph that declares neither
-  behaves exactly as it does today.
-- Per-node caching, `cache: { key, ttlMs, store }`, through the existing cache adapters, imported as
-  types only so the graph runtime does not grow for graphs that never cache.
+**Documentation coverage.** Every public export and every public member now has a doc comment, 4,651
+declarations across 88 entry points, and `npm run docs:check` holds it at 100%. The pass doubled as an
+audit of what the configuration accepts: `routing.fallback` and a provider's `isLocal` were accepted
+but ignored, and now work; five options that were never read are deprecated for removal in 2.0.
 
-**Budgets.** Each Postgres adapter at most 12 KB, with no third-party import. The breaker's store
-adapters sit on their own subpaths, so the per-process default does not grow. The command line is not
-an entry point and is not counted in the subpath table, but it counts against the packed ceiling.
+**Budgets.** No new entry point imports a third-party package. The Postgres adapters measure 3 to
+11 KB against a 12 KB target. Comments are now stripped from the emitted JavaScript and kept in the
+type declarations, so documenting every export cost nothing at run time, and the root import fell
+from 612 to 572 KB. The declarations are where the documentation now lives, and they are shipped
+twice, once per module format, so the unpacked package grew from 3.5 to 4.1 MB; sharing one set of
+declarations between the two formats is on the 1.17.0 list.
 
 **Proof.** A graph thread started on one worker is finished by another through Postgres. A provider
-failure in one process opens the circuit in a second. `nexus eval gate` fails on a seeded regression
-and passes on noise of the same size. The image conformance suite runs green with no credentials in
-the environment.
+failure seen by one breaker opens the circuit for a second. `nexus eval gate` fails a seeded
+regression and passes noise of the same size.
+
+### What did not land, and where it went
+
+- **Image promotion is still blocked.** The image conformance suite now runs from recordings, but
+  there are no recordings yet: capturing them needs live credentials for each backend, and none were
+  available for this release. The suite reports each backend without recordings instead of counting
+  it as a pass, so the family stays experimental until the recordings are made. That is a one-off
+  task, not a design question, and it is the first thing on the list for 1.17.0.
 
 ---
 
 ## 17. 1.17.0: prompt and configuration versioning
+
+**Carried in: image recordings.** Record one live conformance run per image backend, commit the
+fixtures, and decide the image family's promotion on the result, as section 16 describes.
+
+**Carried in: one set of type declarations.** The ESM and CommonJS builds each ship an identical
+copy of the declarations, about 700 KB unpacked. Emitting them once, without breaking CommonJS
+type resolution, returns the package to its 1.15.0 size.
 
 **Templates.** Message templates with typed variables, partials, and a model configuration bundled
 with each version.
@@ -1060,7 +1062,7 @@ minor release to settle, and every removal below has been deprecated in a 1.x re
 - True mixed text-and-asset outputs, so a tool result can pass asset references instead of base64
   JSON.
 - **A slim root import.** The root exports the core client, config builders, types, and errors, and
-  every family is reached through its subpath. Target: at most 250 KB, down from 612 KB.
+  every family is reached through its subpath. Target: at most 250 KB, down from 572 KB.
 - **Optional validators and types.**
   - `zod`, `ajv`, and `ajv-formats` become optional peer dependencies, needed only when a caller
     passes a schema.
@@ -1072,6 +1074,9 @@ minor release to settle, and every removal below has been deprecated in a 1.x re
   - `migrateCheckpoint()` reads v1, and both checkpointers keep reading v1 for the whole 2.x line.
 - Deprecated aliases are removed, including `ImageManagerConfig`. The full list is audited when the
   2.0 branch opens.
+- Options that were accepted but never read are removed: `GoogleProviderConfig.projectId`,
+  `OllamaProviderConfig.timeout`, `MetricsConfig.prometheus`, `DensificationConfig.preserveMarkdown`,
+  and `HealthConfig.latencyHalfLife`. All five are deprecated in 1.16.0.
 
 **Promotions to stable.** Advanced graph APIs, the store, agents, tracing, evaluation, prompts, and
 the server. Images too, if live conformance has passed.

@@ -1,5 +1,8 @@
 import type { TelephonyGatherConfig, TelephonyResponseRequest, TelephonyStreamConfig } from '../types/telephony.js';
 
+/**
+ * Builds a TwiML voice response: say or gather, play, pause, stream, redirect, and hang up, as the request asks.
+ */
 export function createVoiceTwiML(request: TelephonyResponseRequest): string {
   const body: string[] = [];
 

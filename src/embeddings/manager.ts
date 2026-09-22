@@ -88,6 +88,7 @@ export class EmbeddingManager {
     }
   }
 
+  /** Registers a provider under a name. Returns the manager, for chaining. */
   registerEmbeddingProvider(name: string, provider: EmbeddingsProvider): this {
     const normalizedName = name.trim();
     if (!normalizedName) throw new EmbeddingValidationError('Embedding provider name must not be empty');
@@ -102,11 +103,13 @@ export class EmbeddingManager {
     return this;
   }
 
+  /** Whether a provider is registered. */
   hasEmbeddingProvider(name: string): boolean {
     this.ensureAutoRegistered();
     return this.providers.has(name);
   }
 
+  /** Every registered provider's name. */
   listEmbeddingProviders(): string[] {
     this.ensureAutoRegistered();
     return [...this.providers.keys()];

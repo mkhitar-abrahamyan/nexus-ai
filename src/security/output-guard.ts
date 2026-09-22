@@ -52,7 +52,9 @@ export function redactSensitiveText(value: string): string {
   return redacted.replace(CONNECTION_STRING_PATTERN, '[REDACTED_CONNECTION_STRING]');
 }
 
+/** Checks responses for leaked secrets, PII, and other unsafe output. */
 export class OutputGuard {
+  /** Checks a response, blocking, flagging, or redacting as configured. */
   protect(response: NexusResponse, config: SecurityConfig = {}): SecurityResult<NexusResponse> {
     const findings: SecurityFinding[] = [];
     const guardrailsApplied: string[] = [];

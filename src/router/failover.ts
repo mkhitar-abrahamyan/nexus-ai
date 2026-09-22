@@ -9,7 +9,7 @@ import {
 import type { RetryConfig } from '../types/config.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
-import type { RouteDecision } from './types.js';
+import type { RouteAttempt, RouteDecision } from './types.js';
 
 const ABORT_SETTLE_GRACE_MS = 100;
 
@@ -31,16 +31,30 @@ export interface ExecutionOptions {
   retry?: RetryConfig;
   onAttemptSuccess?: (providerName: string, latencyMs: number) => void;
   onAttemptFailure?: (providerName: string, error: unknown) => void;
+  /**
+   * Asked before every attempt, retries included. Returning false skips the provider and moves to
+   * the next fallback — how an open circuit, or a half-open one whose probe slots are taken, keeps
+   * a request away from a provider the router chose before the circuit changed.
+   */
+  allowAttempt?: (providerName: string) => boolean;
 }
 
+/**
+ * Runs a routing decision: the primary provider, then each fallback, honouring per-attempt
+ * timeouts, rate limits, and circuits.
+ */
 export class FailoverExecutor {
+  /**
+   * Completes through the first attempt that succeeds. Throws with every attempt's error when none
+   * does.
+   */
   async complete(
     request: CompletionRequest,
     decision: RouteDecision,
     providers: Map<string, BaseProvider>,
     options: ExecutionOptions = {},
   ): Promise<NexusResponse> {
-    const attempts = [{ providerName: decision.providerName, model: decision.model }, ...decision.fallbacks];
+    const attempts = attemptsOf(decision);
     const errors: string[] = [];
     const retry = this.mergeRetry(options.retry, request.retry);
     const timeoutMs = this.resolveTimeout(request.timeoutMs, options.timeoutMs);
@@ -48,12 +62,22 @@ export class FailoverExecutor {
     attemptsLoop: for (const attempt of attempts) {
       const provider = providers.get(attempt.providerName);
       if (!provider) continue;
+      let lastError: unknown;
 
-      for (let retryIndex = 0; retryIndex <= retry.maxRetries; retryIndex += 1) {
+      for (let retryIndex = 0; retryIndex <= maxRetriesFor(attempt, retry); retryIndex += 1) {
+        if (options.allowAttempt && !options.allowAttempt(attempt.providerName)) {
+          errors.push(`${attempt.providerName}/${attempt.model}: circuit open`);
+          break;
+        }
         let context: AttemptContext | undefined;
         try {
           this.throwIfAborted(request.signal, attempt.providerName, attempt.model);
-          context = this.createAttemptContext(request.signal, timeoutMs, attempt.providerName, attempt.model);
+          context = this.createAttemptContext(
+            request.signal,
+            attempt.timeoutMs ?? timeoutMs,
+            attempt.providerName,
+            attempt.model,
+          );
           const started = Date.now();
           const providerPromise = Promise.resolve(
             provider.complete({
@@ -74,6 +98,7 @@ export class FailoverExecutor {
           return response;
         } catch (caught) {
           const error = caught instanceof NexusProviderError ? caught : (context?.cancellationError() ?? caught);
+          lastError = error;
           options.onAttemptFailure?.(attempt.providerName, error);
           if (error instanceof NexusProviderError && error.category === 'abort') {
             throw error;
@@ -84,20 +109,21 @@ export class FailoverExecutor {
           if (error instanceof UnsettledProviderAttemptError) {
             break attemptsLoop;
           }
-          if (!this.shouldRetry(error, retry, retryIndex)) {
+          if (!this.shouldRetry(error, retry, retryIndex, attempt)) {
             break;
           }
         } finally {
           context?.cleanup();
         }
 
-        await this.delay(this.retryDelay(retry, retryIndex), request.signal);
+        await this.delay(this.retryDelay(retry, retryIndex, lastError, attempt), request.signal);
       }
     }
 
     throw new Error(`All routing attempts failed: ${errors.join(' | ')}`);
   }
 
+  /** Streams through the first attempt that starts successfully. */
   stream(
     request: CompletionRequest,
     decision: RouteDecision,
@@ -113,7 +139,7 @@ export class FailoverExecutor {
     return {
       [Symbol.asyncIterator]() {
         const iterator = (async function* () {
-          const attempts = [{ providerName: decision.providerName, model: decision.model }, ...decision.fallbacks];
+          const attempts = attemptsOf(decision);
           try {
             yield* self.streamAttempts({ ...request, signal: linked.controller.signal }, attempts, providers, options);
           } finally {
@@ -140,7 +166,7 @@ export class FailoverExecutor {
 
   private async *streamAttempts(
     request: CompletionRequest,
-    attempts: Array<{ providerName: string; model: string }>,
+    attempts: RouteAttempt[],
     providers: Map<string, BaseProvider>,
     options: ExecutionOptions,
   ): AsyncGenerator<StreamChunk> {
@@ -152,7 +178,11 @@ export class FailoverExecutor {
       const provider = providers.get(attempt.providerName);
       if (!provider) continue;
 
-      for (let retryIndex = 0; retryIndex <= retry.maxRetries; retryIndex += 1) {
+      for (let retryIndex = 0; retryIndex <= maxRetriesFor(attempt, retry); retryIndex += 1) {
+        if (options.allowAttempt && !options.allowAttempt(attempt.providerName)) {
+          errors.push(`${attempt.providerName}/${attempt.model}: circuit open`);
+          break;
+        }
         const started = Date.now();
         let emitted = false;
         let completed = false;
@@ -166,7 +196,12 @@ export class FailoverExecutor {
 
         try {
           this.throwIfAborted(request.signal, attempt.providerName, attempt.model);
-          context = this.createAttemptContext(request.signal, timeoutMs, attempt.providerName, attempt.model);
+          context = this.createAttemptContext(
+            request.signal,
+            attempt.timeoutMs ?? timeoutMs,
+            attempt.providerName,
+            attempt.model,
+          );
           providerStream = provider.stream({
             ...request,
             model: attempt.model,
@@ -225,10 +260,10 @@ export class FailoverExecutor {
 
         if (attemptError instanceof UnsettledProviderAttemptError) break attemptsLoop;
         if (emitted) break attemptsLoop;
-        if (!this.shouldRetry(attemptError, retry, retryIndex)) break;
+        if (!this.shouldRetry(attemptError, retry, retryIndex, attempt)) break;
 
         try {
-          await this.delay(this.retryDelay(retry, retryIndex), request.signal);
+          await this.delay(this.retryDelay(retry, retryIndex, attemptError, attempt), request.signal);
         } catch (error) {
           if (error instanceof NexusProviderError && error.category === 'abort') return;
           throw error;
@@ -410,7 +445,16 @@ export class FailoverExecutor {
     };
   }
 
-  private shouldRetry(error: unknown, retry: Required<RetryConfig>, retryIndex: number): boolean {
+  private shouldRetry(
+    error: unknown,
+    retry: Required<RetryConfig>,
+    retryIndex: number,
+    attempt?: RouteAttempt,
+  ): boolean {
+    // A rate-limit policy on the attempt was asked for explicitly, so it applies even with retries off.
+    if (attempt?.rateLimit && this.categorizeError(error) === 'rate-limit') {
+      return retryIndex < attempt.rateLimit.maxRetries;
+    }
     if (!retry.enabled || retryIndex >= retry.maxRetries) return false;
     if (error instanceof NexusProviderError && !error.retryable) return false;
     const category = this.categorizeError(error);
@@ -422,7 +466,15 @@ export class FailoverExecutor {
     return categorizeProviderError(error);
   }
 
-  private retryDelay(retry: Required<RetryConfig>, retryIndex: number): number {
+  private retryDelay(
+    retry: Required<RetryConfig>,
+    retryIndex: number,
+    error?: unknown,
+    attempt?: RouteAttempt,
+  ): number {
+    if (attempt?.rateLimit && error !== undefined && this.categorizeError(error) === 'rate-limit') {
+      return attempt.rateLimit.retryAfterMs;
+    }
     const multiplier = retry.backoff === 'exponential' ? 2 ** retryIndex : 1;
     return Math.min(retry.baseDelayMs * multiplier, retry.maxDelayMs);
   }
@@ -467,4 +519,14 @@ export class FailoverExecutor {
       cleanup: () => signal?.removeEventListener('abort', abort),
     };
   }
+}
+
+/** Every attempt a decision describes, the first one carrying the decision's own limits. */
+function attemptsOf(decision: RouteDecision): RouteAttempt[] {
+  return [{ providerName: decision.providerName, model: decision.model, ...decision.primary }, ...decision.fallbacks];
+}
+
+/** The most retries an attempt can take: the request's policy, or its rate-limit policy if larger. */
+function maxRetriesFor(attempt: RouteAttempt, retry: Required<RetryConfig>): number {
+  return Math.max(retry.maxRetries, attempt.rateLimit?.maxRetries ?? 0);
 }

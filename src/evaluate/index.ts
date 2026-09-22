@@ -13,9 +13,11 @@ export {
   type CreateDatasetOptions,
   datasetFromTraces,
   FileDatasetStore,
+  FileExperimentStore,
   type FromTracesOptions,
   MemoryDatasetStore,
   MemoryExperimentStore,
+  readExperiment,
   splitOf,
 } from './datasets.js';
 export {
@@ -29,6 +31,7 @@ export {
   totalCost,
   trajectory,
   type TrajectoryOptions,
+  underCost,
   underLatency,
 } from './evaluators.js';
 export {

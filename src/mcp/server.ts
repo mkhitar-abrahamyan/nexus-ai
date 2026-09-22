@@ -11,9 +11,13 @@ import {
   textContent,
 } from './protocol.js';
 
+/** Options for an MCP server. */
 export interface McpServerOptions {
+  /** Server name reported to clients. Defaults to `nexus-ai-pro`. */
   name?: string;
+  /** Server version reported to clients. Defaults to `1.x`. */
   version?: string;
+  /** Tools the server exposes. */
   tools?: ToolDefinition[];
   /** Resources the server exposes, read by URI. */
   resources?: Array<{
@@ -40,17 +44,20 @@ export class McpServer {
     for (const item of options.tools ?? []) this.tools.set(item.name, item);
   }
 
+  /** Adds a tool. Returns the server, for chaining. */
   register(tool: ToolDefinition): this {
     this.tools.set(tool.name, tool);
     return this;
   }
 
+  /** Starts serving requests over a transport. */
   async connect(transport: McpTransport): Promise<void> {
     this.transport = transport;
     transport.onMessage((message) => void this.handle(message));
     await transport.start?.();
   }
 
+  /** Closes the transport. */
   async close(): Promise<void> {
     await this.transport?.close();
     this.transport = undefined;

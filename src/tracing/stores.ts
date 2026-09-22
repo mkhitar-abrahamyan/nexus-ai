@@ -1,7 +1,11 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Run, RunFeedback, RunQuery, RunTree, TraceStore } from '../types/tracing.js';
+import { applyQuery, assembleTree } from './query.js';
 
+export { applyQuery, assembleTree };
+
+/** Options for the in-memory trace store. */
 export interface MemoryTraceStoreOptions {
   /** Runs kept before the oldest is dropped. Defaults to 10,000. */
   maxRuns?: number;
@@ -21,6 +25,10 @@ export class MemoryTraceStore implements TraceStore {
     this.maxRuns = options.maxRuns ?? 10_000;
   }
 
+  /**
+   * Stores a run, replacing an earlier version with the same id. Drops the oldest runs beyond
+   * `maxRuns`.
+   */
   save(run: Run): void {
     this.runs.delete(run.id);
     this.runs.set(run.id, run);
@@ -30,23 +38,28 @@ export class MemoryTraceStore implements TraceStore {
     }
   }
 
+  /** Reads a run. */
   get(runId: string): Run | undefined {
     return this.runs.get(runId);
   }
 
+  /** Runs matching a query. */
   query(query: RunQuery = {}): Run[] {
     return applyQuery([...this.runs.values()], query);
   }
 
+  /** A trace's runs, assembled into a tree. */
   tree(traceId: string): RunTree | undefined {
     return assembleTree([...this.runs.values()].filter((run) => run.traceId === traceId));
   }
 
+  /** Attaches feedback to a run. */
   addFeedback(runId: string, feedback: RunFeedback): void {
     const run = this.runs.get(runId);
     if (run) this.runs.set(runId, { ...run, feedback: [...(run.feedback ?? []), feedback] });
   }
 
+  /** Deletes runs started before an ISO-8601 time, returning how many went. */
   prune(before: string): number {
     let removed = 0;
     for (const [id, run] of this.runs) {
@@ -58,11 +71,13 @@ export class MemoryTraceStore implements TraceStore {
     return removed;
   }
 
+  /** Runs held. */
   size(): number {
     return this.runs.size;
   }
 }
 
+/** Options for the JSONL trace store. */
 export interface JsonlTraceStoreOptions {
   /** File runs are appended to, one JSON object per line. */
   file: string;
@@ -86,6 +101,7 @@ export class JsonlTraceStore implements TraceStore {
     this.maxBytes = options.maxBytes ?? 64 * 1024 * 1024;
   }
 
+  /** Appends a run. Rewrites the file, keeping the newer half, once it passes `maxBytes`. */
   async save(run: Run): Promise<void> {
     await mkdir(path.dirname(this.file), { recursive: true });
     const line = `${JSON.stringify(run)}\n`;
@@ -93,20 +109,24 @@ export class JsonlTraceStore implements TraceStore {
     await this.rotate();
   }
 
+  /** Reads a run. */
   async get(runId: string): Promise<Run | undefined> {
     const runs = await this.load();
     return runs.get(runId);
   }
 
+  /** Runs matching a query. */
   async query(query: RunQuery = {}): Promise<Run[]> {
     return applyQuery([...(await this.load()).values()], query);
   }
 
+  /** A trace's runs, assembled into a tree. */
   async tree(traceId: string): Promise<RunTree | undefined> {
     const runs = [...(await this.load()).values()].filter((run) => run.traceId === traceId);
     return assembleTree(runs);
   }
 
+  /** Attaches feedback to a run by appending its updated version. */
   async addFeedback(runId: string, feedback: RunFeedback): Promise<void> {
     const run = await this.get(runId);
     if (!run) return;
@@ -114,6 +134,9 @@ export class JsonlTraceStore implements TraceStore {
     await this.save({ ...run, feedback: [...(run.feedback ?? []), feedback] });
   }
 
+  /**
+   * Deletes runs started before an ISO-8601 time by rewriting the file, returning how many went.
+   */
   async prune(before: string): Promise<number> {
     const runs = [...(await this.load()).values()];
     const kept = runs.filter((run) => run.startedAt >= before);
@@ -153,52 +176,4 @@ export class JsonlTraceStore implements TraceStore {
     const lines = content.split('\n').filter(Boolean);
     await writeFile(this.file, `${lines.slice(Math.floor(lines.length / 2)).join('\n')}\n`, 'utf8');
   }
-}
-
-/** Filters and orders runs. Shared by every store, so a query means the same thing everywhere. */
-export function applyQuery(runs: Run[], query: RunQuery = {}): Run[] {
-  const kinds = query.kind === undefined ? undefined : Array.isArray(query.kind) ? query.kind : [query.kind];
-  const matched = runs.filter((run) => {
-    if (query.traceId && run.traceId !== query.traceId) return false;
-    if (kinds && !kinds.includes(run.kind)) return false;
-    if (query.status && run.status !== query.status) return false;
-    if (query.name && run.name !== query.name) return false;
-    if (query.model && run.model !== query.model) return false;
-    if (query.provider && run.provider !== query.provider) return false;
-    if (query.tags?.length && !query.tags.every((tag) => run.tags?.includes(tag))) return false;
-    if (query.minLatencyMs !== undefined && (run.latencyMs ?? 0) < query.minLatencyMs) return false;
-    if (query.minCost !== undefined && (run.cost ?? 0) < query.minCost) return false;
-    if (query.since && run.startedAt < query.since) return false;
-    if (query.until && run.startedAt > query.until) return false;
-    if (query.feedbackKey && !run.feedback?.some((item) => item.key === query.feedbackKey)) return false;
-    if (query.metadata) {
-      for (const [field, expected] of Object.entries(query.metadata)) {
-        if (readPath(run.metadata, field) !== expected) return false;
-      }
-    }
-    return true;
-  });
-
-  const ordered = matched.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  const offset = query.offset ?? 0;
-  return ordered.slice(offset, offset + (query.limit ?? 50));
-}
-
-export function assembleTree(runs: Run[]): RunTree | undefined {
-  const nodes = new Map<string, RunTree>(runs.map((run) => [run.id, { ...run, children: [] }]));
-  let root: RunTree | undefined;
-  for (const node of nodes.values()) {
-    const parent = node.parentId ? nodes.get(node.parentId) : undefined;
-    if (parent) parent.children.push(node);
-    else root ??= node;
-  }
-  for (const node of nodes.values()) node.children.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-  return root;
-}
-
-function readPath(value: unknown, path: string): unknown {
-  return path.split('.').reduce<unknown>((current, part) => {
-    if (current === null || typeof current !== 'object') return undefined;
-    return (current as Record<string, unknown>)[part];
-  }, value);
 }

@@ -1,18 +1,28 @@
 import type { Run, RunTree } from '../types/tracing.js';
 
+/** One field that differs between two matched runs. */
 export interface RunDifference {
+  /** The field, such as `status` or `outputs`. */
   path: string;
+  /** How it differs. */
   kind: 'added' | 'removed' | 'changed';
+  /** Its value in the left trace. */
   left?: unknown;
+  /** Its value in the right trace. */
   right?: unknown;
 }
 
+/** How two traces differ. */
 export interface TraceComparison {
   /** Runs present in both traces, matched by their position and name in the tree. */
   matched: Array<{ path: string; left: Run; right: Run; differences: RunDifference[] }>;
+  /** Paths of runs only in the left trace. */
   onlyLeft: string[];
+  /** Paths of runs only in the right trace. */
   onlyRight: string[];
+  /** Right root latency minus left, in milliseconds. */
   latencyMsDelta: number;
+  /** Right total cost minus left. */
   costDelta: number;
 }
 

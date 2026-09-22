@@ -5,32 +5,49 @@ import type {
   EmbeddingsProvider,
 } from '../types/embeddings.js';
 
+/** One embeddings conformance case. */
 export interface EmbeddingProviderConformanceCase {
+  /** The case's name. */
   name: string;
+  /** Texts to embed. */
   input: string[];
+  /** Input type sent, such as `query` or `document`. */
   inputType?: EmbeddingProviderRequest['inputType'];
+  /** Vector width requested. The result must match it. */
   dimensions?: number;
+  /** An extra check on the result, beyond the contract. */
   validate?: (result: EmbeddingProviderResult) => boolean | Promise<boolean>;
 }
 
+/** The outcome of one embeddings conformance case. */
 export interface EmbeddingProviderConformanceResult {
+  /** The provider checked. */
   providerName: string;
+  /** The model used. */
   model?: string;
+  /** The case. */
   caseName: string;
+  /** True when the result met the contract. */
   ok: boolean;
   /** Whether the adapter honored an already-aborted signal instead of calling the network. */
   abortOk?: boolean;
+  /** What went wrong, when anything did. */
   error?: string;
 }
 
+/** Options for `runEmbeddingProviderConformance()`. */
 export interface EmbeddingProviderConformanceOptions {
+  /** Model to use. Defaults to the adapter's default model. */
   model?: string;
+  /** Cases to run instead of the defaults. */
   fixtures?: readonly EmbeddingProviderConformanceCase[];
+  /** Also checks that an already-aborted signal is honored. Defaults to true. */
   testAbort?: boolean;
   /** Runs the determinism check, which repeats one case and compares the vectors. */
   testDeterminism?: boolean;
 }
 
+/** The default embeddings conformance cases: a single input, a batch, and a query-typed input. */
 export const EMBEDDING_PROVIDER_CONFORMANCE_FIXTURES: readonly EmbeddingProviderConformanceCase[] = [
   { name: 'single-input', input: ['A short sentence about provider-neutral embeddings.'] },
   {

@@ -105,6 +105,21 @@ export class NexusAI {
   private metrics: MetricsCollector;
   private health: ProviderHealthMonitor;
   private circuitBreaker: CircuitBreaker;
+  /**
+   * Health, circuit, and probe-slot hooks for every provider call. Built once, not per request; the
+   * arrow functions read `this` when called, after the constructor has run.
+   */
+  private readonly attemptHooks = {
+    allowAttempt: (providerName: string) => this.circuitBreaker.allowRequest(providerName),
+    onAttemptSuccess: (providerName: string, latencyMs: number) => {
+      this.health.recordSuccess(providerName, latencyMs);
+      this.circuitBreaker.recordSuccess(providerName);
+    },
+    onAttemptFailure: (providerName: string, error: unknown) => {
+      this.health.recordFailure(providerName, error);
+      this.circuitBreaker.recordFailure(providerName, error);
+    },
+  };
   private semanticCache: SemanticCache;
 
   /**
@@ -295,14 +310,7 @@ export class NexusAI {
         return this.failover.complete(context.request, decision, this.providers, {
           timeoutMs: this.config.timeout,
           retry: this.config.retry,
-          onAttemptSuccess: (providerName, latencyMs) => {
-            this.health.recordSuccess(providerName, latencyMs);
-            this.circuitBreaker.recordSuccess(providerName);
-          },
-          onAttemptFailure: (providerName, error) => {
-            this.health.recordFailure(providerName, error);
-            this.circuitBreaker.recordFailure(providerName, error);
-          },
+          ...this.attemptHooks,
         });
       });
       context.response = response;
@@ -537,14 +545,7 @@ export class NexusAI {
     const stream = this.failover.stream(routedRequest, decision, this.providers, {
       timeoutMs: this.config.timeout,
       retry: this.config.retry,
-      onAttemptSuccess: (providerName, latencyMs) => {
-        this.health.recordSuccess(providerName, latencyMs);
-        this.circuitBreaker.recordSuccess(providerName);
-      },
-      onAttemptFailure: (providerName, error) => {
-        this.health.recordFailure(providerName, error);
-        this.circuitBreaker.recordFailure(providerName, error);
-      },
+      ...this.attemptHooks,
     });
     return this.isSecurityEnabled() ? protectStreamOutput(stream, this.security, routedRequest.signal) : stream;
   }
@@ -613,6 +614,7 @@ export class NexusAI {
     return this.telephonyManager.validateWebhook(request);
   }
 
+  /** Parses a telephony media-stream message into a neutral event, through the named provider. */
   parseTelephonyMediaEvent(
     providerName: string,
     message: string | Record<string, unknown>,
@@ -620,6 +622,7 @@ export class NexusAI {
     return this.telephonyManager.parseMediaStreamEvent(providerName, message);
   }
 
+  /** Formats outbound audio, a mark, or a clear as the named provider's media-stream message. */
   formatTelephonyAudioMessage(
     providerName: string,
     streamId: string,
@@ -742,22 +745,27 @@ export class NexusAI {
     return this;
   }
 
+  /** Whether a text provider is configured. */
   hasProvider(name: string): boolean {
     return this.providers.has(name);
   }
 
+  /** Whether a voice provider is configured. */
   hasVoiceProvider(name: string): boolean {
     return this.voiceManager.hasProvider(name);
   }
 
+  /** Whether an image provider is registered. */
   hasImageProvider(name: string): boolean {
     return this.images.hasImageProvider(name);
   }
 
+  /** Whether a telephony provider is configured. */
   hasTelephonyProvider(name: string): boolean {
     return this.telephonyManager.hasProvider(name);
   }
 
+  /** Whether an embeddings provider is registered. */
   hasEmbeddingProvider(name: string): boolean {
     return this.embeddings.hasEmbeddingProvider(name);
   }
@@ -769,18 +777,22 @@ export class NexusAI {
     return [...this.providers.keys()];
   }
 
+  /** Lists configured voice providers. */
   listVoiceProviders(): string[] {
     return this.voiceManager.listProviders();
   }
 
+  /** Lists registered image providers. */
   listImageProviders(): string[] {
     return this.images.listImageProviders();
   }
 
+  /** Lists configured telephony providers. */
   listTelephonyProviders(): string[] {
     return this.telephonyManager.listProviders();
   }
 
+  /** Lists registered embeddings providers. */
   listEmbeddingProviders(): string[] {
     return this.embeddings.listEmbeddingProviders();
   }
@@ -817,6 +829,7 @@ export class NexusAI {
     return new EvalRunner<NexusResponse>(this).run(cases);
   }
 
+  /** Runs the summarize, verify, and format workflow on this client. */
   summarizeVerifyFormat(options: SummarizeVerifyFormatOptions): Promise<WorkflowResult> {
     return summarizeVerifyFormat(this, options);
   }
@@ -834,6 +847,16 @@ export class NexusAI {
     this.circuitBreaker.reset(providerName);
   }
 
+  /**
+   * Loads circuit decisions other workers have published, when `circuitBreaker.store` is set.
+   * Checks refresh shared state in the background on their own; awaiting this at startup means the
+   * first request already avoids providers that are open elsewhere.
+   */
+  syncCircuitBreaker(): Promise<void> {
+    return this.circuitBreaker.sync();
+  }
+
+  /** Health of every provider seen so far, when health tracking is on. */
   getProviderHealth() {
     return this.health.snapshot();
   }
@@ -884,10 +907,12 @@ export class NexusAI {
     this.semanticCache.clear();
   }
 
+  /** Removes expired response-cache entries, returning how many went. */
   clearExpiredCache(): number {
     return this.cache.clearExpired();
   }
 
+  /** Response-cache size, capacity, and expired entries not yet removed. */
   getCacheStats(): { size: number; maxEntries: number; expiredEntries: number } {
     return this.cache.stats();
   }
@@ -1045,14 +1070,7 @@ export class NexusAI {
     const response = await this.failover.complete(routedRequest, decision, this.providers, {
       timeoutMs: this.config.timeout,
       retry: this.config.retry,
-      onAttemptSuccess: (providerName, latencyMs) => {
-        this.health.recordSuccess(providerName, latencyMs);
-        this.circuitBreaker.recordSuccess(providerName);
-      },
-      onAttemptFailure: (providerName, error) => {
-        this.health.recordFailure(providerName, error);
-        this.circuitBreaker.recordFailure(providerName, error);
-      },
+      ...this.attemptHooks,
     });
 
     return response.content.trim();

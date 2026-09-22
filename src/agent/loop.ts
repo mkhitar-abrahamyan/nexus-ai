@@ -3,13 +3,20 @@ import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import { ToolExecutor } from './tool.js';
 
+/** The part of a client the agent loop needs. */
 export interface AgentModelClient {
+  /** Runs one completion. */
   complete(request: CompletionRequest): Promise<NexusResponse>;
 }
 
+/**
+ * A simple tool-calling loop: calls the model, runs the tools it asks for, and repeats until it
+ * answers or runs out of iterations. `createAgent()` adds checkpoints and approvals.
+ */
 export class AgentLoop {
   constructor(private client: AgentModelClient) {}
 
+  /** Runs the loop to completion. Defaults to 8 model calls. */
   async run(config: AgentConfig): Promise<AgentResult> {
     const maxIterations = config.maxIterations ?? 8;
     const executor = new ToolExecutor(config.tools || []);

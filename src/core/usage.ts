@@ -4,6 +4,7 @@ import type { ResponseCost, ResponseMeta, TokenUsage } from '../types/response.j
 import { DEFAULT_CURRENCY, estimateCost, formatCost } from '../optimizer/cost.js';
 import { generateRequestId } from '../utils/ids.js';
 
+/** Token counts as a provider reported them, for `buildUsage()`. */
 export interface UsageInput {
   /**
    * Prompt tokens billed at the standard input rate, excluding anything served from or written to
@@ -11,6 +12,7 @@ export interface UsageInput {
    * the cached counts before passing them here, so each token is priced exactly once.
    */
   inputTokens?: number;
+  /** Completion tokens, reasoning included. */
   outputTokens?: number;
   /** Prompt tokens the provider served from its cache instead of processing again. */
   cachedReadTokens?: number;
@@ -42,10 +44,15 @@ export function buildUsage(input: UsageInput): TokenUsage {
   };
 }
 
+/** Options for `priceUsage()`. */
 export interface PriceUsageOptions {
+  /** The model to price against. */
   model: string;
+  /** The usage to price. */
   usage: TokenUsage;
+  /** Cache lifetime the writes were made with, which some providers price differently. */
   cacheTtl?: CacheTtl;
+  /** Application registry entries and prices. */
   config?: Pick<NexusAIConfig, 'models'>;
   /** Set when the provider returned an authoritative charge rather than a local estimate. */
   reported?: number;
@@ -78,12 +85,19 @@ export function priceUsage(options: PriceUsageOptions): ResponseCost {
   };
 }
 
+/** Options for `buildMeta()`: the provider's token counts plus the call's context. */
 export interface BuildMetaOptions extends UsageInput {
+  /** The provider that answered. */
   provider: string;
+  /** The model that answered. */
   model: string;
+  /** How long the call took, in milliseconds. */
   latencyMs: number;
+  /** Cache lifetime the writes were made with. */
   cacheTtl?: CacheTtl;
+  /** Application registry entries and prices. */
   config?: Pick<NexusAIConfig, 'models'>;
+  /** Request id. Defaults to a generated one. */
   requestId?: string;
 }
 

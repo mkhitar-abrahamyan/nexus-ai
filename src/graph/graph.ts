@@ -8,6 +8,7 @@ import type {
   GraphCheckpointer,
   GraphDescription,
   GraphEvent,
+  GraphInput,
   GraphProgress,
   GraphResult,
   GraphRunOptions,
@@ -24,6 +25,7 @@ import type {
 } from '../types/graph.js';
 import { Command, END, Send, START } from '../types/graph.js';
 import { MemoryGraphCheckpointer } from './checkpointer.js';
+import type { NodeCache } from './node-cache.js';
 import {
   GraphInterrupt,
   GraphNodeError,
@@ -69,6 +71,12 @@ type TaskOutcome<S extends ChannelSchema> =
   | { kind: 'aborted'; attempts: number }
   | { kind: 'failed'; error: unknown; attempts: number };
 
+/** Which channels a caller may write and read, as `createGraph()` declared them. */
+interface GraphScope {
+  input?: readonly string[];
+  output?: readonly string[];
+}
+
 interface Edge<S extends ChannelSchema> {
   from: string;
   to?: string;
@@ -84,11 +92,14 @@ interface Edge<S extends ChannelSchema> {
  * static or conditional, may form cycles, and a compiled graph can be used as a node inside another
  * graph.
  */
-export class StateGraph<S extends ChannelSchema> {
+export class StateGraph<S extends ChannelSchema, I extends keyof S = keyof S, O extends keyof S = keyof S> {
   private readonly nodes = new Map<string, GraphNodeDefinition<S>>();
   private readonly edges: Array<Edge<S>> = [];
 
-  constructor(private readonly channels: S) {
+  constructor(
+    private readonly channels: S,
+    private readonly scope: GraphScope = {},
+  ) {
     if (!channels || typeof channels !== 'object' || Object.keys(channels).length === 0) {
       throw new GraphValidationError('A graph needs at least one state channel');
     }
@@ -97,8 +108,19 @@ export class StateGraph<S extends ChannelSchema> {
         throw new GraphValidationError(`Channel "${name}" must provide a reduce() function`);
       }
     }
+    for (const [field, names] of [
+      ['input', scope.input],
+      ['output', scope.output],
+    ] as const) {
+      for (const name of names ?? []) {
+        if (!Object.hasOwn(channels, name)) {
+          throw new GraphValidationError(`The ${field} channel "${name}" is not one of the graph's channels`);
+        }
+      }
+    }
   }
 
+  /** Adds a node. Returns the graph, for chaining. */
   addNode(name: string, fn: NodeFn<S>, options: NodeOptions = {}): this {
     const normalized = name.trim();
     if (!normalized) throw new GraphValidationError('A node name must not be empty');
@@ -112,6 +134,7 @@ export class StateGraph<S extends ChannelSchema> {
     return this;
   }
 
+  /** Adds an edge that always runs `to` after `from`. Returns the graph, for chaining. */
   addEdge(from: string, to: string): this {
     this.edges.push({ from, to });
     return this;
@@ -137,7 +160,7 @@ export class StateGraph<S extends ChannelSchema> {
   }
 
   /** Validates the shape and returns something runnable. */
-  compile(options: CompileOptions = {}): CompiledGraph<S> {
+  compile(options: CompileOptions = {}): CompiledGraph<S, I, O> {
     const entries = this.edges.filter((edge) => edge.from === START);
     if (entries.length === 0) {
       throw new GraphValidationError('A graph needs an entry point. Call setEntry(node).');
@@ -170,7 +193,9 @@ export class StateGraph<S extends ChannelSchema> {
         for (const target of Object.values(edge.mapping ?? {})) if (target !== END) queue.push(target);
         // A router without a mapping can reach anything, so reachability cannot be proven; treat
         // every node as reachable rather than report a false positive.
-        if (edge.router && !edge.mapping) return new CompiledGraph(this.channels, this.nodes, this.edges, options);
+        if (edge.router && !edge.mapping) {
+          return new CompiledGraph<S, I, O>(this.channels, this.nodes, this.edges, options, this.scope);
+        }
       }
     }
     const orphans = [...this.nodes.keys()].filter((node) => !reachable.has(node));
@@ -178,27 +203,30 @@ export class StateGraph<S extends ChannelSchema> {
       throw new GraphValidationError(`No edge reaches ${orphans.map((node) => `"${node}"`).join(', ')}`);
     }
 
-    return new CompiledGraph(this.channels, this.nodes, this.edges, options);
+    return new CompiledGraph<S, I, O>(this.channels, this.nodes, this.edges, options, this.scope);
   }
 }
 
 /** A validated graph, ready to run. */
-export class CompiledGraph<S extends ChannelSchema> {
+export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S, O extends keyof S = keyof S> {
   private readonly now: () => Date;
   private readonly store: GraphCheckpointer | undefined;
+  /** Loaded the first time a node that declares `cache` runs, and not before. */
+  private nodeCache: Promise<NodeCache> | undefined;
 
   constructor(
     private readonly channels: S,
     private readonly nodes: Map<string, GraphNodeDefinition<S>>,
     private readonly edges: Array<Edge<S>>,
     private readonly options: CompileOptions,
+    private readonly scope: GraphScope = {},
   ) {
     this.now = options.now ?? (() => new Date());
     this.store = options.checkpointer === false ? undefined : (options.checkpointer ?? new MemoryGraphCheckpointer());
   }
 
   /** Runs to completion, to an interrupt, or to the step limit. */
-  async invoke(input: StateUpdate<S> = {}, runOptions: GraphRunOptions = {}): Promise<GraphResult<S>> {
+  async invoke(input: GraphInput<S, I> = {}, runOptions: GraphRunOptions = {}): Promise<GraphResult<S, O>> {
     // Resolve the id here rather than inside stream(), so the result reports the id actually used.
     const threadId = resolveThreadId(runOptions.threadId);
     let last: GraphStepEvent<S> | undefined;
@@ -207,10 +235,11 @@ export class CompiledGraph<S extends ChannelSchema> {
   }
 
   /** Yields one event per superstep, so a caller can render progress as it happens. */
-  stream(input: StateUpdate<S> = {}, runOptions: GraphRunOptions = {}): AsyncIterable<GraphStepEvent<S>> {
+  stream(input: GraphInput<S, I> = {}, runOptions: GraphRunOptions = {}): AsyncIterable<GraphStepEvent<S>> {
     const threadId = resolveThreadId(runOptions.threadId);
     return this.run(threadId, runOptions, async () => {
-      const state = this.seedState(input);
+      this.assertInput(input);
+      const state = this.seedState(input as StateUpdate<S>);
       const next = this.entryNodes();
       return { threadId, step: 0, state, next, status: 'running', createdAt: this.now().toISOString() };
     });
@@ -240,7 +269,7 @@ export class CompiledGraph<S extends ChannelSchema> {
   }
 
   /** Like `resume`, but returns the final result rather than the stream. */
-  async resumeWith(threadId: string, value: unknown, runOptions: GraphRunOptions = {}): Promise<GraphResult<S>> {
+  async resumeWith(threadId: string, value: unknown, runOptions: GraphRunOptions = {}): Promise<GraphResult<S, O>> {
     let last: GraphStepEvent<S> | undefined;
     for await (const event of this.resume(threadId, value, runOptions)) last = event;
     return this.toResult(threadId, last);
@@ -284,7 +313,7 @@ export class CompiledGraph<S extends ChannelSchema> {
     threadId: string,
     answers: Record<string, unknown>,
     runOptions: GraphRunOptions = {},
-  ): Promise<GraphResult<S>> {
+  ): Promise<GraphResult<S, O>> {
     let last: GraphStepEvent<S> | undefined;
     for await (const event of this.resumeInterrupts(threadId, answers, runOptions)) last = event;
     return this.toResult(threadId, last);
@@ -339,7 +368,7 @@ export class CompiledGraph<S extends ChannelSchema> {
         signal: context.signal,
       };
       const paused = await this.state(runOptions.threadId as string);
-      let result: GraphResult<S>;
+      let result: GraphResult<S, O>;
 
       if (paused?.status === 'awaiting_input' && paused.interrupt) {
         // The parent node is being replayed after an answer. Every answer the subgraph already
@@ -349,11 +378,13 @@ export class CompiledGraph<S extends ChannelSchema> {
         for (let index = 0; index < answered; index += 1) context.interrupt({ reason: paused.interrupt.reason });
         result = this.checkpointResult(paused);
       } else {
+        // Only the channels the subgraph accepts are passed in; with no declared input, every
+        // channel the two graphs share by name.
         const seed: Record<string, unknown> = {};
-        for (const key of Object.keys(this.channels)) {
+        for (const key of this.scope.input ?? Object.keys(this.channels)) {
           if (key in context.state) seed[key] = (context.state as Record<string, unknown>)[key];
         }
-        result = await this.invoke(seed as StateUpdate<S>, runOptions);
+        result = await this.invoke(seed as GraphInput<S, I>, runOptions);
       }
 
       while (result.status === 'awaiting_input' && result.interrupt) {
@@ -387,13 +418,14 @@ export class CompiledGraph<S extends ChannelSchema> {
   describe(): GraphDescription {
     const nodes = [...this.nodes.entries()].map(([id, definition]) => {
       const subgraph = (definition.fn as { [SUBGRAPH]?: CompiledGraph<ChannelSchema> })[SUBGRAPH];
-      const { ends, defer, retry, timeoutMs } = definition.options;
+      const { ends, defer, retry, timeoutMs, cache } = definition.options;
       return {
         id,
         ...(ends?.length ? { ends: [...ends] } : {}),
         ...(defer ? { defer } : {}),
         ...((retry?.maxAttempts ?? this.options.retry?.maxAttempts ?? 1) > 1 ? { retry: true } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(cache ? { cache: true } : {}),
         ...(subgraph ? { subgraph: subgraph.describe() } : {}),
       };
     });
@@ -424,6 +456,8 @@ export class CompiledGraph<S extends ChannelSchema> {
       nodes,
       edges,
       dynamic: [...dynamic],
+      ...(this.scope.input ? { input: [...this.scope.input] } : {}),
+      ...(this.scope.output ? { output: [...this.scope.output] } : {}),
     };
   }
 
@@ -720,6 +754,26 @@ export class CompiledGraph<S extends ChannelSchema> {
     if (!definition) throw new GraphValidationError(`Node "${task.node}" disappeared before it could run`);
     const policy = { ...DEFAULT_RETRY, ...this.options.retry, ...definition.options.retry };
     const timeoutMs = definition.options.timeoutMs;
+    const cachePolicy = definition.options.cache;
+    const cache = cachePolicy ? await this.loadNodeCache() : undefined;
+    const cacheKey = cachePolicy && cache ? cache.key(cachePolicy, task.node, checkpoint.state, task.input) : undefined;
+    if (cachePolicy && cache && cacheKey !== undefined) {
+      const hit = await cache.read(cachePolicy, cacheKey);
+      if (hit) {
+        const updates = hit.updates as Array<StateUpdate<S>>;
+        const goto = hit.goto?.length ? (hit.goto as RouteRecord[]) : undefined;
+        notify(runOptions, {
+          type: 'task_end',
+          step,
+          taskId: task.id,
+          node: task.node,
+          ...(updates.length === 1 ? { update: updates[0] } : updates.length > 1 ? { update: updates } : {}),
+          ...(goto ? { goto: goto.map(routeName) } : {}),
+          cached: true,
+        });
+        return { kind: 'ok', updates, goto, attempts: 0 };
+      }
+    }
     let attempts = 0;
 
     while (true) {
@@ -744,6 +798,11 @@ export class CompiledGraph<S extends ChannelSchema> {
         const parent = output.command?.graph === Command.PARENT ? output.command : undefined;
         const goto = parent ? undefined : toRouteRecords(output.command?.goto);
         const updates = parent ? [] : output.updates;
+        // A result that depended on a human's answer, or that addressed the parent graph, is not a
+        // function of this node's state and input, so the key would not describe it.
+        if (cachePolicy && cache && cacheKey !== undefined && !parent && !output.interrupted) {
+          await cache.write(cachePolicy, cacheKey, { updates, ...(goto?.length ? { goto } : {}) });
+        }
         notify(runOptions, {
           type: 'task_end',
           step,
@@ -800,7 +859,7 @@ export class CompiledGraph<S extends ChannelSchema> {
     runOptions: GraphRunOptions,
     signal: AbortSignal,
     attempt: number,
-  ): Promise<{ updates: Array<StateUpdate<S>>; command?: Command }> {
+  ): Promise<{ updates: Array<StateUpdate<S>>; command?: Command; interrupted: boolean }> {
     const node = task.node;
     let interruptIndex = 0;
     const context: NodeContext<S> = {
@@ -838,12 +897,41 @@ export class CompiledGraph<S extends ChannelSchema> {
     };
 
     const result = await fn(context);
+    const interrupted = interruptIndex > 0;
     if (result instanceof Command) {
       const following = (result as { [FOLLOWING_UPDATES]?: Array<StateUpdate<S>> })[FOLLOWING_UPDATES] ?? [];
       const own = result.update as StateUpdate<S> | undefined;
-      return { updates: [...(own ? [own] : []), ...following], command: result };
+      return { updates: [...(own ? [own] : []), ...following], command: result, interrupted };
     }
-    return { updates: result ? [result as StateUpdate<S>] : [] };
+    return { updates: result ? [result as StateUpdate<S>] : [], interrupted };
+  }
+
+  private loadNodeCache(): Promise<NodeCache> {
+    this.nodeCache ??= import('./node-cache.js').then(
+      ({ NodeCache }) => new NodeCache(this.options.name ?? '', this.options.cache, () => this.now().getTime()),
+    );
+    return this.nodeCache;
+  }
+
+  /** Rejects writes to channels the graph does not accept from a caller. */
+  private assertInput(input: object): void {
+    const allowed = this.scope.input;
+    if (!allowed) return;
+    for (const [key, value] of Object.entries(input)) {
+      if (value === undefined || allowed.includes(key)) continue;
+      throw new GraphValidationError(
+        `"${key}" is not an input of this graph. It accepts ${allowed.length ? allowed.map((name) => `"${name}"`).join(', ') : 'no input'}.`,
+      );
+    }
+  }
+
+  /** State as a caller sees it: the output channels, when the graph declared them. */
+  private visible(state: StateOf<S>): Pick<StateOf<S>, O> {
+    const output = this.scope.output;
+    if (!output) return state;
+    const visible: Record<string, unknown> = {};
+    for (const key of output) visible[key] = (state as Record<string, unknown>)[key];
+    return visible as Pick<StateOf<S>, O>;
   }
 
   /** Combines this superstep's writes into state through each channel's reducer. */
@@ -945,11 +1033,11 @@ export class CompiledGraph<S extends ChannelSchema> {
     await store.put(named as GraphCheckpoint);
   }
 
-  private checkpointResult(checkpoint: GraphCheckpoint<S>): GraphResult<S> {
+  private checkpointResult(checkpoint: GraphCheckpoint<S>): GraphResult<S, O> {
     return {
       threadId: checkpoint.threadId,
       status: checkpoint.status,
-      state: checkpoint.state,
+      state: this.visible(checkpoint.state),
       steps: checkpoint.step,
       ...(checkpoint.interrupt ? { interrupt: checkpoint.interrupt } : {}),
       ...(checkpoint.interrupts ? { interrupts: checkpoint.interrupts } : {}),
@@ -989,14 +1077,14 @@ export class CompiledGraph<S extends ChannelSchema> {
     };
   }
 
-  private toResult(threadId: string, last: GraphStepEvent<S> | undefined): GraphResult<S> {
+  private toResult(threadId: string, last: GraphStepEvent<S> | undefined): GraphResult<S, O> {
     if (!last) {
-      return { threadId, status: 'completed', state: this.seedState({}), steps: 0 };
+      return { threadId, status: 'completed', state: this.visible(this.seedState({})), steps: 0 };
     }
     return {
       threadId,
       status: last.status,
-      state: last.state,
+      state: this.visible(last.state),
       steps: last.step,
       ...(last.interrupt ? { interrupt: last.interrupt } : {}),
       ...(last.interrupts ? { interrupts: last.interrupts } : {}),
@@ -1006,9 +1094,47 @@ export class CompiledGraph<S extends ChannelSchema> {
   }
 }
 
-/** Starts a graph definition. */
-export function createGraph<S extends ChannelSchema>(config: { channels: S }): StateGraph<S> {
-  return new StateGraph(config.channels);
+/**
+ * Starts a graph definition.
+ *
+ * `input` and `output` restrict which channels a caller may set and which come back, so working
+ * channels stay internal. Both default to every channel. As a subgraph, a graph receives only its
+ * input channels from the parent and merges back only its output channels. Checkpoints, `state()`,
+ * and stream events still carry the whole state, because they describe the thread rather than
+ * answer a caller.
+ */
+// An empty list gives TypeScript nothing to infer from, so it would fall back to "every channel";
+// these overloads keep `input: []` and `output: []` meaning "none" in the types as well as at run
+// time, without a `const` type parameter that would raise the TypeScript version consumers need.
+export function createGraph<S extends ChannelSchema>(config: {
+  channels: S;
+  input: readonly [];
+  output: readonly [];
+}): StateGraph<S, never, never>;
+export function createGraph<S extends ChannelSchema, O extends keyof S & string = keyof S & string>(config: {
+  channels: S;
+  input: readonly [];
+  output?: readonly O[];
+}): StateGraph<S, never, O>;
+export function createGraph<S extends ChannelSchema, I extends keyof S & string = keyof S & string>(config: {
+  channels: S;
+  input?: readonly I[];
+  output: readonly [];
+}): StateGraph<S, I, never>;
+export function createGraph<
+  S extends ChannelSchema,
+  I extends keyof S & string = keyof S & string,
+  O extends keyof S & string = keyof S & string,
+>(config: { channels: S; input?: readonly I[]; output?: readonly O[] }): StateGraph<S, I, O>;
+export function createGraph<S extends ChannelSchema>(config: {
+  channels: S;
+  input?: readonly string[];
+  output?: readonly string[];
+}): StateGraph<S> {
+  return new StateGraph<S>(config.channels, {
+    ...(config.input ? { input: [...config.input] } : {}),
+    ...(config.output ? { output: [...config.output] } : {}),
+  });
 }
 
 function resolveThreadId(requested: string | undefined): string {

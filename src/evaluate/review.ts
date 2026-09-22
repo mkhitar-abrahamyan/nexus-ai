@@ -2,40 +2,62 @@ import { randomBytes } from 'node:crypto';
 import type { DatasetExample, EvaluationContext, EvaluationScore, Evaluator } from '../types/evaluate.js';
 import type { Run, RunQuery, TraceStore } from '../types/tracing.js';
 
+/** One item waiting for a person, with its claims and the answers it has. */
 export interface ReviewItem {
+  /** The item's id. */
   id: string;
   /** What is being judged, with enough context for a person to judge it. */
   subject: { inputs?: unknown; output?: unknown; runId?: string; exampleId?: string };
   /** The questions a reviewer answers. */
   rubric: ReviewQuestion[];
+  /**
+   * `pending` until claimed, `claimed` while someone works on it, `reviewed` once it has enough
+   * answers.
+   */
   status: 'pending' | 'claimed' | 'reviewed';
   /** Live claims, one per reviewer. Several at once when the item needs consensus. */
   claims: Array<{ reviewer: string; until: string }>;
+  /** Answers submitted so far. */
   answers: ReviewAnswer[];
+  /** ISO-8601 time the item was queued. */
   createdAt: string;
+  /** Application data carried with the item. */
   metadata?: Record<string, unknown>;
 }
 
+/** One question a reviewer answers. */
 export interface ReviewQuestion {
+  /** Key the answer is recorded under, which becomes a score key. */
   key: string;
+  /** The question, as the reviewer sees it. */
   prompt: string;
+  /** What kind of answer is expected. */
   type: 'score' | 'boolean' | 'text' | 'choice';
+  /** The options, for a `choice` question. */
   choices?: string[];
 }
 
+/** One reviewer's answers to an item. */
 export interface ReviewAnswer {
+  /** Who answered. */
   reviewer: string;
+  /** The answers, as scores. */
   scores: EvaluationScore[];
+  /** A note from the reviewer. */
   comment?: string;
+  /** ISO-8601 time the answers were submitted. */
   submittedAt: string;
 }
 
+/** Configuration for an annotation queue. */
 export interface AnnotationQueueOptions {
+  /** Questions every item asks. */
   rubric: ReviewQuestion[];
   /** How long a claim lasts before the item returns to the queue. Defaults to 15 minutes. */
   leaseMs?: number;
   /** Answers needed before an item counts as reviewed. Defaults to 1. */
   consensus?: number;
+  /** Replaces the system clock, for tests. */
   now?: () => Date;
 }
 
@@ -55,6 +77,7 @@ export class AnnotationQueue {
     this.now = options.now ?? (() => new Date());
   }
 
+  /** Queues something for review and returns the new item. */
   enqueue(subject: ReviewItem['subject'], metadata?: Record<string, unknown>): ReviewItem {
     const item: ReviewItem = {
       id: `review-${randomBytes(6).toString('hex')}`,
@@ -103,6 +126,7 @@ export class AnnotationQueue {
     return undefined;
   }
 
+  /** Records a reviewer's answers. The item is reviewed once it has `consensus` answers. */
   submit(itemId: string, answer: Omit<ReviewAnswer, 'submittedAt'> & { submittedAt?: string }): ReviewItem {
     const item = this.items.get(itemId);
     if (!item) throw new RangeError(`No review item "${itemId}"`);
@@ -120,6 +144,7 @@ export class AnnotationQueue {
     return updated;
   }
 
+  /** Items in the queue, optionally with one status. */
   list(status?: ReviewItem['status']): ReviewItem[] {
     const items = [...this.items.values()];
     return status ? items.filter((item) => item.status === status) : items;
@@ -155,8 +180,11 @@ export class AnnotationQueue {
   }
 }
 
+/** Options for `evaluateOnline()`. */
 export interface OnlineEvaluationOptions {
+  /** Where the runs to score are. */
   store: TraceStore;
+  /** Evaluators applied to each sampled run. */
   evaluators: Evaluator[];
   /** Which runs to score. Defaults to finished model runs. */
   query?: RunQuery;
@@ -164,16 +192,23 @@ export interface OnlineEvaluationOptions {
   sampleRate?: number;
   /** Sends an uncertain result to people instead of scoring it automatically. */
   reviewQueue?: AnnotationQueue;
+  /** Decides whether a run's scores are uncertain enough to send it to people. */
   reviewWhen?: (scores: EvaluationScore[], run: Run) => boolean;
   /** Writes scores back as trace feedback. Defaults to true. */
   recordFeedback?: boolean;
+  /** Replaces the system clock, for feedback timestamps. */
   now?: () => Date;
 }
 
+/** What an online evaluation pass did. */
 export interface OnlineEvaluationReport {
+  /** Runs matching the query. */
   scanned: number;
+  /** Runs scored after sampling. */
   evaluated: number;
+  /** Runs sent to the review queue. */
   queuedForReview: number;
+  /** Every score given. */
   scores: EvaluationScore[];
 }
 

@@ -8,12 +8,16 @@ import type { RateLimitStore } from './rate-limit-adapters.js';
  * embeddings, and whatever comes next — shares one limiter instance and one budget.
  */
 export interface RateLimitedRequest {
+  /** Model requested, for per-model limits. */
   model?: string;
+  /** Caller, for per-user limits. */
   userId?: string;
 }
 
+/** Raised when a caller exceeds its rate limit. */
 export class NexusRateLimitError extends Error {
   constructor(
+    /** The bucket that was full. */
     public key: string,
     /** Epoch milliseconds when the window resets, when the store reported one. */
     public readonly resetAt?: number,
@@ -34,6 +38,10 @@ interface Bucket {
   resetAt: number;
 }
 
+/**
+ * Fixed-window rate limiting, per user, per model, or globally, in memory or through a shared
+ * store.
+ */
 export class RateLimiter {
   private buckets = new Map<string, Bucket>();
 
@@ -60,6 +68,7 @@ export class RateLimiter {
     }
   }
 
+  /** Counts one call in memory. Throws `NexusRateLimitError` when the bucket is full. */
   check(request: RateLimitedRequest, config?: RateLimitConfig): void {
     if (!config?.enabled) return;
 

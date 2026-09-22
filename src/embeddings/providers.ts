@@ -5,6 +5,7 @@ import type { EmbeddingRequest, EmbeddingResponse } from '../types/embeddings.js
  * Anything that answers an embedding request: an `EmbeddingManager`, or a `NexusAI` runtime.
  */
 export interface EmbeddingSource {
+  /** Embeds a request. */
   embed(request: EmbeddingRequest): Promise<EmbeddingResponse>;
 }
 
@@ -22,25 +23,42 @@ export function toEmbeddingFunction(
   return async (texts) => (await source.embed({ ...options, input: texts })).vectors;
 }
 
+/** Options for `createOpenAIEmbeddingProvider()`. */
 export interface OpenAIEmbeddingOptions {
+  /** OpenAI API key. */
   apiKey: string;
+  /** Embedding model. Defaults to `text-embedding-3-small`. */
   model?: string;
+  /** API base URL. Defaults to `https://api.openai.com/v1`. */
   baseUrl?: string;
 }
 
+/** Options for `createGeminiEmbeddingProvider()`. */
 export interface GeminiEmbeddingOptions {
+  /** Gemini API key. */
   apiKey: string;
+  /** Embedding model. Defaults to `text-embedding-004`. */
   model?: string;
+  /** API base URL. Defaults to `https://generativelanguage.googleapis.com/v1beta`. */
   baseUrl?: string;
 }
 
+/** Options for `createCohereEmbeddingProvider()`. */
 export interface CohereEmbeddingOptions {
+  /** Cohere API key. */
   apiKey: string;
+  /** Embedding model. Defaults to `embed-v4.0`. */
   model?: string;
+  /** API base URL. Defaults to `https://api.cohere.com/v2`. */
   baseUrl?: string;
+  /** What the vectors are for. Defaults to `search_document`. */
   inputType?: 'search_document' | 'search_query' | 'classification' | 'clustering';
 }
 
+/**
+ * A minimal OpenAI embedding function, for a vector store that needs no routing or retries. The
+ * embeddings family is the fuller option.
+ */
 export function createOpenAIEmbeddingProvider(options: OpenAIEmbeddingOptions): EmbeddingProvider {
   return async (texts) => {
     const response = await fetch(`${(options.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '')}/embeddings`, {
@@ -60,6 +78,10 @@ export function createOpenAIEmbeddingProvider(options: OpenAIEmbeddingOptions): 
   };
 }
 
+/**
+ * A minimal Gemini embedding function, for a vector store that needs no routing or retries. The
+ * embeddings family is the fuller option.
+ */
 export function createGeminiEmbeddingProvider(options: GeminiEmbeddingOptions): EmbeddingProvider {
   return async (texts) => {
     const model = options.model || 'text-embedding-004';
@@ -83,6 +105,10 @@ export function createGeminiEmbeddingProvider(options: GeminiEmbeddingOptions): 
   };
 }
 
+/**
+ * A minimal Cohere embedding function, for a vector store that needs no routing or retries. The
+ * embeddings family is the fuller option.
+ */
 export function createCohereEmbeddingProvider(options: CohereEmbeddingOptions): EmbeddingProvider {
   return async (texts) => {
     const response = await fetch(`${(options.baseUrl || 'https://api.cohere.com/v2').replace(/\/$/, '')}/embed`, {

@@ -9,11 +9,15 @@ import type {
 } from '../types/images.js';
 import { ImageProviderError, ImageValidationError } from './errors.js';
 
+/** Options for `createOpenAIVisualModeration()`. */
 export interface VisualModerationOptions {
+  /** OpenAI API key. */
   apiKey: string;
+  /** API base URL. Defaults to `https://api.openai.com/v1`. */
   baseUrl?: string;
   /** Defaults to `omni-moderation-latest`, which reads images as well as text. */
   model?: string;
+  /** Replaces the global `fetch`. */
   fetch?: typeof globalThis.fetch;
   /**
    * Score, 0–1, at or above which a category blocks. When omitted, the provider's own `flagged`
@@ -27,7 +31,9 @@ export interface VisualModerationOptions {
   reviewThreshold?: number;
   /** Per-category overrides, for a category a product needs stricter or looser than the rest. */
   categoryThresholds?: Record<string, { block?: number; review?: number }>;
+  /** Moderates the prompt and input images before generation. Defaults to true. */
   inspectInput?: boolean;
+  /** Moderates generated images before they are returned. Defaults to true. */
   inspectOutput?: boolean;
   /**
    * Let content through when moderation itself fails. Defaults to false: an outage of the safety

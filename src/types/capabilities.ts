@@ -14,18 +14,27 @@ export type CapabilityPolicy = 'strict' | 'warn' | 'off';
 /** What happened to a requested option that the model could not honor as written. */
 export type CapabilityWarningAction = 'dropped' | 'adjusted';
 
+/**
+ * A request option that was dropped or adjusted because the model does not support it as written.
+ */
 export interface CapabilityWarning {
   /** Dotted request path, such as `reasoning.effort` or `cache.mode`. */
   feature: string;
+  /** The model it was requested for. */
   model: string;
+  /** The provider, when known. */
   provider?: string;
+  /** The value requested. */
   requested?: unknown;
+  /** Whether it was dropped or adjusted. */
   action: CapabilityWarningAction;
   /** Value actually sent, when the option was clamped rather than removed. */
   adjustedTo?: unknown;
+  /** Why. */
   reason: string;
 }
 
+/** How capability negotiation behaves. */
 export interface CapabilityConfig {
   /** Default policy for every operation. Defaults to `warn`. */
   policy?: CapabilityPolicy;

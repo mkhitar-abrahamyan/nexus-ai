@@ -1,6 +1,7 @@
 import type { GraphCheckpoint, GraphCheckpointer } from '../types/graph.js';
 import type { OperationRecord, OperationStore } from '../types/operations.js';
 
+/** Options for the in-process checkpointer. */
 export interface MemoryGraphCheckpointerOptions {
   /** Checkpoints kept per thread, newest first. Defaults to 50. */
   maxPerThread?: number;
@@ -31,6 +32,10 @@ export class MemoryGraphCheckpointer implements GraphCheckpointer {
     if (!(this.maxThreads >= 1)) throw new RangeError('maxThreads must be at least 1');
   }
 
+  /**
+   * Stores a checkpoint, discarding any at the same or a later step of that thread, since those
+   * belong to a rewound timeline.
+   */
   put(checkpoint: GraphCheckpoint): void {
     // Writing step N means the thread continues from N. Anything already stored at N or later belongs
     // to a timeline that was rewound or restarted, and would otherwise surface as the "latest" state.
@@ -47,6 +52,7 @@ export class MemoryGraphCheckpointer implements GraphCheckpointer {
     }
   }
 
+  /** The latest checkpoint of a thread, or the one at a given step. */
   get(threadId: string, step?: number): GraphCheckpoint | undefined {
     const list = this.threads.get(threadId);
     if (!list?.length) return undefined;
@@ -54,11 +60,13 @@ export class MemoryGraphCheckpointer implements GraphCheckpointer {
     return found ? clone(found) : undefined;
   }
 
+  /** A thread's checkpoints, newest first. Defaults to 20. */
   history(threadId: string, limit = 20): GraphCheckpoint[] {
     const list = this.threads.get(threadId) ?? [];
     return [...list].reverse().slice(0, limit).map(clone);
   }
 
+  /** Deletes a thread's checkpoints. */
   delete(threadId: string): void {
     this.threads.delete(threadId);
   }
@@ -69,6 +77,7 @@ export class MemoryGraphCheckpointer implements GraphCheckpointer {
   }
 }
 
+/** Options for the operation-store checkpointer. */
 export interface OperationStoreCheckpointerOptions {
   /** Checkpoints kept per thread. Defaults to 50. */
   maxPerThread?: number;
@@ -95,6 +104,7 @@ export class OperationStoreCheckpointer implements GraphCheckpointer {
     this.maxPerThread = options.maxPerThread ?? 50;
   }
 
+  /** Stores a checkpoint and moves the thread's head to it, pruning beyond `maxPerThread`. */
   async put(checkpoint: GraphCheckpoint): Promise<void> {
     await this.write(stepId(checkpoint.threadId, checkpoint.step), checkpoint);
 
@@ -112,6 +122,7 @@ export class OperationStoreCheckpointer implements GraphCheckpointer {
     await this.write(checkpoint.threadId, { kind: 'graph-thread', latest: checkpoint.step, steps });
   }
 
+  /** The latest checkpoint of a thread, or the one at a given step. */
   async get(threadId: string, step?: number): Promise<GraphCheckpoint | undefined> {
     const target = step ?? (await this.readHead(threadId))?.latest;
     if (target === undefined) return undefined;
@@ -119,6 +130,7 @@ export class OperationStoreCheckpointer implements GraphCheckpointer {
     return record?.result && !isHead(record.result) ? (record.result as GraphCheckpoint) : undefined;
   }
 
+  /** A thread's checkpoints, newest first. Defaults to 20. */
   async history(threadId: string, limit = 20): Promise<GraphCheckpoint[]> {
     const head = await this.readHead(threadId);
     if (!head) return [];
@@ -131,6 +143,7 @@ export class OperationStoreCheckpointer implements GraphCheckpointer {
     return found;
   }
 
+  /** Deletes a thread's checkpoints and its head. */
   async delete(threadId: string): Promise<void> {
     const head = await this.readHead(threadId);
     for (const step of head?.steps ?? []) await this.store.delete?.(stepId(threadId, step));

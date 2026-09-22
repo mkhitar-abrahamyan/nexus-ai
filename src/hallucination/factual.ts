@@ -1,14 +1,24 @@
 import type { CompletionRequest, Message } from '../types/messages.js';
 
+/** Options for `withFactualDefaults()`. */
 export interface FactualOptions {
+  /** Temperature used when the request sets none. Defaults to 0. */
   temperature?: number;
+  /** Top-p used when the request sets none. Defaults to 0.1. */
   topP?: number;
+  /** Tells the model what to answer when it is not sure. Defaults to true. */
   requireUnknownFallback?: boolean;
+  /** That answer. Defaults to `I don't know.` */
   unknownAnswer?: string;
+  /** Whether the model reasons privately, shows a brief summary, or is not told to reason. */
   chainOfThought?: 'none' | 'private' | 'brief';
+  /** Worked examples, added as conversation turns before the request. */
   examples?: Array<{ input: string; output: string }>;
 }
 
+/**
+ * Adds a system message that asks for factual, conservative answers, with low sampling defaults.
+ */
 export function withFactualDefaults(request: CompletionRequest, options: FactualOptions = {}): CompletionRequest {
   const unknownAnswer = options.unknownAnswer || "I don't know.";
   const instructions = [
@@ -34,6 +44,7 @@ export function withFactualDefaults(request: CompletionRequest, options: Factual
   };
 }
 
+/** Adds a system message asking for JSON only, with low sampling defaults. */
 export function asJsonOnly(request: CompletionRequest): CompletionRequest {
   return {
     ...request,

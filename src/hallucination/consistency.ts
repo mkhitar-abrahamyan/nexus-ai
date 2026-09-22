@@ -2,15 +2,23 @@ import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import { withFactualDefaults } from './factual.js';
 
+/** The part of a client that self-consistency needs. */
 export interface ConsistencyClient {
+  /** Runs one completion. */
   complete(request: CompletionRequest): Promise<NexusResponse>;
 }
 
+/** Options for `completeWithSelfConsistency()`. */
 export interface SelfConsistencyOptions {
+  /** Answers sampled. Defaults to 3. */
   samples?: number;
+  /** Samples requested at once. Defaults to 2. */
   maxConcurrency?: number;
+  /** Sampling temperature for each sample. Defaults to the request's, or 0.2. */
   temperature?: number;
+  /** Top-p for each sample. Defaults to the request's, or 0.3. */
   topP?: number;
+  /** Picks the answer. Defaults to the one most similar to the others. */
   judge?: (responses: NexusResponse[]) => Promise<NexusResponse> | NexusResponse;
 }
 
@@ -19,6 +27,10 @@ interface SampleFailure {
   error: unknown;
 }
 
+/**
+ * Samples several answers and returns the one they agree with most. Survives failed samples as long
+ * as one succeeds.
+ */
 export async function completeWithSelfConsistency(
   client: ConsistencyClient,
   request: CompletionRequest,
@@ -96,6 +108,7 @@ async function completeSamples(
   return { candidates, failures };
 }
 
+/** The response whose text is most similar to the others'. */
 export function selectMostConsistent(responses: NexusResponse[]): NexusResponse {
   if (responses.length === 0) {
     throw new Error('selectMostConsistent requires at least one response');
@@ -119,6 +132,7 @@ export function selectMostConsistent(responses: NexusResponse[]): NexusResponse 
   return best;
 }
 
+/** Jaccard similarity of two texts' terms, from 0 to 1. */
 export function textSimilarity(a: string, b: string): number {
   const aTerms = new Set(terms(a));
   const bTerms = new Set(terms(b));

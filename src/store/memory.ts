@@ -6,12 +6,17 @@ import type {
   StorePutOptions,
   StoreSearchOptions,
 } from '../types/store.js';
+import { cosine, matches, textOf } from './helpers.js';
 
+export { cosine, matches, readPath, textOf } from './helpers.js';
+
+/** Options for the in-memory store. */
 export interface MemoryStoreOptions {
   /** Enables semantic search by embedding indexed fields on write. */
   index?: StoreIndexOptions;
   /** Items kept before the least recently written one is dropped. Defaults to 10,000. */
   maxItems?: number;
+  /** Replaces the system clock, for tests. */
   now?: () => Date;
 }
 
@@ -37,6 +42,7 @@ export class MemoryStore implements Store {
     if (!(this.maxItems >= 1)) throw new RangeError('maxItems must be at least 1');
   }
 
+  /** Stores an item, keeping its original `createdAt` when it replaces one. */
   async put<V>(namespace: StoreNamespace, key: string, value: V, options: StorePutOptions = {}): Promise<void> {
     assertKey(key);
     const id = idOf(namespace, key);
@@ -64,16 +70,22 @@ export class MemoryStore implements Store {
     }
   }
 
+  /** Reads an item, or `undefined` when it does not exist or has expired. */
   get<V>(namespace: StoreNamespace, key: string): StoreItem<V> | undefined {
     const item = this.items.get(idOf(namespace, key));
     if (!item || this.expired(item)) return undefined;
     return strip(item) as StoreItem<V>;
   }
 
+  /** Deletes an item. */
   delete(namespace: StoreNamespace, key: string): void {
     this.items.delete(idOf(namespace, key));
   }
 
+  /**
+   * Items under a namespace prefix, newest first, or ranked by similarity when a query is given.
+   * Defaults to 20.
+   */
   async search<V>(namespacePrefix: StoreNamespace, options: StoreSearchOptions = {}): Promise<Array<StoreItem<V>>> {
     const limit = options.limit ?? 20;
     const offset = options.offset ?? 0;
@@ -99,6 +111,7 @@ export class MemoryStore implements Store {
     return ranked.slice(offset, offset + limit).map((item) => strip(item) as StoreItem<V>);
   }
 
+  /** Namespaces under a prefix. Defaults to 100. */
   listNamespaces(options: { prefix?: StoreNamespace; limit?: number } = {}): string[][] {
     const seen = new Set<string>();
     const namespaces: string[][] = [];
@@ -152,55 +165,4 @@ function strip(item: StoredItem): StoreItem {
 
 function startsWith(namespace: readonly string[], prefix: StoreNamespace): boolean {
   return prefix.every((part, index) => namespace[index] === part);
-}
-
-/** Exact match on dot-path fields, so a filter reads like the shape of the value it selects. */
-export function matches(value: unknown, filter: Record<string, unknown> | undefined): boolean {
-  if (!filter) return true;
-  return Object.entries(filter).every(([path, expected]) => {
-    const actual = readPath(value, path);
-    return Array.isArray(expected) ? expected.includes(actual) : actual === expected;
-  });
-}
-
-export function readPath(value: unknown, path: string): unknown {
-  return path.split('.').reduce<unknown>((current, part) => {
-    if (current === null || typeof current !== 'object') return undefined;
-    return (current as Record<string, unknown>)[part];
-  }, value);
-}
-
-/** The text an item is indexed by: chosen fields, or every string in the value. */
-export function textOf(value: unknown, fields: readonly string[] | undefined): string {
-  if (fields?.length) {
-    return fields
-      .map((field) => readPath(value, field))
-      .filter((part): part is string => typeof part === 'string')
-      .join('\n')
-      .trim();
-  }
-  if (typeof value === 'string') return value.trim();
-  const parts: string[] = [];
-  const walk = (current: unknown): void => {
-    if (typeof current === 'string') parts.push(current);
-    else if (Array.isArray(current)) for (const entry of current) walk(entry);
-    else if (current && typeof current === 'object') for (const entry of Object.values(current)) walk(entry);
-  };
-  walk(value);
-  return parts.join('\n').trim();
-}
-
-export function cosine(a: readonly number[], b: readonly number[]): number {
-  let dot = 0;
-  let left = 0;
-  let right = 0;
-  for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
-    const x = a[index] as number;
-    const y = b[index] as number;
-    dot += x * y;
-    left += x * x;
-    right += y * y;
-  }
-  const magnitude = Math.sqrt(left) * Math.sqrt(right);
-  return magnitude === 0 ? 0 : dot / magnitude;
 }

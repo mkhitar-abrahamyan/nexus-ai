@@ -9,19 +9,29 @@ import {
   type ModelCapabilities,
 } from '../types/providers.js';
 
+/** A model name resolved through aliases to a model, provider, and capabilities. */
 export interface ResolvedModel {
+  /** The name requested. */
   requestedModel: string;
+  /** The concrete model it resolves to. */
   model: string;
+  /** The provider it belongs to, or null when unknown. */
   providerName: string | null;
+  /** Its registry entry, when there is one. */
   capabilities?: ModelCapabilities;
   /** Present when the requested name was an alias rather than a concrete model. */
   alias?: AliasMetadata;
 }
 
+/**
+ * Resolves an alias, checking application aliases before bundled ones. A name that is not an alias
+ * is returned unchanged.
+ */
 export function resolveModelAlias(model: string, aliases: Record<string, string> = {}): string {
   return aliases[model] || MODEL_ALIASES[model] || model;
 }
 
+/** Bundled and application model entries merged, application entries winning. */
 export function getModelRegistry(config?: Pick<NexusAIConfig, 'models'>): Record<string, ModelCapabilities> {
   return {
     ...(config?.models?.includeDefaults === false ? {} : KNOWN_MODELS),
@@ -29,6 +39,7 @@ export function getModelRegistry(config?: Pick<NexusAIConfig, 'models'>): Record
   };
 }
 
+/** Bundled and application aliases merged, application aliases winning. */
 export function getModelAliases(config?: Pick<NexusAIConfig, 'models'>): Record<string, string> {
   return {
     ...MODEL_ALIASES,
@@ -73,10 +84,12 @@ export function resolveModel(model: string, config?: Pick<NexusAIConfig, 'models
   };
 }
 
+/** Every model name in the registry, sorted. */
 export function listKnownModels(config?: Pick<NexusAIConfig, 'models'>): string[] {
   return Object.keys(getModelRegistry(config)).sort();
 }
 
+/** Every model in the registry that belongs to a provider, sorted. */
 export function listModelsForProvider(providerName: string, config?: Pick<NexusAIConfig, 'models'>): string[] {
   const registry = getModelRegistry(config);
   return Object.entries(registry)
@@ -87,6 +100,7 @@ export function listModelsForProvider(providerName: string, config?: Pick<NexusA
     .sort();
 }
 
+/** A model's registry entry, resolving aliases first. */
 export function getModelCapabilities(
   model: string,
   config?: Pick<NexusAIConfig, 'models'>,
@@ -94,15 +108,21 @@ export function getModelCapabilities(
   return resolveModel(model, config).capabilities;
 }
 
+/** Where a model entry came from and when it was last checked. */
 export interface ModelProvenance {
   /** The name that was requested, which may be an alias. */
   requestedModel: string;
   /** The concrete model the request resolves to. */
   model: string;
+  /** The provider it belongs to, or null when unknown. */
   providerName: string | null;
+  /** ISO-8601 date the entry was last verified. */
   verifiedAt: string;
+  /** Where the entry's data came from. */
   source: string;
+  /** Alias stage and provenance, when the requested name was an alias. */
   alias?: AliasMetadata;
+  /** Its registry entry, when there is one. */
   capabilities?: ModelCapabilities;
 }
 
@@ -125,10 +145,15 @@ export function describeModel(model: string, config?: Pick<NexusAIConfig, 'model
   };
 }
 
+/** How old the model registry is. */
 export interface RegistryFreshness {
+  /** ISO-8601 date the bundled registry was last verified. */
   verifiedAt: string;
+  /** Days since then. */
   ageDays: number;
+  /** True when the registry or any entry is older than the window. */
   stale: boolean;
+  /** The window, in days. Defaults to 180. */
   maxAgeDays: number;
   /** Entries carrying their own `verifiedAt` that are older than the window. */
   staleModels: string[];

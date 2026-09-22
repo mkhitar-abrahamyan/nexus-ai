@@ -7,9 +7,13 @@ import type { CacheTtl, ModelCapabilities, PromptCachingCapability, ReasoningEff
  * does not declare support for.
  */
 export class NexusCapabilityError extends Error {
+  /** The feature requested, such as `reasoning` or `promptCaching`. */
   readonly feature: string;
+  /** The model it was requested for. */
   readonly model: string;
+  /** The provider, when known. */
   readonly provider?: string;
+  /** The value requested. */
   readonly requested?: unknown;
 
   constructor(options: { feature: string; model: string; provider?: string; requested?: unknown; reason: string }) {
@@ -23,14 +27,19 @@ export class NexusCapabilityError extends Error {
   }
 }
 
+/** A request after negotiation, with what was changed. */
 export interface NegotiationResult<T> {
+  /** The request, adjusted to what the model supports. */
   value: T;
+  /** What was dropped or changed, and why. */
   warnings: CapabilityWarning[];
 }
 
+/** Options for capability negotiation. */
 export interface NegotiateOptions {
   /** Defaults to `warn`. */
   policy?: CapabilityPolicy;
+  /** The provider, named in warnings and errors. */
   provider?: string;
 }
 

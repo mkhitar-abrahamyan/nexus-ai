@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { OperationEvent, OperationWebhookConfig } from '../types/operations.js';
 
+/** Header that carries a delivery's signature. */
 const SIGNATURE_HEADER = 'x-nexus-signature';
 const DEFAULT_TIMEOUT_MS = 10_000;
 /** Rejects a replayed delivery older than this by default. */
@@ -18,6 +19,7 @@ export function signOperationWebhook(body: string, secret: string, timestampSeco
   return `t=${timestampSeconds},v1=${digest}`;
 }
 
+/** Options for `verifyOperationWebhook()`. */
 export interface VerifyOperationWebhookOptions {
   /** Maximum delivery age in seconds. Defaults to 300. */
   toleranceSeconds?: number;

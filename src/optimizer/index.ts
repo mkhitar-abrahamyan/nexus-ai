@@ -4,6 +4,7 @@ import { Tokenizer } from '../utils/tokenizer.js';
 import { PromptDensifier } from './densifier.js';
 import { BudgetEnforcer } from './budget.js';
 
+/** Applies densification and the token budget to a request, reporting what each did. */
 export class TokenOptimizer {
   private tokenizer = new Tokenizer();
   private densifier = new PromptDensifier();
@@ -11,6 +12,7 @@ export class TokenOptimizer {
 
   constructor(private config: TokenOptimizerConfig = {}) {}
 
+  /** Optimizes a request. */
   optimize(request: CompletionRequest): OptimizationResult<CompletionRequest> {
     if (this.config.enabled === false) {
       return {

@@ -1,13 +1,21 @@
+/** A cached value and when it expires. */
 export interface CacheEntry<T> {
+  /** The value. */
   value: T;
+  /** Epoch milliseconds when it expires. */
   expiresAt: number;
 }
 
+/**
+ * A bounded in-memory cache with per-entry expiry, evicting the least recently used entry when
+ * full. Holds 500 entries by default.
+ */
 export class MemoryCache<T> {
   private entries = new Map<string, CacheEntry<T>>();
 
   constructor(private maxEntries = 500) {}
 
+  /** Returns a value, or `undefined` for a miss or an expired entry. A hit counts as recent use. */
   get(key: string): T | undefined {
     const entry = this.entries.get(key);
     if (!entry) return undefined;
@@ -22,6 +30,7 @@ export class MemoryCache<T> {
     return entry.value;
   }
 
+  /** Stores a value. Defaults to 5 minutes. */
   set(key: string, value: T, ttlSeconds = 300): void {
     if (this.entries.size >= this.maxEntries) {
       const oldest = this.entries.keys().next().value;
@@ -34,14 +43,17 @@ export class MemoryCache<T> {
     });
   }
 
+  /** Removes every entry. */
   clear(): void {
     this.entries.clear();
   }
 
+  /** Removes an entry. Returns true when one was removed. */
   delete(key: string): boolean {
     return this.entries.delete(key);
   }
 
+  /** Removes expired entries, returning how many went. */
   clearExpired(): number {
     const now = Date.now();
     let removed = 0;
@@ -54,6 +66,7 @@ export class MemoryCache<T> {
     return removed;
   }
 
+  /** Size, capacity, and expired entries not yet removed. */
   stats(): { size: number; maxEntries: number; expiredEntries: number } {
     const now = Date.now();
     let expiredEntries = 0;
@@ -69,6 +82,7 @@ export class MemoryCache<T> {
   }
 }
 
+/** A cache key for any value, with object keys sorted so equal values give equal keys. */
 export function createCacheKey(value: unknown): string {
   return stableStringify(value);
 }

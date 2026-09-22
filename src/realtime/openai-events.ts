@@ -12,6 +12,7 @@ import type {
   RealtimeToolResult,
 } from './types.js';
 
+/** Builds OpenAI's `session.update` event from a session configuration. */
 export function createOpenAISessionUpdate(config: RealtimeSessionConfig): RealtimeClientEvent {
   const interruption = normalizeInterruption(config.interruption);
   const input = config.audio?.input;
@@ -88,6 +89,7 @@ export function createOpenAISessionUpdate(config: RealtimeSessionConfig): Realti
   };
 }
 
+/** Builds the events that return a tool result to OpenAI and ask the model to continue. */
 export function createOpenAIToolResultEvents(result: RealtimeToolResult): RealtimeClientEvent[] {
   const output = result.ok ? result.result : { error: result.error || 'Tool execution failed' };
   return [
@@ -103,6 +105,7 @@ export function createOpenAIToolResultEvents(result: RealtimeToolResult): Realti
   ];
 }
 
+/** Converts one OpenAI realtime event into neutral session events. */
 export function normalizeOpenAIRealtimeEvent(
   raw: RealtimeServerEvent,
   timestamp = Date.now(),

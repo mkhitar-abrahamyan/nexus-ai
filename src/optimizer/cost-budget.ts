@@ -15,6 +15,7 @@ import type { CostEstimate } from '../types/planning.js';
 
 export const DEFAULT_CURRENCY = 'USD';
 
+/** Raised when a request's estimated cost exceeds its budget. */
 export class CostBudgetError extends Error {
   constructor(message: string) {
     super(message);
@@ -27,6 +28,7 @@ export function formatCost(amount: number): string {
   return `$${amount.toFixed(4)}`;
 }
 
+/** Throws `CostBudgetError` when an estimate exceeds the budget. Does nothing without a budget. */
 export function assertWithinCostBudget(estimate: CostEstimate, maxEstimatedCost?: number): void {
   if (maxEstimatedCost === undefined) return;
   if (estimate.totalCost > maxEstimatedCost) {

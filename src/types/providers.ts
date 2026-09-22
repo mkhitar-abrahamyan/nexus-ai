@@ -1,7 +1,17 @@
+/**
+ * What a model accepts as input: text, images, audio, video, generated images, or PDF documents.
+ */
 export type Modality = 'text' | 'vision' | 'audio' | 'video' | 'image' | 'pdf';
+/** Where a model is in its provider's lifecycle. */
 export type ModelStatus = 'stable' | 'preview' | 'latest' | 'deprecated';
+/** Which provider API a model is served through. */
 export type ModelEndpoint = 'chat' | 'responses' | 'messages' | 'generateContent' | 'realtime';
+/**
+ * Portable reasoning effort, from none to the most the model offers. Each provider maps it to its
+ * own control.
+ */
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+/** A model the router should prefer, optionally weighted above others. */
 export type RoutingModelPreference =
   | string
   | {
@@ -19,7 +29,9 @@ export type CacheTtl = '5m' | '1h';
  * provider may still cache automatically; only caller control is unavailable.
  */
 export interface PromptCachingCapability {
+  /** Whether the provider accepts caller-placed cache breakpoints. */
   explicit?: boolean;
+  /** Cache lifetimes the provider supports. */
   ttls?: CacheTtl[];
   /** Smallest prefix the provider will cache, in tokens. Shorter breakpoints are dropped. */
   minTokens?: number;
@@ -35,45 +47,72 @@ export interface PromptCachingCapability {
  * explicit `false`, or a value outside a declared constraint, is refused or dropped.
  */
 export interface ModelCapabilities {
+  /** Provider that serves the model. */
   provider?: string;
+  /** Model family, for grouping versions. */
   family?: string;
+  /** What the model accepts as input. */
   modalities: Modality[];
+  /** Whether it can stream. */
   streaming: boolean;
+  /** Whether it can call tools. */
   toolCalling: boolean;
+  /** Whether it can guarantee output matching a JSON schema. */
   structuredOutputs?: boolean;
+  /** Whether it can be forced to output valid JSON. */
   jsonMode?: boolean;
+  /** Whether it reasons, and which efforts and token budget it accepts. */
   reasoning?: boolean | { efforts?: ReasoningEffort[]; maxTokens?: number };
+  /** How it supports prompt caching. */
   promptCaching?: boolean | PromptCachingCapability;
+  /** Whether a specific tool can be forced. */
   toolChoice?: boolean;
+  /** Whether it can make several tool calls at once. */
   parallelToolCalls?: boolean;
+  /** Whether it honors a sampling seed. */
   seed?: boolean;
+  /** Whether it accepts top-k sampling. */
   topK?: boolean;
+  /** Whether it accepts frequency and presence penalties. */
   penalties?: boolean;
+  /** Context window, in tokens. */
   maxContextTokens: number;
+  /** Longest output, in tokens. */
   maxOutputTokens?: number;
+  /** Price per 1,000 uncached input tokens, in US dollars. */
   costPer1kInput: number;
+  /** Price per 1,000 output tokens, in US dollars. */
   costPer1kOutput: number;
   /** Price of a cached-prefix read. Falls back to a provider default multiplier when omitted. */
   costPer1kCachedInput?: number;
   /** Price of writing a cache entry. Falls back to a provider default multiplier when omitted. */
   costPer1kCacheWrite?: number;
+  /** Relative quality, 0 to 100, used by quality routing. */
   qualityScore?: number;
+  /** Relative speed, 0 to 100, used by speed routing. */
   speedScore?: number;
+  /** Release date, ISO-8601. */
   release?: string;
+  /** Training data cutoff, ISO-8601. */
   knowledgeCutoff?: string;
+  /** Lifecycle status. */
   status?: ModelStatus;
+  /** Provider APIs the model is served through. */
   endpoints?: ModelEndpoint[];
   /** ISO date this entry was last checked against provider documentation. */
   verifiedAt?: string;
   /** Where this entry was verified against. */
   source?: string;
+  /** Anything else worth knowing, such as pricing caveats. */
   notes?: string;
 }
 
 /** Publication stage of a model alias. */
 export type AliasStage = 'stable' | 'preview' | 'deprecated';
 
+/** Where an alias stands and what it points to. */
 export interface AliasMetadata {
+  /** Whether the alias is stable, in preview, or deprecated. */
   stage: AliasStage;
   /** ISO date this alias target was last checked. */
   verifiedAt?: string;
@@ -81,6 +120,7 @@ export interface AliasMetadata {
   floating?: boolean;
   /** Alias to migrate to when this one is deprecated. */
   replacement?: string;
+  /** Anything else worth knowing about the alias. */
   note?: string;
 }
 
@@ -107,9 +147,13 @@ export const DEFAULT_CACHE_PRICING: Record<string, { read: number; write: number
   deepseek: { read: 0.1, write: 1 },
 };
 
+/** A provider and the models it serves. */
 export interface ProviderCapabilities {
+  /** The provider's name. */
   name: string;
+  /** Whether it runs locally. */
   isLocal: boolean;
+  /** Its models, by name. */
   models: Record<string, ModelCapabilities>;
 }
 
@@ -330,6 +374,10 @@ const cohere = (
       notes || 'Cohere pricing is deployment/plan dependent; override costs in models.registry for exact estimates.',
   });
 
+/**
+ * The bundled model registry: capabilities and prices for every model the package knows by name.
+ * Defaults, not financial truth; override entries through `models.registry`.
+ */
 export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   // OpenAI - current GPT-5.6 family
   'gpt-5.6-sol': {
@@ -1173,6 +1221,7 @@ export const MODEL_ALIAS_METADATA: Record<string, AliasMetadata> = Object.fromEn
   ]),
 );
 
+/** The provider a model name belongs to, from its prefix, or `null` when the name gives no clue. */
 export function resolveProvider(model: string): string | null {
   if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3') || model.startsWith('o4'))
     return 'openai';

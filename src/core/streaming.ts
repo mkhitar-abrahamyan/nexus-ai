@@ -1,5 +1,6 @@
 import type { NexusStream, StreamChunk } from '../types/response.js';
 
+/** Reads a stream to the end and returns its text. */
 export async function collectStream(stream: NexusStream): Promise<string> {
   let content = '';
 
@@ -12,6 +13,7 @@ export async function collectStream(stream: NexusStream): Promise<string> {
   return content;
 }
 
+/** Transforms each chunk of a stream. */
 export async function* mapStream(
   stream: NexusStream,
   mapChunk: (chunk: StreamChunk) => StreamChunk | Promise<StreamChunk>,
@@ -21,6 +23,7 @@ export async function* mapStream(
   }
 }
 
+/** A stream that yields one text chunk and finishes, for tests and cached answers. */
 export function createTextStream(text: string): NexusStream {
   let aborted = false;
 

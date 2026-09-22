@@ -7,46 +7,69 @@
  * each other in memory.
  */
 
+/** The MCP protocol revision this client and server speak, sent during `initialize`. */
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
 
 export type JsonRpcId = string | number;
 
+/** A JSON-RPC request, which expects a response with the same id. */
 export interface JsonRpcRequest {
+  /** Always `2.0`. */
   jsonrpc: '2.0';
+  /** Correlates the response. */
   id: JsonRpcId;
+  /** The method to call. */
   method: string;
+  /** Its parameters. */
   params?: unknown;
 }
 
+/** A JSON-RPC notification, which expects no response. */
 export interface JsonRpcNotification {
+  /** Always `2.0`. */
   jsonrpc: '2.0';
+  /** The method. */
   method: string;
+  /** Its parameters. */
   params?: unknown;
 }
 
+/** A JSON-RPC response: a result or an error, for the request with the same id. */
 export interface JsonRpcResponse {
+  /** Always `2.0`. */
   jsonrpc: '2.0';
+  /** The id of the request it answers. */
   id: JsonRpcId;
+  /** The result, on success. */
   result?: unknown;
+  /** The error, on failure. */
   error?: { code: number; message: string; data?: unknown };
 }
 
+/** Any JSON-RPC message. */
 export type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
 
 /** Carries a transport's messages in both directions. Anything implementing it can host MCP. */
 export interface McpTransport {
+  /** Opens the transport, when it needs opening. */
   start?(): Promise<void> | void;
+  /** Sends one message. */
   send(message: JsonRpcMessage): Promise<void> | void;
   /** Registers the handler that receives every incoming message. */
   onMessage(handler: (message: JsonRpcMessage) => void): void;
+  /** Registers a handler called when the transport closes. */
   onClose?(handler: () => void): void;
+  /** Closes the transport. */
   close(): Promise<void> | void;
 }
 
+/** An MCP protocol error, carrying a JSON-RPC error code. */
 export class McpError extends Error {
   constructor(
     message: string,
+    /** JSON-RPC error code. Defaults to -32000, the generic server error. */
     readonly code = -32_000,
+    /** Error details from the other side. */
     readonly data?: unknown,
   ) {
     super(message);
@@ -54,6 +77,7 @@ export class McpError extends Error {
   }
 }
 
+/** Standard JSON-RPC error codes. */
 export const JSON_RPC_ERRORS = {
   parse: -32_700,
   invalidRequest: -32_600,
@@ -71,6 +95,7 @@ export const JSON_RPC_ERRORS = {
 export class LineDecoder {
   private buffer = '';
 
+  /** Adds a chunk and returns every complete message it finished. */
   push(chunk: string): JsonRpcMessage[] {
     this.buffer += chunk;
     const messages: JsonRpcMessage[] = [];

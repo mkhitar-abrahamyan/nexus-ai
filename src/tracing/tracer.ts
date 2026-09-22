@@ -2,43 +2,67 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import type { Run, RunFeedback, RunKind, RedactionPolicy, SamplingPolicy, TraceStore } from '../types/tracing.js';
 
+/** Configuration for a tracer. */
 export interface TracerOptions {
+  /** Where finished traces are written. */
   store: TraceStore;
+  /** Which traces are kept. */
   sampling?: SamplingPolicy;
+  /** What is removed from runs before they are stored. */
   redaction?: RedactionPolicy;
   /** Tags added to every run, such as the deployment or the release. */
   tags?: string[];
+  /** Metadata added to every run. */
   metadata?: Record<string, unknown>;
+  /** Replaces the system clock, for tests. */
   now?: () => Date;
   /** Errors from the store are swallowed by default; a hook lets an application notice them. */
   onError?: (error: unknown) => void;
 }
 
+/** Options for starting a run. */
 export interface StartRunOptions {
+  /** What the run is, such as a node or a tool name. */
   name: string;
+  /** What kind of work it is. Defaults to `chain`. */
   kind?: RunKind;
+  /** What it received. */
   inputs?: unknown;
+  /** Labels for filtering. */
   tags?: string[];
+  /** Application data, queryable by dot path. */
   metadata?: Record<string, unknown>;
+  /** The model it calls, for a model run. */
   model?: string;
+  /** The provider it calls, for a model run. */
   provider?: string;
   /** Overrides the parent taken from the surrounding context. */
   parentId?: string;
+  /** Joins an existing trace instead of starting a new one. */
   traceId?: string;
 }
 
+/** Options for finishing a run. */
 export interface FinishRunOptions {
+  /** What it produced. */
   outputs?: unknown;
+  /** Why it failed. Its presence marks the run as an error. */
   error?: unknown;
+  /** Token counts and other units reported. */
   usage?: Record<string, number>;
+  /** What it cost. */
   cost?: number;
+  /** Metadata merged into the run's. */
   metadata?: Record<string, unknown>;
 }
 
 /** A run in progress. Finishing it writes it to the store. */
 export interface RunHandle {
+  /** The run's id. */
   readonly id: string;
+  /** The trace it belongs to. */
   readonly traceId: string;
+  /** Finishes the run. The trace is written once its root finishes. */
   finish(options?: FinishRunOptions): Promise<void>;
   /** Starts a run beneath this one, without relying on the ambient context. */
   child(options: StartRunOptions): RunHandle;
@@ -71,6 +95,10 @@ export class Tracer {
     return active ? { traceId: active.traceId, runId: active.runId } : undefined;
   }
 
+  /**
+   * Starts a run beneath the run in scope, or a new trace when there is none. Finish it with the
+   * handle.
+   */
   startRun(options: StartRunOptions): RunHandle {
     const parent = this.context.getStore();
     const traceId = options.traceId ?? parent?.traceId ?? id('trace');
@@ -123,6 +151,7 @@ export class Tracer {
       );
   }
 
+  /** Attaches feedback to a run, through the store's `addFeedback` when it has one. */
   async recordFeedback(
     runId: string,
     feedback: Omit<RunFeedback, 'createdAt'> & { createdAt?: string },

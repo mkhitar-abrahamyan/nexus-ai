@@ -14,10 +14,17 @@ import type {
 } from '../types/images.js';
 import { ImageOperationCancelledError } from './errors.js';
 
+/** Options for the mock image provider. */
 export interface MockImageProviderOptions {
+  /** Provider name. Defaults to `mock`. */
   name?: string;
+  /** Model reported. Defaults to `mock-image-v1`. */
   model?: string;
+  /**
+   * Simulated latency per call, in milliseconds. Honours the call's abort signal. Defaults to 0.
+   */
   latencyMs?: number;
+  /** Capabilities reported, merged over the defaults. */
   capabilities?: Partial<ImageProviderCapabilities>;
 }
 
@@ -56,6 +63,7 @@ const DEFAULT_CAPABILITIES: ImageProviderCapabilities = {
 
 /** A deterministic, network-free provider for tests, examples, and capability conformance. */
 export class MockImageProvider implements ImageProvider {
+  /** Provider name, capabilities, and models. */
   readonly info: ImageProviderInfo;
   private readonly model: string;
   private readonly latencyMs: number;
@@ -75,11 +83,13 @@ export class MockImageProvider implements ImageProvider {
     };
   }
 
+  /** Returns a tiny PNG per requested image. */
   async generate(request: ImageGenerateRequest, context: ImageProviderCallContext): Promise<ImageResult> {
     await waitForMock(this.latencyMs, context);
     return this.createResult('generate', request, context);
   }
 
+  /** Returns a tiny PNG per requested image. */
   async edit(request: ImageEditRequest, context: ImageProviderCallContext): Promise<ImageResult> {
     await waitForMock(this.latencyMs, context);
     return this.createResult('edit', request, context);

@@ -4,7 +4,9 @@ import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
 import { KNOWN_MODELS } from '../types/providers.js';
 
+/** Groq's chat API. */
 export class GroqProvider extends OpenAIProvider {
+  /** Always `groq`, hosted. */
   readonly info = { name: 'groq', isLocal: false };
 
   constructor(config: GroqProviderConfig) {
@@ -14,6 +16,7 @@ export class GroqProvider extends OpenAIProvider {
     });
   }
 
+  /** Runs one completion. */
   async complete(request: CompletionRequest): Promise<NexusResponse> {
     const response = await super.complete({ ...request, model: this.stripPrefix(request.model) });
     return {
@@ -27,6 +30,7 @@ export class GroqProvider extends OpenAIProvider {
     };
   }
 
+  /** Streams one completion. */
   stream(request: CompletionRequest): NexusStream {
     const stream = super.stream({ ...request, model: this.stripPrefix(request.model) });
     return this.createStream(async function* () {

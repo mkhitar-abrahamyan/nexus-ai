@@ -137,7 +137,9 @@ interface OpenAIResponseFunctionCallItem {
 
 type OpenAIResponseStreamEvent = Record<string, unknown> & { type: string };
 
+/** OpenAI's Chat Completions API, and any server compatible with it. */
 export class OpenAIProvider extends BaseProvider {
+  /** Provider name and locality. */
   readonly info: ProviderInfo;
   private client?: OpenAIClient;
   private config: OpenAIProviderConfig;
@@ -200,6 +202,7 @@ export class OpenAIProvider extends BaseProvider {
     });
   }
 
+  /** Runs one completion. */
   async complete(request: CompletionRequest): Promise<NexusResponse> {
     const providerRequest = this.withProviderModel(request);
     try {
@@ -230,6 +233,7 @@ export class OpenAIProvider extends BaseProvider {
     }
   }
 
+  /** Streams one completion. */
   stream(request: CompletionRequest): NexusStream {
     const self = this;
 

@@ -10,32 +10,50 @@ import {
   type McpTransport,
 } from './protocol.js';
 
+/** A tool an MCP server offers. */
 export interface McpToolDescriptor {
+  /** The tool's name. */
   name: string;
+  /** What the tool does, for the model. */
   description?: string;
+  /** JSON Schema for the arguments. */
   inputSchema?: Record<string, unknown>;
 }
 
+/** A resource an MCP server offers. */
 export interface McpResourceDescriptor {
+  /** The resource's URI. */
   uri: string;
+  /** A readable name. */
   name?: string;
+  /** What the resource contains. */
   description?: string;
+  /** Its MIME type. */
   mimeType?: string;
 }
 
+/** One piece of content from an MCP server: text, or base64 data with a MIME type. */
 export interface McpContent {
+  /** `text`, `image`, `resource`, or another type the server defines. */
   type: string;
+  /** The text, for text content. */
   text?: string;
+  /** Base64 data, for binary content. */
   data?: string;
+  /** MIME type of `data`. */
   mimeType?: string;
   [key: string]: unknown;
 }
 
+/** What a tool call returned. */
 export interface McpToolResult {
+  /** The result, as content parts. */
   content: McpContent[];
+  /** True when the tool reported a failure rather than a result. */
   isError?: boolean;
 }
 
+/** Options for an MCP client. */
 export interface McpClientOptions {
   /** Name and version this client reports in the handshake. */
   clientInfo?: { name: string; version: string };
@@ -83,36 +101,45 @@ export class McpClient {
     return this.serverInfo;
   }
 
+  /** Lists the server's tools. */
   async listTools(): Promise<McpToolDescriptor[]> {
     await this.connect();
     const result = (await this.request('tools/list')) as { tools?: McpToolDescriptor[] };
     return result?.tools ?? [];
   }
 
+  /**
+   * Calls a tool. A tool that fails reports `isError` rather than throwing; a protocol failure
+   * throws `McpError`.
+   */
   async callTool(name: string, args: Record<string, unknown> = {}): Promise<McpToolResult> {
     await this.connect();
     const result = (await this.request('tools/call', { name, arguments: args })) as McpToolResult;
     return { content: result?.content ?? [], ...(result?.isError ? { isError: true } : {}) };
   }
 
+  /** Lists the server's resources. */
   async listResources(): Promise<McpResourceDescriptor[]> {
     await this.connect();
     const result = (await this.request('resources/list')) as { resources?: McpResourceDescriptor[] };
     return result?.resources ?? [];
   }
 
+  /** Reads a resource's content. */
   async readResource(uri: string): Promise<McpContent[]> {
     await this.connect();
     const result = (await this.request('resources/read', { uri })) as { contents?: McpContent[] };
     return result?.contents ?? [];
   }
 
+  /** Lists the server's prompts. */
   async listPrompts(): Promise<Array<{ name: string; description?: string }>> {
     await this.connect();
     const result = (await this.request('prompts/list')) as { prompts?: Array<{ name: string; description?: string }> };
     return result?.prompts ?? [];
   }
 
+  /** Renders a prompt with arguments into messages. */
   async getPrompt(
     name: string,
     args: Record<string, unknown> = {},
@@ -148,6 +175,7 @@ export class McpClient {
     }));
   }
 
+  /** Closes the connection and rejects every request still waiting. */
   async close(): Promise<void> {
     this.failAll(new McpError('The MCP client was closed'));
     await this.transport.close();
@@ -210,10 +238,15 @@ export class McpClient {
   }
 }
 
+/** Launches a local MCP server as a child process and talks to it over stdin and stdout. */
 export interface StdioClientOptions {
+  /** Executable to run. */
   command: string;
+  /** Its arguments. */
   args?: string[];
+  /** Environment variables for the process. */
   env?: Record<string, string>;
+  /** Working directory for the process. */
   cwd?: string;
 }
 
@@ -261,9 +294,13 @@ export function createStdioTransport(options: StdioClientOptions): McpTransport 
   };
 }
 
+/** Connects to a remote MCP server over HTTP. */
 export interface HttpClientOptions {
+  /** The server's endpoint. */
   url: string;
+  /** Headers sent with every request, such as authorization. */
   headers?: Record<string, string>;
+  /** Replaces the global `fetch`. */
   fetch?: typeof globalThis.fetch;
 }
 

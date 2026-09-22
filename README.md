@@ -105,14 +105,24 @@ nexus scan src --json
 nexus models --provider deepseek
 nexus optimize prompt.txt --model gpt-5.4-mini --max-input-tokens 4000
 nexus eval examples/cli-eval.json
+nexus eval run eval.mjs --out candidate.json --baseline baseline.json --fail-on-regression
+nexus traces list --store runs.jsonl --status error --since 2026-09-20T00:00:00Z
+nexus db sql --adapters operations,traces | psql "$DATABASE_URL"
 ```
 
 CLI commands are intentionally thin wrappers around library modules:
 
 - `nexus scan` checks files for secrets, PII, and prompt-injection patterns.
 - `nexus models` lists the bundled model registry.
-- `nexus eval` runs JSON or JS eval cases.
+- `nexus eval` runs JSON or JS eval cases. `nexus eval run`, `compare`, and `gate` run an evaluation
+  module to an experiment file and fail a build only on a regression beyond noise.
+- `nexus traces list`, `show`, and `export` read a JSONL trace file, or any trace store a module
+  exports — a Postgres store over your own pool, for instance.
+- `nexus db sql` prints the Postgres schema for the adapters you use, for your own migration tooling.
 - `nexus optimize` previews token optimization for a request or prompt file.
+
+Every command takes `--json`. A usage mistake exits with 2 and a failed check with 1, so a CI script
+can tell them apart. The newer commands load their code on demand, so `nexus scan` starts no slower.
 
 ## Core Concepts
 
@@ -642,7 +652,7 @@ const checkpointer = new OperationStoreCheckpointer(new RedisOperationStore(redi
 ```
 
 Writes are compare-and-set on the record's sequence, so two workers advancing the same thread cannot
-both win.
+both win. `PostgresOperationStore` works the same way; see [Postgres](#postgres).
 
 **Subgraphs.** A compiled graph is a node:
 
@@ -652,6 +662,37 @@ parent.addNode('research', researchGraph.asNode());
 
 Channels shared by name are passed in and merged back; anything the parent does not declare stays
 private to the subgraph.
+
+**Input and output channels.** Working channels can stay internal:
+
+```ts
+const research = createGraph({
+  channels: { question: lastValue(''), notes: appendList<string>(), answer: lastValue('') },
+  input: ['question'],
+  output: ['answer'],
+});
+```
+
+`invoke()` accepts only `question` and returns only `answer`, in the types as well as at run time. As
+a subgraph it receives only its inputs from the parent and merges back only its outputs, so a parent
+with its own `notes` channel never sees these. Checkpoints, `state()`, and stream events still carry
+the whole state, because they describe the thread rather than answer the caller.
+
+**Caching node results.** An expensive node whose result depends only on what it reads can skip work
+it has already done:
+
+```ts
+graph.addNode('classify', classifyTicket, {
+  cache: { ttlMs: 10 * 60_000, key: ({ state }) => `classify:${(state as Ticket).body}` },
+});
+```
+
+The default key hashes the graph name, the node, the state it sees, and its `Send` input — always
+correct, sometimes too specific, which is what `key` is for. Results live in a bounded in-process map
+by default, or in any cache adapter: `compile({ cache: new RedisCacheAdapter(redis) })` shares them
+across workers. A failure, an interrupt, a node that consumed a human's answer, and a command for a
+parent graph are never cached, and a cache that is down is a miss rather than a failed node. The
+caching code loads the first time a caching node runs.
 
 The graph is not in the root import. It costs nothing to a user who does not build graphs.
 
@@ -715,7 +756,8 @@ prefix to search. Items can expire with `ttlMs`, be filtered by field, and be ra
 any embedding function you inject — the store never imports the embeddings runtime, and without an
 index a query falls back to matching text. `RedisStore` from `nexus-ai-pro/store/redis` carries the
 same contract across processes through a client-like interface, so no Redis package is a dependency
-here.
+here. `PostgresStore` from `nexus-ai-pro/postgres/store` does the same in Postgres, and ranks in the
+database with pgvector when `vectorDimensions` is set.
 
 ## MCP
 
@@ -723,8 +765,6 @@ The Model Context Protocol, both directions, implemented directly rather than th
 
 ```ts
 import { McpClient, createStdioTransport } from 'nexus-ai-pro/mcp';
-import { Tracer, MemoryTraceStore } from 'nexus-ai-pro/tracing';
-import { evaluate, createDataset, compareExperiments } from 'nexus-ai-pro/evaluate';
 
 const client = new McpClient(createStdioTransport({ command: 'npx', args: ['-y', 'some-mcp-server'] }));
 const agent = createAgent({ client: ai, tools: await client.toNexusTools({ prefix: 'files' }) });
@@ -753,7 +793,7 @@ inputs, outputs, tokens, cost, and errors, stored where you can search it.
 import { Tracer, MemoryTraceStore, traceGraph, traceModelClient } from 'nexus-ai-pro/tracing';
 
 const tracer = new Tracer({
-  store: new MemoryTraceStore(),               // or JsonlTraceStore({ file })
+  store: new MemoryTraceStore(),               // or JsonlTraceStore, or PostgresTraceStore
   sampling: { rate: 0.05, keepErrors: true },  // 5% of traces, plus every failure
   redaction: { hideFields: ['apiKey', 'user.email'] },
 });
@@ -785,6 +825,9 @@ console.log(formatTree(tree));
 
 await tracer.recordFeedback(runId, { key: 'thumbs', score: 0, source: 'user' });
 ```
+
+The same questions from a terminal: `nexus traces list --store runs.jsonl --status error`, then
+`nexus traces show <traceId>` to print the tree.
 
 `compareTraces(a, b)` lays two runs of the same shape side by side and reports what changed — the
 step that got slower, the tool that stopped being called, the output that differs — which is how
@@ -849,6 +892,12 @@ and `trajectory`, which scores *how* an answer was reached — an agent that get
 calling the refund tool three times is not working. The LLM judge from `nexus-ai-pro/evals/judge`
 plugs in as one more evaluator.
 
+**Cost is read from the output**: `meta.cost` on a completion or an image result, or a `cost` field on
+anything else, and a `cost` option reads whatever a custom target returns. `underCost(0.05)` fails an
+example that overspends, and `totalCost()` sums the experiment, so a quality gain that tripled the
+bill is visible. `signal` cancels an evaluation without ever storing a partial experiment, and
+`repetitions` can be a function when some examples are noisier than others.
+
 ### Was the change real?
 
 ```ts
@@ -869,6 +918,21 @@ verdict twice.
 The report names the examples that moved most, the failures that are new, and the ones that were
 fixed. A comparison across different dataset versions says so rather than pretending it is like for
 like.
+
+### In CI
+
+```bash
+nexus eval run eval.mjs --out candidate.json --baseline baseline.json --fail-on-regression
+```
+
+The module exports `{ target, dataset, evaluators, summary? }`. `nexus eval gate baseline.json
+candidate.json` compares two stored experiments on its own. Either fails only when a metric got worse
+beyond noise, a new failure appeared, or the datasets differ; `--allow-dataset-mismatch` accepts the
+last. `FileExperimentStore` keeps experiments as files a pipeline can cache or commit, and
+`PostgresExperimentStore` keeps them in a table.
+
+`EvalRunner` and `MediaEvalRunner` run on `evaluate()` too, and their results carry the experiment
+underneath, so an existing suite can be gated the same way without being rewritten.
 
 ### The runs you did not think of
 
@@ -1046,14 +1110,38 @@ probe closes it; a failed probe reopens it and restarts the cooldown. If *every*
 router routes anyway — that usually means a shared dependency is down, and one attempt beats a
 certain failure with no attempt at all.
 
-`isFailure` keeps errors that are not the provider's fault out of the calculation:
+A request the caller cancelled never counts against the provider. `isFailure` keeps anything else
+that is not the provider's fault out of the calculation:
 
 ```ts
 circuitBreaker: {
   enabled: true,
-  isFailure: (error) => !(error instanceof Error && error.name === 'AbortError'),
+  isFailure: (error) => !(error instanceof NexusProviderError && error.category === 'bad-response'),
 }
 ```
+
+Probe limits hold on every attempt, retries included: while a probe is in flight, other requests go
+to the next provider instead of piling onto one that has only just come back.
+
+**Sharing circuit state across workers.** By default each worker learns on its own. Give the breaker
+a store and a provider that fails in one worker is taken out of routing in all of them, and when the
+cooldown ends only one worker probes it:
+
+```ts
+import { RedisCircuitStateStore } from 'nexus-ai-pro/ops/circuit-store';
+
+const ai = new NexusAI({
+  providers,
+  circuitBreaker: { enabled: true, store: new RedisCircuitStateStore(redis), workerId: process.env.HOSTNAME },
+});
+await ai.syncCircuitBreaker(); // optional: learn what is open elsewhere before the first request
+```
+
+Only decisions are shared — open, closed, and who may probe. Each worker still counts its own
+failures, and every check stays synchronous: shared state is refreshed in the background at most once
+a second, so the breaker never puts a network call in front of a request. If the store is
+unreachable, each worker decides for itself rather than holding circuits open. `PostgresCircuitStateStore`
+does the same in Postgres, and the coordination code loads only when a store is configured.
 
 **Distributed rate limiting.** The built-in limiter is process-local, which multiplies the real
 limit by the number of workers. Pointing it at a shared store fixes that, and the same budget then
@@ -1186,6 +1274,53 @@ bytes belong in an `AssetStore` with only a reference on the record. The BullMQ 
 queues the operation id and nothing else.
 
 The image family already runs on this lifecycle, so `ai.images.submit()` reports the same events.
+
+## Postgres
+
+One adapter family for everything that has to outlive a process or be shared between workers, over
+the Postgres client you already have:
+
+```ts
+import pg from 'pg';
+import { PostgresOperationStore, PostgresStore, PostgresTraceStore } from 'nexus-ai-pro/postgres';
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const operations = new PostgresOperationStore(pool);
+await operations.migrate(); // or: nexus db sql | psql "$DATABASE_URL"
+```
+
+| Adapter | Subpath | Serves |
+| --- | --- | --- |
+| `PostgresOperationStore` | `/postgres/operations` | durable operations, and graph checkpoints through `OperationStoreCheckpointer` |
+| `PostgresStore` | `/postgres/store` | long-term memory, ranked by pgvector when `vectorDimensions` is set |
+| `PostgresTraceStore` | `/postgres/traces` | traces, with every query filter in SQL |
+| `PostgresDatasetStore`, `PostgresExperimentStore` | `/postgres/evaluate` | datasets and experiments |
+| `PostgresCircuitStateStore` | `/postgres/circuits` | circuit state shared between workers |
+
+**No driver is a dependency.** Each adapter takes anything with a `query(text, values)` method that
+resolves to `{ rows }`: `pg`'s `Pool` and `Client`, `@neondatabase/serverless`, PGlite.
+`fromPostgresJs(sql)` adapts `postgres.js`. Parameters are only ever strings, numbers, and `null`,
+cast in SQL, so a driver's own conversion of arrays or dates never changes what is stored.
+
+**Nothing creates a schema at import.** `migrate()` applies an adapter's schema when you call it;
+`postgresMigration()` and `nexus db sql` produce the same SQL for the migration tooling you already
+use. Table names are options, schema-qualified if you like.
+
+**What Postgres adds over the other stores.** An operation update is one `UPDATE … WHERE sequence =
+expected`, atomic without a transaction. Idempotency keys are unique in the table, so when two
+workers race to submit the same key the loser attaches to the winner's operation instead of running
+the work twice. Trace feedback is appended in one statement, so two evaluators scoring one run at once
+both land.
+
+A graph thread started on one worker and finished on another is the same code as before, pointed at a
+different store:
+
+```ts
+const graph = builder.compile({ checkpointer: new OperationStoreCheckpointer(new PostgresOperationStore(pool)) });
+```
+
+The adapters are tested on every run against a real Postgres engine — PGlite, PostgreSQL compiled to
+WebAssembly — with the same contract tests the in-memory stores pass.
 
 ## Embeddings
 
@@ -2153,80 +2288,88 @@ only, so it never appears in an import graph.
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 612 KB | 100% | +4.7 MB |
-| `nexus-ai-pro/config` | 468 KB | 76% | +4.7 MB |
-| `nexus-ai-pro/core` | 462 KB | 75% | +4.7 MB |
-| `nexus-ai-pro/realtime` | 157 KB | 26% | none |
-| `nexus-ai-pro/batch` | 118 KB | 19% | none |
-| `nexus-ai-pro/realtime/session` | 94 KB | 15% | none |
-| `nexus-ai-pro/embeddings` | 91 KB | 15% | none |
-| `nexus-ai-pro/providers/groq` | 79 KB | 13% | none |
-| `nexus-ai-pro/providers/mistral` | 79 KB | 13% | none |
-| `nexus-ai-pro/providers/azure-openai` | 78 KB | 13% | none |
-| `nexus-ai-pro/providers/openrouter` | 78 KB | 13% | none |
-| `nexus-ai-pro/providers/deepseek` | 77 KB | 13% | none |
-| `nexus-ai-pro/providers/llamacpp` | 77 KB | 13% | none |
-| `nexus-ai-pro/providers/lmstudio` | 77 KB | 13% | none |
-| `nexus-ai-pro/providers/openai` | 77 KB | 13% | none |
-| `nexus-ai-pro/agent` | 76 KB | 12% | none |
-| `nexus-ai-pro/providers/anthropic` | 70 KB | 11% | none |
-| `nexus-ai-pro/providers/google` | 66 KB | 11% | none |
-| `nexus-ai-pro/images` | 65 KB | 11% | none |
-| `nexus-ai-pro/graph` | 60 KB | 10% | none |
-| `nexus-ai-pro/providers/ollama` | 58 KB | 9% | none |
-| `nexus-ai-pro/batch/openai` | 52 KB | 8% | none |
-| `nexus-ai-pro/batch/anthropic` | 52 KB | 8% | none |
-| `nexus-ai-pro/operations` | 49 KB | 8% | none |
-| `nexus-ai-pro/batch/mock` | 47 KB | 8% | none |
-| `nexus-ai-pro/providers/cohere` | 46 KB | 8% | none |
+| `nexus-ai-pro` | 572 KB | 100% | +4.7 MB |
+| `nexus-ai-pro/config` | 441 KB | 77% | +4.7 MB |
+| `nexus-ai-pro/core` | 437 KB | 76% | +4.7 MB |
+| `nexus-ai-pro/realtime` | 156 KB | 27% | none |
+| `nexus-ai-pro/batch` | 101 KB | 18% | none |
+| `nexus-ai-pro/realtime/session` | 94 KB | 16% | none |
+| `nexus-ai-pro/embeddings` | 81 KB | 14% | none |
+| `nexus-ai-pro/providers/groq` | 72 KB | 13% | none |
+| `nexus-ai-pro/providers/mistral` | 72 KB | 13% | none |
+| `nexus-ai-pro/providers/azure-openai` | 71 KB | 12% | none |
+| `nexus-ai-pro/providers/openrouter` | 71 KB | 12% | none |
+| `nexus-ai-pro/providers/deepseek` | 70 KB | 12% | none |
+| `nexus-ai-pro/providers/llamacpp` | 70 KB | 12% | none |
+| `nexus-ai-pro/providers/lmstudio` | 70 KB | 12% | none |
+| `nexus-ai-pro/providers/openai` | 70 KB | 12% | none |
+| `nexus-ai-pro/agent` | 63 KB | 11% | none |
+| `nexus-ai-pro/providers/anthropic` | 62 KB | 11% | none |
+| `nexus-ai-pro/providers/google` | 59 KB | 10% | none |
+| `nexus-ai-pro/images` | 59 KB | 10% | none |
+| `nexus-ai-pro/providers/ollama` | 53 KB | 9% | none |
+| `nexus-ai-pro/graph` | 49 KB | 9% | none |
+| `nexus-ai-pro/batch/openai` | 46 KB | 8% | none |
+| `nexus-ai-pro/batch/anthropic` | 46 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% | none |
-| `nexus-ai-pro/security` | 40 KB | 7% | +3.4 MB |
-| `nexus-ai-pro/models` | 35 KB | 6% | none |
-| `nexus-ai-pro/evaluate` | 33 KB | 5% | none |
-| `nexus-ai-pro/images/inputs` | 31 KB | 5% | none |
-| `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 5% | none |
-| `nexus-ai-pro/tracing` | 26 KB | 4% | none |
-| `nexus-ai-pro/evals` | 23 KB | 4% | none |
-| `nexus-ai-pro/images/transform` | 22 KB | 4% | none |
-| `nexus-ai-pro/images/stores` | 22 KB | 4% | none |
-| `nexus-ai-pro/telephony/twilio` | 21 KB | 3% | none |
-| `nexus-ai-pro/telephony` | 20 KB | 3% | none |
+| `nexus-ai-pro/providers/cohere` | 44 KB | 8% | none |
+| `nexus-ai-pro/batch/mock` | 41 KB | 7% | none |
+| `nexus-ai-pro/operations` | 40 KB | 7% | none |
+| `nexus-ai-pro/security` | 39 KB | 7% | +3.4 MB |
+| `nexus-ai-pro/postgres` | 36 KB | 6% | none |
+| `nexus-ai-pro/models` | 32 KB | 6% | none |
+| `nexus-ai-pro/evaluate` | 31 KB | 5% | none |
+| `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 5% | none |
+| `nexus-ai-pro/images/inputs` | 27 KB | 5% | none |
+| `nexus-ai-pro/evals` | 25 KB | 4% | none |
+| `nexus-ai-pro/tracing` | 23 KB | 4% | none |
+| `nexus-ai-pro/images/stores` | 21 KB | 4% | none |
+| `nexus-ai-pro/telephony/twilio` | 21 KB | 4% | none |
+| `nexus-ai-pro/images/transform` | 20 KB | 3% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 3% | none |
-| `nexus-ai-pro/realtime/mock` | 19 KB | 3% | none |
 | `nexus-ai-pro/voice` | 18 KB | 3% | none |
-| `nexus-ai-pro/mcp` | 18 KB | 3% | none |
-| `nexus-ai-pro/images/comfyui` | 17 KB | 3% | none |
-| `nexus-ai-pro/embeddings/adapters` | 17 KB | 3% | none |
+| `nexus-ai-pro/realtime/mock` | 18 KB | 3% | none |
+| `nexus-ai-pro/telephony` | 18 KB | 3% | none |
+| `nexus-ai-pro/images/evals` | 17 KB | 3% | none |
+| `nexus-ai-pro/images/comfyui` | 16 KB | 3% | none |
+| `nexus-ai-pro/embeddings/adapters` | 16 KB | 3% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 3% | none |
-| `nexus-ai-pro/images/google` | 15 KB | 2% | none |
-| `nexus-ai-pro/images/evals` | 15 KB | 2% | none |
 | `nexus-ai-pro/images/assets` | 14 KB | 2% | none |
+| `nexus-ai-pro/images/google` | 14 KB | 2% | none |
+| `nexus-ai-pro/mcp` | 14 KB | 2% | none |
 | `nexus-ai-pro/context` | 13 KB | 2% | none |
-| `nexus-ai-pro/operations/adapters` | 13 KB | 2% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 2% | none |
 | `nexus-ai-pro/workflows` | 13 KB | 2% | none |
-| `nexus-ai-pro/images/mock` | 12 KB | 2% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 2% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 2% | none |
-| `nexus-ai-pro/store/redis` | 11 KB | 2% | none |
+| `nexus-ai-pro/images/mock` | 11 KB | 2% | none |
+| `nexus-ai-pro/postgres/operations` | 11 KB | 2% | none |
+| `nexus-ai-pro/postgres/store` | 11 KB | 2% | none |
 | `nexus-ai-pro/providers` | 10 KB | 2% | none |
 | `nexus-ai-pro/providers/base` | 10 KB | 2% | none |
-| `nexus-ai-pro/embeddings/models` | 10 KB | 2% | none |
-| `nexus-ai-pro/voice/openai` | 9 KB | 1% | none |
-| `nexus-ai-pro/images/moderation` | 9 KB | 1% | none |
-| `nexus-ai-pro/ops/circuit-breaker` | 8 KB | 1% | none |
+| `nexus-ai-pro/postgres/traces` | 10 KB | 2% | none |
+| `nexus-ai-pro/voice/openai` | 9 KB | 2% | none |
+| `nexus-ai-pro/images/moderation` | 9 KB | 2% | none |
+| `nexus-ai-pro/operations/adapters` | 9 KB | 2% | none |
+| `nexus-ai-pro/testing/record` | 9 KB | 2% | none |
+| `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 2% | none |
+| `nexus-ai-pro/embeddings/models` | 8 KB | 1% | none |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 1% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 1% | none |
-| `nexus-ai-pro/telephony/realtime-bridge` | 7 KB | 1% | none |
-| `nexus-ai-pro/graph/visualize` | 6 KB | 1.0% | none |
-| `nexus-ai-pro/store` | 6 KB | 1.0% | none |
-| `nexus-ai-pro/providers/errors` | 5 KB | 0.8% | none |
-| `nexus-ai-pro/embeddings/mock` | 5 KB | 0.8% | none |
-| `nexus-ai-pro/cache/semantic-cache` | 5 KB | 0.8% | none |
-| `nexus-ai-pro/evals/judge` | 5 KB | 0.8% | none |
-| `nexus-ai-pro/operations/webhooks` | 4 KB | 0.7% | none |
-| `nexus-ai-pro/ops/rate-limit-adapters` | 3 KB | 0.5% | none |
+| `nexus-ai-pro/store` | 6 KB | 1% | none |
+| `nexus-ai-pro/store/redis` | 6 KB | 1% | none |
+| `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 1% | none |
+| `nexus-ai-pro/providers/errors` | 5 KB | 0.9% | none |
+| `nexus-ai-pro/postgres/evaluate` | 5 KB | 0.9% | none |
+| `nexus-ai-pro/cache/semantic-cache` | 5 KB | 0.9% | none |
+| `nexus-ai-pro/evals/judge` | 5 KB | 0.9% | none |
+| `nexus-ai-pro/embeddings/mock` | 4 KB | 0.7% | none |
+| `nexus-ai-pro/operations/webhooks` | 3 KB | 0.5% | none |
+| `nexus-ai-pro/graph/visualize` | 3 KB | 0.5% | none |
+| `nexus-ai-pro/postgres/circuits` | 3 KB | 0.5% | none |
+| `nexus-ai-pro/ops/circuit-store` | 3 KB | 0.5% | none |
 | `nexus-ai-pro/cache/memory-cache` | 3 KB | 0.5% | none |
+| `nexus-ai-pro/ops/rate-limit-adapters` | 2 KB | 0.3% | none |
 | `nexus-ai-pro/cache` | 2 KB | 0.3% | none |
 | `nexus-ai-pro/cache/adapters` | 2 KB | 0.3% | none |
 | `nexus-ai-pro/rag` | 2 KB | 0.3% | none |
@@ -2281,10 +2424,38 @@ npm run check:release
 conformance tests, coverage thresholds, package import checks, and an external type-consumer test.
 `check:release` additionally verifies the dry-run tarball and a clean packed-package install.
 
+`npm run docs:check` fails when any public export, or any public member of an exported class,
+interface, or enum, has no doc comment. Every entry point is kept at 100%; `--list` names what is
+missing.
+
 Real provider conformance is opt-in:
 
 ```bash
 npm run test:conformance:real
+```
+
+### Recorded provider traffic
+
+A suite that needs credentials can run everywhere else from recordings:
+
+```ts
+import { fixtureFetch } from 'nexus-ai-pro/testing/record';
+
+// Replays by default; NEXUS_FIXTURES=record captures, NEXUS_FIXTURES=live bypasses.
+const fetch = fixtureFetch({ directory: 'tests/fixtures/openai' });
+const provider = new OpenAIImageProvider({ apiKey: process.env.OPENAI_API_KEY ?? 'replay', fetch });
+```
+
+Recording writes one reviewable JSON file per exchange. Credential headers and query parameters are
+removed before anything is written, and a `redact` hook handles the rest — personal data in a prompt,
+through a PII detector from `nexus-ai-pro/security`, for instance. Replay serves the files back with
+no network, matches requests by method, URL, and body with object keys sorted and multipart
+boundaries ignored, and throws `FixtureMissingError` for anything unrecorded instead of reaching the
+live API. `installFetch()` covers code that calls the global `fetch`.
+
+```bash
+npm run test:conformance:images       # replays image recordings; needs no credentials
+npm run conformance:images:record     # records them; needs OPENAI_API_KEY, GOOGLE_API_KEY, or COMFYUI_URL
 ```
 
 ## Roadmap
@@ -2296,13 +2467,15 @@ live in [API_STABILITY.md](./API_STABILITY.md).
 Shipped so far:
 
 - completion controls and capability negotiation;
-- durable operations, provider batch tiers, and distributed resilience;
-- first-class embeddings and graphs;
+- durable operations, provider batch tiers, and distributed resilience, now including shared circuit
+  state and a Postgres adapter family;
+- embeddings, graphs, long-term memory, agents on graphs, and MCP;
+- queryable traces, an evaluation platform, and a CI gate on top of it;
+- record and replay of provider traffic;
 - per-entry-point size budgets.
 
-The current work is image portability: three backends behind one contract, masked edits, validated
-inputs, visual moderation, and media evaluation. Promotion out of experimental waits on live
-conformance.
+Next is prompt and configuration versioning. The image family leaves experimental once recorded live
+conformance passes on all three backends.
 
 ## Known Limitations
 
@@ -2317,8 +2490,10 @@ conformance.
 - NLI verification is an interface; bring a specialized verifier for high-confidence entailment.
 - Guardrails reduce risk but do not replace application authorization, provider-side moderation, or
   human review of high-impact actions.
-- Circuit-breaker state is per process, and realtime sessions are not yet routed through the metrics,
-  audit, and rate-limit path that every other family uses.
+- Realtime sessions are not yet routed through the metrics, audit, and rate-limit path that every
+  other family uses.
+- The image adapters are verified against documented wire shapes; recorded live conformance for all
+  three backends is still to come, which is why the family is experimental.
 
 ## Production Notes
 

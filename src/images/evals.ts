@@ -7,6 +7,8 @@ import type {
   ImageResult,
   MediaSafetyFinding,
 } from '../types/images.js';
+import { createHash } from 'node:crypto';
+import type { DatasetExample, EvaluationScore, Experiment, ExperimentStore } from '../types/evaluate.js';
 import type { RgbaImage } from './codec.js';
 import { ImageValidationError } from './errors.js';
 
@@ -31,23 +33,35 @@ export interface MediaEvalExpectations {
   preserve?: { asset: AssetInput; minSimilarity: number };
   /** Whether this case should be blocked. Drives the false-positive and false-negative counts. */
   shouldBlock?: boolean;
+  /** Fails a run slower than this, in milliseconds. */
   maxLatencyMs?: number;
+  /** Fails a run that cost more than this. */
   maxCost?: number;
 }
 
+/** One media evaluation case: a request, how often to run it, and what counts as a pass. */
 export interface MediaEvalCase {
+  /** Identifies the case in reports and comparisons. */
   id: string;
+  /** Whether the request generates or edits. */
   operation: ImageOperation;
+  /** The image request to run. */
   request: ImageGenerateRequest | ImageEditRequest;
   /** Runs per case. Stochastic output needs several; defaults to the runner's `runs`. */
   runs?: number;
+  /** What the result must satisfy. Without it, a run passes when it produces an image. */
   expect?: MediaEvalExpectations;
+  /** Labels for filtering and grouping reports. */
   tags?: string[];
 }
 
 /** Produces one result for one run of a case — usually a thin call into `ImageManager`. */
 export type MediaEvalTarget = (evalCase: MediaEvalCase, run: number) => Promise<ImageResult>;
 
+/**
+ * Scoring functions a case's expectations need. Alignment and OCR are injected, so any vision model
+ * or OCR engine works.
+ */
 export interface MediaEvalScorers {
   /** Returns prompt alignment from 0 to 1, typically a vision model acting as judge. */
   alignment?: (asset: AssetDescriptor, prompt: string) => Promise<number> | number;
@@ -57,30 +71,50 @@ export interface MediaEvalScorers {
   decode?: (asset: AssetInput) => Promise<RgbaImage> | RgbaImage;
 }
 
+/**
+ * A run sent to a person, because its score fell in an uncertain band or a safety policy asked for
+ * review.
+ */
 export interface ReviewItem {
+  /** The case that produced it. */
   caseId: string;
+  /** Which run of the case. */
   run: number;
+  /** Why it needs a person. */
   reason: string;
+  /** The run's scores. */
   scores: Record<string, number>;
+  /** The image to look at. */
   asset?: AssetDescriptor;
+  /** Safety findings on the run. */
   findings?: readonly MediaSafetyFinding[];
 }
 
 /** Where uncertain results go for a person to judge. */
 export interface ReviewQueue {
+  /** Adds an item for review. */
   enqueue(item: ReviewItem): Promise<void> | void;
 }
 
+/** A review queue that keeps items in memory, for tests and small setups. */
 export class MemoryReviewQueue implements ReviewQueue {
+  /** Items queued so far, in order. */
   readonly items: ReviewItem[] = [];
 
+  /** Adds an item for review. */
   enqueue(item: ReviewItem): void {
     this.items.push(item);
   }
 }
 
+/**
+ * Configuration for `MediaEvalRunner`: scorers, where uncertain results go, and how often to run
+ * each case.
+ */
 export interface MediaEvalOptions {
+  /** Scoring functions for alignment, OCR, and decoding. */
   scorers?: MediaEvalScorers;
+  /** Where uncertain results go for a person to judge. */
   reviewQueue?: ReviewQueue;
   /**
    * Scores inside this band are neither a clear pass nor a clear fail, so they go to review instead
@@ -91,38 +125,66 @@ export interface MediaEvalOptions {
   runs?: number;
 }
 
+/** Distribution of one metric across runs. */
 export interface MetricStats {
+  /** Values measured. */
   n: number;
+  /** Their mean. */
   mean: number;
+  /** Their sample standard deviation. */
   stddev: number;
+  /** The smallest value. */
   min: number;
+  /** The largest value. */
   max: number;
   /** Normal-approximation 95% interval for the mean. Wide intervals mean more runs are needed. */
   ci95: [number, number];
 }
 
+/** The outcome of one run of a case. */
 export interface MediaEvalRunReport {
+  /** Which run, starting at 0. */
   run: number;
+  /** True when every expectation held. */
   passed: boolean;
+  /** True when a safety policy blocked the run. */
   blocked: boolean;
+  /** Each expectation that failed, as a readable reason. */
   failures: string[];
+  /** Every metric measured: `latencyMs`, `cost`, `alignment`, `textAccuracy`, `similarity`. */
   scores: Record<string, number>;
+  /** Why the run failed to produce a result, when it did. */
   error?: string;
 }
 
+/** A case's runs and how consistently it passed. */
 export interface MediaEvalCaseReport {
+  /** The case's id. */
   id: string;
+  /** The case's tags. */
   tags?: string[];
+  /** Every run. */
   runs: MediaEvalRunReport[];
+  /** Share of runs that passed. */
   passRate: number;
+  /** True only when every run passed. */
   passed: boolean;
+  /** Distribution of each metric across the runs. */
   stats: Record<string, MetricStats>;
 }
 
+/** A media evaluation: per-case results, distributions, safety accuracy, and operational health. */
 export interface MediaEvalReport {
+  /** Per-case results, in order. */
   cases: MediaEvalCaseReport[];
+  /** Share of all runs that passed. */
   passRate: number;
+  /** Distribution of each metric across every run. */
   metrics: Record<string, MetricStats>;
+  /**
+   * How well blocking matched expectations: true and false positives and negatives, and their
+   * rates.
+   */
   safety: {
     truePositives: number;
     falsePositives: number;
@@ -133,6 +195,7 @@ export interface MediaEvalReport {
     /** Share of runs expected to be blocked that got through. */
     falseNegativeRate: number;
   };
+  /** Runs, errors, error rate, and failovers across the evaluation. */
   operational: {
     runs: number;
     errors: number;
@@ -140,17 +203,96 @@ export interface MediaEvalReport {
     /** Runs whose result names more than one provider on its route. */
     failovers: number;
   };
+  /** Runs sent to review. */
   reviewQueued: number;
+  /** The same evaluation as an experiment, for storage and `compareExperiments()`. */
+  experiment?: Experiment;
 }
 
+/** Options for one evaluation run. */
+export interface MediaEvalRunOptions {
+  /** Names the experiment. Defaults to `media-eval` plus a timestamp. */
+  name?: string;
+  /** Stores the experiment, for a later comparison. */
+  store?: ExperimentStore;
+  /** Application data recorded on the experiment. */
+  metadata?: Record<string, unknown>;
+  /** Stops the evaluation. No further runs start, and nothing is stored. */
+  signal?: AbortSignal;
+}
+
+/**
+ * Runs media cases repeatedly and reports distributions, safety accuracy, and operations.
+ *
+ * Built on `evaluate()`: each case is an example, `runs` is its repetition count, and the report is
+ * assembled from the experiment, which is returned with it so a media evaluation can be stored and
+ * compared like any other.
+ */
 export class MediaEvalRunner {
   constructor(
     private readonly target: MediaEvalTarget,
     private readonly options: MediaEvalOptions = {},
   ) {}
 
-  async evaluate(cases: readonly MediaEvalCase[]): Promise<MediaEvalReport> {
+  /**
+   * Runs every case its configured number of times and reports the results. Rejects before running
+   * anything when a case asks for fewer than one run, and stops when a case needs a scorer that is
+   * not configured.
+   */
+  async evaluate(cases: readonly MediaEvalCase[], runOptions: MediaEvalRunOptions = {}): Promise<MediaEvalReport> {
     if (cases.length === 0) throw new ImageValidationError('A media evaluation needs at least one case');
+    const runCounts = cases.map((evalCase) => {
+      const runCount = evalCase.runs ?? this.options.runs ?? 1;
+      if (!Number.isInteger(runCount) || runCount < 1) {
+        throw new ImageValidationError(`Case "${evalCase.id}" must run at least once`);
+      }
+      return runCount;
+    });
+
+    const ids = uniqueIds(cases.map((evalCase) => evalCase.id));
+    const examples: Array<DatasetExample<MediaEvalCase>> = cases.map((evalCase, index) => ({
+      id: ids[index] as string,
+      inputs: evalCase,
+      ...(evalCase.tags ? { tags: evalCase.tags } : {}),
+    }));
+    const runsOf = new Map(examples.map((example, index) => [example.id, runCounts[index] as number]));
+    const outcomes = new Map<string, { run: MediaEvalRunReport; reviewed: number; failover: boolean }>();
+
+    // A configuration error — a case that needs a scorer nobody configured — must stop the whole
+    // evaluation rather than be recorded as one failed run, so it aborts with itself as the reason.
+    const stop = new AbortController();
+    const signal = runOptions.signal ? AbortSignal.any([stop.signal, runOptions.signal]) : stop.signal;
+    // Loaded on first use, so the media evaluation entry point stays the size it was.
+    const { evaluate } = await import('../evaluate/run.js');
+
+    const experiment = await evaluate<MediaEvalCase>(
+      async (evalCase, { example, run }) => {
+        try {
+          const outcome = await this.runOnce(evalCase, run);
+          outcomes.set(`${example.id}#${run}`, outcome);
+          return outcome.run;
+        } catch (error) {
+          stop.abort(error);
+          throw error;
+        }
+      },
+      {
+        name: 'media-eval',
+        version: mediaVersion(examples),
+        examples,
+        createdAt: new Date().toISOString(),
+      },
+      [(context) => (context.output ? runScores(context.output as MediaEvalRunReport) : [])],
+      {
+        name: runOptions.name ?? `media-eval ${new Date().toISOString()}`,
+        concurrency: 1,
+        repetitions: (example) => runsOf.get(example.id) ?? 1,
+        cost: (output) => (output as MediaEvalRunReport).scores.cost,
+        signal,
+        ...(runOptions.store ? { store: runOptions.store } : {}),
+        ...(runOptions.metadata ? { metadata: runOptions.metadata } : {}),
+      },
+    );
 
     const caseReports: MediaEvalCaseReport[] = [];
     const allScores: Record<string, number[]> = {};
@@ -162,16 +304,12 @@ export class MediaEvalRunner {
     let reviewQueued = 0;
     let totalRuns = 0;
 
-    for (const evalCase of cases) {
-      const runCount = evalCase.runs ?? this.options.runs ?? 1;
-      if (!Number.isInteger(runCount) || runCount < 1) {
-        throw new ImageValidationError(`Case "${evalCase.id}" must run at least once`);
-      }
-
+    cases.forEach((evalCase, index) => {
       const runs: MediaEvalRunReport[] = [];
-      for (let run = 0; run < runCount; run += 1) {
+      for (let run = 0; run < (runCounts[index] as number); run += 1) {
+        const report = outcomes.get(`${ids[index]}#${run}`);
+        if (!report) continue;
         totalRuns += 1;
-        const report = await this.runOnce(evalCase, run);
         runs.push(report.run);
         reviewQueued += report.reviewed;
         if (report.failover) failovers += 1;
@@ -204,7 +342,7 @@ export class MediaEvalRunner {
         passed: passes === runs.length,
         stats: Object.fromEntries(Object.entries(perMetric).map(([metric, values]) => [metric, stats(values)])),
       });
-    }
+    });
 
     const passedRuns = caseReports.reduce((total, item) => total + item.runs.filter((run) => run.passed).length, 0);
 
@@ -219,6 +357,7 @@ export class MediaEvalRunner {
       },
       operational: { runs: totalRuns, errors, errorRate: errors / totalRuns, failovers },
       reviewQueued,
+      experiment,
     };
   }
 
@@ -436,6 +575,50 @@ function collectScores(target: Record<string, number[]>, scores: Record<string, 
     values.push(value);
     target[metric] = values;
   }
+}
+
+/** One run's scores in experiment form. Latency is renamed so comparisons treat lower as better. */
+function runScores(report: MediaEvalRunReport): EvaluationScore[] {
+  return [
+    {
+      key: 'passed',
+      score: report.passed ? 1 : 0,
+      passed: report.passed,
+      ...(report.failures.length > 0 ? { comment: report.failures.join('; ') } : {}),
+    },
+    ...Object.entries(report.scores).map(([key, score]) => ({ key: key === 'latencyMs' ? 'latency' : key, score })),
+  ];
+}
+
+/**
+ * A content version for media cases.
+ *
+ * An edit case carries image bytes, and serializing those as JSON would turn every byte into a
+ * number in a string several times the image's size. Byte arrays are hashed by digest instead.
+ */
+function mediaVersion(examples: ReadonlyArray<DatasetExample<MediaEvalCase>>): string {
+  const hash = createHash('sha256');
+  for (const example of examples) {
+    hash.update(
+      // A Buffer's toJSON() runs before a replacer sees the value, so the original is read from the
+      // holder instead.
+      JSON.stringify({ id: example.id, inputs: example.inputs }, function (this: Record<string, unknown>, key, value) {
+        const original = this[key];
+        return original instanceof Uint8Array ? `bytes:${createHash('sha256').update(original).digest('hex')}` : value;
+      }),
+    );
+  }
+  return `v${hash.digest('hex').slice(0, 12)}`;
+}
+
+/** Case ids as example ids, with a suffix where two cases share an id. */
+function uniqueIds(values: readonly string[]): string[] {
+  const seen = new Map<string, number>();
+  return values.map((value) => {
+    const count = (seen.get(value) ?? 0) + 1;
+    seen.set(value, count);
+    return count === 1 ? value : `${value}#${count}`;
+  });
 }
 
 // The PNG codec loads only when a case checks preservation without its own decoder.

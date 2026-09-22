@@ -27,6 +27,7 @@ const GOOGLE_FORMATS = ['png', 'jpeg'] as const;
 const GOOGLE_ASPECT_RATIOS = ['1:1', '3:4', '4:3', '9:16', '16:9'] as const;
 const GOOGLE_INPUT_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 
+/** Options for the Google image provider, for the Gemini API or Vertex AI. */
 export interface GoogleImageProviderConfig {
   /** Gemini API key, sent as `x-goog-api-key`. */
   apiKey?: string;
@@ -35,15 +36,23 @@ export interface GoogleImageProviderConfig {
    * at a Vertex endpoint such as `https://us-central1-aiplatform.googleapis.com/v1/projects/P/locations/us-central1/publishers/google`.
    */
   accessToken?: string;
+  /**
+   * API base URL. Defaults to the Gemini API, `https://generativelanguage.googleapis.com/v1beta`.
+   */
   baseUrl?: string;
+  /** Model for generation. Defaults to `imagen-4.0-generate-001`. */
   generateModel?: string;
+  /** Model for edits. Defaults to `imagen-3.0-capability-001`. */
   editModel?: string;
+  /** Headers added to every request. */
   defaultHeaders?: Record<string, string>;
+  /** Replaces the global `fetch`. */
   fetch?: typeof globalThis.fetch;
   /** Converts a neutral mask to Imagen's white-is-editable greyscale. Loaded on first masked request. */
   maskTransformer?: AssetTransformer;
   /** `dont_allow`, `allow_adult`, or `allow_all`, passed through as `personGeneration`. */
   personGeneration?: string;
+  /** Keeps Google's response on each result as `raw`. Off by default. */
   includeRawResponse?: boolean;
 }
 
@@ -66,6 +75,7 @@ interface ImagenResponse {
  * channel, and safety filtering reported per image rather than as a request failure.
  */
 export class GoogleImageProvider implements ImageProvider {
+  /** Provider name, capabilities, and models. */
   readonly info: ImageProviderInfo;
 
   private readonly baseUrl: string;
@@ -108,6 +118,7 @@ export class GoogleImageProvider implements ImageProvider {
     };
   }
 
+  /** Generates images from a prompt. */
   async generate(request: ImageGenerateRequest, context: ImageProviderCallContext): Promise<ImageResult> {
     const startedAt = Date.now();
     const model = resolveModel(request.model, this.generateModel);
@@ -125,6 +136,7 @@ export class GoogleImageProvider implements ImageProvider {
     return this.normalize(response, request, context, model, format, startedAt, 'generate', warnings);
   }
 
+  /** Edits an image, optionally within a mask. */
   async edit(request: ImageEditRequest, context: ImageProviderCallContext): Promise<ImageResult> {
     const startedAt = Date.now();
     const model = resolveModel(request.model, this.editModel);

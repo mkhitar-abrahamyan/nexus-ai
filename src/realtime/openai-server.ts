@@ -1,13 +1,20 @@
 import { RealtimeError } from './errors.js';
 
+/** The part of a `fetch` response the server helpers read. */
 export interface OpenAIRealtimeServerFetchResponse {
+  /** True for a 2xx status. */
   readonly ok: boolean;
+  /** HTTP status code. */
   readonly status: number;
+  /** HTTP status text. */
   readonly statusText?: string;
+  /** Reads the body as text. */
   text(): Promise<string>;
+  /** Reads the body as JSON. */
   json?(): Promise<unknown>;
 }
 
+/** The part of `fetch` the server helpers use. */
 export type OpenAIRealtimeServerFetch = (
   input: string,
   init: {
@@ -18,26 +25,44 @@ export type OpenAIRealtimeServerFetch = (
   },
 ) => Promise<OpenAIRealtimeServerFetchResponse>;
 
+/** The part of `FormData` the SDP exchange needs. */
 export interface FormDataLike {
+  /** Sets a field. */
   set(name: string, value: string): void;
 }
 
+/** Server-side options for creating OpenAI realtime sessions, where the API key lives. */
 export interface OpenAIRealtimeServerOptions {
+  /** OpenAI API key. Never send it to a browser. */
   apiKey: string;
+  /** Realtime model. */
   model: string;
+  /** Session settings sent to OpenAI, such as instructions or voice. */
   session?: Record<string, unknown>;
+  /** API base URL. Defaults to `https://api.openai.com/v1`. */
   baseUrl?: string;
+  /** Identifies the end user to OpenAI's safety systems, sent as `OpenAI-Safety-Identifier`. */
   safetyIdentifier?: string;
+  /** Replaces the global `fetch`. */
   fetch?: OpenAIRealtimeServerFetch;
+  /** Creates the multipart form, for runtimes without a global `FormData`. */
   formDataFactory?: () => FormDataLike;
 }
 
+/** A short-lived client secret a browser can connect with. */
 export interface OpenAIRealtimeClientSecret {
+  /** The token. */
   value: string;
+  /** Epoch seconds when it expires. */
   expiresAt?: number;
+  /** OpenAI's response, unmodified. */
   raw: Record<string, unknown>;
 }
 
+/**
+ * Exchanges a browser's SDP offer with OpenAI and returns the SDP answer. What your
+ * `sessionEndpoint` does in `unified-sdp` mode.
+ */
 export async function createOpenAIRealtimeCall(
   sdp: string,
   options: OpenAIRealtimeServerOptions,
@@ -60,6 +85,10 @@ export async function createOpenAIRealtimeCall(
   return response.text();
 }
 
+/**
+ * Mints an ephemeral client secret for a browser session. What your `sessionEndpoint` does in
+ * `ephemeral-token` mode.
+ */
 export async function createOpenAIRealtimeClientSecret(
   options: OpenAIRealtimeServerOptions,
   signal?: AbortSignal,
@@ -107,6 +136,7 @@ export async function createOpenAIRealtimeClientSecret(
   };
 }
 
+/** Returns a function that exchanges an SDP offer, ready to put behind your own HTTP route. */
 export function createOpenAIRealtimeSessionEndpoint(options: OpenAIRealtimeServerOptions) {
   return (sdp: string, signal?: AbortSignal) => createOpenAIRealtimeCall(sdp, options, signal);
 }

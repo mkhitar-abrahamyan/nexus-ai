@@ -6,7 +6,7 @@ import type {
   StorePutOptions,
   StoreSearchOptions,
 } from '../types/store.js';
-import { cosine, matches, textOf } from './memory.js';
+import { cosine, matches, textOf } from './helpers.js';
 
 /**
  * The subset of a Redis client this store uses.
@@ -15,18 +15,27 @@ import { cosine, matches, textOf } from './memory.js';
  * Upstash client, or a fake in a test all work without this package depending on any of them.
  */
 export interface RedisStoreLikeClient {
+  /** Reads a key. */
   get(key: string): Promise<string | null>;
+  /** Writes a key, with `PX` and a TTL in milliseconds when the item expires. */
   set(key: string, value: string, mode?: string, ttl?: number): Promise<unknown>;
+  /** Deletes keys. */
   del(key: string | string[]): Promise<unknown>;
+  /** Adds to a set. */
   sadd(key: string, member: string): Promise<unknown>;
+  /** Removes from a set. */
   srem(key: string, member: string): Promise<unknown>;
+  /** Reads a set. */
   smembers(key: string): Promise<string[]>;
 }
 
+/** Options for the Redis store. */
 export interface RedisStoreOptions {
   /** Key prefix, so one Redis instance can hold several stores. Defaults to `nexus:store`. */
   prefix?: string;
+  /** Embeds items for semantic search. Without it, search matches text in the stored values. */
   index?: StoreIndexOptions;
+  /** Replaces the system clock, for tests. */
   now?: () => Date;
 }
 
@@ -53,6 +62,7 @@ export class RedisStore implements Store {
     this.now = options.now ?? (() => new Date());
   }
 
+  /** Stores an item, keeping its original `createdAt` when it replaces one. */
   async put<V>(namespace: StoreNamespace, key: string, value: V, options: StorePutOptions = {}): Promise<void> {
     if (!key.trim()) throw new RangeError('A store key must not be empty');
     const id = this.itemKey(namespace, key);
@@ -80,6 +90,7 @@ export class RedisStore implements Store {
     await this.client.sadd(this.indexKey(), namespace.join('\u0000'));
   }
 
+  /** Reads an item, or `undefined` when it does not exist or Redis has expired it. */
   async get<V>(namespace: StoreNamespace, key: string): Promise<StoreItem<V> | undefined> {
     const record = await this.read(this.itemKey(namespace, key));
     if (!record) {
@@ -90,11 +101,16 @@ export class RedisStore implements Store {
     return strip(record) as StoreItem<V>;
   }
 
+  /** Deletes an item. */
   async delete(namespace: StoreNamespace, key: string): Promise<void> {
     await this.client.del(this.itemKey(namespace, key));
     await this.client.srem(this.namespaceKey(namespace), key);
   }
 
+  /**
+   * Items under a namespace prefix, newest first, or ranked by similarity when a query is given.
+   * Defaults to 20.
+   */
   async search<V>(namespacePrefix: StoreNamespace, options: StoreSearchOptions = {}): Promise<Array<StoreItem<V>>> {
     const namespaces = await this.namespacesUnder(namespacePrefix);
     const records: StoredRecord[] = [];
@@ -122,6 +138,7 @@ export class RedisStore implements Store {
     return ranked.slice(offset, offset + limit).map((record) => strip(record) as StoreItem<V>);
   }
 
+  /** Namespaces under a prefix. Defaults to 100. */
   async listNamespaces(options: { prefix?: StoreNamespace; limit?: number } = {}): Promise<string[][]> {
     const namespaces = await this.namespacesUnder(options.prefix ?? []);
     return namespaces.slice(0, options.limit ?? 100);

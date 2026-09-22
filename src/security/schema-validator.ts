@@ -63,7 +63,9 @@ export const completionRequestSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
+/** Validates a request's shape before it is sent. */
 export class SchemaValidator {
+  /** Findings for every field that does not match the request schema. */
   validate(request: CompletionRequest): SecurityFinding[] {
     const parsed = completionRequestSchema.safeParse(request);
     if (parsed.success) return [];

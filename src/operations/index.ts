@@ -27,6 +27,7 @@ export {
 export {
   OperationCancelledError,
   OperationConflictError,
+  OperationDuplicateError,
   OperationError,
   OperationExpiredError,
   OperationLeaseLostError,

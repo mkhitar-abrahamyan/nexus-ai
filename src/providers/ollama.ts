@@ -41,7 +41,9 @@ interface OllamaChatResponse {
   eval_count?: number;
 }
 
+/** Ollama, for models running on this machine or a local server. */
 export class OllamaProvider extends BaseProvider {
+  /** Always `ollama`, local. */
   readonly info: ProviderInfo = { name: 'ollama', isLocal: true };
   private client?: OllamaClient;
   private config: OllamaProviderConfig;
@@ -77,6 +79,7 @@ export class OllamaProvider extends BaseProvider {
     return model;
   }
 
+  /** Runs one completion. */
   async complete(request: CompletionRequest): Promise<NexusResponse> {
     const model = this.extractModel(request.model);
     try {
@@ -113,6 +116,7 @@ export class OllamaProvider extends BaseProvider {
     }
   }
 
+  /** Streams one completion. */
   stream(request: CompletionRequest): NexusStream {
     const self = this;
 

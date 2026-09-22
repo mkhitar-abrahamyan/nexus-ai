@@ -2,9 +2,12 @@ import type { CompletionRequest } from '../types/messages.js';
 import type { BudgetConfig } from '../types/optimizer.js';
 import { Tokenizer } from '../utils/tokenizer.js';
 
+/** Raised when a request exceeds its input token budget and `onExceeded` is `error`, the default. */
 export class TokenBudgetError extends Error {
   constructor(
+    /** Estimated input tokens. */
     public tokens: number,
+    /** The budget. */
     public maxTokens: number,
   ) {
     super(`Token budget exceeded: ${tokens} tokens > ${maxTokens} max tokens`);
@@ -12,9 +15,14 @@ export class TokenBudgetError extends Error {
   }
 }
 
+/** Checks requests against an input token budget and applies its over-budget strategy. */
 export class BudgetEnforcer {
   constructor(private tokenizer = new Tokenizer()) {}
 
+  /**
+   * Estimates a request's input tokens and whether they exceed the budget, with a warning past
+   * `warnAt`.
+   */
   check(
     request: CompletionRequest,
     config: BudgetConfig = {},
@@ -38,6 +46,10 @@ export class BudgetEnforcer {
     };
   }
 
+  /**
+   * Applies the budget as `onExceeded` says: `error` throws, `truncate` trims the oldest non-system
+   * messages, and `allow` and `densify` pass the request through, densification running elsewhere.
+   */
   enforce(request: CompletionRequest, config: BudgetConfig = {}): CompletionRequest {
     if (config.enabled === false || !config.maxInputTokens) return request;
 

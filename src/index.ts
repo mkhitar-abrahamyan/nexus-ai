@@ -95,6 +95,7 @@ export {
 export {
   OperationCancelledError,
   OperationConflictError,
+  OperationDuplicateError,
   OperationError,
   OperationExpiredError,
   OperationLeaseLostError,
@@ -156,6 +157,8 @@ export {
   type CircuitSnapshot,
   type CircuitState,
   type CircuitStateChange,
+  type CircuitStateStore,
+  type SharedCircuitState,
 } from './ops/circuit-breaker.js';
 export {
   MemoryRateLimitStore,
@@ -352,6 +355,7 @@ export {
   type EvalJudge,
   type EvalJudgment,
   type EvalResult,
+  type EvalRunOptions,
   type EvalRunResult,
 } from './evals/runner.js';
 export {

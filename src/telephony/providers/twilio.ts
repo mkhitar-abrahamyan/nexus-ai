@@ -23,16 +23,26 @@ import type {
 import { TelephonyProviderError } from '../errors.js';
 import { createVoiceTwiML } from '../twiml.js';
 
+/** Options for the Twilio telephony provider. */
 export interface TwilioTelephonyProviderConfig {
+  /** Twilio account SID. Required for REST calls. */
   accountSid?: string;
+  /** Twilio auth token, used for REST calls and webhook validation. */
   authToken?: string;
+  /** REST API base URL. Defaults to `https://api.twilio.com/2010-04-01`. */
   baseUrl?: string;
+  /** Replaces the global `fetch`. */
   fetch?: typeof fetch;
 }
 
 type TwilioPayload = Record<string, unknown>;
 
+/**
+ * Twilio Programmable Voice: outbound calls, TwiML webhooks, call control, phone numbers, and
+ * bidirectional Media Streams.
+ */
 export class TwilioTelephonyProvider implements TelephonyProvider {
+  /** Always `twilio`, with every telephony capability. */
   readonly info: TelephonyProviderInfo = {
     name: 'twilio',
     isLocal: false,
@@ -49,6 +59,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
 
   constructor(private config: TwilioTelephonyProviderConfig = {}) {}
 
+  /** Places an outbound call. */
   async createCall(request: CreateCallRequest): Promise<CreateCallResponse> {
     const body = new URLSearchParams();
 
@@ -97,6 +108,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     };
   }
 
+  /** Builds a TwiML webhook response. */
   async createWebhookResponse(request: TelephonyResponseRequest): Promise<TelephonyWebhookResponse> {
     const body = createVoiceTwiML(request);
     return {
@@ -107,6 +119,9 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     };
   }
 
+  /**
+   * Validates a webhook's `X-Twilio-Signature`, using the request's token or the configured one.
+   */
   validateWebhook(request: TelephonyWebhookValidationRequest): boolean {
     const token = request.authToken || this.config.authToken;
     if (!token) throw new TelephonyProviderError('Twilio webhook validation requires authToken', 'twilio');
@@ -125,6 +140,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     return safeEqual(signature, expected);
   }
 
+  /** Reads a call's details. */
   async getCall(request: GetCallRequest): Promise<TelephonyCallDetails> {
     const raw = await this.request(`/Calls/${encodeURIComponent(request.callId)}.json`, {
       method: 'GET',
@@ -134,6 +150,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     return this.toCallDetails(raw, request.callId);
   }
 
+  /** Ends a call in progress. */
   async endCall(request: EndCallRequest): Promise<TelephonyCallDetails> {
     const body = new URLSearchParams();
     body.set('Status', request.status || 'completed');
@@ -147,6 +164,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     return this.toCallDetails(raw, request.callId);
   }
 
+  /** Parses a status callback into neutral call details. */
   parseStatusCallback(
     body: string | URLSearchParams | Record<string, string | number | boolean | undefined>,
   ): TelephonyStatusCallback | undefined {
@@ -171,6 +189,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     };
   }
 
+  /** Lists the account's phone numbers. */
   async listPhoneNumbers(request: ListPhoneNumbersRequest = {}): Promise<TelephonyPhoneNumber[]> {
     const query = new URLSearchParams();
     if (request.phoneNumber) query.set('PhoneNumber', request.phoneNumber);
@@ -188,6 +207,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     return list.map((entry) => this.toPhoneNumber(objectValue(entry)));
   }
 
+  /** Changes where a phone number sends its calls and status callbacks. */
   async updatePhoneNumber(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber> {
     const body = new URLSearchParams();
     if (request.friendlyName !== undefined) body.set('FriendlyName', request.friendlyName);
@@ -213,6 +233,10 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     return this.toPhoneNumber(raw);
   }
 
+  /**
+   * Parses a Media Streams message into a neutral event. Returns `undefined` for events it does not
+   * model.
+   */
   parseMediaStreamEvent(message: string | Record<string, unknown>): TelephonyMediaStreamEvent | undefined {
     const data = typeof message === 'string' ? (JSON.parse(message) as TwilioPayload) : message;
     const event = stringValue(data.event);
@@ -294,6 +318,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     return undefined;
   }
 
+  /** Formats a Media Streams message: audio, a mark, or a clear. */
   formatAudioMessage(
     streamId: string,
     payload: string,

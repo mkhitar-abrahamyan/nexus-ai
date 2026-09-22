@@ -10,7 +10,9 @@ const PII_PATTERNS: Record<PIIType, RegExp> = {
   'private-key': /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
 };
 
+/** Finds and masks personal data such as emails, phone numbers, and card numbers. */
 export class PIIDetector {
+  /** Finds personal data in a request's messages. */
   detect(request: CompletionRequest, config: PIIConfig = {}): SecurityFinding[] {
     if (config.enabled === false) return [];
 
@@ -40,6 +42,7 @@ export class PIIDetector {
     return findings;
   }
 
+  /** Returns the request with personal data masked. */
   mask(request: CompletionRequest, config: PIIConfig = {}): CompletionRequest {
     const enabledTypes = config.detect || ['email', 'phone', 'credit-card', 'ip-address', 'aws-key', 'private-key'];
     const maskChar = config.maskChar || '█';

@@ -2,41 +2,74 @@ import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import type { EvalCase, EvalJudge } from './runner.js';
 
+/** The one method the judge needs from a client. */
 export interface JudgeClient<Response = NexusResponse> {
+  /** Runs one completion. */
   complete(request: CompletionRequest): Promise<Response>;
 }
 
+/** What the judge sees for one answer. */
 export interface LLMJudgeInput {
+  /** The answer to judge. */
   actual: string;
+  /** A reference answer, when there is one. */
   expected?: string;
+  /** The question the answer responds to. */
   query?: string;
+  /** The rubric for this answer, overriding the judge's. */
   rubric?: string;
+  /** Source passages the answer should be grounded in. */
   contexts?: string[];
+  /** Application data, not shown to the judge. */
   metadata?: Record<string, unknown>;
 }
 
+/** Configuration for an LLM judge. */
 export interface LLMJudgeOptions<Response = NexusResponse> {
+  /** Client the judge model is called through. */
   client: JudgeClient<Response>;
+  /** The judge model. */
   model: string;
+  /** What a good answer looks like, in plain language. */
   rubric?: string;
+  /**
+   * Replaces the default instruction that asks for JSON with score, passed, rationale, and labels.
+   */
   systemPrompt?: string;
+  /**
+   * Score at or above which an answer passes when the judge does not say. Defaults to the middle of
+   * `range`.
+   */
   passThreshold?: number;
+  /** Scoring range. Defaults to 0 to 1. */
   range?: [number, number];
+  /** Sampling temperature. Defaults to 0, for repeatable verdicts. */
   temperature?: number;
+  /** Output token limit. Defaults to 512. */
   maxTokens?: number;
+  /** Application data sent with every judge request. */
   metadata?: Record<string, unknown>;
 }
 
+/** A judge's verdict. */
 export interface LLMJudgeResult {
+  /** Score, clamped to the range. */
   score: number;
+  /** Whether the answer passed. */
   passed: boolean;
+  /** Why, in the judge's words. */
   rationale?: string;
+  /** Labels the judge applied. */
   labels?: string[];
+  /** The judge's raw response. */
   raw: unknown;
+  /** Provider the judge ran on. */
   providerUsed?: string;
+  /** Model the judge ran on. */
   modelUsed?: string;
 }
 
+/** Turns a response and its case into what the judge sees. */
 export type LLMJudgeInputMapper<Response> = (
   response: Response,
   testCase: EvalCase<Response>,
@@ -48,9 +81,14 @@ const DEFAULT_SYSTEM_PROMPT = [
   'Score must be numeric within the configured range.',
 ].join(' ');
 
+/**
+ * Scores answers with a model against a rubric, asking for structured JSON and tolerating a judge
+ * that answers in prose.
+ */
 export class LLMJudge<Response = NexusResponse> {
   constructor(private options: LLMJudgeOptions<Response>) {}
 
+  /** Judges one answer. */
   async evaluate(input: LLMJudgeInput): Promise<LLMJudgeResult> {
     const range = this.options.range || [0, 1];
     const threshold = this.options.passThreshold ?? midpoint(range);
@@ -88,6 +126,10 @@ export class LLMJudge<Response = NexusResponse> {
     });
   }
 
+  /**
+   * Adapts the judge to an `EvalRunner` case, optionally with a mapper that picks what the judge
+   * sees.
+   */
   asEvalJudge(mapper?: LLMJudgeInputMapper<Response>): EvalJudge<Response> {
     return async (response, testCase) => {
       const input = mapper
@@ -120,6 +162,7 @@ export class LLMJudge<Response = NexusResponse> {
   }
 }
 
+/** Adapts a judge to an `EvalRunner` case. The same as `judge.asEvalJudge(mapper)`. */
 export function createLLMJudgeEval<Response = NexusResponse>(
   judge: LLMJudge<Response>,
   mapper?: LLMJudgeInputMapper<Response>,
@@ -127,6 +170,10 @@ export function createLLMJudgeEval<Response = NexusResponse>(
   return judge.asEvalJudge(mapper);
 }
 
+/**
+ * Reads a judge's reply: JSON, fenced JSON, or a number in prose, clamped to the range, with
+ * `passed` from the reply or the threshold.
+ */
 export function parseJudgeResponse(
   content: string,
   options: {

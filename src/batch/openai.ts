@@ -12,11 +12,17 @@ import type { NexusResponse } from '../types/response.js';
 import { buildMeta } from '../core/usage.js';
 import { BatchProviderResponseError } from './errors.js';
 
+/** Options for the OpenAI batch provider. */
 export interface OpenAIBatchProviderOptions {
+  /** OpenAI API key. */
   apiKey: string;
+  /** API base URL. Defaults to `https://api.openai.com/v1`. */
   baseUrl?: string;
+  /** Sent as the `OpenAI-Organization` header. */
   organization?: string;
+  /** Headers added to every request. */
   headers?: Record<string, string>;
+  /** Replaces the global `fetch`. */
   fetch?: typeof fetch;
   /** Endpoint every item targets. Defaults to chat completions. */
   endpoint?: '/v1/chat/completions' | '/v1/embeddings' | (string & {});
@@ -54,6 +60,7 @@ interface OpenAIBatchPayload {
  * synchronous one.
  */
 export class OpenAIBatchProvider implements BatchProvider {
+  /** Always `openai`, with its batch limits. */
   readonly info: BatchProviderInfo = {
     name: 'openai',
     capabilities: {
@@ -67,6 +74,7 @@ export class OpenAIBatchProvider implements BatchProvider {
 
   constructor(private readonly options: OpenAIBatchProviderOptions) {}
 
+  /** Uploads the items as JSONL and creates a batch over them. */
   async submit(request: BatchSubmitRequest, context: BatchProviderCallContext): Promise<BatchJobRef> {
     const endpoint = this.options.endpoint ?? '/v1/chat/completions';
     const jsonl = request.items
@@ -111,11 +119,13 @@ export class OpenAIBatchProvider implements BatchProvider {
     return { id: batch.id, provider: 'openai', metadata: { inputFileId: file.id, endpoint } };
   }
 
+  /** Reads a batch's status and counts. */
   async poll(ref: BatchJobRef, context: BatchProviderCallContext): Promise<BatchJobState> {
     const batch = (await this.request(`/batches/${encodeURIComponent(ref.id)}`, {}, context)) as OpenAIBatchPayload;
     return this.toState(ref, batch);
   }
 
+  /** Downloads a finished batch's results. Empty until the output file exists. */
   async results(ref: BatchJobRef, context: BatchProviderCallContext): Promise<BatchOutputItem[]> {
     const batch = (await this.request(`/batches/${encodeURIComponent(ref.id)}`, {}, context)) as OpenAIBatchPayload;
     if (!batch.output_file_id) return [];
@@ -127,6 +137,7 @@ export class OpenAIBatchProvider implements BatchProvider {
       .map((line) => this.toOutputItem(line));
   }
 
+  /** Cancels a batch. Items already processed keep their results. */
   async cancel(ref: BatchJobRef, context: BatchProviderCallContext): Promise<BatchJobState> {
     const batch = (await this.request(
       `/batches/${encodeURIComponent(ref.id)}/cancel`,

@@ -10,14 +10,23 @@ import type {
 } from '../../types/voice.js';
 import { VoiceProviderError } from '../errors.js';
 
+/** Options for the OpenAI voice provider. */
 export interface OpenAIVoiceProviderConfig {
+  /** OpenAI API key. */
   apiKey: string;
+  /** API base URL. Defaults to `https://api.openai.com/v1`. */
   baseUrl?: string;
+  /** Sent as the `OpenAI-Organization` header. */
   organization?: string;
+  /** Transcription model. Defaults to `gpt-4o-transcribe`. */
   transcriptionModel?: string;
+  /** Speech model. Defaults to `gpt-4o-mini-tts`. */
   speechModel?: string;
+  /** Voice used when a request names none. Defaults to `alloy`. */
   defaultVoice?: string;
+  /** Headers added to every request. */
   headers?: Record<string, string>;
+  /** Replaces the global `fetch`. */
   fetch?: typeof fetch;
 }
 
@@ -31,7 +40,9 @@ const DEFAULT_TRANSCRIPTION_MODEL = 'gpt-4o-transcribe';
 const DEFAULT_SPEECH_MODEL = 'gpt-4o-mini-tts';
 const DEFAULT_VOICE = 'alloy';
 
+/** OpenAI speech-to-text and text-to-speech. */
 export class OpenAIVoiceProvider implements VoiceProvider {
+  /** Always `openai`, with transcription and speech. */
   readonly info: VoiceProviderInfo = {
     name: 'openai',
     isLocal: false,
@@ -44,6 +55,7 @@ export class OpenAIVoiceProvider implements VoiceProvider {
 
   constructor(private config: OpenAIVoiceProviderConfig) {}
 
+  /** Transcribes audio. */
   async transcribe(request: TranscriptionRequest): Promise<TranscriptionResponse> {
     const model = request.model || this.config.transcriptionModel || DEFAULT_TRANSCRIPTION_MODEL;
     const form = new FormData();
@@ -94,6 +106,7 @@ export class OpenAIVoiceProvider implements VoiceProvider {
     };
   }
 
+  /** Synthesizes speech. */
   async speak(request: SpeechRequest): Promise<SpeechResponse> {
     const model = request.model || this.config.speechModel || DEFAULT_SPEECH_MODEL;
     const format = request.format || 'mp3';

@@ -8,7 +8,9 @@ import type {
 import { isTerminalOperationStatus } from '../types/operations.js';
 import { OperationCancelledError } from './errors.js';
 
+/** Options for a process-local operation handle. */
 export interface LocalOperationHandleOptions {
+  /** Replaces the system clock, for event timestamps. */
   now?: () => Date;
   /**
    * Builds the error `result()` rejects with on cancellation.
@@ -43,6 +45,7 @@ export class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
   private sequence = 0;
 
   constructor(
+    /** The operation's id. */
     readonly id: string,
     private readonly options: LocalOperationHandleOptions = {},
   ) {
@@ -56,10 +59,12 @@ export class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
     this.emit({ ...this.eventBase(), type: 'queued', status: 'queued' });
   }
 
+  /** Where the operation stands. */
   status(): OperationStatus {
     return this.currentStatus;
   }
 
+  /** The latest progress reported. */
   progress(): OperationProgress | undefined {
     return this.currentProgress;
   }
@@ -74,10 +79,12 @@ export class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
     return this.controller.signal;
   }
 
+  /** Resolves with the result, or rejects when the operation fails, is cancelled, or expires. */
   result(): Promise<TResult> {
     return this.resultPromise;
   }
 
+  /** Asks the operation to stop. Resolves false when it already finished or is already stopping. */
   cancel(reason?: string): boolean {
     if (isTerminalOperationStatus(this.currentStatus) || this.currentStatus === 'cancelling') return false;
 
@@ -91,6 +98,7 @@ export class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
     return true;
   }
 
+  /** Every event, past and future, until the operation finishes. */
   events(): AsyncIterable<OperationEvent<TResult>> {
     return this.iterateEvents();
   }
@@ -132,6 +140,7 @@ export class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
     this.currentAttempt += 1;
   }
 
+  /** Marks the operation expired and rejects its result. Returns false when it already finished. */
   markExpired(error?: unknown): boolean {
     if (isTerminalOperationStatus(this.currentStatus)) return false;
     this.currentStatus = 'expired';
@@ -177,6 +186,7 @@ export class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
     }
   }
 
+  /** Marks the operation succeeded and resolves its result. Ignored once it has finished. */
   settleSuccess(value: TResult): void {
     if (isTerminalOperationStatus(this.currentStatus)) return;
     this.currentStatus = 'succeeded';
@@ -184,6 +194,7 @@ export class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
     this.resolveResult(value);
   }
 
+  /** Marks the operation failed and rejects its result. Ignored once it has finished. */
   settleFailure(error: unknown, deadLettered?: boolean): void {
     if (isTerminalOperationStatus(this.currentStatus)) return;
     this.currentStatus = 'failed';
@@ -247,6 +258,7 @@ export class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
   }
 }
 
+/** Reduces any error to the name, code, message, and retryability an operation record stores. */
 export function describeOperationError(error: unknown): OperationErrorDescriptor {
   if (error instanceof Error) {
     const code = (error as { code?: unknown }).code;

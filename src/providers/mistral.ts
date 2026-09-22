@@ -4,7 +4,9 @@ import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
 import { KNOWN_MODELS } from '../types/providers.js';
 
+/** Mistral's chat API. */
 export class MistralProvider extends OpenAIProvider {
+  /** Always `mistral`, hosted. */
   readonly info = { name: 'mistral', isLocal: false };
 
   constructor(config: MistralProviderConfig) {
@@ -14,6 +16,7 @@ export class MistralProvider extends OpenAIProvider {
     });
   }
 
+  /** Runs one completion. */
   async complete(request: CompletionRequest): Promise<NexusResponse> {
     const response = await super.complete({ ...request, model: this.stripPrefix(request.model) });
     return {
@@ -27,6 +30,7 @@ export class MistralProvider extends OpenAIProvider {
     };
   }
 
+  /** Streams one completion. */
   stream(request: CompletionRequest): NexusStream {
     const stream = super.stream({ ...request, model: this.stripPrefix(request.model) });
     return this.createStream(async function* () {

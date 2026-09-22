@@ -14,6 +14,7 @@ import type {
 import { isTerminalOperationStatus } from '../types/operations.js';
 import {
   OperationCancelledError,
+  OperationDuplicateError,
   OperationExpiredError,
   OperationLeaseLostError,
   OperationNotFoundError,
@@ -93,7 +94,16 @@ export class OperationRunner<TResult = unknown> {
       traceContext: options.traceContext,
       metadata: options.metadata,
     };
-    await this.store.create(record);
+    try {
+      await this.store.create(record);
+    } catch (error) {
+      // Another worker created the operation between the lookup above and this write; replay it.
+      if (error instanceof OperationDuplicateError && options.idempotencyKey && this.store.findByIdempotencyKey) {
+        const winner = await this.store.findByIdempotencyKey(options.idempotencyKey);
+        if (winner) return this.attachToRecord(winner);
+      }
+      throw error;
+    }
     await this.config.dispatcher?.dispatch(record as OperationRecord<unknown>);
 
     return this.startHandle(record, executor, options.signal);

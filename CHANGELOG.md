@@ -4,6 +4,101 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-09-22
+
+Shared state and the command line. Everything that has to outlive a process or be shared between
+workers now has a Postgres adapter, circuit decisions are shared across a fleet, the evaluation
+platform has a CI gate, and suites that needed credentials can run from recorded provider traffic.
+
+### Added
+
+- **A Postgres adapter family** (`nexus-ai-pro/postgres`, with one subpath per adapter):
+  `PostgresOperationStore`, `PostgresStore` (long-term memory, ranked by pgvector when
+  `vectorDimensions` is set), `PostgresTraceStore`, `PostgresDatasetStore`, `PostgresExperimentStore`,
+  and `PostgresCircuitStateStore`.
+  - Each takes any client with `query(text, values)` — `pg`, `@neondatabase/serverless`, PGlite — and
+    `fromPostgresJs()` adapts `postgres.js`. No driver becomes a dependency.
+  - Nothing creates a schema at import: `migrate()`, `postgresMigration()`, and `nexus db sql` apply
+    or print it.
+  - Idempotency keys are unique in the operations table, so two workers racing to submit one key run
+    the work once. Graph threads persist across workers through `OperationStoreCheckpointer`.
+- **Shared circuit state.** `circuitBreaker.store` takes a `CircuitStateStore`: memory and Redis
+  adapters in `nexus-ai-pro/ops/circuit-store`, Postgres in `/postgres/circuits`. A provider that
+  fails in one worker is taken out of routing in all of them, and one worker at a time probes it when
+  the cooldown ends. Checks stay synchronous; the coordination code loads only when a store is
+  configured. `ai.syncCircuitBreaker()` loads shared state at startup.
+- **Evaluation from the command line.** `nexus eval run`, `nexus eval compare`, and `nexus eval gate`
+  run an evaluation module to an experiment file and fail a build only on a regression beyond noise,
+  a new failure, or a dataset mismatch. `nexus traces list`, `show`, and `export` read a JSONL file or
+  any trace store a module exports. `nexus db sql` prints the Postgres schema. Every command takes
+  `--json`, and a usage error exits with 2.
+- **Record and replay** (`nexus-ai-pro/testing/record`). `recordingFetch()` writes provider traffic
+  to reviewable fixture files with credentials removed; `replayFetch()` serves it back with no network
+  and throws `FixtureMissingError` for anything unrecorded; `fixtureFetch()` picks the mode from
+  `NEXUS_FIXTURES`; `installFetch()` covers code that calls the global `fetch`. Multipart boundaries
+  and key order do not break matching.
+- **Image conformance from recordings.** `npm run conformance:images:record` records the image suite
+  against every backend with credentials present; `npm run test:conformance:images` replays it in CI
+  and reports any backend without recordings rather than counting it as a pass.
+- **Graph input and output channels.** `createGraph({ channels, input, output })` restricts what a
+  caller may pass in and what comes back, in the types and at run time. As a subgraph, a graph
+  receives only its inputs and merges back only its outputs.
+- **Per-node caching.** `addNode(name, fn, { cache: { key, ttlMs, store } })` reuses a node's result
+  for the same state and input, in a bounded in-process map or any cache adapter
+  (`compile({ cache })` sets a default). Failures, interrupts, human answers, and parent commands are
+  never cached; a failing cache is a miss.
+- **Evaluation additions.** `underCost()` per-example cost gate; `FileExperimentStore` and
+  `readExperiment()`; `repetitions` may be a function per example; the target receives the abort
+  signal.
+- `EvalRunner.run()` and `MediaEvalRunner.evaluate()` return the experiment underneath their report,
+  and accept options to name and store it.
+- `OperationDuplicateError`, raised by stores that enforce unique idempotency keys.
+- **Documentation coverage.** Every public export, and every public member of an exported class,
+  interface, or enum, now has a doc comment: 4,651 declarations across 88 entry points.
+  `npm run docs:check` enforces it and runs as part of `npm test`.
+
+### Changed
+
+- `EvalRunner` and `MediaEvalRunner` now run on `evaluate()`. Their results and errors are unchanged;
+  `evaluate()` is loaded the first time they run, so neither entry point grew.
+- A caller cancelling a request no longer counts against a provider's circuit.
+- Circuit probe limits are enforced on every attempt through the failover executor, so concurrent
+  requests go to a fallback instead of all probing a half-open provider.
+- Comments are stripped from the emitted JavaScript and kept in the type declarations, where editors
+  read them. Every entry point shrinks as a result: the root import is 572 KB, down from 612 KB, even
+  after the breaker fixes, the `EvalRunner` rebuild, and duplicate-key handling. The published size
+  table has the per-entry-point figures.
+- The packed tarball is 666 KB and 4.1 MB unpacked, up from 3.5 MB, almost all of it the doc comments
+  in the type declarations, which are shipped for both ESM and CommonJS.
+
+### Fixed
+
+- `evaluate()` ignored its `signal` option; aborting now stops new examples, reaches targets, and
+  never stores a partial experiment.
+- `evaluate()` never recorded cost, so `totalCost()` always reported 0. Cost is now read from
+  completion and image results or from a `cost` option.
+- A half-open probe slot was never released when an attempt's error did not count as a failure,
+  leaving the circuit refusing traffic until it was reset.
+- The breaker's documented `halfOpenMaxCalls` was not enforced on real requests: the client routed
+  every request to a half-open provider.
+- The context-window summary call could route to a provider whose circuit was open.
+- `routing.fallback` was accepted but never applied. `onError` models are now tried after every
+  route the router chose, `onTimeout` gives the first attempt its own timeout before its fallback,
+  and `onRateLimit` retries a rate-limited first attempt before falling back.
+- Privacy routing ignored a provider's own `isLocal` declaration, so an OpenAI-compatible server
+  configured as local was still scored as hosted.
+
+### Deprecated
+
+These options were accepted but never read. They still type-check, do nothing, and will be removed
+in 2.0.
+
+- `GoogleProviderConfig.projectId`.
+- `OllamaProviderConfig.timeout`.
+- `MetricsConfig.prometheus`: Prometheus text is always available from `getPrometheusMetrics()`.
+- `DensificationConfig.preserveMarkdown`: densification never rewrites Markdown structure.
+- `HealthConfig.latencyHalfLife`: latency is averaged with a fixed weight.
+
 ## [1.15.0] - 2026-09-21
 
 Evaluation. One entry point for evaluating anything, datasets versioned by their content, experiments
@@ -751,7 +846,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.16.0...HEAD
+[1.16.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.12.0...v1.14.0
 [1.12.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.11.0...v1.12.0

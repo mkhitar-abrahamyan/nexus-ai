@@ -70,7 +70,9 @@ function geminiUsage(usage: GeminiUsageMetadata | undefined): UsageInput {
   };
 }
 
+/** Google's Gemini API. */
 export class GoogleProvider extends BaseProvider {
+  /** Always `google`, hosted. */
   readonly info: ProviderInfo = { name: 'google', isLocal: false };
   private config: GoogleProviderConfig;
 
@@ -79,6 +81,7 @@ export class GoogleProvider extends BaseProvider {
     this.config = config;
   }
 
+  /** Runs one completion. */
   async complete(request: CompletionRequest): Promise<NexusResponse> {
     try {
       this.throwIfAborted(request);
@@ -107,6 +110,7 @@ export class GoogleProvider extends BaseProvider {
     }
   }
 
+  /** Streams one completion. */
   stream(request: CompletionRequest): NexusStream {
     const self = this;
 

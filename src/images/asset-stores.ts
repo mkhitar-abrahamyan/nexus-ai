@@ -33,13 +33,24 @@ interface StoredRecord {
   expiresAt?: string;
 }
 
+/** Options for a store that keeps assets as files on local disk. */
 export interface FilesystemAssetStoreOptions {
   /** Directory the store owns. Created on first write if missing. */
   directory: string;
+  /** Largest single asset accepted, in bytes. */
   maxAssetBytes?: number;
+  /**
+   * Lifetime for assets stored without their own, in seconds. Without it, assets are kept until
+   * deleted.
+   */
   defaultTtlSeconds?: number;
+  /** Creates asset ids. Defaults to random ids. */
   createAssetId?: () => string;
+  /** Replaces the system clock, for tests. */
   now?: () => Date;
+  /**
+   * Produces URLs for `sign()`, such as a route on your own server. Without one, signing throws.
+   */
   signer?: AssetSigner;
 }
 
@@ -71,6 +82,7 @@ export class FilesystemAssetStore implements AssetStore {
     this.signer = options.signer;
   }
 
+  /** Writes an asset and its metadata to disk. */
   async put(input: ByteAssetInput, options: AssetPutOptions): Promise<AssetStat> {
     const nowMs = this.clock().getTime();
     const normalized = validateByteInput(input);
@@ -117,6 +129,10 @@ export class FilesystemAssetStore implements AssetStore {
     return toStat(record);
   }
 
+  /**
+   * Reads an asset with its bytes, or `undefined` when it does not exist, has expired, or belongs
+   * to another tenant.
+   */
   async get(assetId: string, tenantId: string): Promise<ByteAssetDescriptor | undefined> {
     const record = await this.ownedRecord(assetId, tenantId);
     if (!record) return undefined;
@@ -130,11 +146,13 @@ export class FilesystemAssetStore implements AssetStore {
     return { ...cloneDescriptor(record.descriptor), location: { kind: 'bytes', data } };
   }
 
+  /** Describes an asset without reading its bytes. */
   async stat(assetId: string, tenantId: string): Promise<AssetStat | undefined> {
     const record = await this.ownedRecord(assetId, tenantId);
     return record ? toStat(record) : undefined;
   }
 
+  /** Deletes an asset. Resolves `true` when it existed. */
   async delete(assetId: string, tenantId: string): Promise<true | undefined> {
     const record = await this.ownedRecord(assetId, tenantId);
     if (!record) return undefined;
@@ -142,6 +160,7 @@ export class FilesystemAssetStore implements AssetStore {
     return true;
   }
 
+  /** Returns a URL from the configured signer. Throws when no signer is configured. */
   async sign(assetId: string, tenantId: string, options: AssetSignOptions = {}): Promise<string | undefined> {
     if (!this.signer) throw new AssetStoreSigningError('Asset signing requires a configured signer');
     const expiresInSeconds = optionalPositiveNumber(options.expiresInSeconds, 'expiresInSeconds');
@@ -161,6 +180,7 @@ export class FilesystemAssetStore implements AssetStore {
     }
   }
 
+  /** Deletes expired assets, returning how many went. */
   async purgeExpired(): Promise<number> {
     let removed = 0;
     const now = this.clock().getTime();
@@ -229,6 +249,7 @@ export class FilesystemAssetStore implements AssetStore {
  * contract covers S3, R2, MinIO, or a test double.
  */
 export interface S3LikeClient {
+  /** Writes an object. */
   putObject(input: {
     bucket: string;
     key: string;
@@ -236,21 +257,36 @@ export interface S3LikeClient {
     contentType?: string;
     metadata?: Record<string, string>;
   }): Promise<void>;
+  /** Reads an object and its metadata. */
   getObject(input: { bucket: string; key: string }): Promise<{ body: Uint8Array; metadata?: Record<string, string> }>;
+  /** Reads an object's metadata without its body. */
   headObject?(input: { bucket: string; key: string }): Promise<{ metadata?: Record<string, string> } | undefined>;
+  /** Deletes an object. */
   deleteObject(input: { bucket: string; key: string }): Promise<void>;
+  /** Lists objects under a prefix. */
   listObjects(input: { bucket: string; prefix: string }): Promise<Array<{ key: string }>>;
+  /** Produces a presigned URL for an object. */
   getSignedUrl?(input: { bucket: string; key: string; expiresInSeconds?: number }): Promise<string>;
 }
 
+/** Options for a store that keeps assets in an S3-compatible bucket. */
 export interface S3AssetStoreOptions {
+  /** The S3 client, through the structural interface above, so no AWS SDK becomes a dependency. */
   client: S3LikeClient;
+  /** The bucket the store writes to. */
   bucket: string;
   /** Key prefix owned by this store. Defaults to `nexus-assets/`. */
   prefix?: string;
+  /** Largest single asset accepted, in bytes. */
   maxAssetBytes?: number;
+  /**
+   * Lifetime for assets stored without their own, in seconds. Without it, assets are kept until
+   * deleted.
+   */
   defaultTtlSeconds?: number;
+  /** Creates asset ids. Defaults to random ids. */
   createAssetId?: () => string;
+  /** Replaces the system clock, for tests. */
   now?: () => Date;
   /** Overrides the client's own signer. */
   signer?: AssetSigner;
@@ -285,6 +321,7 @@ export class S3AssetStore implements AssetStore {
     this.signer = options.signer;
   }
 
+  /** Writes an asset and its metadata to the bucket. */
   async put(input: ByteAssetInput, options: AssetPutOptions): Promise<AssetStat> {
     const nowMs = this.clock().getTime();
     const normalized = validateByteInput(input);
@@ -345,6 +382,10 @@ export class S3AssetStore implements AssetStore {
     return toStat(record);
   }
 
+  /**
+   * Reads an asset with its bytes, or `undefined` when it does not exist, has expired, or belongs
+   * to another tenant.
+   */
   async get(assetId: string, tenantId: string): Promise<ByteAssetDescriptor | undefined> {
     const record = await this.ownedRecord(assetId, tenantId);
     if (!record) return undefined;
@@ -363,11 +404,13 @@ export class S3AssetStore implements AssetStore {
     }
   }
 
+  /** Describes an asset without reading its bytes. */
   async stat(assetId: string, tenantId: string): Promise<AssetStat | undefined> {
     const record = await this.ownedRecord(assetId, tenantId);
     return record ? toStat(record) : undefined;
   }
 
+  /** Deletes an asset. Resolves `true` when it existed. */
   async delete(assetId: string, tenantId: string): Promise<true | undefined> {
     const record = await this.ownedRecord(assetId, tenantId);
     if (!record) return undefined;
@@ -375,6 +418,7 @@ export class S3AssetStore implements AssetStore {
     return true;
   }
 
+  /** Returns a presigned URL from the configured signer or the client's own. */
   async sign(assetId: string, tenantId: string, options: AssetSignOptions = {}): Promise<string | undefined> {
     const expiresInSeconds = optionalPositiveNumber(options.expiresInSeconds, 'expiresInSeconds');
     const record = await this.ownedRecord(assetId, tenantId);
@@ -404,6 +448,7 @@ export class S3AssetStore implements AssetStore {
     throw new AssetStoreSigningError('Asset signing requires a signer or a client that can presign');
   }
 
+  /** Deletes expired assets, returning how many went. */
   async purgeExpired(): Promise<number> {
     const now = this.clock().getTime();
     const objects = await this.options.client.listObjects({

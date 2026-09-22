@@ -1,7 +1,10 @@
 import type { OperationRecord, OperationStore } from '../types/operations.js';
 import { isTerminalOperationStatus } from '../types/operations.js';
-import { OperationSerializationError } from './errors.js';
+import { assertSerializableRecord } from './serialization.js';
 
+export { assertSerializableRecord };
+
+/** Options for the in-memory operation store. */
 export interface MemoryOperationStoreOptions {
   /** Oldest terminal records are evicted past this count. Defaults to 1000. */
   maxRecords?: number;
@@ -23,6 +26,7 @@ export class MemoryOperationStore<TResult = unknown> implements OperationStore<T
     this.maxRecords = options.maxRecords ?? 1000;
   }
 
+  /** Stores a new record. Refuses records carrying raw bytes. */
   create(record: OperationRecord<TResult>): void {
     assertSerializableRecord(record);
     this.records.set(record.id, clone(record));
@@ -30,11 +34,16 @@ export class MemoryOperationStore<TResult = unknown> implements OperationStore<T
     this.evict();
   }
 
+  /** Reads a record. */
   read(id: string): OperationRecord<TResult> | undefined {
     const record = this.records.get(id);
     return record ? clone(record) : undefined;
   }
 
+  /**
+   * Writes a record when its stored sequence still equals `expectedSequence`. Returns false when
+   * another writer got there first.
+   */
   update(record: OperationRecord<TResult>, expectedSequence: number): boolean {
     const current = this.records.get(record.id);
     if (!current || current.sequence !== expectedSequence) return false;
@@ -43,12 +52,17 @@ export class MemoryOperationStore<TResult = unknown> implements OperationStore<T
     return true;
   }
 
+  /** Deletes a record. Returns true when it existed. */
   delete(id: string): boolean {
     const record = this.records.get(id);
     if (record?.idempotencyKey) this.byIdempotencyKey.delete(record.idempotencyKey);
     return this.records.delete(id);
   }
 
+  /**
+   * Records whose lease has expired, or running records without one, up to `limit`, for another
+   * worker to take over.
+   */
   claimExpired(now: string, limit: number): Array<OperationRecord<TResult>> {
     const expired: Array<OperationRecord<TResult>> = [];
     for (const record of this.records.values()) {
@@ -60,15 +74,18 @@ export class MemoryOperationStore<TResult = unknown> implements OperationStore<T
     return expired;
   }
 
+  /** Finds the record that claimed an idempotency key. */
   findByIdempotencyKey(key: string): OperationRecord<TResult> | undefined {
     const id = this.byIdempotencyKey.get(key);
     return id ? this.read(id) : undefined;
   }
 
+  /** Every record. */
   list(): Array<OperationRecord<TResult>> {
     return [...this.records.values()].map(clone);
   }
 
+  /** Removes every record. */
   clear(): void {
     this.records.clear();
     this.byIdempotencyKey.clear();
@@ -87,59 +104,4 @@ export class MemoryOperationStore<TResult = unknown> implements OperationStore<T
 
 function clone<T>(value: T): T {
   return structuredClone(value);
-}
-
-const BINARY_TAGS = new Set([
-  '[object ArrayBuffer]',
-  '[object SharedArrayBuffer]',
-  '[object Uint8Array]',
-  '[object Uint8ClampedArray]',
-  '[object Int8Array]',
-  '[object Uint16Array]',
-  '[object Int16Array]',
-  '[object Uint32Array]',
-  '[object Int32Array]',
-  '[object Float32Array]',
-  '[object Float64Array]',
-  '[object BigInt64Array]',
-  '[object BigUint64Array]',
-  '[object DataView]',
-  '[object Blob]',
-  '[object File]',
-  '[object ReadableStream]',
-]);
-
-/**
- * Refuses to persist a record carrying raw bytes.
- *
- * Queueing binary media is the mistake this family is most likely to invite: an image result holds
- * a `Uint8Array`, JSON-encoding it inflates the payload by a third, and most queue backends cap job
- * size well below one image. The bytes belong in an `AssetStore`, with only a reference on the
- * record. Failing loudly at the boundary is far cheaper than discovering it as a truncated job.
- */
-export function assertSerializableRecord(record: OperationRecord<unknown>): void {
-  const binaryPath = findBinary(record.result, 'result') ?? findBinary(record.metadata, 'metadata');
-  if (binaryPath) throw new OperationSerializationError(record.id, binaryPath);
-}
-
-function findBinary(value: unknown, path: string, seen = new WeakSet<object>()): string | undefined {
-  if (value === null || typeof value !== 'object') return undefined;
-  if (BINARY_TAGS.has(Object.prototype.toString.call(value))) return path;
-  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return path;
-  if (seen.has(value)) return undefined;
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      const found = findBinary(value[index], `${path}[${index}]`, seen);
-      if (found) return found;
-    }
-    return undefined;
-  }
-
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    const found = findBinary(child, `${path}.${key}`, seen);
-    if (found) return found;
-  }
-  return undefined;
 }

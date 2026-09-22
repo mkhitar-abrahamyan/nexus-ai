@@ -28,6 +28,10 @@ import { FamilyTelemetry, type FamilyRuntime } from '../ops/family-telemetry.js'
 
 type ImageRequest = ImageGenerateRequest | ImageEditRequest;
 
+/**
+ * Routes image generation and edits to registered providers, as operations with status,
+ * cancellation, and events.
+ */
 export class ImageManager {
   private readonly providers = new Map<string, ImageProvider>();
   private operationCounter = 0;
@@ -44,6 +48,10 @@ export class ImageManager {
     }
   }
 
+  /**
+   * Registers a provider under a name. Throws for a provider without declared capabilities. Returns
+   * the manager, for chaining.
+   */
   registerImageProvider(name: string, provider: ImageProvider): this {
     const normalizedName = name.trim();
     if (!normalizedName) throw new ImageValidationError('Image provider name must not be empty');
@@ -56,22 +64,27 @@ export class ImageManager {
     return this;
   }
 
+  /** Whether a provider is registered. */
   hasImageProvider(name: string): boolean {
     return this.providers.has(name);
   }
 
+  /** Every registered provider's name. */
   listImageProviders(): string[] {
     return [...this.providers.keys()];
   }
 
+  /** Generates images and waits for the result. */
   generate(request: ImageGenerateRequest): Promise<ImageResult> {
     return this.submit({ operation: 'generate', request }).result();
   }
 
+  /** Edits an image and waits for the result. */
   edit(request: ImageEditRequest): Promise<ImageResult> {
     return this.submit({ operation: 'edit', request }).result();
   }
 
+  /** Starts an image operation and returns its handle without waiting. */
   submit(submission: ImageOperationSubmission): OperationHandle<ImageResult>;
   submit(request: ImageGenerateRequest): OperationHandle<ImageResult>;
   submit(request: ImageEditRequest): OperationHandle<ImageResult>;

@@ -43,9 +43,16 @@ interface PendingConfirmation {
   abort?: () => void;
 }
 
+/**
+ * A realtime voice conversation: connects a transport, runs tools, handles barge-in, reconnects,
+ * and keeps a record of everything said.
+ */
 export class RealtimeSession {
+  /** This session's id. */
   readonly id: string;
+  /** Provider name, for records and telemetry. */
   readonly provider: string;
+  /** The realtime model. */
   readonly model: string;
   private readonly emitter = new TypedEventEmitter<RealtimeSessionEvents>();
   private readonly clock: RealtimeClock;
@@ -114,14 +121,17 @@ export class RealtimeSession {
     this.bindAbortSignal(config.signal);
   }
 
+  /** The session's lifecycle state. */
   get state(): RealtimeSessionState {
     return this.sessionState;
   }
 
+  /** The provider's session id once connected, otherwise this session's own id. */
   get sessionId(): string {
     return this.providerSessionId || this.id;
   }
 
+  /** Subscribes to a session event. Returns a function that unsubscribes. */
   on<Event extends keyof RealtimeSessionEvents>(
     event: Event,
     listener: (payload: RealtimeSessionEvents[Event]) => void,
@@ -129,6 +139,7 @@ export class RealtimeSession {
     return this.emitter.on(event, listener);
   }
 
+  /** Subscribes to the next occurrence of a session event only. */
   once<Event extends keyof RealtimeSessionEvents>(
     event: Event,
     listener: (payload: RealtimeSessionEvents[Event]) => void,
@@ -136,14 +147,17 @@ export class RealtimeSession {
     return this.emitter.once(event, listener);
   }
 
+  /** A snapshot of the conversation record. */
   getConversation(): RealtimeConversation {
     return snapshotRealtimeConversation(this.conversation);
   }
 
+  /** A snapshot of the conversation's metrics. */
   getMetrics(): ConversationMetrics {
     return { ...this.conversation.metrics };
   }
 
+  /** Raw provider events retained so far. */
   getRawEvents(): RealtimeServerEvent[] {
     return this.rawEvents.map((event) => ({ ...event }));
   }
@@ -153,6 +167,10 @@ export class RealtimeSession {
     await this.eventQueue;
   }
 
+  /**
+   * Exports the conversation: the record as JSON, the provider's events, a readable transcript, or
+   * analytics without transcripts.
+   */
   export(format: 'json'): RealtimeConversation;
   export(format: 'openai-events'): RealtimeServerEvent[];
   export(format: 'text'): string;
@@ -163,6 +181,10 @@ export class RealtimeSession {
     return exportRealtimeConversation(this.conversation, format, this.rawEvents);
   }
 
+  /**
+   * Connects the transport, configures the provider session, and starts enforcing the session's
+   * limits.
+   */
   async connect(options: RealtimeConnectOptions = {}): Promise<void> {
     if (this.sessionState === 'connected') return;
     if (this.connectPromise) return this.connectPromise;
@@ -230,6 +252,7 @@ export class RealtimeSession {
     return this.connectPromise;
   }
 
+  /** Disconnects and stops reconnecting. */
   async disconnect(): Promise<void> {
     if (this.sessionState === 'disconnected') return;
     this.manualDisconnect = true;
@@ -245,15 +268,18 @@ export class RealtimeSession {
     }
   }
 
+  /** Sends a raw provider event. */
   sendEvent(event: RealtimeClientEvent): void {
     this.sendProviderEvent(event);
   }
 
+  /** Sends a chunk of microphone audio. */
   sendAudio(chunk: ArrayBuffer): void {
     this.assertConnected('send audio');
     this.config.transport.sendAudio(chunk);
   }
 
+  /** Adds a user text message, and by default asks the model to answer it. */
   sendText(text: string, createResponse = true): void {
     if (!text.trim()) throw new Error('Realtime text input must not be empty');
     this.sendProviderEvent({
@@ -267,23 +293,33 @@ export class RealtimeSession {
     if (createResponse) this.createResponse();
   }
 
+  /**
+   * Commits buffered audio as a user turn, and by default asks the model to answer it. For
+   * push-to-talk without server turn detection.
+   */
   commitAudio(createResponse = true): void {
     this.sendProviderEvent({ type: 'input_audio_buffer.commit' });
     if (createResponse) this.createResponse();
   }
 
+  /** Discards buffered audio that has not been committed. */
   clearAudio(): void {
     this.sendProviderEvent({ type: 'input_audio_buffer.clear' });
   }
 
+  /** Asks the model to respond now, optionally with response-level settings. */
   createResponse(response?: Record<string, unknown>): void {
     this.sendProviderEvent(response ? { type: 'response.create', response } : { type: 'response.create' });
   }
 
+  /** Changes provider session settings mid-conversation. */
   updateSession(session: Record<string, unknown>): void {
     this.sendProviderEvent({ type: 'session.update', session });
   }
 
+  /**
+   * Stops the model speaking: cancels its response and truncates what was not heard, as configured.
+   */
   interrupt(reason: 'barge_in' | 'manual' = 'manual'): void {
     this.performInterruption(reason, true);
   }
@@ -319,6 +355,10 @@ export class RealtimeSession {
     });
   }
 
+  /**
+   * Records when the first audio of a response actually started playing, which is the latency a
+   * caller hears. Call it from your player.
+   */
   markAudioPlayed(at = this.clock.now()): void {
     if (this.firstAudioRecorded) return;
     this.firstAudioRecorded = true;
@@ -339,6 +379,7 @@ export class RealtimeSession {
     this.emitMetrics();
   }
 
+  /** Answers a pending tool confirmation. Returns false when there was no such pending call. */
   confirmTool(callId: string, approved: boolean): boolean {
     const pending = this.pendingConfirmations.get(callId);
     if (!pending) return false;
@@ -347,12 +388,14 @@ export class RealtimeSession {
     return true;
   }
 
+  /** Runs a pending tool call yourself, for `toolExecution.mode: 'manual'`. */
   async executeTool(callId: string): Promise<RealtimeToolResult> {
     const call = this.pendingCalls.get(callId);
     if (!call) throw new Error(`Realtime tool call "${callId}" is not pending`);
     return this.toolExecutor.execute(call);
   }
 
+  /** Sends a tool result you produced yourself, for `toolExecution.mode: 'manual'`. */
   async submitToolResult(callId: string, result: unknown, error?: string): Promise<RealtimeToolResult> {
     const call = this.pendingCalls.get(callId);
     if (!call) throw new Error(`Realtime tool call "${callId}" is not pending`);
@@ -959,6 +1002,7 @@ export class RealtimeSession {
   }
 }
 
+/** Creates a realtime session from its configuration. */
 export function createRealtimeSession(config: RealtimeSessionConfig): RealtimeSession {
   return new RealtimeSession(config);
 }

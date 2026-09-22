@@ -50,9 +50,11 @@ export function summarizeHistory(options: SummarizeOptions): AgentMiddleware {
   };
 }
 
+/** Options for `redactMiddleware()`. */
 export interface RedactOptions {
   /** Patterns replaced before a message reaches the provider. */
   patterns: readonly RegExp[];
+  /** Text each match is replaced with. Defaults to `[redacted]`. */
   replacement?: string;
   /** Also redact what the model sends back, for anything written to logs or state. */
   redactOutput?: boolean;

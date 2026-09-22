@@ -15,10 +15,16 @@ import { VoiceCapabilityError, VoiceProviderError } from './errors.js';
 import { FamilyTelemetry, type FamilyRuntime } from '../ops/family-telemetry.js';
 import { VoiceSession, type VoiceSessionCompletionClient } from './session.js';
 
+/** The part of a client a voice turn needs. */
 export interface VoiceCompletionClient {
+  /** Runs one completion. */
   complete(request: CompletionRequest): Promise<NexusResponse>;
 }
 
+/**
+ * Routes speech-to-text and text-to-speech to registered providers: the one a request names, the
+ * configured default, or the first that supports the operation.
+ */
 export class VoiceManager {
   private providers = new Map<string, VoiceProvider>();
   private readonly telemetry: FamilyTelemetry;
@@ -33,19 +39,23 @@ export class VoiceManager {
     }
   }
 
+  /** Registers a provider under a name. Returns the manager, for chaining. */
   registerProvider(name: string, provider: VoiceProvider): this {
     this.providers.set(name, provider);
     return this;
   }
 
+  /** Whether a provider is registered. */
   hasProvider(name: string): boolean {
     return this.providers.has(name);
   }
 
+  /** Every registered provider's name. */
   listProviders(): string[] {
     return [...this.providers.keys()];
   }
 
+  /** Transcribes audio. */
   async transcribe(request: TranscriptionRequest): Promise<TranscriptionResponse> {
     const provider = this.resolveProvider(
       'transcription',
@@ -72,6 +82,7 @@ export class VoiceManager {
     }
   }
 
+  /** Synthesizes speech. */
   async speak(request: SpeechRequest): Promise<SpeechResponse> {
     const provider = this.resolveProvider('speech', request.provider || this.config.defaultSpeechProvider);
     const speak = provider.speak;
@@ -99,6 +110,10 @@ export class VoiceManager {
     }
   }
 
+  /**
+   * Runs one voice turn: transcribes the audio unless a transcript is given, completes, and speaks
+   * the answer when `speech` is set.
+   */
   async runTurn(request: VoiceTurnRequest, client: VoiceCompletionClient): Promise<VoiceTurnResponse> {
     const transcript = request.transcript !== undefined ? undefined : await this.requireTranscription(request);
     const transcriptText = request.transcript ?? transcript?.text ?? '';
@@ -117,6 +132,7 @@ export class VoiceManager {
     };
   }
 
+  /** Starts a multi-turn voice session. */
   createSession(config: VoiceSessionConfig, client: VoiceSessionCompletionClient): VoiceSession {
     return new VoiceSession(config, this, client);
   }

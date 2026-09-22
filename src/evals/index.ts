@@ -5,6 +5,7 @@ export {
   type EvalJudge,
   type EvalJudgment,
   type EvalResult,
+  type EvalRunOptions,
   type EvalRunResult,
 } from './runner.js';
 export {

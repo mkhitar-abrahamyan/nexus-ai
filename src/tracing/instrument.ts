@@ -3,15 +3,21 @@ import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import type { RunHandle, Tracer } from './tracer.js';
 
+/** Options for `traceGraph()`. */
 export interface GraphTracingOptions {
+  /** Name of the root run. Defaults to `graph`. */
   name?: string;
+  /** Labels for filtering. */
   tags?: string[];
+  /** Metadata added to the root run. */
   metadata?: Record<string, unknown>;
+  /** Inputs recorded on the root run. */
   inputs?: unknown;
   /** `graph` by default; an agent run is worth labelling as one. */
   kind?: 'graph' | 'agent';
 }
 
+/** Tracing for one graph run: a root run with one child per task. */
 export interface GraphTracing {
   /** Spread into a run's options: `graph.invoke(input, { threadId, ...tracing.runOptions })`. */
   runOptions: { onEvent: (event: GraphEvent) => void };
@@ -19,6 +25,7 @@ export interface GraphTracing {
   root: RunHandle;
   /** The active run for a node, so a model call inside it nests where it belongs. */
   runFor(node: string): RunHandle | undefined;
+  /** Finishes the root run, recording the result's status and state. */
   finish(result?: GraphResult<never> | { status?: string; state?: unknown }): Promise<void>;
 }
 
@@ -118,7 +125,9 @@ function nameOf(active: Map<string, RunHandle>, handle: RunHandle): string | und
   return undefined;
 }
 
+/** Any client with a `complete()` method. */
 export interface ModelClientLike {
+  /** Runs one completion. */
   complete(request: CompletionRequest): Promise<NexusResponse>;
 }
 

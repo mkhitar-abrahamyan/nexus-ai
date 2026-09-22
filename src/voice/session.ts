@@ -17,16 +17,26 @@ import { ToolExecutor } from '../agent/tool.js';
 import { generateRequestId } from '../utils/ids.js';
 import { VoiceProviderError } from './errors.js';
 
+/** The part of a client a voice session needs. */
 export interface VoiceSessionCompletionClient {
+  /** Runs one completion. */
   complete(request: CompletionRequest): Promise<NexusResponse>;
 }
 
+/** The speech operations a voice session needs, such as a `VoiceManager`. */
 export interface VoiceSessionRuntime {
+  /** Transcribes audio. */
   transcribe(request: TranscriptionRequest): Promise<TranscriptionResponse>;
+  /** Synthesizes speech. */
   speak(request: SpeechRequest): Promise<SpeechResponse>;
 }
 
+/**
+ * A multi-turn voice conversation: each turn transcribes the user, answers with the model, and
+ * speaks the answer, keeping the history.
+ */
 export class VoiceSession {
+  /** The session's id. */
   readonly id: string;
   private history: Message[];
 
@@ -39,15 +49,21 @@ export class VoiceSession {
     this.history = [...(config.messages || [])];
   }
 
+  /** A copy of the conversation so far. */
   getHistory(): Message[] {
     return [...this.history];
   }
 
+  /**
+   * Replaces the history, by default with the session's starting messages. Returns the session, for
+   * chaining.
+   */
   reset(messages: Message[] = this.config.messages || []): this {
     this.history = [...messages];
     return this;
   }
 
+  /** Runs one turn from audio or a transcript, adding both sides to the history. */
   async handleTurn(input: VoiceSessionTurnInput = {}): Promise<VoiceSessionTurnResponse> {
     const transcript = input.transcript === undefined ? await this.transcribeInput(input) : undefined;
     const transcriptText = input.transcript ?? transcript?.text ?? '';

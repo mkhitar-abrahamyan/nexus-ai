@@ -1,9 +1,11 @@
 import type { AuditLogConfig, AuditLogEvent } from '../types/config.js';
 import { redactSensitiveText } from '../security/output-guard.js';
 
+/** Writes audit events to the configured sink, redacting sensitive data unless told otherwise. */
 export class AuditLogger {
   constructor(private config?: AuditLogConfig) {}
 
+  /** Writes one event. Does nothing when audit logging is off. */
   async log(event: AuditLogEvent): Promise<void> {
     if (!this.config?.enabled) return;
     if (this.config.includeSensitiveData && !this.config.sink) {

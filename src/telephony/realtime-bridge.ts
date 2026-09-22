@@ -31,9 +31,11 @@ export function twilioRealtimeAudioOptions(overrides: RealtimeAudioOptions = {})
   };
 }
 
+/** Options for `createTelephonyRealtimeBridge()`. */
 export interface TelephonyRealtimeBridgeOptions {
   /** The realtime session driving the call. The bridge does not create it, so tools and instructions stay app-owned. */
   session: RealtimeSession;
+  /** Parses and formats the provider's media-stream messages. */
   telephony: TelephonyManager;
   /** Registered provider name. Defaults to `twilio`. */
   provider?: string;
@@ -49,19 +51,28 @@ export interface TelephonyRealtimeBridgeOptions {
   bargeIn?: boolean;
   /** Disconnect the session when the provider's stream stops. Defaults to true. */
   autoDisconnect?: boolean;
+  /** Called when the provider's stream starts. */
   onStart?(event: TelephonyStartEvent): void | Promise<void>;
+  /** Called when the provider's stream stops. */
   onStop?(event: TelephonyStopEvent): void | Promise<void>;
+  /** Called when the caller presses a key. */
   onDtmf?(event: TelephonyDtmfEvent): void | Promise<void>;
   /** Receives errors from message handling and outbound sends, which are never thrown at the socket. */
   onError?(error: unknown): void;
 }
 
+/**
+ * A phone call connected to a realtime voice session: caller audio goes to the model, and the
+ * model's audio goes back to the caller.
+ */
 export interface TelephonyRealtimeBridge {
   /** Provider call identifier, available once the stream has started. */
   readonly callId: string | undefined;
+  /** Provider stream identifier, available once the stream has started. */
   readonly streamId: string | undefined;
   /** Custom `<Parameter>` values from the provider's stream instruction. */
   readonly parameters: Record<string, string>;
+  /** True once the stream has stopped or the bridge was closed. */
   readonly closed: boolean;
   /** Feeds one raw media-socket message through the bridge. Safe to call before `start`. */
   handleMessage(message: string | Record<string, unknown>): Promise<void>;

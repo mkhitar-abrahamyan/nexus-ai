@@ -7,6 +7,10 @@ import type {
   PipelineStepName,
 } from './types.js';
 
+/**
+ * Runs the request pipeline's hooks and custom steps, and times each stage into the request's
+ * trace.
+ */
 export class PipelineRunner {
   private steps: PipelineStep[] = [];
 
@@ -16,11 +20,13 @@ export class PipelineRunner {
     }
   }
 
+  /** Adds a custom step, run after the built-in stages. Returns the runner, for chaining. */
   use(step: PipelineStep): this {
     this.steps.push(step);
     return this;
   }
 
+  /** Runs every handler registered for a hook, in order. */
   async runHook(name: PipelineHookName, context: PipelineContext): Promise<PipelineContext> {
     if (this.config.enabled === false) return context;
 
@@ -32,6 +38,7 @@ export class PipelineRunner {
     return next;
   }
 
+  /** Runs the custom steps, in order. */
   async runCustomSteps(context: PipelineContext): Promise<PipelineContext> {
     if (this.config.enabled === false) return context;
 
@@ -42,6 +49,7 @@ export class PipelineRunner {
     return next;
   }
 
+  /** Runs one stage and records its timing, unless tracing is off. */
   async trace<T>(
     context: PipelineContext,
     name: PipelineStepName,
@@ -81,6 +89,7 @@ export class PipelineRunner {
     }
   }
 
+  /** Stamps the trace's end time and duration. */
   finish(context: PipelineContext): PipelineContext {
     const ended = Date.now();
     context.trace.endedAt = new Date(ended).toISOString();
@@ -115,6 +124,7 @@ export class PipelineRunner {
   }
 }
 
+/** A fresh pipeline context for a request. */
 export function createPipelineContext(request: import('../types/messages.js').CompletionRequest): PipelineContext {
   return {
     request,

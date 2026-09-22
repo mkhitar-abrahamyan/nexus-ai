@@ -11,9 +11,13 @@ import {
 
 export type { WebResolvedAddress };
 
+/** Options for the fetch-URL tool, including its SSRF policy. */
 export interface WebConnectorOptions extends SafeFetchPolicy {
+  /** Gives up after this long, in milliseconds. Defaults to 10 seconds. */
   timeoutMs?: number;
+  /** Largest response read, in bytes. Longer responses are truncated. Defaults to 20,000. */
   maxResponseBytes?: number;
+  /** Redirects followed, each checked against the policy again. Defaults to 5. */
   maxRedirects?: number;
 }
 
@@ -21,6 +25,10 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 20_000;
 const DEFAULT_MAX_REDIRECTS = 5;
 
+/**
+ * A `fetch_url` tool that reads text from public URLs allowed by the policy, refusing private
+ * addresses.
+ */
 export function createFetchUrlTool(options: WebConnectorOptions = {}): ToolDefinition {
   return tool({
     name: 'fetch_url',
@@ -59,6 +67,7 @@ export function createFetchUrlTool(options: WebConnectorOptions = {}): ToolDefin
   });
 }
 
+/** A search tool around your own search function. */
 export function createSearchTool(search: (query: string) => Promise<unknown>, name = 'web_search'): ToolDefinition {
   return tool({
     name,

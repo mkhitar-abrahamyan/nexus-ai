@@ -1,3 +1,4 @@
+/** Why a realtime session failed. */
 export type RealtimeErrorCategory =
   | 'authentication'
   | 'permission'
@@ -13,27 +14,47 @@ export type RealtimeErrorCategory =
   | 'abort'
   | 'unknown';
 
+/** Options for constructing a `RealtimeError`. */
 export interface RealtimeErrorOptions {
+  /** What went wrong. */
   message: string;
+  /** The provider's error code. */
   code?: string;
+  /** Why it failed. Defaults to `unknown`. */
   category?: RealtimeErrorCategory;
+  /** The provider involved. */
   provider?: string;
+  /** Whether retrying could succeed. Defaults to false. */
   retryable?: boolean;
+  /** Whether the session cannot continue. Defaults to false. */
   fatal?: boolean;
+  /** HTTP status, when there was one. */
   status?: number;
+  /** The provider event that reported the error. */
   eventId?: string;
+  /** The underlying error. */
   cause?: unknown;
+  /** The provider's error payload, unmodified. */
   raw?: unknown;
 }
 
+/** An error from a realtime session or transport. */
 export class RealtimeError extends Error {
+  /** The provider's error code. */
   readonly code?: string;
+  /** Why it failed. */
   readonly category: RealtimeErrorCategory;
+  /** The provider involved. */
   readonly provider?: string;
+  /** Whether retrying could succeed. */
   readonly retryable: boolean;
+  /** Whether the session cannot continue. */
   readonly fatal: boolean;
+  /** HTTP status, when there was one. */
   readonly status?: number;
+  /** The provider event that reported the error. */
   readonly eventId?: string;
+  /** The provider's error payload, unmodified. */
   readonly raw?: unknown;
 
   constructor(options: RealtimeErrorOptions) {
@@ -50,6 +71,10 @@ export class RealtimeError extends Error {
   }
 }
 
+/**
+ * Wraps any error as a `RealtimeError`, inferring the category from its name and message. A
+ * `RealtimeError` is returned unchanged unless `defaults.fatal` differs.
+ */
 export function toRealtimeError(error: unknown, defaults: Partial<RealtimeErrorOptions> = {}): RealtimeError {
   if (error instanceof RealtimeError) {
     if (defaults.fatal === undefined || defaults.fatal === error.fatal) return error;

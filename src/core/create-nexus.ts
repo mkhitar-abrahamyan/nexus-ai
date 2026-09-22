@@ -15,6 +15,7 @@ import type {
   ProvidersConfig,
 } from '../types/config.js';
 
+/** Providers the `createNexus()` shorthand can configure by name. */
 export type CreateNexusProvider =
   | 'openai'
   | 'anthropic'
@@ -29,14 +30,26 @@ export type CreateNexusProvider =
   | 'lmstudio'
   | 'llamaCpp';
 
+/**
+ * Options for `createNexus()`: the full configuration, or a one-provider shorthand whose
+ * credentials fall back to the provider's usual environment variables.
+ */
 export interface CreateNexusOptions extends Omit<Partial<NexusAIConfig>, 'providers'> {
+  /** Providers, as in the full configuration. Merged with the shorthand provider. */
   providers?: ProvidersConfig;
+  /** The one provider to configure. */
   provider?: CreateNexusProvider;
+  /** Its API key. Defaults to the provider's environment variable, such as `OPENAI_API_KEY`. */
   apiKey?: string;
+  /** Its base URL, for a proxy or a compatible server. */
   baseUrl?: string;
+  /** Azure OpenAI endpoint. Defaults to `AZURE_OPENAI_ENDPOINT`. */
   endpoint?: string;
+  /** Azure OpenAI deployment. Defaults to `AZURE_OPENAI_DEPLOYMENT`. */
   deployment?: string;
+  /** Azure OpenAI API version. Defaults to `AZURE_OPENAI_API_VERSION`. */
   apiVersion?: string;
+  /** The default model. Also switches routing to `direct` unless routing is configured. */
   model?: string;
 }
 

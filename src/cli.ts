@@ -13,13 +13,18 @@ import { TokenOptimizer } from './optimizer/index.js';
 import type { CompletionRequest } from './types/messages.js';
 import type { NexusAIConfig } from './types/config.js';
 import type { SecurityFinding } from './types/security.js';
-
-type Flags = Record<string, string | boolean>;
-
-interface ParsedArgs {
-  positionals: string[];
-  flags: Flags;
-}
+import {
+  CliUsageError,
+  type Flags,
+  flagBool,
+  isRecord,
+  numberFlag,
+  type ParsedArgs,
+  parseArgs,
+  printTable,
+  stringFlag,
+  writeJson,
+} from './cli/args.js';
 
 interface CliFinding {
   file: string;
@@ -32,7 +37,6 @@ interface CliFinding {
 
 const DEFAULT_SCAN_MAX_BYTES = 1_000_000;
 const IGNORED_DIRS = new Set(['.git', 'node_modules', 'dist', 'coverage', '.next', '.turbo']);
-const BOOLEAN_FLAGS = new Set(['all', 'densify', 'fail', 'help', 'json', 'print', 'reveal-values']);
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
@@ -50,9 +54,29 @@ async function main(): Promise<void> {
     case 'models':
       runModels(parsed);
       return;
-    case 'eval':
+    case 'eval': {
+      const [subcommand, ...args] = parsed.positionals;
+      if (subcommand === 'run' || subcommand === 'compare' || subcommand === 'gate') {
+        // Loaded on demand, so the other commands start without the evaluation code.
+        const { runEvaluationCommand } = await import('./cli/evaluation.js');
+        await runEvaluationCommand(subcommand, { positionals: args, flags: parsed.flags });
+        return;
+      }
       await runEval(parsed);
       return;
+    }
+    case 'traces': {
+      const [subcommand, ...args] = parsed.positionals;
+      const { runTracesCommand } = await import('./cli/traces.js');
+      await runTracesCommand(subcommand, { positionals: args, flags: parsed.flags });
+      return;
+    }
+    case 'db': {
+      const [subcommand, ...args] = parsed.positionals;
+      const { runDbCommand } = await import('./cli/db.js');
+      await runDbCommand(subcommand, { positionals: args, flags: parsed.flags });
+      return;
+    }
     case 'optimize':
       await runOptimize(parsed);
       return;
@@ -368,56 +392,6 @@ function sanitizeCliFinding(finding: CliFinding): CliFinding {
   };
 }
 
-function parseArgs(args: string[]): ParsedArgs {
-  const positionals: string[] = [];
-  const flags: Flags = {};
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (!arg.startsWith('--')) {
-      positionals.push(arg);
-      continue;
-    }
-
-    const [rawKey, inlineValue] = arg.slice(2).split('=', 2);
-    if (rawKey.startsWith('no-')) {
-      flags[rawKey.slice(3)] = false;
-      continue;
-    }
-
-    const next = args[index + 1];
-    if (inlineValue !== undefined) {
-      flags[rawKey] = inlineValue;
-    } else if (BOOLEAN_FLAGS.has(rawKey)) {
-      flags[rawKey] = true;
-    } else if (next && !next.startsWith('--')) {
-      flags[rawKey] = next;
-      index += 1;
-    } else {
-      flags[rawKey] = true;
-    }
-  }
-
-  return { positionals, flags };
-}
-
-function flagBool(flags: Flags, name: string): boolean {
-  return flags[name] === true;
-}
-
-function stringFlag(flags: Flags, name: string): string | undefined {
-  const value = flags[name];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function numberFlag(flags: Flags, name: string): number | undefined {
-  const value = stringFlag(flags, name);
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) throw new Error(`--${name} must be a number.`);
-  return parsed;
-}
-
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
@@ -440,25 +414,6 @@ function isEvalClient(value: unknown): value is EvalClient<unknown> {
   return isRecord(value) && typeof value.complete === 'function';
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function writeJson(value: unknown): void {
-  console.log(JSON.stringify(value, null, 2));
-}
-
-function printTable(rows: Array<Record<string, string>>, columns: string[]): void {
-  const widths = Object.fromEntries(
-    columns.map((column) => [column, Math.max(column.length, ...rows.map((row) => row[column].length))]),
-  );
-  console.log(columns.map((column) => column.padEnd(widths[column])).join('  '));
-  console.log(columns.map((column) => '-'.repeat(widths[column])).join('  '));
-  for (const row of rows) {
-    console.log(columns.map((column) => row[column].padEnd(widths[column])).join('  '));
-  }
-}
-
 function formatCost(value: number | undefined): string {
   return value === undefined ? '' : `$${value.toFixed(6)}`;
 }
@@ -474,13 +429,27 @@ Usage:
   nexus scan [paths...] [--json] [--max-bytes 1000000] [--no-fail] [--reveal-values]
   nexus models [--provider openai] [--json]
   nexus eval <eval.json|eval.mjs> [--json]
+  nexus eval run <eval.mjs> [--out experiment.json] [--experiments dir] [--baseline baseline.json] [--fail-on-regression]
+                 [--name n] [--concurrency 4] [--repetitions 1] [--timeout-ms n] [--json]
+  nexus eval compare <baseline.json> <candidate.json> [--lower-is-better latency,cost] [--seed n] [--json]
+  nexus eval gate <baseline.json> <candidate.json> [--allow-dataset-mismatch] [--json]
+  nexus traces list --store <runs.jsonl|store.mjs> [--trace id] [--kind model,tool] [--status error] [--name n]
+                    [--model m] [--provider p] [--tags a,b] [--since iso] [--until iso] [--min-latency-ms n]
+                    [--min-cost n] [--feedback-key k] [--limit 20] [--offset n] [--json]
+  nexus traces show <traceId> --store <runs.jsonl|store.mjs> [--json]
+  nexus traces export --store <runs.jsonl|store.mjs> [--out runs.jsonl] [same filters as list]
+  nexus db sql [--adapters operations,store,traces,evaluation,circuits] [--vector-dimensions 1536]
   nexus optimize [request.json|prompt.txt] [--model gpt-5-mini] [--max-input-tokens 4000] [--densify] [--json]
 
-Eval files can export { cases, client } or { cases, config }. JSON cases may use "expected", "contains", and "match": "includes" | "exact" | "regex".`);
+Eval files can export { cases, client } or { cases, config }. JSON cases may use "expected", "contains", and "match": "includes" | "exact" | "regex".
+Evaluation modules for "eval run" export { target, dataset, evaluators, summary?, options? }.
+"eval gate" exits 1 when a metric got worse beyond noise, a new failure appeared, or the datasets differ.
+Trace store modules export any TraceStore as { store }, such as a PostgresTraceStore over the application's own pool.`);
 }
 
 main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
   console.error(redactSensitiveText(message));
-  process.exitCode = 1;
+  // A usage mistake exits 2, so a CI script can tell a wrong invocation from a failed check.
+  process.exitCode = error instanceof CliUsageError ? 2 : 1;
 });

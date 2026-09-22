@@ -28,7 +28,9 @@ interface CohereChatResponse {
   };
 }
 
+/** Cohere's Chat API. */
 export class CohereProvider extends BaseProvider {
+  /** Always `cohere`, hosted. */
   readonly info: ProviderInfo = { name: 'cohere', isLocal: false };
   private config: CohereProviderConfig;
 
@@ -37,6 +39,7 @@ export class CohereProvider extends BaseProvider {
     this.config = config;
   }
 
+  /** Runs one completion. */
   async complete(request: CompletionRequest): Promise<NexusResponse> {
     const model = this.stripPrefix(request.model);
     try {
@@ -97,6 +100,7 @@ export class CohereProvider extends BaseProvider {
     }
   }
 
+  /** Streams one completion. */
   stream(request: CompletionRequest): NexusStream {
     const self = this;
     return this.createStream(async function* () {
@@ -115,6 +119,7 @@ export class CohereProvider extends BaseProvider {
     }, request.signal);
   }
 
+  /** Whether the models endpoint answers with the configured key. */
   async healthCheck(): Promise<boolean> {
     const response = await fetch(`${this.baseUrl()}/v2/models`, {
       headers: { Authorization: `Bearer ${this.config.apiKey}` },

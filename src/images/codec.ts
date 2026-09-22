@@ -20,11 +20,15 @@ export {
 
 /** Decoded pixels, always expanded to 8-bit RGBA so callers need no per-format branches. */
 export interface RgbaImage {
+  /** Width in pixels. */
   width: number;
+  /** Height in pixels. */
   height: number;
+  /** Pixels as RGBA, 4 bytes each, row by row. */
   data: Uint8Array;
 }
 
+/** Options for `decodePng()`. */
 export interface DecodePngOptions {
   /**
    * Refuses to allocate pixel memory past this count. Checked against the header before

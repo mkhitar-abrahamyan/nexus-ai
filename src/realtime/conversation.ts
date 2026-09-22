@@ -14,19 +14,29 @@ import type {
   UserSpeechItem,
 } from './types.js';
 
+/** Options for `createRealtimeConversation()`. */
 export interface CreateRealtimeConversationOptions {
+  /** Conversation id. Defaults to a generated one. */
   id?: string;
+  /** The provider. */
   provider: RealtimeProviderName;
+  /** The realtime model. */
   model: string;
+  /** ISO-8601 start time. Defaults to now. */
   startedAt?: string;
+  /** Application data carried with the record. */
   metadata?: Record<string, unknown>;
+  /** Creates ids. */
   idFactory?: RealtimeIdFactory;
 }
 
+/** Options for `reduceRealtimeConversation()`. */
 export interface RealtimeConversationReducerOptions extends RealtimeConversationOptions {
+  /** Creates ids for items the reducer adds. */
   idFactory?: RealtimeIdFactory;
 }
 
+/** Conversation metrics with every counter at zero. */
 export function createConversationMetrics(): ConversationMetrics {
   return {
     connectionSetupMs: 0,
@@ -40,6 +50,7 @@ export function createConversationMetrics(): ConversationMetrics {
   };
 }
 
+/** Creates an empty, active conversation record. */
 export function createRealtimeConversation(options: CreateRealtimeConversationOptions): RealtimeConversation {
   const idFactory = options.idFactory || createRealtimeId;
   return {
@@ -54,6 +65,10 @@ export function createRealtimeConversation(options: CreateRealtimeConversationOp
   };
 }
 
+/**
+ * Applies one realtime event to a conversation record and returns the new record. The input is
+ * never mutated.
+ */
 export function reduceRealtimeConversation(
   conversation: RealtimeConversation,
   event: RealtimeEvent,
@@ -269,6 +284,7 @@ export function reduceRealtimeConversation(
   return next;
 }
 
+/** Returns a copy of the record with some metrics replaced. */
 export function withConversationMetrics(
   conversation: RealtimeConversation,
   metrics: Partial<ConversationMetrics>,
@@ -278,10 +294,15 @@ export function withConversationMetrics(
   return next;
 }
 
+/** A deep copy of the record. */
 export function snapshotRealtimeConversation(conversation: RealtimeConversation): RealtimeConversation {
   return cloneValue(conversation);
 }
 
+/**
+ * Exports a record as JSON, the provider's raw events, a readable transcript, or analytics without
+ * transcripts.
+ */
 export function exportRealtimeConversation(
   conversation: RealtimeConversation,
   format: RealtimeConversationExportFormat,

@@ -10,11 +10,14 @@ import type {
   RealtimeToolSchema,
 } from './types.js';
 
+/** Options for `defineTool()` with a schema whose type the tool's input is inferred from. */
 export interface DefineRealtimeToolOptions<Schema extends RealtimeToolSchema<unknown>, Output>
   extends Omit<RealtimeTool<InferRealtimeSchema<Schema>, Output>, 'schema'> {
+  /** Validates the input and gives the tool its input type. */
   schema: Schema;
 }
 
+/** Defines a realtime tool, checking it has a name and a description. */
 export function defineTool<Schema extends RealtimeToolSchema<unknown>, Output>(
   definition: DefineRealtimeToolOptions<Schema, Output>,
 ): RealtimeTool<InferRealtimeSchema<Schema>, Output>;
@@ -27,19 +30,32 @@ export function defineTool(definition: RealtimeTool<unknown, unknown>): Realtime
   return { ...definition };
 }
 
+/** Callbacks as tool calls progress. */
 export interface RealtimeToolExecutorHooks {
+  /** Called when a call starts running. */
   onStarted?: (call: RealtimeToolCall) => void;
+  /** Called when a call is waiting for confirmation. */
   onConfirmationRequired?: (call: RealtimeToolCall) => void;
+  /** Called when a call finishes, successfully or not. */
   onCompleted?: (result: RealtimeToolResult) => void;
 }
 
+/** Options for a realtime tool executor. */
 export interface RealtimeToolExecutorOptions extends RealtimeToolExecutionOptions, RealtimeToolExecutorHooks {
+  /** The session the calls belong to, passed to each tool. */
   sessionId: string;
+  /** Aborts queued and running calls. */
   signal?: AbortSignal;
+  /** Replaces the system clock, for tests. */
   clock?: RealtimeClock;
+  /** Creates idempotency keys. */
   idFactory?: RealtimeIdFactory;
 }
 
+/**
+ * Runs realtime tool calls: validates input, asks for confirmation when required, limits
+ * concurrency and duration, and runs each call id at most once.
+ */
 export class RealtimeToolExecutor {
   private readonly tools = new Map<string, RealtimeTool<unknown, unknown>>();
   private readonly completed = new Map<string, RealtimeToolResult>();
@@ -63,25 +79,33 @@ export class RealtimeToolExecutor {
     for (const tool of tools) this.register(tool);
   }
 
+  /** Adds a tool. Throws when one with the same name exists. Returns the executor, for chaining. */
   register(tool: AnyRealtimeTool): this {
     if (this.tools.has(tool.name)) throw new Error(`Realtime tool "${tool.name}" is already registered`);
     this.tools.set(tool.name, tool as RealtimeTool<unknown, unknown>);
     return this;
   }
 
+  /** Whether a tool is registered. */
   has(name: string): boolean {
     return this.tools.has(name);
   }
 
+  /** Every registered tool. */
   list(): AnyRealtimeTool[] {
     return [...this.tools.values()] as AnyRealtimeTool[];
   }
 
+  /** Forgets completed results, for one call id or all of them, so those ids can run again. */
   clearCompleted(callId?: string): void {
     if (callId) this.completed.delete(callId);
     else this.completed.clear();
   }
 
+  /**
+   * Runs a call. A call id already running or completed returns the same result instead of running
+   * twice.
+   */
   execute(call: Omit<RealtimeToolCall, 'idempotencyKey'> & { idempotencyKey?: string }): Promise<RealtimeToolResult> {
     const normalized: RealtimeToolCall = {
       ...call,
@@ -301,6 +325,7 @@ export class RealtimeToolExecutor {
   }
 }
 
+/** Converts tools to OpenAI realtime tool definitions. */
 export function toOpenAIRealtimeTools(tools: AnyRealtimeTool[]): Array<Record<string, unknown>> {
   return tools.map((tool) => ({
     type: 'function',

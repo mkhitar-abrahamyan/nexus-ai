@@ -1,9 +1,13 @@
 import type { Run, RunQuery, TraceStore } from '../types/tracing.js';
 
+/** What an alert measures: error rate, latency percentile, total cost, or run count. */
 export type AlertMetric = 'errorRate' | 'latencyP95' | 'latencyP50' | 'cost' | 'count';
 
+/** A condition over recent runs that should fire an alert. */
 export interface AlertRule {
+  /** Name reported when it fires. */
   name: string;
+  /** What it measures. */
   metric: AlertMetric;
   /** Fires when the measured value crosses this, in the direction implied by the metric. */
   threshold: number;
@@ -15,19 +19,29 @@ export interface AlertRule {
   minRuns?: number;
 }
 
+/** A rule that fired. */
 export interface AlertEvent {
+  /** The rule's name. */
   rule: string;
+  /** What it measured. */
   metric: AlertMetric;
+  /** The measured value. */
   value: number;
+  /** The threshold it crossed. */
   threshold: number;
+  /** Runs measured. */
   runs: number;
+  /** ISO-8601 start of the window. */
   windowStart: string;
+  /** ISO-8601 end of the window. */
   windowEnd: string;
   /** A few runs that contributed, so an alert points at something rather than just firing. */
   samples: Array<{ id: string; traceId: string; name: string }>;
 }
 
+/** Where fired alerts are sent. */
 export interface AlertNotifier {
+  /** Sends one alert. */
   notify(event: AlertEvent): Promise<void> | void;
 }
 
@@ -80,6 +94,7 @@ export class AlertEvaluator {
   }
 }
 
+/** Computes a metric over a set of runs. */
 export function measure(metric: AlertMetric, runs: Run[]): number {
   switch (metric) {
     case 'errorRate':
@@ -118,9 +133,13 @@ function pickSamples(metric: AlertMetric, runs: Run[]): Run[] {
   return relevant.slice(0, 3);
 }
 
+/** Options for `createWebhookNotifier()`. */
 export interface WebhookNotifierOptions {
+  /** The webhook URL. */
   url: string;
+  /** Headers added to each post. */
   headers?: Record<string, string>;
+  /** Replaces the global `fetch`. */
   fetch?: typeof globalThis.fetch;
   /** Builds the payload. Defaults to a shape chat webhooks accept: `{ text }` plus the event. */
   body?: (event: AlertEvent) => unknown;

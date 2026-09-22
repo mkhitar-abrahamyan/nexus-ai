@@ -4,6 +4,7 @@ import { END, START } from '../types/graph.js';
 /** Anything that can describe itself: a compiled graph, or a description already taken from one. */
 export type Describable = GraphDescription | { describe(): GraphDescription };
 
+/** Options for `toMermaid()`. */
 export interface MermaidOptions {
   /** Layout direction. Defaults to top-down. */
   direction?: 'TD' | 'LR';

@@ -168,13 +168,19 @@ export const EMBEDDING_MODEL_ALIASES: Record<string, string> = {
   'embed-local': 'nomic-embed-text',
 };
 
+/** An embedding model name resolved through aliases to a model, provider, and capabilities. */
 export interface ResolvedEmbeddingModel {
+  /** The name requested. */
   requestedModel: string;
+  /** The concrete model it resolves to. */
   model: string;
+  /** The provider it belongs to, or null when unknown. */
   providerName: string | null;
+  /** Its registry entry, when there is one. */
   capabilities?: EmbeddingModelCapabilities;
 }
 
+/** Bundled and application embedding model entries merged, application entries winning. */
 export function getEmbeddingModelRegistry(
   config?: EmbeddingModelRegistryConfig,
 ): Record<string, EmbeddingModelCapabilities> {
@@ -184,6 +190,7 @@ export function getEmbeddingModelRegistry(
   };
 }
 
+/** Bundled and application embedding aliases merged, application aliases winning. */
 export function getEmbeddingModelAliases(config?: EmbeddingModelRegistryConfig): Record<string, string> {
   return {
     ...EMBEDDING_MODEL_ALIASES,
@@ -213,10 +220,12 @@ export function resolveEmbeddingModel(model: string, config?: EmbeddingModelRegi
   };
 }
 
+/** Every embedding model name in the registry, sorted. */
 export function listEmbeddingModels(config?: EmbeddingModelRegistryConfig): string[] {
   return Object.keys(getEmbeddingModelRegistry(config)).sort();
 }
 
+/** Every embedding model in the registry that belongs to a provider, sorted. */
 export function listEmbeddingModelsForProvider(providerName: string, config?: EmbeddingModelRegistryConfig): string[] {
   return Object.entries(getEmbeddingModelRegistry(config))
     .filter(([, capabilities]) => capabilities.provider === providerName)
@@ -224,6 +233,7 @@ export function listEmbeddingModelsForProvider(providerName: string, config?: Em
     .sort();
 }
 
+/** An embedding model's registry entry, resolving aliases first. */
 export function getEmbeddingModelCapabilities(
   model: string,
   config?: EmbeddingModelRegistryConfig,
@@ -231,9 +241,13 @@ export function getEmbeddingModelCapabilities(
   return resolveEmbeddingModel(model, config).capabilities;
 }
 
+/** Input for `estimateEmbeddingCost()`. */
 export interface EmbeddingCostEstimateInput {
+  /** The model, or an alias. */
   model: string;
+  /** Input tokens to price. */
   inputTokens: number;
+  /** Application registry entries and aliases. */
   config?: EmbeddingModelRegistryConfig;
 }
 
@@ -259,6 +273,7 @@ export function estimateEmbeddingCost(input: EmbeddingCostEstimateInput): CostEs
   };
 }
 
+/** Prices the usage an embedding call reported. */
 export function priceEmbeddingUsage(
   model: string,
   usage: TokenUsage,

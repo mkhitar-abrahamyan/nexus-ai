@@ -1,20 +1,32 @@
 import type { RagChunk } from './rag.js';
 
+/** Turns texts into vectors, one per text, in order. */
 export type EmbeddingProvider = (texts: string[]) => Promise<number[][]> | number[][];
 
+/** A chunk to store, with its vector when already computed. */
 export interface VectorDocument extends RagChunk {
+  /** Its vector. Computed with the store's embedding function when omitted. */
   embedding?: number[];
 }
 
+/** A stored chunk returned by a search. */
 export interface VectorSearchResult extends RagChunk {
+  /** Cosine similarity to the query, from -1 to 1. */
   score: number;
 }
 
+/** Options for a vector search. */
 export interface VectorSearchOptions {
+  /** Most results returned. Defaults to 5. */
   topK?: number;
+  /** Lowest similarity returned. Defaults to 0. */
   minScore?: number;
 }
 
+/**
+ * Chunks and their vectors in process memory, searched by cosine similarity. Defaults to hashed
+ * term vectors, which need no provider.
+ */
 export class MemoryVectorStore {
   private documents: Array<VectorDocument & { embedding: number[] }> = [];
   private embed: EmbeddingProvider;
@@ -23,6 +35,7 @@ export class MemoryVectorStore {
     this.embed = embed;
   }
 
+  /** Adds chunks, embedding those without a vector in one batch. */
   async add(documents: VectorDocument[]): Promise<void> {
     const missing = documents.filter((doc) => !doc.embedding).map((doc) => doc.content);
     const generated = missing.length ? await this.embed(missing) : [];
@@ -34,6 +47,7 @@ export class MemoryVectorStore {
     }
   }
 
+  /** The chunks most similar to a query, best first. */
   async search(query: string, options: VectorSearchOptions = {}): Promise<VectorSearchResult[]> {
     const topK = options.topK || 5;
     const minScore = options.minScore ?? 0;
@@ -50,15 +64,21 @@ export class MemoryVectorStore {
       .slice(0, topK);
   }
 
+  /** Removes every chunk. */
   clear(): void {
     this.documents = [];
   }
 
+  /** Chunks held. */
   size(): number {
     return this.documents.length;
   }
 }
 
+/**
+ * Hashed term-count vectors, normalized to unit length. Deterministic and free, for tests and a
+ * store without a provider.
+ */
 export function createHashEmbeddings(texts: string[], dimensions = 384): number[][] {
   return texts.map((text) => {
     const vector = new Array<number>(dimensions).fill(0);
@@ -73,6 +93,7 @@ export function createHashEmbeddings(texts: string[], dimensions = 384): number[
   });
 }
 
+/** Cosine similarity of two unit-length vectors, as their dot product. */
 export function cosineSimilarity(a: number[], b: number[]): number {
   const length = Math.min(a.length, b.length);
   if (length === 0) return 0;

@@ -19,19 +19,28 @@ import type {
 
 /** An asset input whose payload is already available locally as bytes. */
 export interface ByteAssetInput extends Omit<AssetInput, 'location'> {
+  /**
+   * The asset's bytes. A store only accepts content it can hold, not a URL or another store's
+   * reference.
+   */
   location: AssetBytesLocation;
 }
 
 /** A retrieved asset descriptor whose byte payload is available to the caller. */
 export interface ByteAssetDescriptor extends Omit<AssetDescriptor, 'location'> {
+  /** The asset's bytes. */
   location: AssetBytesLocation;
 }
 
+/** How an asset is stored: who owns it, where it came from, and how long it is kept. */
 export interface AssetPutOptions {
   /** Tenant that owns the asset. This value is required for every later access. */
   tenantId: string;
+  /** Where the asset came from. */
   provenance: AssetProvenance;
+  /** Width in pixels, when known. */
   width?: number;
+  /** Height in pixels, when known. */
   height?: number;
   /** Relative retention period. Mutually exclusive with `expiresAt`. */
   ttlSeconds?: number;
@@ -39,27 +48,41 @@ export interface AssetPutOptions {
   expiresAt?: Date | string;
 }
 
+/** What a store knows about an asset without reading its bytes. */
 export interface AssetStat {
+  /** The store's id for the asset. */
   assetId: string;
+  /** The tenant that owns it. */
   tenantId: string;
   /** Metadata-only descriptor. Its location points back to this store, not to the byte payload. */
   descriptor: AssetDescriptor;
+  /** ISO-8601 time it was stored. */
   createdAt: string;
+  /** ISO-8601 time it expires, when it does. */
   expiresAt?: string;
 }
 
+/** Options for a signed URL. */
 export interface AssetSignOptions {
   /** Requested signed-URL lifetime. Enforcement is delegated to the configured signer. */
   expiresInSeconds?: number;
 }
 
+/** What a signer receives: the asset, the time, and the lifetime asked for. */
 export interface AssetSignerContext extends AssetStat {
+  /** The current time, ISO-8601. */
   now: string;
+  /** Lifetime requested for the URL, in seconds. */
   expiresInSeconds?: number;
 }
 
+/**
+ * Turns an asset into a URL a client can fetch, such as a presigned S3 URL or a route on your own
+ * server.
+ */
 export type AssetSigner = (context: AssetSignerContext) => string | URL | Promise<string | URL>;
 
+/** A value a store method returns, synchronously or asynchronously. */
 export type AssetStoreResult<T> = T | Promise<T>;
 
 /**
@@ -69,36 +92,68 @@ export type AssetStoreResult<T> = T | Promise<T>;
  * may complete synchronously or asynchronously so the same contract can cover memory and remote stores.
  */
 export interface AssetStore {
+  /** Stores an asset. Throws `AssetStoreCapacityError` when it would not fit. */
   put(input: ByteAssetInput, options: AssetPutOptions): AssetStoreResult<AssetStat>;
+  /**
+   * Reads an asset with its bytes, or `undefined` when it does not exist, has expired, or belongs
+   * to another tenant.
+   */
   get(assetId: string, tenantId: string): AssetStoreResult<ByteAssetDescriptor | undefined>;
+  /** Describes an asset without reading its bytes. */
   stat(assetId: string, tenantId: string): AssetStoreResult<AssetStat | undefined>;
+  /** Deletes an asset. Resolves `true` when it existed. */
   delete(assetId: string, tenantId: string): AssetStoreResult<true | undefined>;
+  /**
+   * Returns a URL for the asset from the configured signer, or `undefined` when the asset does not
+   * exist.
+   */
   sign(assetId: string, tenantId: string, options?: AssetSignOptions): AssetStoreResult<string | undefined>;
+  /** Deletes expired assets, returning how many went. */
   purgeExpired(): AssetStoreResult<number>;
 }
 
+/** Limits and behaviour for the in-process asset store. */
 export interface MemoryAssetStoreOptions {
+  /** Most assets held at once. Defaults to 1,000. */
   maxEntries?: number;
+  /** Most bytes held in total. Defaults to 64 MiB. */
   maxTotalBytes?: number;
+  /** Largest single asset accepted. Defaults to 10 MiB. */
   maxAssetBytes?: number;
+  /**
+   * Lifetime for assets stored without their own, in seconds. Without it, assets are kept until
+   * deleted.
+   */
   defaultTtlSeconds?: number;
+  /** Creates asset ids. Defaults to random ids. */
   createAssetId?: () => string;
+  /** Replaces the system clock, for tests. */
   now?: () => Date;
+  /** Produces URLs for `sign()`. Without one, signing is refused. */
   signer?: AssetSigner;
 }
 
+/** What the in-process store currently holds, against its limits. */
 export interface MemoryAssetStoreSnapshot {
+  /** Assets held. */
   entries: number;
+  /** Bytes held. */
   totalBytes: number;
+  /** Most assets allowed. */
   maxEntries: number;
+  /** Most bytes allowed. */
   maxTotalBytes: number;
+  /** Largest single asset allowed. */
   maxAssetBytes: number;
 }
 
+/** Base class for asset store failures. */
 export class AssetStoreError extends Error {
   constructor(
     message: string,
+    /** Stable code for the failure. */
     public readonly code: string,
+    /** The underlying error, when there was one. */
     public readonly cause?: unknown,
   ) {
     super(message);
@@ -106,6 +161,7 @@ export class AssetStoreError extends Error {
   }
 }
 
+/** Raised when an asset or its options are invalid. */
 export class AssetStoreValidationError extends AssetStoreError {
   constructor(message: string, cause?: unknown) {
     super(message, 'ASSET_STORE_VALIDATION_ERROR', cause);
@@ -113,13 +169,22 @@ export class AssetStoreValidationError extends AssetStoreError {
   }
 }
 
+/** Which store limit a request ran into. */
 export type AssetCapacityConstraint = 'maxEntries' | 'maxTotalBytes' | 'maxAssetBytes';
 
+/**
+ * Raised when an asset would exceed a store limit. Carries the limit, what is held, and what was
+ * asked for.
+ */
 export class AssetStoreCapacityError extends AssetStoreError {
   constructor(
+    /** The limit that was hit. */
     public readonly constraint: AssetCapacityConstraint,
+    /** The limit's value. */
     public readonly maximum: number,
+    /** What the store holds now. */
     public readonly current: number,
+    /** What the asset would add. */
     public readonly requested: number,
   ) {
     super(
@@ -130,6 +195,7 @@ export class AssetStoreCapacityError extends AssetStoreError {
   }
 }
 
+/** Raised when a signed URL cannot be produced. */
 export class AssetStoreSigningError extends AssetStoreError {
   constructor(message: string, cause?: unknown) {
     super(message, 'ASSET_STORE_SIGNING_ERROR', cause);

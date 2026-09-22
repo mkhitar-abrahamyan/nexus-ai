@@ -1,3 +1,4 @@
+/** A rate-limit window after counting one call. */
 export interface RateLimitHit {
   /** Calls counted in the current window, including this one. */
   count: number;
@@ -14,6 +15,7 @@ export interface RateLimitHit {
 export interface RateLimitStore {
   /** Counts one call against `key` and returns the resulting window state. */
   hit(key: string, windowMs: number): Promise<RateLimitHit> | RateLimitHit;
+  /** Resets a key's window. */
   reset?(key: string): Promise<void> | void;
 }
 
@@ -23,6 +25,7 @@ export class MemoryRateLimitStore implements RateLimitStore {
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
+  /** Counts one call, starting a new window when the last has ended. */
   hit(key: string, windowMs: number): RateLimitHit {
     const now = this.now();
     const bucket = this.buckets.get(key);
@@ -37,10 +40,12 @@ export class MemoryRateLimitStore implements RateLimitStore {
     return bucket;
   }
 
+  /** Resets a key's window. */
   reset(key: string): void {
     this.buckets.delete(key);
   }
 
+  /** Resets every window. */
   clear(): void {
     this.buckets.clear();
   }
@@ -52,9 +57,13 @@ export class MemoryRateLimitStore implements RateLimitStore {
  * Structural rather than tied to one client, so `ioredis`, `node-redis`, or a proxy all satisfy it.
  */
 export interface RedisRateLimitLikeClient {
+  /** Increments a key. */
   incr(key: string): Promise<number> | number;
+  /** Sets a key's expiry in milliseconds. */
   pexpire(key: string, milliseconds: number): Promise<unknown> | unknown;
+  /** Reads a key's remaining lifetime in milliseconds. */
   pttl(key: string): Promise<number> | number;
+  /** Deletes a key, for `reset()`. */
   del?(key: string): Promise<unknown> | unknown;
   /** Optional atomic primitive. Strongly preferred; see the class note. */
   eval?(script: string, numKeys: number, ...args: string[]): Promise<unknown> | unknown;
@@ -74,7 +83,9 @@ end
 return {count, ttl}
 `;
 
+/** Options for the Redis rate-limit store. */
 export interface RedisRateLimitStoreOptions {
+  /** Key prefix. Defaults to `nexus-ai-pro:ratelimit:`. */
   prefix?: string;
   /** Disables the Lua path even when the client exposes `eval`. */
   useEval?: boolean;
@@ -102,6 +113,7 @@ export class RedisRateLimitStore implements RateLimitStore {
     this.useEval = options.useEval !== false && typeof client.eval === 'function';
   }
 
+  /** Counts one call, in one atomic step when the client has `eval`. */
   async hit(key: string, windowMs: number): Promise<RateLimitHit> {
     const namespaced = this.prefix + key;
 
@@ -129,6 +141,7 @@ export class RedisRateLimitStore implements RateLimitStore {
     return { count, resetAt: Date.now() + ttl };
   }
 
+  /** Resets a key's window. Does nothing when the client has no `del`. */
   async reset(key: string): Promise<void> {
     await this.client.del?.(this.prefix + key);
   }

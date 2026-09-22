@@ -24,16 +24,23 @@ export {
  */
 export type MaskSemantics = 'white-is-editable' | 'black-is-editable' | 'alpha-transparent-is-editable';
 
+/** What a mask must be converted to. */
 export interface MaskTarget {
+  /** How the provider reads masks. */
   semantics: MaskSemantics;
   /** Dimensions of the image the mask applies to. The prepared mask always matches them. */
   width: number;
+  /** Height of the image the mask applies to. */
   height: number;
+  /** The provider, named in errors. */
   provider?: string;
 }
 
+/** A mask converted for one provider, at the image's exact dimensions. */
 export interface PreparedMask extends AssetInput {
+  /** Width, equal to the image's. */
   width: number;
+  /** Height, equal to the image's. */
   height: number;
   /** Share of pixels marked editable, between 0 and 1. */
   coverage: number;
@@ -47,9 +54,11 @@ export interface PreparedMask extends AssetInput {
  * anti-aliasing.
  */
 export interface AssetTransformer {
+  /** Converts a mask to the target's semantics and dimensions. */
   prepareMask(mask: ImageMaskInput, target: MaskTarget): Promise<PreparedMask> | PreparedMask;
 }
 
+/** Options for the bundled PNG mask transformer. */
 export interface PngMaskTransformerOptions {
   /** Luminance, 0–255, at or above which a pixel counts as white. Defaults to 128. */
   threshold?: number;
@@ -59,6 +68,10 @@ export interface PngMaskTransformerOptions {
 
 const DEFAULT_MAX_MASK_PIXELS = 40_000_000;
 
+/**
+ * Converts PNG masks between polarities and alpha semantics, resizing with nearest-neighbour when
+ * the mask's `resizeMode` allows.
+ */
 export class PngMaskTransformer implements AssetTransformer {
   private readonly threshold: number;
   private readonly maxPixels: number;
@@ -71,6 +84,10 @@ export class PngMaskTransformer implements AssetTransformer {
     }
   }
 
+  /**
+   * Converts a PNG mask. Throws for a mask that is not PNG bytes, or of the wrong size when
+   * `resizeMode` is `reject`.
+   */
   prepareMask(mask: ImageMaskInput, target: MaskTarget): PreparedMask {
     if (mask.location.kind !== 'bytes') {
       throw new ImageCapabilityError(

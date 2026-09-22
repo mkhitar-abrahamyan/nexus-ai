@@ -8,7 +8,12 @@ import { InputGuard } from './input-guard.js';
 import type { NexusResponse } from '../types/response.js';
 import { SemanticInjectionClassifier } from './semantic-injection-classifier.js';
 
+/**
+ * Raised when guardrails block a request or a response. Finding values are redacted from the
+ * message.
+ */
 export class NexusSecurityError extends Error {
+  /** What was found, with sensitive values redacted. */
   public readonly findings: SecurityFinding[];
 
   constructor(findings: SecurityFinding[], target: 'request' | 'output' = 'request') {
@@ -19,6 +24,10 @@ export class NexusSecurityError extends Error {
   }
 }
 
+/**
+ * Runs the input and output guardrails: schema validation, injection and PII detection, and output
+ * checks, at a security level or with a full configuration.
+ */
 export class SecurityPipeline {
   private schemaValidator = new SchemaValidator();
   private injectionDetector = new InjectionDetector();
@@ -29,6 +38,7 @@ export class SecurityPipeline {
 
   constructor(private config: SecurityLevel | SecurityConfig = 'standard') {}
 
+  /** Checks and sanitizes a request before it is sent. */
   protectInput(request: CompletionRequest): SecurityResult<CompletionRequest> {
     const normalized = this.normalizeConfig();
     const level = normalized.level || 'standard';
@@ -95,6 +105,9 @@ export class SecurityPipeline {
     };
   }
 
+  /**
+   * Throws `NexusSecurityError` with the high and critical findings when a request check failed.
+   */
   assertSafe(result: SecurityResult<CompletionRequest>): void {
     if (!result.ok) {
       throw new NexusSecurityError(
@@ -103,6 +116,9 @@ export class SecurityPipeline {
     }
   }
 
+  /**
+   * Throws `NexusSecurityError` with the high and critical findings when a response check failed.
+   */
   assertOutputSafe(result: SecurityResult<NexusResponse>): void {
     if (!result.ok) {
       throw new NexusSecurityError(
@@ -112,6 +128,7 @@ export class SecurityPipeline {
     }
   }
 
+  /** Checks and sanitizes a response before it is returned. */
   protectOutput(response: NexusResponse): SecurityResult<NexusResponse> {
     const normalized = this.normalizeConfig();
     const level = normalized.level || 'standard';

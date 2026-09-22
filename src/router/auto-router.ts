@@ -17,7 +17,12 @@ export class AutoRouter {
     const candidates = this.withoutOpenCircuits(this.getCandidates(ctx), ctx).map((candidate) => ({
       ...candidate,
       score:
-        this.score(candidate.model, strategy, ctx.config) +
+        this.score(
+          candidate.model,
+          strategy,
+          ctx.config,
+          ctx.providers.get(candidate.providerName)?.info?.isLocal === true,
+        ) +
         candidate.weight +
         this.healthScore(candidate.providerName, ctx),
       reason: `auto route by ${strategy} score`,
@@ -82,12 +87,17 @@ export class AutoRouter {
     });
   }
 
-  private score(model: string, strategy: string, config: NexusAIConfig): number {
+  /**
+   * Scores a model for a strategy. For privacy, a model counts as local when its name says so or when
+   * its provider was configured with `isLocal`, which is how a self-hosted OpenAI-compatible server
+   * is preferred without renaming its models.
+   */
+  private score(model: string, strategy: string, config: NexusAIConfig, providerIsLocal = false): number {
     const registry = getModelRegistry(config);
     const normalized = model.startsWith('ollama/') ? model.slice(7) : model;
     const caps = registry[model] || registry[normalized] || this.localFallbackCapabilities(model);
 
-    if (strategy === 'privacy') return isLocalModel(model) ? 100 : 30;
+    if (strategy === 'privacy') return providerIsLocal || isLocalModel(model) ? 100 : 30;
     if (strategy === 'speed') return this.speedScore(model, caps);
     if (strategy === 'cost') return this.costScore(model, caps);
     return this.qualityScore(model, caps);

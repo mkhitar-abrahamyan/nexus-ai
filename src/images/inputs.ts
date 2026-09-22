@@ -4,6 +4,7 @@ import type { AssetStore } from './asset-support.js';
 import { readImageDimensions, sniffImageType } from './image-header.js';
 import { ImageValidationError } from './errors.js';
 
+/** Why the input resolver refused an input. */
 export type ImageInputRejection =
   | 'too-large'
   | 'too-many-pixels'
@@ -21,11 +22,14 @@ export type ImageInputRejection =
  * rather than surfacing a generic validation failure.
  */
 export class ImageInputError extends ImageValidationError {
+  /** Always `IMAGE_INPUT_REJECTED`. */
   override readonly code = 'IMAGE_INPUT_REJECTED';
 
   constructor(
     message: string,
+    /** Why it was refused. */
     public readonly reason: ImageInputRejection,
+    /** The request option that carried the input, such as `input` or `mask`. */
     public readonly option: string,
     cause?: unknown,
   ) {
@@ -34,6 +38,7 @@ export class ImageInputError extends ImageValidationError {
   }
 }
 
+/** Limits on image inputs, and how remote and stored inputs are fetched. */
 export interface ImageInputPolicy extends SafeFetchPolicy {
   /** Largest input accepted, in bytes. Defaults to 20 MB. */
   maxBytes?: number;
@@ -57,6 +62,7 @@ export interface ImageInputPolicy extends SafeFetchPolicy {
   timeoutMs?: number;
   /** Resolves `stored` locations. */
   store?: AssetStore;
+  /** Tenant stored assets are read for, when the call supplies none. */
   tenantId?: string;
 }
 
@@ -85,6 +91,10 @@ export class ImageInputResolver implements ImageAssetResolver {
     this.allowed = (policy.allowedMimeTypes ?? DEFAULT_ALLOWED).map(normalizeMime);
   }
 
+  /**
+   * Resolves an input to bytes, enforcing every limit. Throws `ImageInputError` for a refused
+   * input.
+   */
   async resolve(asset: AssetInput, context: ImageAssetResolverContext): Promise<AssetInput> {
     const option = context.option;
     const location = asset.location;

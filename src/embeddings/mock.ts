@@ -8,10 +8,15 @@ import type {
 } from '../types/embeddings.js';
 import { createHashEmbeddings } from '../hallucination/retrieval.js';
 
+/** Options for the mock embeddings provider. */
 export interface MockEmbeddingProviderOptions {
+  /** Provider name. Defaults to `mock`. */
   name?: string;
+  /** Model reported. Defaults to `mock-embedding`. */
   defaultModel?: string;
+  /** Vector width when the request sets none. Defaults to 16. */
   dimensions?: number;
+  /** Capabilities reported, merged over the defaults. */
   capabilities?: Partial<EmbeddingProviderCapabilities>;
   /** Reported input tokens per call. Defaults to a word count, so cost is non-zero and testable. */
   usage?: (request: EmbeddingProviderRequest) => { inputTokens?: number; totalTokens?: number };
@@ -28,6 +33,7 @@ export interface MockEmbeddingProviderOptions {
  * deduplication without a provider account. It records every call it received.
  */
 export class MockEmbeddingProvider implements EmbeddingsProvider {
+  /** Provider name, capabilities, and models. */
   readonly info: EmbeddingProviderInfo;
   /** Every provider request this instance received, in call order. */
   readonly calls: EmbeddingProviderRequest[] = [];
@@ -55,6 +61,7 @@ export class MockEmbeddingProvider implements EmbeddingsProvider {
     return this.attempts;
   }
 
+  /** Returns deterministic vectors, one per input. */
   async embed(
     request: EmbeddingProviderRequest,
     context: EmbeddingProviderCallContext,

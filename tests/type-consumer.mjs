@@ -198,8 +198,23 @@ import {
   passRate,
   AnnotationQueue,
   MemoryExperimentStore,
+  FileExperimentStore,
+  underCost,
   type Experiment,
 } from 'nexus-ai-pro/evaluate';
+import {
+  PostgresOperationStore,
+  PostgresStore,
+  PostgresTraceStore,
+  PostgresDatasetStore,
+  PostgresExperimentStore,
+  PostgresCircuitStateStore,
+  postgresMigration,
+  type PostgresLikeClient,
+} from 'nexus-ai-pro/postgres';
+import { PostgresStore as SubpathPostgresStore } from 'nexus-ai-pro/postgres/store';
+import { MemoryCircuitStateStore, RedisCircuitStateStore } from 'nexus-ai-pro/ops/circuit-store';
+import { recordingFetch, replayFetch, type RecordedExchange } from 'nexus-ai-pro/testing/record';
 import { BatchManager as SubpathBatchManager } from 'nexus-ai-pro/batch';
 import { MockBatchProvider } from 'nexus-ai-pro/batch/mock';
 import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
@@ -561,6 +576,29 @@ const experiment: Promise<Experiment> = evaluate(async (inputs) => inputs.q, eva
   repetitions: 2,
 });
 const comparison = experiment.then((candidate) => compareExperiments(candidate, candidate));
+const pool: PostgresLikeClient = { query: async () => ({ rows: [], rowCount: 0 }) };
+const durableOperations = new PostgresOperationStore(pool, { table: 'app.operations' });
+const postgresMemory: Store = new PostgresStore(pool, { vectorDimensions: 1536 });
+const subpathMemoryStore: Store = new SubpathPostgresStore(pool);
+const postgresTraces: TraceStore = new PostgresTraceStore(pool);
+const postgresDatasets = new PostgresDatasetStore(pool);
+const postgresExperiments = new PostgresExperimentStore(pool);
+const sharedCircuits = new PostgresCircuitStateStore(pool);
+const schema: string = postgresMigration({ adapters: ['traces', 'circuits'] });
+const sharedBreaker = new CircuitBreaker({ enabled: true, store: new MemoryCircuitStateStore(), workerId: 'api-1' });
+const redisCircuits = new RedisCircuitStateStore({
+  hgetall: async () => ({}),
+  hget: async () => null,
+  hset: async () => 1,
+  set: async () => 'OK',
+  get: async () => null,
+  del: async () => 1,
+});
+const experimentFiles = new FileExperimentStore('./experiments');
+const costGate = underCost(0.05);
+const recorder = recordingFetch({ directory: './fixtures' });
+const replayer: typeof fetch = replayFetch({ directory: './fixtures', onMissing: 'throw' });
+const exchangeKey = (exchange: RecordedExchange): string => exchange.key;
 const reviewQueue = new AnnotationQueue({ rubric: [{ key: 'ok', prompt: 'Good?', type: 'boolean' }] });
 const batchManager = new BatchManager({ providers: { mock: new MockBatchProvider() }, defaultProvider: 'mock' });
 const subpathBatchManager = new SubpathBatchManager();

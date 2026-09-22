@@ -91,7 +91,42 @@ const imports = [
   { specifier: 'nexus-ai-pro/mcp', exports: ['McpClient', 'McpServer', 'createStdioTransport', 'McpError'] },
   {
     specifier: 'nexus-ai-pro/evaluate',
-    exports: ['evaluate', 'createDataset', 'compareExperiments', 'AnnotationQueue', 'exactMatch', 'trajectory'],
+    exports: [
+      'evaluate',
+      'createDataset',
+      'compareExperiments',
+      'AnnotationQueue',
+      'exactMatch',
+      'trajectory',
+      'underCost',
+      'FileExperimentStore',
+    ],
+  },
+  {
+    specifier: 'nexus-ai-pro/postgres',
+    exports: [
+      'PostgresOperationStore',
+      'PostgresStore',
+      'PostgresTraceStore',
+      'PostgresDatasetStore',
+      'PostgresExperimentStore',
+      'PostgresCircuitStateStore',
+      'postgresMigration',
+      'fromPostgresJs',
+    ],
+  },
+  { specifier: 'nexus-ai-pro/postgres/operations', exports: ['PostgresOperationStore', 'operationStoreMigration'] },
+  { specifier: 'nexus-ai-pro/postgres/store', exports: ['PostgresStore', 'storeMigration'] },
+  { specifier: 'nexus-ai-pro/postgres/traces', exports: ['PostgresTraceStore', 'traceStoreMigration'] },
+  {
+    specifier: 'nexus-ai-pro/postgres/evaluate',
+    exports: ['PostgresDatasetStore', 'PostgresExperimentStore', 'evaluationStoreMigration'],
+  },
+  { specifier: 'nexus-ai-pro/postgres/circuits', exports: ['PostgresCircuitStateStore', 'circuitStoreMigration'] },
+  { specifier: 'nexus-ai-pro/ops/circuit-store', exports: ['MemoryCircuitStateStore', 'RedisCircuitStateStore'] },
+  {
+    specifier: 'nexus-ai-pro/testing/record',
+    exports: ['recordingFetch', 'replayFetch', 'fixtureFetch', 'installFetch', 'readFixtures', 'FixtureMissingError'],
   },
   {
     specifier: 'nexus-ai-pro/tracing',

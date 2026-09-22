@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "Typed AI framework for TypeScript: provider routing and failover, parallel agent graphs with checkpoints, durable operations, guardrails, and cost control",
   "type": "module",
   "main": "dist-cjs/index.js",
@@ -520,6 +520,86 @@
         "default": "./dist-cjs/evaluate/index.js"
       }
     },
+    "./postgres": {
+      "import": {
+        "types": "./dist/postgres/index.d.ts",
+        "default": "./dist/postgres/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/index.d.ts",
+        "default": "./dist-cjs/postgres/index.js"
+      }
+    },
+    "./postgres/operations": {
+      "import": {
+        "types": "./dist/postgres/operations.d.ts",
+        "default": "./dist/postgres/operations.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/operations.d.ts",
+        "default": "./dist-cjs/postgres/operations.js"
+      }
+    },
+    "./postgres/store": {
+      "import": {
+        "types": "./dist/postgres/store.d.ts",
+        "default": "./dist/postgres/store.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/store.d.ts",
+        "default": "./dist-cjs/postgres/store.js"
+      }
+    },
+    "./postgres/traces": {
+      "import": {
+        "types": "./dist/postgres/traces.d.ts",
+        "default": "./dist/postgres/traces.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/traces.d.ts",
+        "default": "./dist-cjs/postgres/traces.js"
+      }
+    },
+    "./postgres/evaluate": {
+      "import": {
+        "types": "./dist/postgres/evaluate.d.ts",
+        "default": "./dist/postgres/evaluate.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/evaluate.d.ts",
+        "default": "./dist-cjs/postgres/evaluate.js"
+      }
+    },
+    "./postgres/circuits": {
+      "import": {
+        "types": "./dist/postgres/circuits.d.ts",
+        "default": "./dist/postgres/circuits.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/circuits.d.ts",
+        "default": "./dist-cjs/postgres/circuits.js"
+      }
+    },
+    "./ops/circuit-store": {
+      "import": {
+        "types": "./dist/ops/circuit-store.d.ts",
+        "default": "./dist/ops/circuit-store.js"
+      },
+      "require": {
+        "types": "./dist-cjs/ops/circuit-store.d.ts",
+        "default": "./dist-cjs/ops/circuit-store.js"
+      }
+    },
+    "./testing/record": {
+      "import": {
+        "types": "./dist/testing/record.d.ts",
+        "default": "./dist/testing/record.js"
+      },
+      "require": {
+        "types": "./dist-cjs/testing/record.d.ts",
+        "default": "./dist-cjs/testing/record.js"
+      }
+    },
     "./ops/circuit-breaker": {
       "import": {
         "types": "./dist/ops/circuit-breaker.d.ts",
@@ -857,6 +937,7 @@
     "example:agent": "tsx examples/agent.ts",
     "example:realtime": "tsx examples/realtime-scheduling.ts",
     "size:check": "node scripts/check-subpath-sizes.mjs",
+    "docs:check": "node scripts/check-doc-coverage.mjs",
     "size:update": "node scripts/check-subpath-sizes.mjs --update",
     "registry:generate": "node scripts/generate-model-registry.mjs",
     "registry:check": "node scripts/generate-model-registry.mjs --check",
@@ -867,7 +948,7 @@
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
     "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
     "typecheck:examples:browser": "tsc -p tsconfig.examples.browser.json --noEmit",
-    "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run size:check && npm run test:smoke && npm run test:api && npm run test:types",
+    "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:conformance:images && npm run size:check && npm run docs:check && npm run test:smoke && npm run test:api && npm run test:types",
     "test:unit": "node --import tsx --test tests/unit.ts tests/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-lines=82 --test-coverage-branches=67 --test-coverage-functions=73 tests/unit.ts tests/*.test.ts",
     "test:smoke": "node tests/package-smoke.mjs",
@@ -882,8 +963,10 @@
     "check:release": "npm run check && npm run bench:graph && npm run pack:dry-run && npm run test:clean-install",
     "prepack": "npm run build",
     "prepublishOnly": "npm run check:release",
-    "build:esm": "tsc",
-    "build:cjs": "tsc -p tsconfig.cjs.json && node scripts/finalize-cjs.mjs"
+    "build:esm": "tsc --removeComments --declaration false && tsc --emitDeclarationOnly",
+    "build:cjs": "tsc -p tsconfig.cjs.json --removeComments --declaration false && tsc -p tsconfig.cjs.json --emitDeclarationOnly && node scripts/finalize-cjs.mjs",
+    "test:conformance:images": "tsx tests/conformance.images.ts",
+    "conformance:images:record": "tsx tests/conformance.images.ts --record"
   },
   "keywords": [
     "ai",
@@ -927,7 +1010,12 @@
     "realtime",
     "voice",
     "typescript",
-    "nodejs"
+    "nodejs",
+    "postgres",
+    "pgvector",
+    "circuit-breaker",
+    "record-replay",
+    "llm-evaluation"
   ],
   "author": "Mkhitar Abrahamyan <mkhitar.abrahamyan99@gmail.com>",
   "license": "MIT",
@@ -956,6 +1044,8 @@
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
     "@biomejs/biome": "^2.3.0",
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-pgvector": "^0.0.9",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/sdk-metrics": "^2.1.0",
     "@opentelemetry/sdk-node": "^0.220.0",
@@ -1148,6 +1238,30 @@
       ],
       "evaluate": [
         "dist-cjs/evaluate/index.d.ts"
+      ],
+      "postgres": [
+        "dist-cjs/postgres/index.d.ts"
+      ],
+      "postgres/operations": [
+        "dist-cjs/postgres/operations.d.ts"
+      ],
+      "postgres/store": [
+        "dist-cjs/postgres/store.d.ts"
+      ],
+      "postgres/traces": [
+        "dist-cjs/postgres/traces.d.ts"
+      ],
+      "postgres/evaluate": [
+        "dist-cjs/postgres/evaluate.d.ts"
+      ],
+      "postgres/circuits": [
+        "dist-cjs/postgres/circuits.d.ts"
+      ],
+      "ops/circuit-store": [
+        "dist-cjs/ops/circuit-store.d.ts"
+      ],
+      "testing/record": [
+        "dist-cjs/testing/record.d.ts"
       ],
       "ops/circuit-breaker": [
         "dist-cjs/ops/circuit-breaker.d.ts"

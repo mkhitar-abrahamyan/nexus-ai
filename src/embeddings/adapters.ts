@@ -18,9 +18,13 @@ import { EmbeddingProviderResponseError } from './errors.js';
  */
 
 export interface EmbeddingAdapterOptions {
+  /** API key. */
   apiKey?: string;
+  /** API base URL. Each adapter has its own default. */
   baseUrl?: string;
+  /** Model used when a request names none. */
   model?: string;
+  /** Headers added to every request. */
   headers?: Record<string, string>;
   /** Replaces the global `fetch`, for proxying or tests. */
   fetch?: typeof fetch;
@@ -99,6 +103,7 @@ interface OpenAIEmbeddingPayload {
  * when the request names none.
  */
 export class OpenAIEmbeddingProvider extends HttpEmbeddingProvider {
+  /** Provider name, capabilities, and models. */
   readonly info: EmbeddingProviderInfo;
 
   constructor(options: OpenAICompatibleEmbeddingOptions = {}) {
@@ -118,6 +123,7 @@ export class OpenAIEmbeddingProvider extends HttpEmbeddingProvider {
     };
   }
 
+  /** Embeds a batch of texts. */
   async embed(
     request: EmbeddingProviderRequest,
     context: EmbeddingProviderCallContext,
@@ -165,6 +171,7 @@ interface GoogleEmbeddingPayload {
 
 /** Google Generative Language `batchEmbedContents`. */
 export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
+  /** Provider name, capabilities, and models. */
   readonly info: EmbeddingProviderInfo;
 
   constructor(options: EmbeddingAdapterOptions = {}) {
@@ -188,6 +195,7 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
     return this.options.apiKey ? { 'x-goog-api-key': this.options.apiKey } : {};
   }
 
+  /** Embeds a batch of texts. */
   async embed(
     request: EmbeddingProviderRequest,
     context: EmbeddingProviderCallContext,
@@ -237,6 +245,7 @@ interface CoherePayload {
 
 /** Cohere v2 `/embed`. */
 export class CohereEmbeddingProvider extends HttpEmbeddingProvider {
+  /** Provider name, capabilities, and models. */
   readonly info: EmbeddingProviderInfo;
 
   constructor(options: EmbeddingAdapterOptions = {}) {
@@ -256,6 +265,7 @@ export class CohereEmbeddingProvider extends HttpEmbeddingProvider {
     };
   }
 
+  /** Embeds a batch of texts. */
   async embed(
     request: EmbeddingProviderRequest,
     context: EmbeddingProviderCallContext,
@@ -316,6 +326,7 @@ interface OllamaPayload {
 
 /** Local Ollama `/api/embed`. */
 export class OllamaEmbeddingProvider extends HttpEmbeddingProvider {
+  /** Provider name, capabilities, and models. */
   readonly info: EmbeddingProviderInfo;
 
   constructor(options: EmbeddingAdapterOptions = {}) {
@@ -333,6 +344,7 @@ export class OllamaEmbeddingProvider extends HttpEmbeddingProvider {
     };
   }
 
+  /** Embeds a batch of texts. */
   async embed(
     request: EmbeddingProviderRequest,
     context: EmbeddingProviderCallContext,

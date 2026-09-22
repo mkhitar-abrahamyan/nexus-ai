@@ -1,10 +1,15 @@
 import type { EvaluationScore, ExampleResult, Experiment } from '../types/evaluate.js';
 import { stats } from './run.js';
 
+/** How one metric moved between two experiments. */
 export interface MetricComparison {
+  /** The score key. */
   key: string;
+  /** Mean in the baseline. */
   baseline: number;
+  /** Mean in the candidate. */
   candidate: number;
+  /** Mean of the per-example differences, candidate minus baseline. */
   delta: number;
   /** 95% interval for the delta, from a paired bootstrap. Excludes zero when the change is real. */
   ci95: [number, number];
@@ -12,29 +17,46 @@ export interface MetricComparison {
   verdict: 'better' | 'worse' | 'unchanged';
 }
 
+/** How one example's score moved. */
 export interface ExampleComparison {
+  /** The example. */
   exampleId: string;
+  /** The score key. */
   key: string;
+  /** Its score in the baseline. */
   baseline: number;
+  /** Its score in the candidate. */
   candidate: number;
+  /** The change, signed so a positive number is always an improvement. */
   delta: number;
 }
 
+/** What changed between a baseline experiment and a candidate. */
 export interface ExperimentComparison {
+  /** The baseline experiment. */
   baseline: { id: string; name: string };
+  /** The candidate experiment. */
   candidate: { id: string; name: string };
   /** Present when the two experiments did not run over the same dataset version. */
   datasetMismatch?: { baseline: string; candidate: string };
+  /** One entry per metric both experiments scored. */
   metrics: MetricComparison[];
   /** The examples that moved most, worst first. */
   regressions: ExampleComparison[];
+  /** The examples that improved most, best first. */
   improvements: ExampleComparison[];
   /** True when any metric got worse beyond noise, or a new error appeared. */
   regressed: boolean;
+  /** Examples that failed in the candidate but not the baseline. */
   newErrors: string[];
+  /** Examples that failed in the baseline but not the candidate. */
   fixedErrors: string[];
 }
 
+/**
+ * Options for `compareExperiments()`. `latency`, `total-cost`, and `cost` are lower-is-better
+ * unless replaced.
+ */
 export interface CompareOptions {
   /** Metrics where a lower number is better, such as latency or cost. */
   lowerIsBetter?: readonly string[];

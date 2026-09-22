@@ -20,19 +20,28 @@ import type { AssetTransformer } from './transform.js';
 
 /** One node of a ComfyUI API-format workflow. */
 export interface ComfyNode {
+  /** The node type, such as `KSampler`. */
   class_type: string;
+  /** Its inputs: literal values, or `[nodeId, outputIndex]` links to other nodes. */
   inputs: Record<string, unknown>;
 }
 
+/** A ComfyUI workflow in API format: nodes keyed by id. */
 export type ComfyWorkflow = Record<string, ComfyNode>;
 
+/** An image uploaded to ComfyUI's input folder. */
 export interface ComfyUploadedImage {
+  /** File name ComfyUI assigned. */
   name: string;
+  /** Subfolder it was stored in. */
   subfolder?: string;
+  /** Folder type, usually `input`. */
   type?: string;
 }
 
+/** What a workflow builder receives besides the request. */
 export interface ComfyWorkflowContext {
+  /** Whether it generates or edits. */
   operation: ImageOperation;
   /** Uploaded input image, present for edits. */
   input?: ComfyUploadedImage;
@@ -54,20 +63,35 @@ export type ComfyWorkflowBuilder = (
   context: ComfyWorkflowContext,
 ) => ComfyWorkflow;
 
+/** Options for the ComfyUI image provider. */
 export interface ComfyUIImageProviderConfig {
+  /** ComfyUI server URL. Defaults to `http://127.0.0.1:8188`. */
   baseUrl?: string;
+  /**
+   * Builds the workflow for each request. Defaults to the bundled text-to-image and inpaint
+   * workflows.
+   */
   workflow?: ComfyWorkflowBuilder;
   /** Checkpoint used by the bundled workflows. */
   checkpoint?: string;
+  /** Replaces the global `fetch`. */
   fetch?: typeof globalThis.fetch;
   /** Starting poll interval. Defaults to 500 ms; it backs off to `maxPollIntervalMs`. */
   pollIntervalMs?: number;
+  /** Longest poll interval, in milliseconds. Defaults to 5 seconds. */
   maxPollIntervalMs?: number;
   /** Gives up waiting for the queue after this long. Defaults to 10 minutes. */
   timeoutMs?: number;
+  /** Sizes the server supports, reported as capabilities. */
   dimensions?: readonly ImageDimensions[];
+  /**
+   * Converts neutral masks to ComfyUI's white-is-editable form. Defaults to the bundled PNG
+   * transformer, loaded on the first masked request.
+   */
   maskTransformer?: AssetTransformer;
+  /** Headers added to every request, such as authorization for a proxied server. */
   headers?: Record<string, string>;
+  /** Client id sent with queued prompts. Defaults to a random id. */
   clientId?: string;
 }
 
@@ -100,6 +124,7 @@ const DEFAULT_DIMENSIONS: readonly ImageDimensions[] = [
  * the queue explicitly or it keeps consuming the GPU.
  */
 export class ComfyUIImageProvider implements ImageProvider {
+  /** Provider name, capabilities, and models. */
   readonly info: ImageProviderInfo;
 
   private readonly baseUrl: string;
@@ -145,10 +170,12 @@ export class ComfyUIImageProvider implements ImageProvider {
     };
   }
 
+  /** Generates images by queueing the workflow and polling for its outputs. */
   generate(request: ImageGenerateRequest, context: ImageProviderCallContext): Promise<ImageResult> {
     return this.run('generate', request, context);
   }
 
+  /** Edits an image by uploading it, and any mask, then queueing the workflow. */
   edit(request: ImageEditRequest, context: ImageProviderCallContext): Promise<ImageResult> {
     return this.run('edit', request, context);
   }

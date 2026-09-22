@@ -11,9 +11,13 @@ import { DEFAULT_CURRENCY, formatCost } from './cost-budget.js';
  */
 export { CostBudgetError, DEFAULT_CURRENCY, assertWithinCostBudget, formatCost } from './cost-budget.js';
 
+/** Input for `estimateCost()`. */
 export interface CostEstimateInput {
+  /** The model, or an alias. */
   model: string;
+  /** Input tokens billed at the standard rate. */
   inputTokens: number;
+  /** Output tokens. Defaults to 0. */
   outputTokens?: number;
   /** Tokens the provider served from its prompt cache, billed at the cached-read rate. */
   cachedReadTokens?: number;
@@ -21,6 +25,7 @@ export interface CostEstimateInput {
   cachedWriteTokens?: number;
   /** Cache lifetime the request asked for; long-lived writes cost more on some providers. */
   cacheTtl?: CacheTtl;
+  /** Application registry entries and prices. */
   config?: Pick<NexusAIConfig, 'models'>;
 }
 
@@ -65,6 +70,10 @@ function cacheRates(
   return { read, write };
 }
 
+/**
+ * Prices a request from the model registry, with cached reads and writes on their own lines.
+ * Unknown models cost 0.
+ */
 export function estimateCost(input: CostEstimateInput): CostEstimate {
   const resolved = resolveModel(input.model, input.config);
   const caps = resolved.capabilities;

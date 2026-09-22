@@ -77,6 +77,20 @@ export function underLatency(maxMs: number, options: { key?: string } = {}): Eva
   });
 }
 
+/**
+ * Cost as a pass or fail, per example.
+ *
+ * Reads the cost `evaluate()` recorded for the output, so an example whose output carries no cost
+ * scores 0 and passes: an unpriced call is not evidence of overspending.
+ */
+export function underCost(maxCost: number, options: { key?: string } = {}): Evaluator {
+  return (context) => ({
+    key: options.key ?? 'cost',
+    score: context.cost ?? 0,
+    passed: (context.cost ?? 0) <= maxCost,
+  });
+}
+
 /** Cosine similarity against the expected answer, through any embedder. */
 export function embeddingSimilarity(options: {
   embed: (texts: string[]) => Promise<number[][]>;
@@ -98,6 +112,7 @@ export function embeddingSimilarity(options: {
   };
 }
 
+/** Options for `trajectory()`. */
 export interface TrajectoryOptions {
   /** Tool or node names expected, in order. */
   expected?: readonly string[];
@@ -105,6 +120,7 @@ export interface TrajectoryOptions {
   path?: (context: EvaluationContext) => string[];
   /** `exact` requires the same sequence; `subset` only requires each expected step to appear. */
   mode?: 'exact' | 'subset';
+  /** Score key. Defaults to `trajectory`. */
   key?: string;
 }
 

@@ -1,7 +1,9 @@
 import type { SecurityConfig } from '../types/security.js';
 
+/** Names of the bundled guardrail presets. */
 export type GuardrailPolicyName = 'owasp-llm' | 'pii-safe' | 'rag-grounded' | 'tool-safe' | 'enterprise-strict';
 
+/** The bundled guardrail presets, as security configurations. */
 export const GUARDRAIL_POLICIES: Record<GuardrailPolicyName, SecurityConfig> = {
   'owasp-llm': {
     level: 'strict',
@@ -55,6 +57,7 @@ export const GUARDRAIL_POLICIES: Record<GuardrailPolicyName, SecurityConfig> = {
   },
 };
 
+/** A bundled guardrail preset, with your overrides merged over it. */
 export function guardrailPolicy(name: GuardrailPolicyName, overrides: SecurityConfig = {}): SecurityConfig {
   const base = GUARDRAIL_POLICIES[name];
   return {

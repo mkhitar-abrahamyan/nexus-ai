@@ -1,7 +1,10 @@
+/** Base class for embeddings errors, each with a stable `code`. */
 export class EmbeddingError extends Error {
   constructor(
     message: string,
+    /** Stable code, such as `EMBEDDING_VALIDATION_ERROR`. */
     public readonly code: string,
+    /** The underlying error. */
     public readonly cause?: unknown,
   ) {
     super(message);
@@ -9,6 +12,7 @@ export class EmbeddingError extends Error {
   }
 }
 
+/** Raised when a request is invalid before anything is sent. */
 export class EmbeddingValidationError extends EmbeddingError {
   constructor(message: string, cause?: unknown) {
     super(message, 'EMBEDDING_VALIDATION_ERROR', cause);
@@ -16,9 +20,11 @@ export class EmbeddingValidationError extends EmbeddingError {
   }
 }
 
+/** Raised when an embeddings provider fails. */
 export class EmbeddingProviderError extends EmbeddingError {
   constructor(
     message: string,
+    /** The provider. */
     public readonly provider?: string,
     cause?: unknown,
   ) {
@@ -27,6 +33,7 @@ export class EmbeddingProviderError extends EmbeddingError {
   }
 }
 
+/** Raised when no provider, or no provider by the requested name, is registered. */
 export class EmbeddingProviderNotFoundError extends EmbeddingProviderError {
   constructor(provider?: string) {
     super(
@@ -47,11 +54,14 @@ export class EmbeddingProviderNotFoundError extends EmbeddingProviderError {
  * surfaces later as bad retrieval.
  */
 export class EmbeddingCapabilityError extends EmbeddingProviderError {
+  /** Always `EMBEDDING_CAPABILITY_ERROR`. */
   override readonly code = 'EMBEDDING_CAPABILITY_ERROR';
 
   constructor(
     provider: string,
+    /** The unsupported option, such as `dimensions` or `inputType`. */
     public readonly option: string,
+    /** The value requested. */
     public readonly requestedValue?: unknown,
     detail?: string,
   ) {
@@ -66,7 +76,12 @@ export class EmbeddingCapabilityError extends EmbeddingProviderError {
   }
 }
 
+/**
+ * Raised when a provider's response does not have the shape the adapter expects, such as the wrong
+ * number of vectors.
+ */
 export class EmbeddingProviderResponseError extends EmbeddingProviderError {
+  /** Always `EMBEDDING_PROVIDER_RESPONSE_ERROR`. */
   override readonly code = 'EMBEDDING_PROVIDER_RESPONSE_ERROR';
 
   constructor(provider: string, message: string, cause?: unknown) {
@@ -75,8 +90,12 @@ export class EmbeddingProviderResponseError extends EmbeddingProviderError {
   }
 }
 
+/** Raised when a model is not in the embeddings registry and no provider was named. */
 export class EmbeddingModelNotFoundError extends EmbeddingError {
-  constructor(public readonly model: string) {
+  constructor(
+    /** The model looked up. */
+    public readonly model: string,
+  ) {
     super(
       `Embedding model "${model}" is not in the registry. Add it through embeddings.models.registry, or name a provider explicitly.`,
       'EMBEDDING_MODEL_NOT_FOUND',

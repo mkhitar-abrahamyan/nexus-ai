@@ -2,28 +2,44 @@ import type { CompletionRequest } from '../types/messages.js';
 import type { WorkflowClient, WorkflowResult, WorkflowStepResult } from './chains.js';
 import { withFactualDefaults } from '../hallucination/factual.js';
 
+/** What every domain workflow takes. */
 export interface DomainWorkflowOptions {
+  /** Model to use. */
   model: string;
+  /** The text to work on. */
   input: string;
+  /** Reference passages included in the prompt. */
   context?: string[];
 }
 
+/** Options for `supportTriageWorkflow()`. */
 export interface SupportWorkflowOptions extends DomainWorkflowOptions {
+  /** The customer's tier, which can change the severity. */
   customerTier?: string;
 }
 
+/** Options for `salesQualificationWorkflow()`. */
 export interface SalesWorkflowOptions extends DomainWorkflowOptions {
+  /** The product the lead is for. */
   product?: string;
 }
 
+/** Options for `legalReviewWorkflow()`. */
 export interface LegalReviewWorkflowOptions extends DomainWorkflowOptions {
+  /** Jurisdiction the text falls under. */
   jurisdiction?: string;
 }
 
+/** Options for `codeReviewWorkflow()`. */
 export interface CodeReviewWorkflowOptions extends DomainWorkflowOptions {
+  /** The code's language. */
   language?: string;
 }
 
+/**
+ * Triages a support request into severity, category, next action, and a customer-safe reply, as
+ * JSON.
+ */
 export async function supportTriageWorkflow(
   client: WorkflowClient,
   options: SupportWorkflowOptions,
@@ -51,6 +67,10 @@ export async function supportTriageWorkflow(
   });
 }
 
+/**
+ * Qualifies a sales lead into a fit score, pain points, a recommended offer, and a follow-up email,
+ * as JSON.
+ */
 export async function salesQualificationWorkflow(
   client: WorkflowClient,
   options: SalesWorkflowOptions,
@@ -78,6 +98,10 @@ export async function salesQualificationWorkflow(
   });
 }
 
+/**
+ * Flags legal risks, missing clauses, and questions to ask, as JSON, with an explicit fallback when
+ * the text is not enough. Not legal advice.
+ */
 export async function legalReviewWorkflow(
   client: WorkflowClient,
   options: LegalReviewWorkflowOptions,
@@ -112,6 +136,10 @@ export async function legalReviewWorkflow(
   );
 }
 
+/**
+ * Reviews code for bugs, security risks, performance issues, and missing tests, as JSON findings
+ * ordered by severity.
+ */
 export async function codeReviewWorkflow(
   client: WorkflowClient,
   options: CodeReviewWorkflowOptions,

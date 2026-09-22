@@ -27,15 +27,25 @@ const DEFAULT_MAX_INPUT_BYTES = 50 * 1024 * 1024;
 const OPENAI_IMAGE_FORMATS = ['png', 'jpeg', 'webp'] as const;
 const OPENAI_INPUT_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 
+/** Options for the OpenAI image provider. */
 export interface OpenAIImageProviderConfig {
+  /** OpenAI API key. */
   apiKey: string;
+  /** API base URL. Defaults to `https://api.openai.com/v1`. */
   baseUrl?: string;
+  /** Sent as the `OpenAI-Organization` header. */
   organization?: string;
+  /** Sent as the `OpenAI-Project` header. */
   project?: string;
+  /** Headers added to every request. */
   defaultHeaders?: Record<string, string>;
+  /** Model used when a request names none. Defaults to `gpt-image-2`. */
   defaultModel?: string;
+  /** Largest input image accepted, in bytes. Defaults to 50 MiB. */
   maxInputBytes?: number;
+  /** Replaces the global `fetch`. */
   fetch?: typeof globalThis.fetch;
+  /** Keeps OpenAI's response on each result as `raw`. Off by default. */
   includeRawResponse?: boolean;
   /**
    * Converts a neutral mask into OpenAI's alpha-channel semantics. Defaults to the bundled PNG
@@ -44,18 +54,27 @@ export interface OpenAIImageProviderConfig {
   maskTransformer?: AssetTransformer;
 }
 
+/** What OpenAI said about a request its moderation refused. */
 export interface OpenAIModerationDetails {
+  /** Whether the prompt or the generated image was refused. */
   moderationStage?: 'input' | 'output' | 'unknown';
+  /** The moderation categories reported. */
   categories?: string[];
 }
 
+/** An error from the OpenAI Image API, with its HTTP status and request id. */
 export class OpenAIImageProviderError extends ImageProviderError {
   constructor(
     message: string,
+    /** HTTP status. */
     public readonly status: number,
+    /** OpenAI's request id, for support. */
     public readonly requestId?: string,
+    /** OpenAI's error code. */
     public readonly apiCode?: string,
+    /** Moderation details, when moderation refused the request. */
     public readonly moderation?: OpenAIModerationDetails,
+    /** The same refusal as neutral safety findings. */
     public readonly safetyFindings?: MediaSafetyFinding[],
     cause?: unknown,
   ) {
@@ -95,6 +114,7 @@ interface OpenAIImagesResponse {
  * so an application that never masks never loads it.
  */
 export class OpenAIImageProvider implements ImageProvider {
+  /** Provider name, capabilities, and models. */
   readonly info: ImageProviderInfo;
 
   private readonly baseUrl: string;
@@ -152,6 +172,7 @@ export class OpenAIImageProvider implements ImageProvider {
     };
   }
 
+  /** Generates images from a prompt. */
   async generate(request: ImageGenerateRequest, context: ImageProviderCallContext): Promise<ImageResult> {
     this.assertDirectRequest(request, 'generate');
     const startedAt = Date.now();
@@ -179,6 +200,7 @@ export class OpenAIImageProvider implements ImageProvider {
     );
   }
 
+  /** Edits images, optionally within a mask. */
   async edit(request: ImageEditRequest, context: ImageProviderCallContext): Promise<ImageResult> {
     this.assertDirectRequest(request, 'edit');
 

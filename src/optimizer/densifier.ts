@@ -1,7 +1,9 @@
 import type { CompletionRequest } from '../types/messages.js';
 import type { DensificationConfig } from '../types/optimizer.js';
 
+/** Rewrites prompts to use fewer tokens without changing what they say. */
 export class PromptDensifier {
+  /** Densifies every text message in a request. */
   densifyRequest(
     request: CompletionRequest,
     config: DensificationConfig = {},
@@ -29,6 +31,10 @@ export class PromptDensifier {
     return { request: next, techniques: [...applied] };
   }
 
+  /**
+   * Densifies one text, leaving fenced code untouched unless configured otherwise, and records the
+   * techniques applied.
+   */
   densifyText(text: string, techniques: string[], applied: Set<string>, config: DensificationConfig): string {
     const segments = this.splitCodeBlocks(text, config.preserveCodeBlocks !== false);
 

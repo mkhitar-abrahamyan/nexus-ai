@@ -13,14 +13,23 @@ import type { NexusResponse } from '../types/response.js';
 import { buildMeta } from '../core/usage.js';
 import { BatchProviderResponseError } from './errors.js';
 
+/** Options for the Anthropic batch provider. */
 export interface AnthropicBatchProviderOptions {
+  /** Anthropic API key. */
   apiKey: string;
+  /** API base URL. Defaults to `https://api.anthropic.com/v1`. */
   baseUrl?: string;
+  /** Sent as `anthropic-version`. Defaults to `2023-06-01`. */
   version?: string;
+  /** Headers added to every request. */
   headers?: Record<string, string>;
+  /** Replaces the global `fetch`. */
   fetch?: typeof fetch;
   /** Applied to any item that names no model. */
   defaultModel?: string;
+  /**
+   * Output token limit for items that set none. Defaults to 1,024, since Anthropic requires one.
+   */
   maxTokens?: number;
 }
 
@@ -56,6 +65,7 @@ interface AnthropicBatchPayload {
 
 /** Anthropic Message Batches: half price, 24-hour window. */
 export class AnthropicBatchProvider implements BatchProvider {
+  /** Always `anthropic`, with its batch limits. */
   readonly info: BatchProviderInfo = {
     name: 'anthropic',
     capabilities: {
@@ -69,6 +79,7 @@ export class AnthropicBatchProvider implements BatchProvider {
 
   constructor(private readonly options: AnthropicBatchProviderOptions) {}
 
+  /** Submits a batch of message requests. */
   async submit(request: BatchSubmitRequest, context: BatchProviderCallContext): Promise<BatchJobRef> {
     const requests = request.items.map((item) => {
       const { system, messages } = splitSystem(item.request.messages);
@@ -94,6 +105,7 @@ export class AnthropicBatchProvider implements BatchProvider {
     return { id: batch.id, provider: 'anthropic' };
   }
 
+  /** Reads a batch's status and counts. */
   async poll(ref: BatchJobRef, context: BatchProviderCallContext): Promise<BatchJobState> {
     const batch = (await this.request(
       `/messages/batches/${encodeURIComponent(ref.id)}`,
@@ -103,6 +115,7 @@ export class AnthropicBatchProvider implements BatchProvider {
     return this.toState(ref, batch);
   }
 
+  /** Reads a finished batch's results. */
   async results(ref: BatchJobRef, context: BatchProviderCallContext): Promise<BatchOutputItem[]> {
     const body = await this.requestText(`/messages/batches/${encodeURIComponent(ref.id)}/results`, context);
     return body
@@ -111,6 +124,7 @@ export class AnthropicBatchProvider implements BatchProvider {
       .map((line) => this.toOutputItem(line));
   }
 
+  /** Cancels a batch. Items already processed keep their results. */
   async cancel(ref: BatchJobRef, context: BatchProviderCallContext): Promise<BatchJobState> {
     const batch = (await this.request(
       `/messages/batches/${encodeURIComponent(ref.id)}/cancel`,

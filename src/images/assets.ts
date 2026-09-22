@@ -89,6 +89,10 @@ export class MemoryAssetStore implements AssetStore {
     this.signer = options.signer;
   }
 
+  /**
+   * Stores an asset. Throws when it would exceed a capacity limit, rather than evicting live
+   * assets.
+   */
   put(input: ByteAssetInput, options: AssetPutOptions): AssetStat {
     const nowMs = this.nowMs();
     this.purgeExpiredAt(nowMs);
@@ -132,6 +136,10 @@ export class MemoryAssetStore implements AssetStore {
     return statFromEntry(entry);
   }
 
+  /**
+   * Reads an asset with its bytes, or `undefined` when it does not exist, has expired, or belongs
+   * to another tenant.
+   */
   get(assetId: string, tenantId: string): ByteAssetDescriptor | undefined {
     const entry = this.ownedEntry(assetId, tenantId);
     if (!entry) return undefined;
@@ -143,11 +151,13 @@ export class MemoryAssetStore implements AssetStore {
     };
   }
 
+  /** Describes an asset without its bytes. */
   stat(assetId: string, tenantId: string): AssetStat | undefined {
     const entry = this.ownedEntry(assetId, tenantId);
     return entry ? statFromEntry(entry) : undefined;
   }
 
+  /** Deletes an asset. Returns true when it existed. */
   delete(assetId: string, tenantId: string): true | undefined {
     const entry = this.ownedEntry(assetId, tenantId);
     if (!entry) return undefined;
@@ -156,6 +166,7 @@ export class MemoryAssetStore implements AssetStore {
     return true;
   }
 
+  /** Returns a URL from the configured signer. Throws when no signer is configured. */
   async sign(assetId: string, tenantId: string, options: AssetSignOptions = {}): Promise<string | undefined> {
     if (!this.signer) throw new AssetStoreSigningError('Asset signing requires a configured signer');
     const expiresInSeconds = optionalPositiveNumber(options.expiresInSeconds, 'expiresInSeconds');
@@ -175,10 +186,12 @@ export class MemoryAssetStore implements AssetStore {
     }
   }
 
+  /** Deletes expired assets, returning how many went. */
   purgeExpired(): number {
     return this.purgeExpiredAt(this.nowMs());
   }
 
+  /** Entries and bytes held, against the limits. */
   snapshot(): MemoryAssetStoreSnapshot {
     this.purgeExpired();
     return {

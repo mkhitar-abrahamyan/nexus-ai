@@ -32,7 +32,9 @@ const SUSPICIOUS_URL_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   },
 ];
 
+/** Checks requests for secrets, dangerous URLs, and other unsafe input. */
 export class InputGuard {
+  /** Checks a request, blocking, flagging, or redacting as configured. */
   protect(request: CompletionRequest, config: SecurityConfig = {}): SecurityResult<CompletionRequest> {
     const findings: SecurityFinding[] = [];
     const guardrailsApplied: string[] = [];

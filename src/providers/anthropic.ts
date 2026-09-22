@@ -208,7 +208,9 @@ type AnthropicResponseContentBlock =
 
 type AnthropicStreamEvent = Record<string, unknown> & { type: string };
 
+/** Anthropic's Messages API. */
 export class AnthropicProvider extends BaseProvider {
+  /** Always `anthropic`, hosted. */
   readonly info: ProviderInfo;
   private client?: AnthropicClient;
   private config: AnthropicProviderConfig;
@@ -317,6 +319,7 @@ export class AnthropicProvider extends BaseProvider {
     return formatted;
   }
 
+  /** Runs one completion. */
   async complete(request: CompletionRequest): Promise<NexusResponse> {
     const providerRequest = this.withProviderModel(request);
     try {
@@ -360,6 +363,7 @@ export class AnthropicProvider extends BaseProvider {
     }
   }
 
+  /** Streams one completion. */
   stream(request: CompletionRequest): NexusStream {
     const self = this;
 

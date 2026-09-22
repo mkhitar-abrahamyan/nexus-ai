@@ -19,12 +19,17 @@ import { ToolExecutor } from './tool.js';
 
 /** The model call an agent makes. Injected, so this module needs no provider runtime. */
 export interface AgentModelClient {
+  /** Runs one completion. */
   complete(request: CompletionRequest): Promise<NexusResponse>;
 }
 
+/** A tool call the agent is about to make. */
 export interface AgentToolCall {
+  /** The model's id for the call. */
   id: string;
+  /** The tool's name. */
   name: string;
+  /** Arguments, parsed from the model's JSON. */
   args: Record<string, unknown>;
 }
 
@@ -34,12 +39,15 @@ export type AgentApproval =
   | { approved: true; args?: Record<string, unknown> }
   | { approved: false; reason?: string };
 
+/** How a call to a tool that needs approval is presented to the operator. */
 export interface AgentApprovalPolicy {
   /** The question an operator sees. Defaults to naming the tool and its arguments. */
   reason?: (call: AgentToolCall) => string;
 }
 
+/** Hooks around the agent's model calls and tool calls. Each hook is optional. */
 export interface AgentMiddleware {
+  /** Names the middleware in traces and errors. */
   name?: string;
   /** Adjusts the request before it is sent: trim history, add context, swap the model. */
   beforeModel?(context: {
@@ -59,16 +67,25 @@ export interface AgentMiddleware {
   wrapToolCall?(call: AgentToolCall, next: () => Promise<AgentToolResult>): Promise<AgentToolResult> | AgentToolResult;
 }
 
+/** What a tool call produced. */
 export interface AgentToolResult {
+  /** True when the tool returned a value. */
   ok: boolean;
+  /** The value returned. */
   result?: unknown;
+  /** Why the tool failed. */
   error?: string;
 }
 
+/** Options for `createAgent()`. */
 export interface CreateAgentOptions {
+  /** Client the model is called through. */
   client: AgentModelClient;
+  /** Model to use. Defaults to the client's routing. */
   model?: string;
+  /** Tools the model may call. */
   tools?: ToolDefinition[];
+  /** System prompt placed before the conversation. */
   systemPrompt?: string;
   /** Model calls before the agent stops with `stopReason: 'max_iterations'`. Defaults to 8. */
   maxIterations?: number;
@@ -76,14 +93,24 @@ export interface CreateAgentOptions {
   toolConcurrency?: number;
   /** Tools that need human approval before they run, keyed by tool name. */
   interruptOn?: Record<string, AgentApprovalPolicy | true>;
+  /** Hooks around model and tool calls, applied in order. */
   middleware?: AgentMiddleware[];
   /** Long-term memory, available to tools and middleware as `store`. */
   store?: Store;
+  /**
+   * Where checkpoints go. Defaults to the graph's in-process checkpointer; `false` disables them,
+   * and with them approvals.
+   */
   checkpointer?: GraphCheckpointer | false;
+  /** Names the agent in checkpoints and traces. */
   name?: string;
+  /** Sampling temperature. */
   temperature?: number;
+  /** Output token limit. */
   maxTokens?: number;
+  /** Structured output format for answers. */
   responseFormat?: CompletionRequest['responseFormat'];
+  /** Application data sent with every model request. */
   metadata?: Record<string, unknown>;
 }
 
@@ -94,14 +121,22 @@ const agentChannels = () => ({
   stopReason: lastValue<AgentStopReason | undefined>(undefined),
 });
 
+/** The agent's state channels, as a graph schema. */
 export type AgentChannels = ReturnType<typeof agentChannels>;
+/** The agent's state. */
 export type AgentState = {
+  /** The conversation, tool calls and results included. */
   messages: Message[];
+  /** Model calls made so far. */
   iterations: number;
+  /** The final answer, once the model stops calling tools. */
   answer: string;
+  /** Why the agent stopped. */
   stopReason?: AgentStopReason;
 };
+/** `completed` when the model answered, `max_iterations` when it ran out of model calls. */
 export type AgentStopReason = 'completed' | 'max_iterations';
+/** An agent: a compiled graph over the agent's channels. */
 export type AgentGraph = CompiledGraph<AgentChannels>;
 
 /** Wraps a question into the state an agent starts from. */

@@ -210,10 +210,14 @@ What is guaranteed is the state machine — closed, open after a threshold is cr
 the cooldown, closed again only after the configured probe successes — and that routing still selects
 a provider when every circuit is open rather than failing the request untried.
 
-Breaker state is per process by design. Two workers can disagree about a provider, and neither the
-breaker nor its snapshot promises cluster-wide consensus. Rate-limit counters are the opposite: they
-are only shared when a store is configured, and the default in-memory counter gives each worker its
-own budget.
+Breaker state is per process unless `circuitBreaker.store` is set (since 1.16.0). With a store,
+workers converge on each other's decisions within about `syncIntervalMs`, and one worker at a time
+holds the probe; this is eventual agreement, not consensus, and two workers may briefly disagree.
+Failure counting stays per worker either way. The `CircuitStateStore` contract and the memory, Redis,
+and Postgres adapters follow the 1.x rules. Since 1.16.0 a caller's cancellation does not count as a
+failure unless `isFailure` says so, and probe limits apply to every attempt the failover executor
+makes. Rate-limit counters are only shared when a store is configured, and the default in-memory
+counter gives each worker its own budget.
 
 ## Batch API stage
 
@@ -328,6 +332,19 @@ Also since 1.12.0, all additive:
 - A subgraph node's thread id is `<parent thread>:<task id>`, which equals the previous
   `<parent thread>:<node>` for any node not reached through `Send`.
 
+Also since 1.16.0, all additive:
+
+- `createGraph({ channels, input, output })`. `StateGraph`, `CompiledGraph`, and `GraphResult` gained
+  defaulted type parameters for the input and output channels, so existing annotations such as
+  `CompiledGraph<S>` keep their meaning. A write to an undeclared input rejects with
+  `GraphValidationError`. Checkpoints and stream events still carry every channel.
+- `NodeOptions.cache` and `CompileOptions.cache`. Guaranteed: a failure, an interrupt, a node that
+  consumed an interrupt's answer, and a `Command.PARENT` result are never served from the cache, and a
+  cache that throws is treated as a miss. Not guaranteed: the default key's exact text, so entries
+  written by one minor release may miss after an upgrade.
+- `task_end` events may carry `cached: true`; `GraphDescription` may carry `input`, `output`, and a
+  node's `cache` flag.
+
 ## Agent, store, MCP, and tracing stages (1.14.0)
 
 The `nexus-ai-pro/agent`, `nexus-ai-pro/store`, `nexus-ai-pro/store/redis`, and `nexus-ai-pro/mcp`
@@ -368,9 +385,32 @@ are normalized; new optional fields and new bundled evaluators may be added in a
   same inputs give the same verdict; the exact interval bounds may change if the method improves, and
   a verdict is a judgement about evidence rather than a compatibility guarantee.
 - `evaluate()` reports a target's failure as a failed example and an evaluator's failure as a failed
-  measurement; neither throws.
-- The existing `EvalRunner` and `MediaEvalRunner` keep their APIs unchanged. Rebuilding them on this
-  entry point is a later, internal change.
+  measurement; neither throws. Since 1.16.0 an aborted evaluation rejects with the abort reason and
+  stores nothing.
+- `EvalRunner` and `MediaEvalRunner` keep their APIs. Since 1.16.0 both run on `evaluate()` and carry
+  the resulting experiment in an optional `experiment` field; their reports are otherwise unchanged.
+- Since 1.16.0, additive: `underCost()`, `FileExperimentStore`, `readExperiment()`, the `cost`
+  option, per-example `repetitions`, and `signal` on the target's context.
+
+## Postgres, command-line, and record-and-replay stages (1.16.0)
+
+The `nexus-ai-pro/postgres` subpaths, `nexus-ai-pro/ops/circuit-store`, and
+`nexus-ai-pro/testing/record` are public and follow the 1.x rules. None is exported from the root.
+
+- Each Postgres adapter implements the same contract as the corresponding in-memory store, and is
+  tested against it. Ordering among rows that tie on a timestamp is not a guarantee.
+- `PostgresLikeClient` is the whole driver contract: `query(text, values)` resolving to `{ rows }`.
+- The schema is guaranteed additive for the 1.x line: a minor release may add a column or an index,
+  never drop or rename one, and `migrate()` stays idempotent. A change that needs a data migration
+  waits for 2.0.
+- Unique idempotency keys in `PostgresOperationStore` are a guarantee, and `OperationDuplicateError`
+  is the signal the runner relies on.
+- The `nexus` commands and flags listed by `nexus help` are public. Human-readable output is not a
+  guarantee and may improve in any release; `--json` output follows the 1.x rules; exit codes are
+  guaranteed — 0 for success, 1 for a failed check, 2 for a usage error.
+- The fixture file format and the default match key of `testing/record` are stable for the 1.x line,
+  so recordings made with one release keep replaying with the next. A change that would invalidate
+  recordings waits for 2.0.
 
 ## Deprecation process
 

@@ -5,6 +5,10 @@ export interface PromptHardeningOptions {
   systemInstruction?: string;
 }
 
+/**
+ * Wraps user content in delimiters and adds a system instruction to treat it as data, not
+ * instructions.
+ */
 export function hardenPrompt(request: CompletionRequest, options: PromptHardeningOptions = {}): CompletionRequest {
   const delimiter = options.delimiter || '"""';
   const systemInstruction =

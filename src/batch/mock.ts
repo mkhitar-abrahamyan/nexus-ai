@@ -11,8 +11,11 @@ import type {
 } from '../types/batch.js';
 import { buildMeta } from '../core/usage.js';
 
+/** Options for the mock batch provider. */
 export interface MockBatchProviderOptions {
+  /** Provider name. Defaults to `mock`. */
   name?: string;
+  /** Capabilities reported, merged over the defaults. */
   capabilities?: Partial<BatchProviderCapabilities>;
   /**
    * Statuses returned by successive `poll()` calls. The last is repeated once exhausted, so
@@ -23,6 +26,7 @@ export interface MockBatchProviderOptions {
   failItems?: readonly string[];
   /** Tokens reported per successful item. */
   tokensPerItem?: { input: number; output: number };
+  /** Model reported on responses when an item names none. Defaults to `mock-model`. */
   model?: string;
 }
 
@@ -33,6 +37,7 @@ export interface MockBatchProviderOptions {
  * some items fail, without a provider account or a 24-hour wait.
  */
 export class MockBatchProvider implements BatchProvider {
+  /** Provider name and capabilities. */
   readonly info: BatchProviderInfo;
   /** Every submitted batch, keyed by its generated id. */
   readonly submitted = new Map<string, BatchSubmitRequest>();
@@ -58,6 +63,7 @@ export class MockBatchProvider implements BatchProvider {
     return this.pollCounts.get(id) ?? 0;
   }
 
+  /** Records a batch and returns a generated id. */
   async submit(request: BatchSubmitRequest, _context: BatchProviderCallContext): Promise<BatchJobRef> {
     this.counter += 1;
     const id = `mock-batch-${this.counter}`;
@@ -65,6 +71,7 @@ export class MockBatchProvider implements BatchProvider {
     return { id, provider: this.info.name };
   }
 
+  /** Returns the next scripted status. Defaults to `completed` immediately. */
   async poll(ref: BatchJobRef, _context: BatchProviderCallContext): Promise<BatchJobState> {
     const seen = (this.pollCounts.get(ref.id) ?? 0) + 1;
     this.pollCounts.set(ref.id, seen);
@@ -84,6 +91,7 @@ export class MockBatchProvider implements BatchProvider {
     };
   }
 
+  /** A response per item, or an error for items in `failItems`. */
   async results(ref: BatchJobRef, _context: BatchProviderCallContext): Promise<BatchOutputItem[]> {
     const request = this.submitted.get(ref.id);
     if (!request) return [];
@@ -112,6 +120,7 @@ export class MockBatchProvider implements BatchProvider {
     });
   }
 
+  /** Marks a batch cancelled. */
   async cancel(ref: BatchJobRef, _context: BatchProviderCallContext): Promise<BatchJobState> {
     this.cancelled.add(ref.id);
     return { ref, status: 'cancelled', counts: this.counts(ref) };

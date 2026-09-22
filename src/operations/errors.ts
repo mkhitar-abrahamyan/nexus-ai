@@ -1,9 +1,12 @@
 import type { OperationStatus } from '../types/operations.js';
 
+/** Base class for durable-operation errors, each with a stable `code`. */
 export class OperationError extends Error {
   constructor(
     message: string,
+    /** Stable code, such as `OPERATION_CANCELLED`. */
     public readonly code: string,
+    /** The underlying error. */
     public readonly cause?: unknown,
   ) {
     super(message);
@@ -11,9 +14,12 @@ export class OperationError extends Error {
   }
 }
 
+/** Raised when work is attempted on a cancelled operation. */
 export class OperationCancelledError extends OperationError {
   constructor(
+    /** The operation. */
     public readonly operationId: string,
+    /** Why it was cancelled. */
     public readonly reason?: string,
   ) {
     super(
@@ -24,9 +30,12 @@ export class OperationCancelledError extends OperationError {
   }
 }
 
+/** Raised when an operation passes its expiry before completing. */
 export class OperationExpiredError extends OperationError {
   constructor(
+    /** The operation. */
     public readonly operationId: string,
+    /** ISO-8601 time it expired. */
     public readonly expiresAt?: string,
   ) {
     super(
@@ -47,7 +56,9 @@ export class OperationExpiredError extends OperationError {
  */
 export class OperationTransitionError extends OperationError {
   constructor(
+    /** The status it was in. */
     public readonly from: OperationStatus,
+    /** The status it was asked to move to. */
     public readonly to: OperationStatus,
     operationId?: string,
   ) {
@@ -67,7 +78,9 @@ export class OperationTransitionError extends OperationError {
  */
 export class OperationConflictError extends OperationError {
   constructor(
+    /** The operation. */
     public readonly operationId: string,
+    /** The sequence the losing write expected. */
     public readonly expectedSequence: number,
   ) {
     super(
@@ -78,9 +91,12 @@ export class OperationConflictError extends OperationError {
   }
 }
 
+/** Raised when a worker's lease on an operation was taken over by another worker. */
 export class OperationLeaseLostError extends OperationError {
   constructor(
+    /** The operation. */
     public readonly operationId: string,
+    /** The worker whose lease was lost. */
     public readonly owner: string,
   ) {
     super(`Operation "${operationId}" lease held by "${owner}" was taken over`, 'OPERATION_LEASE_LOST');
@@ -88,8 +104,29 @@ export class OperationLeaseLostError extends OperationError {
   }
 }
 
+/**
+ * Raised by a store that enforces unique idempotency keys when a second record claims one.
+ *
+ * Two workers can both find no record for a key and both try to create one; a store that can say
+ * which one lost lets the runner attach the loser to the winner's operation instead of running the
+ * work twice.
+ */
+export class OperationDuplicateError extends OperationError {
+  constructor(
+    /** The key already claimed. */
+    public readonly idempotencyKey: string,
+  ) {
+    super(`An operation with idempotency key "${idempotencyKey}" already exists`, 'OPERATION_DUPLICATE');
+    this.name = 'OperationDuplicateError';
+  }
+}
+
+/** Raised when an operation id is not in the store. */
 export class OperationNotFoundError extends OperationError {
-  constructor(public readonly operationId: string) {
+  constructor(
+    /** The id looked up. */
+    public readonly operationId: string,
+  ) {
     super(`Operation "${operationId}" is not in the store`, 'OPERATION_NOT_FOUND');
     this.name = 'OperationNotFoundError';
   }
@@ -104,7 +141,9 @@ export class OperationNotFoundError extends OperationError {
  */
 export class OperationSerializationError extends OperationError {
   constructor(
+    /** The operation. */
     public readonly operationId: string,
+    /** Where in the result the bytes were found. */
     public readonly path: string,
   ) {
     super(

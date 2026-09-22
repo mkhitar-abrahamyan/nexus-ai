@@ -3,17 +3,27 @@ import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.
 import { generateRequestId } from '../utils/ids.js';
 import { createAbortProviderError, type NexusProviderErrorOptions, toNexusProviderError } from './errors.js';
 
+/** What a provider says about itself. */
 export interface ProviderInfo {
+  /** Provider name. */
   name: string;
+  /** True when it runs on this machine, which privacy routing prefers. */
   isLocal: boolean;
 }
 
+/** Base class for chat providers: complete, stream, and a health check. */
 export abstract class BaseProvider {
+  /** Provider name and locality. */
   abstract readonly info: ProviderInfo;
 
+  /** Runs one completion. */
   abstract complete(request: CompletionRequest): Promise<NexusResponse>;
+  /** Streams one completion. */
   abstract stream(request: CompletionRequest): NexusStream;
 
+  /**
+   * Whether the provider is reachable. Defaults to true; adapters override it with a real check.
+   */
   async healthCheck(): Promise<boolean> {
     return true;
   }

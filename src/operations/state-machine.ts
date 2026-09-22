@@ -28,10 +28,12 @@ const TRANSITIONS: Readonly<Record<OperationStatus, readonly OperationStatus[]>>
   expired: [],
 };
 
+/** Whether an operation may move from one status to another. */
 export function canTransition(from: OperationStatus, to: OperationStatus): boolean {
   return TRANSITIONS[from].includes(to);
 }
 
+/** Throws `OperationTransitionError` when an operation may not move from one status to another. */
 export function assertTransition(from: OperationStatus, to: OperationStatus, operationId?: string): void {
   if (!canTransition(from, to)) throw new OperationTransitionError(from, to, operationId);
 }

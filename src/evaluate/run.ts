@@ -15,23 +15,42 @@ import type {
 /** Turns one example into an output. A completion, an agent run, a graph, or plain code. */
 export type EvaluationTarget<I = unknown> = (
   inputs: I,
-  context: { example: DatasetExample<I>; run: number },
+  context: { example: DatasetExample<I>; run: number; signal?: AbortSignal },
 ) => Promise<unknown> | unknown;
 
+/** Options for `evaluate()`. */
 export interface EvaluateOptions {
   /** Names the experiment. Defaults to the dataset name plus a timestamp. */
   name?: string;
   /** Examples evaluated at once. Defaults to 4; `1` runs them in order. */
   concurrency?: number;
-  /** Times each example is run. Above 1 for a target that is not deterministic. */
-  repetitions?: number;
+  /**
+   * Times each example is run. Above 1 for a target that is not deterministic; a function gives
+   * each example its own count, for a dataset where some cases are noisier than others.
+   */
+  repetitions?: number | ((example: DatasetExample) => number);
+  /** Evaluators over the whole experiment, such as a pass rate. */
   summary?: SummaryEvaluator[];
+  /** Where the experiment is saved. */
   store?: ExperimentStore;
+  /** Application data stored with the experiment. */
   metadata?: Record<string, unknown>;
   /** Stops an example that hangs. */
   timeoutMs?: number;
+  /**
+   * Cancels the evaluation. No further examples start, the examples in flight receive the signal,
+   * and `evaluate()` rejects with the abort reason instead of storing a partial experiment that
+   * could later be mistaken for a complete baseline.
+   */
   signal?: AbortSignal;
+  /**
+   * Reads the cost of one output. Defaults to `meta.cost.amount` on a completion, a numeric
+   * `meta.cost` on an image result, or a numeric `cost` field on anything else.
+   */
+  cost?: (output: unknown, example: DatasetExample) => number | undefined;
+  /** Called after each example finishes, for progress reporting. */
   onResult?: (result: ExampleResult) => void;
+  /** Replaces the system clock, for tests. */
   now?: () => Date;
 }
 
@@ -50,21 +69,32 @@ export async function evaluate<I = unknown, O = unknown>(
   options: EvaluateOptions = {},
 ): Promise<Experiment> {
   if (dataset.examples.length === 0) throw new RangeError(`Dataset "${dataset.name}" has no examples`);
+  options.signal?.throwIfAborted();
 
   const now = options.now ?? (() => new Date());
-  const repetitions = Math.max(1, options.repetitions ?? 1);
   const startedAt = now().toISOString();
   const results: ExampleResult[] = [];
 
   const jobs = dataset.examples.flatMap((example) =>
-    Array.from({ length: repetitions }, (_, run) => ({ example, run })),
+    Array.from({ length: repetitionsOf(example as DatasetExample, options.repetitions) }, (_, run) => ({
+      example,
+      run,
+    })),
   );
 
-  await runConcurrently(jobs, options.concurrency ?? 4, async ({ example, run }) => {
-    const result = await evaluateOne(target, example, run, evaluators, options);
-    results.push(result);
-    options.onResult?.(result);
-  });
+  await runConcurrently(
+    jobs,
+    options.concurrency ?? 4,
+    async ({ example, run }) => {
+      const result = await evaluateOne(target, example, run, evaluators, options);
+      results.push(result);
+      options.onResult?.(result);
+    },
+    options.signal,
+  );
+  // Examples that were in flight when the signal fired finished on their own terms; the experiment
+  // they belong to is still incomplete, so it is neither returned nor stored.
+  options.signal?.throwIfAborted();
 
   // Ordered by example, then repetition, so two experiments over one dataset line up row by row.
   const order = new Map(dataset.examples.map((example, index) => [example.id, index]));
@@ -90,6 +120,15 @@ export async function evaluate<I = unknown, O = unknown>(
   return experiment;
 }
 
+function repetitionsOf(example: DatasetExample, setting: EvaluateOptions['repetitions']): number {
+  if (typeof setting !== 'function') return Math.max(1, setting ?? 1);
+  const count = setting(example);
+  if (!Number.isInteger(count) || count < 1) {
+    throw new RangeError(`Example "${example.id}" must run at least once; repetitions returned ${count}`);
+  }
+  return count;
+}
+
 async function evaluateOne<I, O>(
   target: EvaluationTarget<I>,
   example: DatasetExample<I, O>,
@@ -102,7 +141,9 @@ async function evaluateOne<I, O>(
   let error: { name: string; message: string } | undefined;
 
   try {
-    const call = Promise.resolve(target(example.inputs, { example, run }));
+    const call = Promise.resolve(
+      target(example.inputs, { example, run, ...(options.signal ? { signal: options.signal } : {}) }),
+    );
     output = options.timeoutMs === undefined ? await call : await withTimeout(call, options.timeoutMs, example.id);
   } catch (caught) {
     error =
@@ -111,11 +152,13 @@ async function evaluateOne<I, O>(
         : { name: 'Error', message: String(caught) };
   }
 
+  const cost = error ? undefined : (options.cost ?? defaultCost)(output, example as DatasetExample);
   const context: EvaluationContext<I, O> = {
     example,
     output,
     ...(error ? { error } : {}),
     latencyMs: Date.now() - started,
+    ...(Number.isFinite(cost) ? { cost } : {}),
     run,
   };
 
@@ -141,8 +184,22 @@ async function evaluateOne<I, O>(
     ...(output === undefined ? {} : { output }),
     ...(error ? { error } : {}),
     latencyMs: context.latencyMs,
+    ...(context.cost === undefined ? {} : { cost: context.cost }),
     scores,
   };
+}
+
+/** Cost as the package's own results report it: a completion, an image result, or a plain field. */
+function defaultCost(output: unknown): number | undefined {
+  if (!output || typeof output !== 'object') return undefined;
+  const record = output as { cost?: unknown; meta?: { cost?: unknown } };
+  const meta = record.meta?.cost;
+  if (typeof meta === 'number') return meta;
+  if (meta && typeof meta === 'object') {
+    const amount = (meta as { amount?: unknown }).amount;
+    if (typeof amount === 'number') return amount;
+  }
+  return typeof record.cost === 'number' ? record.cost : undefined;
 }
 
 function normalizeScores(value: Awaited<ReturnType<Evaluator>>, evaluator: Evaluator): EvaluationScore[] {
@@ -173,6 +230,7 @@ export function summarize(results: ExampleResult[]): MetricSummary[] {
   });
 }
 
+/** Count, mean, sample standard deviation, minimum, maximum, and 95% interval of the mean for a set of scores. */
 export function stats(values: number[]): Omit<MetricSummary, 'key' | 'passRate'> {
   const n = values.length;
   const mean = n === 0 ? 0 : values.reduce((total, value) => total + value, 0) / n;
@@ -207,17 +265,21 @@ async function runConcurrently<T>(
   items: readonly T[],
   limit: number,
   worker: (item: T) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (items.length === 0) return;
   const bound = Math.max(1, Math.min(Math.floor(limit), items.length));
   if (bound === 1) {
-    for (const item of items) await worker(item);
+    for (const item of items) {
+      if (signal?.aborted) return;
+      await worker(item);
+    }
     return;
   }
   let cursor = 0;
   await Promise.all(
     Array.from({ length: bound }, async () => {
-      while (cursor < items.length) {
+      while (cursor < items.length && !signal?.aborted) {
         const index = cursor++;
         await worker(items[index] as T);
       }

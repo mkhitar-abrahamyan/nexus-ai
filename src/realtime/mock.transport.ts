@@ -12,17 +12,27 @@ import type {
   RealtimeTransportState,
 } from './types.js';
 
+/** One scripted step of the mock transport: a provider event, audio, an error, or a disconnect. */
 export type MockRealtimeTransportStep =
   | { type: 'data'; event: RealtimeServerEvent; raw?: unknown }
   | { type: 'audio'; audio: RealtimeTransportAudioEvent }
   | { type: 'error'; error: RealtimeError | Error | string }
   | { type: 'disconnect'; event?: Partial<RealtimeTransportDisconnectedEvent> };
 
+/** Options for the mock transport. */
 export interface MockRealtimeTransportOptions {
+  /** Steps played back after connecting. A bare event is treated as a `data` step. */
   script?: Array<MockRealtimeTransportStep | RealtimeServerEvent>;
+  /**
+   * Plays the script as soon as the transport connects. Defaults to true; `false` leaves it to
+   * `advance()` and `flush()`.
+   */
   autoPlay?: boolean;
+  /** Session id reported when connected. */
   sessionId?: string;
+  /** Replaces the system clock. */
   now?: () => number;
+  /** Throws when used in the wrong state, as a real transport does. Defaults to true. */
   strictState?: boolean;
 }
 
@@ -30,10 +40,15 @@ type MockTransportEventMap = RealtimeTransportEvents & Record<string, unknown>;
 
 /** Deterministic transport for unit tests, demos, and session state-machine simulation. */
 export class MockRealtimeTransport implements RealtimeTransport {
+  /** Always `mock`. */
   readonly kind = 'mock' as const;
+  /** Current connection state. */
   state: RealtimeTransportState = 'idle';
+  /** Every event sent, for assertions. */
   readonly sentEvents: RealtimeClientEvent[] = [];
+  /** Every audio chunk sent, for assertions. */
   readonly sentAudio: ArrayBuffer[] = [];
+  /** Every configuration `connect()` received. */
   readonly connectionConfigs: RealtimeSessionConfig[] = [];
 
   private readonly emitter = new TypedEventEmitter<MockTransportEventMap>();
@@ -47,6 +62,7 @@ export class MockRealtimeTransport implements RealtimeTransport {
     for (const step of this.options.script || []) this.enqueue(step);
   }
 
+  /** Subscribes to a transport event. Returns a function that unsubscribes. */
   on<Event extends keyof RealtimeTransportEvents>(
     event: Event,
     listener: (payload: RealtimeTransportEvents[Event]) => void,
@@ -54,6 +70,7 @@ export class MockRealtimeTransport implements RealtimeTransport {
     return this.emitter.on(event, listener);
   }
 
+  /** Connects immediately and, unless `autoPlay` is off, plays the script. */
   async connect(config: RealtimeSessionConfig): Promise<void> {
     if (this.state === 'connected') return;
     if (this.state === 'connecting' || this.state === 'disconnecting') {
@@ -84,20 +101,24 @@ export class MockRealtimeTransport implements RealtimeTransport {
     if (this.options.autoPlay !== false) this.flush();
   }
 
+  /** Records an audio chunk. */
   sendAudio(chunk: ArrayBuffer): void {
     this.assertConnected('send audio');
     this.sentAudio.push(copyArrayBuffer(chunk));
   }
 
+  /** Records an event. */
   sendEvent(event: RealtimeClientEvent): void {
     this.assertConnected('send an event');
     this.sentEvents.push({ ...event });
   }
 
+  /** Records a `response.cancel` event. */
   interrupt(): void {
     this.sendEvent({ type: 'response.cancel' });
   }
 
+  /** Disconnects cleanly. */
   async disconnect(): Promise<void> {
     if (this.state === 'idle' || this.state === 'disconnected') {
       this.state = 'disconnected';
@@ -115,6 +136,7 @@ export class MockRealtimeTransport implements RealtimeTransport {
     });
   }
 
+  /** Adds a step to the script. Returns the transport, for chaining. */
   enqueue(step: MockRealtimeTransportStep | RealtimeServerEvent): this {
     const mockError = step.type === 'error' && 'error' in step ? step.error : undefined;
     const controlStep =
@@ -146,11 +168,13 @@ export class MockRealtimeTransport implements RealtimeTransport {
     }
   }
 
+  /** Emits a provider event now. */
   emitData(event: RealtimeServerEvent, raw?: unknown): void {
     this.assertConnected('emit data');
     this.emitter.emit('data', { event, raw: raw ?? event });
   }
 
+  /** Emits model audio now. */
   emitAudio(audio: RealtimeTransportAudioEvent): void {
     this.assertConnected('emit audio');
     this.emitter.emit('audio', {
@@ -159,6 +183,7 @@ export class MockRealtimeTransport implements RealtimeTransport {
     });
   }
 
+  /** Emits a transport error now. */
   emitError(error: RealtimeError | Error | string): void {
     const normalized =
       error instanceof RealtimeError
@@ -172,6 +197,7 @@ export class MockRealtimeTransport implements RealtimeTransport {
     this.emitter.emit('error', normalized);
   }
 
+  /** Simulates a dropped connection, retryable unless marked expected. */
   emitDisconnected(event: Partial<RealtimeTransportDisconnectedEvent> = {}): void {
     this.state = event.expected === false ? 'failed' : 'disconnected';
     this.emitter.emit('disconnected', {
@@ -183,6 +209,7 @@ export class MockRealtimeTransport implements RealtimeTransport {
     });
   }
 
+  /** Clears the recorded events, audio, and configurations. */
   clearRecords(): void {
     this.sentEvents.length = 0;
     this.sentAudio.length = 0;

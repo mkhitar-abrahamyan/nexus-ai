@@ -1,9 +1,12 @@
 import type { InterruptRequest, PendingInterrupt } from '../types/graph.js';
 
+/** Base class for graph errors, each with a stable `code`. */
 export class GraphError extends Error {
   constructor(
     message: string,
+    /** Stable code, such as `GRAPH_NODE_ERROR`. */
     public readonly code: string,
+    /** The underlying error. */
     public readonly cause?: unknown,
   ) {
     super(message);
@@ -11,6 +14,10 @@ export class GraphError extends Error {
   }
 }
 
+/**
+ * Raised when a graph definition is invalid: an unknown node, a missing entry point, or a bad
+ * channel.
+ */
 export class GraphValidationError extends GraphError {
   constructor(message: string, cause?: unknown) {
     super(message, 'GRAPH_VALIDATION_ERROR', cause);
@@ -27,9 +34,13 @@ export class GraphValidationError extends GraphError {
  */
 export class GraphInterrupt extends GraphError {
   constructor(
+    /** What the node asked for. */
     public readonly request: InterruptRequest,
+    /** The node that interrupted. */
     public readonly node: string,
+    /** Superstep it happened in. */
     public readonly step: number,
+    /** Its position among that node's interrupts in the step. */
     public readonly index: number,
     /** Task that asked. Equal to `node` unless the task came from a `Send`. */
     public readonly taskId: string = node,
@@ -47,7 +58,9 @@ export class GraphInterrupt extends GraphError {
  */
 export class GraphStepLimitError extends GraphError {
   constructor(
+    /** The budget that was exceeded. */
     public readonly maxSteps: number,
+    /** Tasks still pending when it stopped. */
     public readonly pending: readonly string[],
   ) {
     super(
@@ -58,9 +71,12 @@ export class GraphStepLimitError extends GraphError {
   }
 }
 
+/** Raised when a node throws. The original error is its `cause`. */
 export class GraphNodeError extends GraphError {
   constructor(
+    /** The node that failed. */
     public readonly node: string,
+    /** Superstep it failed in. */
     public readonly step: number,
     cause: unknown,
   ) {
@@ -73,8 +89,12 @@ export class GraphNodeError extends GraphError {
   }
 }
 
+/** Raised when a thread has no checkpoint to resume or inspect. */
 export class GraphThreadNotFoundError extends GraphError {
-  constructor(public readonly threadId: string) {
+  constructor(
+    /** The thread looked up. */
+    public readonly threadId: string,
+  ) {
     super(
       `No checkpoint for thread "${threadId}". A thread is resumable only when the graph was compiled with a checkpointer and run with an explicit threadId.`,
       'GRAPH_THREAD_NOT_FOUND',
@@ -83,9 +103,12 @@ export class GraphThreadNotFoundError extends GraphError {
   }
 }
 
+/** Raised when resuming a thread that is not awaiting input. */
 export class GraphNotInterruptedError extends GraphError {
   constructor(
+    /** The thread. */
     public readonly threadId: string,
+    /** Its current status. */
     public readonly status: string,
   ) {
     super(
@@ -104,7 +127,9 @@ export class GraphNotInterruptedError extends GraphError {
  */
 export class GraphNodeTimeoutError extends GraphError {
   constructor(
+    /** The node. */
     public readonly node: string,
+    /** The timeout it exceeded, in milliseconds. */
     public readonly timeoutMs: number,
   ) {
     super(`Graph node "${node}" exceeded its ${timeoutMs}ms timeout`, 'GRAPH_NODE_TIMEOUT');

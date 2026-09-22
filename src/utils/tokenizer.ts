@@ -1,6 +1,11 @@
 import type { CompletionRequest, Message } from '../types/messages.js';
 
+/**
+ * Estimates token counts without a model-specific tokenizer, for budgets, planning, and context
+ * windows.
+ */
 export class Tokenizer {
+  /** Estimated tokens in a text. */
   estimateTextTokens(text: string): number {
     if (!text) return 0;
 
@@ -13,6 +18,7 @@ export class Tokenizer {
     return Math.max(1, Math.ceil((wordLike.length + charEstimate) / 2));
   }
 
+  /** Estimated tokens in a message, including its role overhead. */
   estimateMessageTokens(message: Message): number {
     const roleOverhead = 4;
 
@@ -32,6 +38,7 @@ export class Tokenizer {
     );
   }
 
+  /** Estimated input tokens for a request, including messages and tool definitions. */
   estimateRequestTokens(request: CompletionRequest): number {
     const modelOverhead = 8;
     const toolOverhead =

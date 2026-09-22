@@ -31,6 +31,10 @@ type TelephonyCapability =
   | 'listPhoneNumbers'
   | 'updatePhoneNumber';
 
+/**
+ * Routes telephony operations to registered providers: the one a request names, the configured
+ * default, or the first that supports the operation.
+ */
 export class TelephonyManager {
   private providers = new Map<string, TelephonyProvider>();
 
@@ -46,19 +50,23 @@ export class TelephonyManager {
     }
   }
 
+  /** Registers a provider under a name. Returns the manager, for chaining. */
   registerProvider(name: string, provider: TelephonyProvider): this {
     this.providers.set(name, provider);
     return this;
   }
 
+  /** Whether a provider is registered. */
   hasProvider(name: string): boolean {
     return this.providers.has(name);
   }
 
+  /** Every registered provider's name. */
   listProviders(): string[] {
     return [...this.providers.keys()];
   }
 
+  /** Places an outbound call. */
   async createCall(request: CreateCallRequest): Promise<CreateCallResponse> {
     const provider = this.resolveProvider('createCall', request.provider || this.config.defaultProvider);
     const createCall = provider.createCall;
@@ -86,6 +94,7 @@ export class TelephonyManager {
     }
   }
 
+  /** Builds a webhook response, such as TwiML. */
   async createWebhookResponse(request: TelephonyResponseRequest): Promise<TelephonyWebhookResponse> {
     const provider = this.resolveProvider('createWebhookResponse', request.provider || this.config.defaultProvider);
     if (!provider.createWebhookResponse) throw new TelephonyCapabilityError(provider.info.name, 'webhook responses');
@@ -102,12 +111,14 @@ export class TelephonyManager {
     }
   }
 
+  /** Validates a webhook's signature. */
   async validateWebhook(request: TelephonyWebhookValidationRequest): Promise<boolean> {
     const provider = this.resolveProvider('validateWebhook', request.provider || this.config.defaultProvider);
     if (!provider.validateWebhook) throw new TelephonyCapabilityError(provider.info.name, 'webhook validation');
     return provider.validateWebhook(request);
   }
 
+  /** Reads a call's details. */
   async getCall(request: GetCallRequest): Promise<TelephonyCallDetails> {
     const provider = this.resolveProvider('getCall', request.provider || this.config.defaultProvider);
     if (!provider.getCall) throw new TelephonyCapabilityError(provider.info.name, 'call lookup');
@@ -124,6 +135,7 @@ export class TelephonyManager {
     }
   }
 
+  /** Ends a call in progress. */
   async endCall(request: EndCallRequest): Promise<TelephonyCallDetails> {
     const provider = this.resolveProvider('endCall', request.provider || this.config.defaultProvider);
     const endCall = provider.endCall;
@@ -151,6 +163,7 @@ export class TelephonyManager {
     }
   }
 
+  /** Parses a status callback through the named provider. */
   parseStatusCallback(
     providerName: string,
     body: string | URLSearchParams | Record<string, string | number | boolean | undefined>,
@@ -162,6 +175,7 @@ export class TelephonyManager {
     return provider.parseStatusCallback(body);
   }
 
+  /** Lists phone numbers. */
   async listPhoneNumbers(request: ListPhoneNumbersRequest = {}): Promise<TelephonyPhoneNumber[]> {
     const provider = this.resolveProvider('listPhoneNumbers', request.provider || this.config.defaultProvider);
     if (!provider.listPhoneNumbers) throw new TelephonyCapabilityError(provider.info.name, 'phone number listing');
@@ -178,6 +192,7 @@ export class TelephonyManager {
     }
   }
 
+  /** Changes where a phone number sends its calls. */
   async updatePhoneNumber(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber> {
     const provider = this.resolveProvider('updatePhoneNumber', request.provider || this.config.defaultProvider);
     if (!provider.updatePhoneNumber) throw new TelephonyCapabilityError(provider.info.name, 'phone number updates');
@@ -194,6 +209,7 @@ export class TelephonyManager {
     }
   }
 
+  /** Parses a media-stream message through the named provider. */
   parseMediaStreamEvent(
     providerName: string,
     message: string | Record<string, unknown>,
@@ -203,6 +219,7 @@ export class TelephonyManager {
     return provider.parseMediaStreamEvent(message);
   }
 
+  /** Formats outbound audio, a mark, or a clear as the named provider's media-stream message. */
   formatAudioMessage(
     providerName: string,
     streamId: string,

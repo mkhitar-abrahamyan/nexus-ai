@@ -1,22 +1,31 @@
 import type { PipelineTrace, PipelineTraceStep } from '../pipeline/types.js';
 
+/** The part of an OpenTelemetry span the exporter uses. */
 export interface OpenTelemetryLikeSpan {
+  /** Sets an attribute. */
   setAttribute(key: string, value: string | number | boolean): void;
+  /** Records an exception. */
   recordException?(error: Error): void;
+  /** Sets the span status. */
   setStatus?(status: { code: number; message?: string }): void;
+  /** Ends the span. */
   end(endTime?: Date): void;
 }
 
+/** The part of an OpenTelemetry tracer the exporter uses. */
 export interface OpenTelemetryLikeTracer {
+  /** Starts a span. */
   startSpan(name: string, options?: Record<string, unknown>): OpenTelemetryLikeSpan;
 }
 
+/** Exports pipeline traces as OpenTelemetry spans: one for the pipeline and one per step. */
 export class OpenTelemetryTraceExporter {
   constructor(
     private tracer: OpenTelemetryLikeTracer,
     private spanPrefix = 'nexus-ai-pro',
   ) {}
 
+  /** Exports one pipeline trace, with extra attributes on the root span. */
   exportTrace(trace: PipelineTrace, attributes: Record<string, string | number | boolean> = {}): void {
     const root = this.tracer.startSpan(`${this.spanPrefix}.pipeline`, {
       startTime: new Date(trace.startedAt),

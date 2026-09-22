@@ -24,6 +24,7 @@ const DEFAULT_MAX_POLL_INTERVAL_MS = 300_000;
 /** Just past the 24-hour discounted tier, so a batch that lands late is still collected. */
 const DEFAULT_TIMEOUT_MS = 26 * 60 * 60 * 1000;
 
+/** What the batch manager runs on. */
 export interface BatchManagerRuntime {
   /** Persists the operation record, so a submitted batch survives a restart. */
   operations?: OperationRunnerConfig<BatchJobResult>;
@@ -57,6 +58,10 @@ export class BatchManager {
     }
   }
 
+  /**
+   * Registers a provider under a name. Throws for a provider without `submit` and `poll`. Returns
+   * the manager, for chaining.
+   */
   registerBatchProvider(name: string, provider: BatchProvider): this {
     const normalized = name.trim();
     if (!normalized) throw new BatchValidationError('Batch provider name must not be empty');
@@ -67,10 +72,12 @@ export class BatchManager {
     return this;
   }
 
+  /** Whether a provider is registered. */
   hasBatchProvider(name: string): boolean {
     return this.providers.has(name);
   }
 
+  /** Every registered provider's name. */
   listBatchProviders(): string[] {
     return [...this.providers.keys()];
   }
@@ -138,6 +145,7 @@ export class BatchManager {
     });
   }
 
+  /** Cancels a batch. Throws when the provider cannot cancel. */
   async cancel(ref: BatchJobRef): Promise<BatchJobState> {
     const provider = this.providers.get(ref.provider);
     if (!provider) throw new BatchProviderNotFoundError(ref.provider);

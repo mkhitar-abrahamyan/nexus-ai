@@ -5,6 +5,7 @@ import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import type { ResponseFormatConfig } from '../types/config.js';
 
+/** Raised when a response does not match the requested format and cannot be repaired. */
 export class ResponseFormatError extends Error {
   constructor(message: string) {
     super(message);

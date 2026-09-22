@@ -28,7 +28,9 @@ const DEFAULT_PATTERNS: Array<{ pattern: RegExp; severity: SecurityFinding['seve
   { pattern: /<\/?system>|<\/?developer>|<\/?instructions>/i, severity: 'medium', label: 'synthetic role tag' },
 ];
 
+/** Finds prompt-injection attempts by pattern. */
 export class InjectionDetector {
+  /** Finds injection attempts in a request's messages. */
   detect(request: CompletionRequest, config: InjectionDetectionConfig = {}): SecurityFinding[] {
     if (config.enabled === false) return [];
 
@@ -63,6 +65,7 @@ export class InjectionDetector {
     return findings;
   }
 
+  /** Returns the request with injection markers defused. */
   neutralize(request: CompletionRequest): CompletionRequest {
     return {
       ...request,

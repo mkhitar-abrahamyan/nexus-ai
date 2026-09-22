@@ -1,6 +1,6 @@
 import type { OperationDispatcher, OperationRecord, OperationStore } from '../types/operations.js';
 import { isTerminalOperationStatus } from '../types/operations.js';
-import { assertSerializableRecord } from './store.js';
+import { assertSerializableRecord } from './serialization.js';
 
 /**
  * The Redis commands the operation store needs.
@@ -9,9 +9,13 @@ import { assertSerializableRecord } from './store.js';
  * satisfy it without this package depending on any of them.
  */
 export interface RedisOperationLikeClient {
+  /** Reads a hash field. */
   hget(key: string, field: string): Promise<string | null> | string | null;
+  /** Sets a hash field. */
   hset(key: string, field: string, value: string): Promise<unknown> | unknown;
+  /** Deletes a hash field. */
   hdel(key: string, field: string): Promise<unknown> | unknown;
+  /** Reads every hash value. */
   hvals(key: string): Promise<string[]> | string[];
   /** Optional CAS primitive. When absent the store falls back to a read-compare-write. */
   eval?(script: string, numKeys: number, ...args: string[]): Promise<unknown> | unknown;
@@ -26,7 +30,9 @@ redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
 return 1
 `;
 
+/** Options for the Redis operation store. */
 export interface RedisOperationStoreOptions {
+  /** Key prefix. Defaults to `nexus-ai-pro:operations:`. */
   prefix?: string;
   /** Disables the Lua compare-and-set even when the client exposes `eval`. */
   useEval?: boolean;
@@ -52,6 +58,7 @@ export class RedisOperationStore<TResult = unknown> implements OperationStore<TR
     this.useEval = options.useEval !== false && typeof client.eval === 'function';
   }
 
+  /** Stores a new record and indexes its idempotency key. Refuses records carrying raw bytes. */
   async create(record: OperationRecord<TResult>): Promise<void> {
     assertSerializableRecord(record);
     await this.client.hset(this.recordsKey(), record.id, JSON.stringify(record));
@@ -60,11 +67,16 @@ export class RedisOperationStore<TResult = unknown> implements OperationStore<TR
     }
   }
 
+  /** Reads a record. */
   async read(id: string): Promise<OperationRecord<TResult> | undefined> {
     const raw = await this.client.hget(this.recordsKey(), id);
     return raw ? (JSON.parse(raw) as OperationRecord<TResult>) : undefined;
   }
 
+  /**
+   * Writes a record when its stored sequence still equals `expectedSequence`. Resolves false when
+   * another worker got there first.
+   */
   async update(record: OperationRecord<TResult>, expectedSequence: number): Promise<boolean> {
     assertSerializableRecord(record);
     const encoded = JSON.stringify(record);
@@ -87,6 +99,7 @@ export class RedisOperationStore<TResult = unknown> implements OperationStore<TR
     return true;
   }
 
+  /** Deletes a record and its idempotency index. Resolves true when it existed. */
   async delete(id: string): Promise<boolean> {
     const record = await this.read(id);
     if (record?.idempotencyKey) await this.client.hdel(this.idempotencyKey(), record.idempotencyKey);
@@ -94,6 +107,10 @@ export class RedisOperationStore<TResult = unknown> implements OperationStore<TR
     return record !== undefined;
   }
 
+  /**
+   * Records whose lease has expired, or running records without one, up to `limit`, for another
+   * worker to take over.
+   */
   async claimExpired(now: string, limit: number): Promise<Array<OperationRecord<TResult>>> {
     const records = await this.list();
     const expired: Array<OperationRecord<TResult>> = [];
@@ -106,11 +123,13 @@ export class RedisOperationStore<TResult = unknown> implements OperationStore<TR
     return expired;
   }
 
+  /** Finds the record that claimed an idempotency key. */
   async findByIdempotencyKey(key: string): Promise<OperationRecord<TResult> | undefined> {
     const id = await this.client.hget(this.idempotencyKey(), key);
     return id ? this.read(id) : undefined;
   }
 
+  /** Every record. */
   async list(): Promise<Array<OperationRecord<TResult>>> {
     const values = await this.client.hvals(this.recordsKey());
     return values.map((value) => JSON.parse(value) as OperationRecord<TResult>);
@@ -125,7 +144,9 @@ export class RedisOperationStore<TResult = unknown> implements OperationStore<TR
   }
 }
 
+/** The part of a BullMQ `Queue` the dispatcher needs. */
 export interface BullMQLikeOperationQueue {
+  /** Adds a job. */
   add(
     name: string,
     data: unknown,
@@ -133,6 +154,7 @@ export interface BullMQLikeOperationQueue {
   ): Promise<{ id?: string | number }> | { id?: string | number };
 }
 
+/** Options for the BullMQ operation dispatcher. */
 export interface BullMQOperationDispatcherOptions {
   /** Job name used for every dispatched operation. Defaults to `nexus-operation`. */
   jobName?: string;
@@ -153,6 +175,10 @@ export class BullMQOperationDispatcher implements OperationDispatcher {
     private readonly options: BullMQOperationDispatcherOptions = {},
   ) {}
 
+  /**
+   * Queues an operation's id and routing metadata, using the operation id as the job id so a
+   * duplicate dispatch is ignored.
+   */
   async dispatch(record: OperationRecord<unknown>): Promise<void> {
     await this.queue.add(
       this.options.jobName ?? 'nexus-operation',

@@ -28,102 +28,199 @@ import type {
 
 const DEFAULT_REALTIME_ENDPOINT = 'https://api.openai.com/v1/realtime/calls';
 
+/** The subset of `RTCSessionDescription` the transport uses: an SDP offer or answer. */
 export interface RealtimeSessionDescriptionLike {
+  /** Whether this description offers a session or answers one. */
   type: 'offer' | 'answer';
+  /** The session description itself. */
   sdp?: string;
 }
 
+/** The subset of `MediaStreamTrack` the transport uses. */
 export interface RealtimeMediaTrackLike extends EventTargetLike {
+  /** `audio` or `video`. */
   readonly kind?: string;
+  /** `live` or `ended`. */
   readonly readyState?: string;
+  /** Stops capturing, releasing the microphone. */
   stop?(): void;
 }
 
+/** The subset of `MediaStream` the transport uses. */
 export interface RealtimeMediaStreamLike {
+  /** Every track in the stream. */
   getTracks?(): RealtimeMediaTrackLike[];
+  /** The stream's audio tracks. */
   getAudioTracks?(): RealtimeMediaTrackLike[];
 }
 
+/** The subset of `navigator.mediaDevices` the transport uses to open the microphone. */
 export interface RealtimeMediaDevicesLike extends EventTargetLike {
+  /** Asks for the microphone with the given constraints. */
   getUserMedia(constraints: Record<string, unknown>): Promise<RealtimeMediaStreamLike>;
 }
 
+/** The subset of `RTCDataChannel` the transport sends and receives realtime events on. */
 export interface RealtimeDataChannelLike extends EventTargetLike {
+  /** The channel's label. OpenAI expects `oai-events`. */
   readonly label?: string;
+  /** `connecting`, `open`, `closing`, or `closed`. */
   readonly readyState: string;
+  /** Sends one event. */
   send(data: string | ArrayBuffer | Uint8Array): void;
+  /** Closes the channel. */
   close(): void;
 }
 
+/**
+ * The subset of `RTCPeerConnection` the transport uses. Structural, so a browser, a Node WebRTC
+ * library, or a test double all fit.
+ */
 export interface RealtimePeerConnectionLike extends EventTargetLike {
+  /** Overall connection state. */
   readonly connectionState?: string;
+  /** ICE connection state, watched to detect a network drop. */
   readonly iceConnectionState?: string;
+  /** The offer this side created. */
   readonly localDescription?: RealtimeSessionDescriptionLike | null;
+  /** Opens the channel realtime events travel on. */
   createDataChannel(label: string, options?: Record<string, unknown>): RealtimeDataChannelLike;
+  /** Sends the microphone's audio to the provider. */
   addTrack(track: RealtimeMediaTrackLike, ...streams: RealtimeMediaStreamLike[]): unknown;
+  /** Creates the SDP offer sent to the provider. */
   createOffer(options?: Record<string, unknown>): Promise<RealtimeSessionDescriptionLike>;
+  /** Applies this side's offer. */
   setLocalDescription(description: RealtimeSessionDescriptionLike): Promise<void>;
+  /** Applies the provider's answer. */
   setRemoteDescription(description: RealtimeSessionDescriptionLike): Promise<void>;
+  /** Closes the connection. */
   close(): void;
 }
 
+/** Creates a peer connection. Defaults to the global `RTCPeerConnection`. */
 export type RealtimePeerConnectionFactory = (config?: Record<string, unknown>) => RealtimePeerConnectionLike;
 
+/** The subset of a `fetch` response the transport reads. */
 export interface RealtimeFetchResponseLike {
+  /** True for a 2xx status. */
   readonly ok: boolean;
+  /** HTTP status code. */
   readonly status: number;
+  /** HTTP status text. */
   readonly statusText?: string;
+  /** Response headers. */
   readonly headers?: { get(name: string): string | null };
+  /** Reads the body as text. */
   text(): Promise<string>;
 }
 
+/** The subset of `fetch` options the transport sends. */
 export interface RealtimeFetchInitLike {
+  /** HTTP method. */
   method?: string;
+  /** Request headers. */
   headers?: Record<string, string>;
+  /** Request body. */
   body?: string;
+  /** Aborts the request. */
   signal?: AbortSignalLike;
 }
 
+/** The subset of `fetch` the transport uses to exchange SDP and fetch tokens. */
 export type RealtimeFetchLike = (url: string, init?: RealtimeFetchInitLike) => Promise<RealtimeFetchResponseLike>;
 
+/** The subset of `AbortController` the transport uses, for platforms without the global. */
 export interface RealtimeAbortControllerLike {
+  /** The signal handed to requests. */
   readonly signal: AbortSignalLike;
+  /** Aborts the requests using the signal. */
   abort(reason?: unknown): void;
 }
 
+/**
+ * How the browser's offer reaches OpenAI. `unified-sdp` posts it to your server, which forwards it
+ * with your API key so the key never reaches the browser. `ephemeral-token` has the browser call
+ * OpenAI directly with a short-lived token your server issued.
+ */
 export type OpenAIWebRTCSessionMode = 'unified-sdp' | 'ephemeral-token';
 
+/** A short-lived client secret for connecting from a browser. */
 export interface OpenAIEphemeralCredential {
+  /** The token. */
   value: string;
+  /** Epoch milliseconds when it stops working. */
   expiresAt?: number;
 }
 
+/** Fetches an ephemeral token for a session, typically from your own server. */
 export type OpenAIWebRTCTokenProvider = (
   config: RealtimeSessionConfig,
   signal?: AbortSignalLike,
 ) => string | OpenAIEphemeralCredential | Promise<string | OpenAIEphemeralCredential>;
 
+/**
+ * Options for the browser WebRTC transport: how the session is negotiated, the microphone, and the
+ * platform APIs it runs on.
+ */
 export interface OpenAIWebRTCTransportOptions {
+  /**
+   * Your server endpoint. In `unified-sdp` mode it receives the browser's SDP offer and returns
+   * OpenAI's answer; in `ephemeral-token` mode it returns a token.
+   */
   sessionEndpoint?: string;
+  /**
+   * How the session is negotiated. Defaults to `ephemeral-token` when a token or token provider is
+   * given, `unified-sdp` otherwise.
+   */
   sessionMode?: OpenAIWebRTCSessionMode;
+  /** OpenAI's WebRTC endpoint, for `ephemeral-token` mode. Defaults to OpenAI's production URL. */
   realtimeEndpoint?: string;
+  /** A token already issued, for `ephemeral-token` mode. */
   ephemeralToken?: string;
+  /** Fetches a token when connecting, for `ephemeral-token` mode. */
   ephemeralTokenProvider?: OpenAIWebRTCTokenProvider;
+  /** Headers sent to `sessionEndpoint`, such as your own session cookie or CSRF token. */
   sessionEndpointHeaders?: Record<string, string>;
+  /** Passed to the peer connection constructor, for ICE servers and similar settings. */
   peerConnectionConfig?: Record<string, unknown>;
+  /** Creates the peer connection, for platforms without the global `RTCPeerConnection`. */
   peerConnectionFactory?: RealtimePeerConnectionFactory;
+  /** Opens the microphone. Defaults to `navigator.mediaDevices`. */
   mediaDevices?: RealtimeMediaDevicesLike;
+  /** Uses this stream instead of opening the microphone. */
   mediaStream?: RealtimeMediaStreamLike;
+  /** Uses this track instead of opening the microphone. */
   mediaTrack?: RealtimeMediaTrackLike;
+  /**
+   * Also stops `mediaStream` or `mediaTrack` on disconnect. Tracks the transport opened itself are
+   * always stopped.
+   */
   stopProvidedTracks?: boolean;
+  /** Replaces the global `fetch`. */
   fetch?: RealtimeFetchLike;
+  /** Creates abort controllers, for platforms without the global. */
   abortControllerFactory?: () => RealtimeAbortControllerLike;
+  /** Replaces timers, for tests. */
   timers?: TimerPlatform;
+  /** Replaces the system clock, for tests. */
   now?: () => number;
+  /**
+   * Fails the connection if it is not open within this many milliseconds. Defaults to 15 seconds.
+   */
   connectTimeoutMs?: number;
+  /**
+   * How long an ICE disconnect may last before the connection is treated as failed. Defaults to 2
+   * seconds, since brief drops usually recover on their own.
+   */
   iceDisconnectGraceMs?: number;
+  /** Label of the events data channel. Defaults to `oai-events`. */
   dataChannelLabel?: string;
+  /** Options for the events data channel. */
   dataChannelOptions?: Record<string, unknown>;
+  /**
+   * Allows `sendAudio()` to push audio over the data channel. `false` restricts audio to the
+   * microphone track.
+   */
   sendAudioOverDataChannel?: boolean;
 }
 
@@ -137,7 +234,9 @@ type WebRTCTransportEventMap = RealtimeTransportEvents & Record<string, unknown>
 
 /** Framework-independent OpenAI Realtime WebRTC transport using structural, injectable platform APIs. */
 export class OpenAIWebRTCTransport implements RealtimeTransport {
+  /** Always `webrtc`. */
   readonly kind = 'webrtc' as const;
+  /** Current connection state. */
   state: RealtimeTransportState = 'idle';
 
   private readonly emitter = new TypedEventEmitter<WebRTCTransportEventMap>();
@@ -155,6 +254,7 @@ export class OpenAIWebRTCTransport implements RealtimeTransport {
 
   constructor(private readonly options: OpenAIWebRTCTransportOptions = {}) {}
 
+  /** Subscribes to a transport event. Returns a function that unsubscribes. */
   on<Event extends keyof RealtimeTransportEvents>(
     event: Event,
     listener: (payload: RealtimeTransportEvents[Event]) => void,
@@ -162,6 +262,7 @@ export class OpenAIWebRTCTransport implements RealtimeTransport {
     return this.emitter.on(event, listener);
   }
 
+  /** Opens the microphone, negotiates the session, and resolves once the events channel is open. */
   async connect(config: RealtimeSessionConfig): Promise<void> {
     if (this.state === 'connected') return;
     if (this.state === 'connecting' || this.state === 'disconnecting') throw this.invalidState('connect');
@@ -253,6 +354,10 @@ export class OpenAIWebRTCTransport implements RealtimeTransport {
     }
   }
 
+  /**
+   * Sends audio as an `input_audio_buffer.append` event, for audio that does not come from the
+   * microphone track. Throws when `sendAudioOverDataChannel` is false.
+   */
   sendAudio(chunk: ArrayBuffer): void {
     if (this.options.sendAudioOverDataChannel === false) {
       const error = new RealtimeError({
@@ -267,6 +372,7 @@ export class OpenAIWebRTCTransport implements RealtimeTransport {
     this.sendEvent({ type: 'input_audio_buffer.append', audio: encodeBase64(chunk) });
   }
 
+  /** Sends a raw realtime event over the data channel. */
   sendEvent(event: RealtimeClientEvent): void {
     const channel = this.requireOpenChannel();
     try {
@@ -283,10 +389,12 @@ export class OpenAIWebRTCTransport implements RealtimeTransport {
     }
   }
 
+  /** Cancels the model's current response. */
   interrupt(): void {
     this.sendEvent({ type: 'response.cancel' });
   }
 
+  /** Closes the connection, stopping tracks the transport opened. Resolves once closed. */
   async disconnect(): Promise<void> {
     if (this.state === 'idle' || this.state === 'disconnected') {
       this.state = 'disconnected';

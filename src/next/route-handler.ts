@@ -6,6 +6,10 @@ export interface NexusRouteHandlerOptions {
   stream?: boolean;
 }
 
+/**
+ * Creates a Next.js `POST` route handler that completes the posted request, or streams it as
+ * server-sent events when streaming is on.
+ */
 export function createNexusRouteHandler(options: NexusRouteHandlerOptions) {
   return async function POST(request: Request): Promise<Response> {
     const body = (await request.json()) as CompletionRequest;

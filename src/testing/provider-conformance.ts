@@ -2,31 +2,51 @@ import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse, StreamChunk } from '../types/response.js';
 import type { BaseProvider } from '../providers/base.js';
 
+/** One chat-provider conformance case: a request and a check on its response. */
 export interface ProviderConformanceCase {
+  /** The case's name. */
   name: string;
+  /** The request sent. */
   request: CompletionRequest;
+  /** Returns true when the response is acceptable. */
   validate: (response: NexusResponse) => boolean | Promise<boolean>;
 }
 
+/** The outcome of one chat-provider conformance case. */
 export interface ProviderConformanceResult {
+  /** The provider checked. */
   providerName: string;
+  /** The model used. */
   model: string;
+  /** The case. */
   caseName: string;
+  /** True when `complete()` returned a response the case accepted. */
   completeOk: boolean;
+  /** True when streaming produced usable chunks and no error, when `testStream` is on. */
   streamOk?: boolean;
+  /** True when the health check passed, when `testHealth` is on. */
   healthOk?: boolean;
+  /** What went wrong, when anything did. */
   error?: string;
 }
 
+/** Options for `runProviderConformance()`. */
 export interface ProviderConformanceOptions {
+  /** Model to use for every case. The provider's own fixtures are used when omitted. */
   model?: string;
+  /** Cases to run instead of the defaults. */
   fixtures?: ProviderConformanceCase[];
+  /** Also streams each case. Off by default. */
   testStream?: boolean;
+  /** Also runs the provider's health check once. Off by default. */
   testHealth?: boolean;
+  /** Includes the JSON response-format case. Defaults to true. */
   testJson?: boolean;
+  /** Includes the tool-calling case. Off by default. */
   testTools?: boolean;
 }
 
+/** Default conformance cases for each bundled chat provider, keyed by provider name. */
 export const PROVIDER_CONFORMANCE_FIXTURES: Record<string, ProviderConformanceCase[]> = {
   openai: baseFixtures('gpt-5.4-mini'),
   anthropic: baseFixtures('claude-sonnet-4'),
@@ -38,6 +58,10 @@ export const PROVIDER_CONFORMANCE_FIXTURES: Record<string, ProviderConformanceCa
   openrouter: baseFixtures('openrouter/openai/gpt-5.4-mini'),
 };
 
+/**
+ * Checks a chat provider against the neutral contract: completion, and optionally streaming,
+ * health, JSON output, and tool calls. Runs live requests.
+ */
 export async function runProviderConformance(
   providerName: string,
   provider: BaseProvider,

@@ -30,38 +30,73 @@ import type {
 const DEFAULT_URL = 'wss://api.openai.com/v1/realtime';
 const DEFAULT_MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 
+/**
+ * The subset of a `WebSocket` the transport uses. Structural, so the `ws` package, a browser
+ * socket, or a test double all fit.
+ */
 export interface RealtimeWebSocketLike extends EventTargetLike {
+  /** Connection state, as the WebSocket standard numbers it. */
   readonly readyState: number;
+  /** How binary messages are delivered. */
   binaryType?: string;
+  /** Sends one message. */
   send(data: string | ArrayBuffer | Uint8Array): void;
+  /** Closes the socket. */
   close(code?: number, reason?: string): void;
 }
 
+/** What a WebSocket factory receives besides the URL. */
 export interface OpenAIWebSocketFactoryOptions {
+  /** Headers to send on the upgrade request, including authorization. */
   headers: Record<string, string>;
+  /** Subprotocols to request. */
   protocols?: string[];
 }
 
+/**
+ * Opens a WebSocket. Supply one for a runtime whose `WebSocket` cannot set headers, such as the
+ * `ws` package in Node.
+ */
 export type OpenAIWebSocketFactory = (url: string, options: OpenAIWebSocketFactoryOptions) => RealtimeWebSocketLike;
 
+/** Fetches a short-lived token for a session, instead of using a long-lived API key. */
 export type OpenAIEphemeralTokenProvider = (
   config: RealtimeSessionConfig,
   signal?: AbortSignalLike,
 ) => string | Promise<string>;
 
+/** Options for the server-side WebSocket transport. */
 export interface OpenAIWebSocketTransportOptions {
+  /** Realtime endpoint. Defaults to OpenAI's production URL. */
   url?: string;
+  /** API key. Keep it on a server; a browser should use WebRTC with an ephemeral token. */
   apiKey?: string;
+  /** A token already issued. */
   ephemeralToken?: string;
+  /** Fetches a token when connecting. */
   ephemeralTokenProvider?: OpenAIEphemeralTokenProvider;
+  /** Headers added to the upgrade request. */
   headers?: Record<string, string>;
+  /** Subprotocols to request. */
   protocols?: string[];
+  /** Opens the socket. */
   webSocketFactory?: OpenAIWebSocketFactory;
+  /**
+   * Fails the connection if it is not open within this many milliseconds. Defaults to 10 seconds.
+   */
   connectTimeoutMs?: number;
+  /**
+   * How long `disconnect()` waits for the socket to close cleanly, in milliseconds. Defaults to 1
+   * second.
+   */
   disconnectTimeoutMs?: number;
+  /** Largest audio chunk `sendAudio()` accepts, in bytes. Defaults to 15 MiB. */
   maxAudioChunkBytes?: number;
+  /** Decodes text frames, for runtimes without `TextDecoder`. */
   codec?: Utf8Codec;
+  /** Replaces timers, for tests. */
   timers?: TimerPlatform;
+  /** Replaces the system clock, for tests. */
   now?: () => number;
 }
 
@@ -69,7 +104,9 @@ type WebSocketTransportEventMap = RealtimeTransportEvents & Record<string, unkno
 
 /** OpenAI Realtime WebSocket transport. Inject a factory such as `ws` for server-side authenticated use. */
 export class OpenAIWebSocketTransport implements RealtimeTransport {
+  /** Always `websocket`. */
   readonly kind = 'websocket' as const;
+  /** Current connection state. */
   state: RealtimeTransportState = 'idle';
 
   private readonly emitter = new TypedEventEmitter<WebSocketTransportEventMap>();
@@ -82,6 +119,7 @@ export class OpenAIWebSocketTransport implements RealtimeTransport {
 
   constructor(private readonly options: OpenAIWebSocketTransportOptions = {}) {}
 
+  /** Subscribes to a transport event. Returns a function that unsubscribes. */
   on<Event extends keyof RealtimeTransportEvents>(
     event: Event,
     listener: (payload: RealtimeTransportEvents[Event]) => void,
@@ -89,6 +127,7 @@ export class OpenAIWebSocketTransport implements RealtimeTransport {
     return this.emitter.on(event, listener);
   }
 
+  /** Opens the socket, configures the session, and resolves once it is ready. */
   async connect(config: RealtimeSessionConfig): Promise<void> {
     if (this.state === 'connected') return;
     if (this.state === 'connecting' || this.state === 'disconnecting') throw this.invalidState('connect');
@@ -168,6 +207,10 @@ export class OpenAIWebSocketTransport implements RealtimeTransport {
     }
   }
 
+  /**
+   * Sends a chunk of audio as an `input_audio_buffer.append` event. Throws for a chunk over
+   * `maxAudioChunkBytes`.
+   */
   sendAudio(chunk: ArrayBuffer): void {
     const limit = this.options.maxAudioChunkBytes ?? DEFAULT_MAX_AUDIO_BYTES;
     if (chunk.byteLength > limit) {
@@ -183,6 +226,7 @@ export class OpenAIWebSocketTransport implements RealtimeTransport {
     this.sendEvent({ type: 'input_audio_buffer.append', audio: encodeBase64(chunk) });
   }
 
+  /** Sends a raw realtime event. */
   sendEvent(event: RealtimeClientEvent): void {
     const socket = this.requireOpenSocket();
     try {
@@ -199,10 +243,12 @@ export class OpenAIWebSocketTransport implements RealtimeTransport {
     }
   }
 
+  /** Cancels the model's current response. */
   interrupt(): void {
     this.sendEvent({ type: 'response.cancel' });
   }
 
+  /** Closes the socket. Resolves once closed or after `disconnectTimeoutMs`. */
   async disconnect(): Promise<void> {
     if (this.state === 'idle' || this.state === 'disconnected') {
       this.state = 'disconnected';

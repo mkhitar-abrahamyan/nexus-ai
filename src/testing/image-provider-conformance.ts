@@ -17,33 +17,57 @@ interface ImageProviderConformanceCaseBase {
   validate?: (result: ImageResult) => boolean | Promise<boolean>;
 }
 
+/** A conformance case that generates an image. */
 export interface ImageGenerateProviderConformanceCase extends ImageProviderConformanceCaseBase {
+  /** Always `generate`. */
   operation: 'generate';
+  /** The request sent. */
   request: ImageGenerateRequest;
 }
 
+/** A conformance case that edits an image. */
 export interface ImageEditProviderConformanceCase extends ImageProviderConformanceCaseBase {
+  /** Always `edit`. */
   operation: 'edit';
+  /** The request sent. */
   request: ImageEditRequest;
 }
 
+/** One image conformance case: a generation or an edit. */
 export type ImageProviderConformanceCase = ImageGenerateProviderConformanceCase | ImageEditProviderConformanceCase;
 
+/** The outcome of one image conformance case. */
 export interface ImageProviderConformanceResult {
+  /** The provider checked. */
   providerName: string;
+  /** The model used. */
   model?: string;
+  /** The case. */
   caseName: string;
+  /** Whether it generated or edited. */
   operation: ImageOperation;
+  /** True when the operation returned a result that met the contract. */
   operationOk: boolean;
+  /** Whether an already-aborted signal was honored, when `testAbort` is on. */
   abortOk?: boolean;
+  /** Every contract violation found, joined. */
   error?: string;
 }
 
+/** Options for `runImageProviderConformance()`. */
 export interface ImageProviderConformanceOptions {
+  /** Model to use for every case. */
   model?: string;
+  /**
+   * Cases to run instead of the defaults, which are built from the provider's declared
+   * capabilities.
+   */
   fixtures?: readonly ImageProviderConformanceCase[];
+  /** Image the edit cases start from. Defaults to a portable 1x1 PNG. */
   editInput?: AssetInput;
+  /** Also checks that each case honors an already-aborted signal. Off by default. */
   testAbort?: boolean;
+  /** Runs the edit cases when the provider declares `edit`. Defaults to true. */
   testEdit?: boolean;
   /** Run the masked-edit case when the provider declares `supportsMask`. Defaults to true. */
   testMask?: boolean;
@@ -93,12 +117,17 @@ const MASKED_EDIT_FIXTURE: ImageEditProviderConformanceCase = {
   },
 };
 
+/** The default image conformance cases: one generation, one edit, and one masked edit. */
 export const IMAGE_PROVIDER_CONFORMANCE_FIXTURES: readonly ImageProviderConformanceCase[] = [
   BASIC_GENERATE_FIXTURE,
   BASIC_EDIT_FIXTURE,
   MASKED_EDIT_FIXTURE,
 ];
 
+/**
+ * Checks an image adapter against the neutral contract: the results it returns, the operations it
+ * declares, and optionally how it handles an aborted signal.
+ */
 export async function runImageProviderConformance(
   providerName: string,
   provider: ImageProvider,
