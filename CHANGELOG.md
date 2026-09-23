@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-09-23
+
 Prompt versioning, and documentation you can navigate. Prompts are defined with typed variables,
 versioned by their content, promoted between labels only after their gates agree, and served through
 registry outages; every feature now has its own guide, and the README is an overview that links to them.
@@ -892,7 +894,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.17.0...HEAD
+[1.17.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.12.0...v1.14.0

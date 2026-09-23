@@ -412,7 +412,7 @@ The `nexus-ai-pro/postgres` subpaths, `nexus-ai-pro/ops/circuit-store`, and
   so recordings made with one release keep replaying with the next. A change that would invalidate
   recordings waits for 2.0.
 
-## Prompt stages (Unreleased)
+## Prompt stages (1.17.0)
 
 The `nexus-ai-pro/prompts` subpaths and `nexus-ai-pro/postgres/prompts` are experimental in
 production readiness, as the image family is: their exported types, functions, and classes follow the

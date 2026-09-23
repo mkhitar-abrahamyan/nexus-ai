@@ -3,12 +3,12 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.16.0**. 91 export subpaths, each
+Status baseline: **1.17.0**. 97 export subpaths, each
 held to a size budget in CI, 12 completion providers, 5 embedding providers, 2 batch providers, 3
 image providers plus a mock, 101 completion registry models plus 63 aliases, and 11 embedding models
-plus 5 aliases. 604 unit tests pass; coverage sits at **91.7% lines / 76.9% branches / 86.6%
+plus 5 aliases. 623 unit tests pass; coverage sits at **92.0% lines / 77.4% branches / 87.2%
 functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry
-drift, per-subpath size, documentation coverage, a graph benchmark, mock conformance, packed-package smoke, API contract,
+drift, per-subpath size, documentation and guide coverage, a graph benchmark, mock conformance, packed-package smoke, API contract,
 consumer type resolution, and clean install on Node 22 and 24.
 
 ---
@@ -21,8 +21,8 @@ weight is a constraint on every new feature rather than a feature of its own.
 
 Measured from the current build, an entry point costs a fraction of the root import: `/agent` 11%,
 `/graph` 9%, `/operations` 7%, `/evaluate` 5%, `/tracing` 4%, `/mcp` 2%, `/store` 1%,
-`/cache/memory-cache` 0.5%, `/streaming` 0.2%. Dependencies are counted as well as bytes: 87 of the
-91 entry points import no third-party package at all, and the four that do — the root, `/config`,
+`/cache/memory-cache` 0.5%, `/streaming` 0.2%. Dependencies are counted as well as bytes: 93 of the
+97 entry points import no third-party package at all, and the four that do — the root, `/config`,
 `/core`, and `/security` — are the ones that reach the schema validators. Every new capability gets its own export subpath and stays out of the
 root, and `npm run size:check` fails the build when any entry point grows past its budget or picks up
 a dependency it did not have.
@@ -956,41 +956,78 @@ regression and passes noise of the same size.
 
 ---
 
-## 17. 1.17.0: prompt and configuration versioning
+## 17. Shipped in 1.17.0 — prompt versioning, and a guide per feature
 
-**Carried in: image recordings.** Record one live conformance run per image backend, commit the
-fixtures, and decide the image family's promotion on the result, as section 16 describes.
+**Templates that type themselves.** `definePrompt()` reads a prompt's variables out of its template
+text, so `render()` requires every variable without a default and a misspelling is a compile error
+rather than a blank in production. Dot paths, partials, placeholders for whole messages, defaults, and
+a request configuration versioned with the prompt; an unknown partial or a cycle fails when the prompt
+is defined, not on its first render. Typing it needed no `const` type parameter, so the TypeScript
+floor is unchanged.
 
-**Carried in: one set of type declarations.** The ESM and CommonJS builds each ship an identical
-copy of the declarations, about 700 KB unpacked. Emitting them once, without breaking CommonJS
-type resolution, returns the package to its 1.15.0 size.
+**Versions derived from content.** `promptVersion()` hashes the definition over a canonical encoding,
+so the same prompt has the same version in a test, in CI, and in production, and committing unchanged
+content is a no-op. Hashing uses Web Crypto, so the value is the same in Node, a browser, and an edge
+runtime.
 
-**Templates.** Message templates with typed variables, partials, and a model configuration bundled
-with each version.
+**A registry with gates** (`nexus-ai-pro/prompts/registry`). Labels — `production`, `staging`, a tag —
+point at versions. `promote()` moves one only after the gates registered for the destination agree:
+`experimentGate()` requires a passing experiment for that exact version, with per-metric thresholds
+and an optional no-regression comparison against the version it would replace, and `servedByGate()`
+requires staging before production. Refusals are reported per gate and nothing moves; `force` records
+which gates were overridden. `rollback()`, `split()` for sticky A/B tests, `diff()` with
+`formatPromptDiff()`, and a full history. Label writes are compare-and-set, so two workers promoting
+at once cannot both win, and changes can be posted to signed webhooks.
 
-**Registry** (`nexus-ai-pro/prompts`).
-- Content-addressed versions, tags, and environments such as development, staging, and production.
-- History, diffs, and rollback.
-- Promotion can require a named experiment to pass first.
-- Webhooks fire on promotion.
-- Storage adapters: memory, files, Redis, and Postgres, reusing the adapter family from section 16.
+**The headless playground.** `evaluatePrompt()` runs a version over a dataset and stores an experiment
+tagged with that version — the tag the gate looks for — so the loop from "try a wording" to "it is
+allowed into production" closes without a bespoke script.
 
-**Serving.**
-- A client cache with a TTL and stale-while-revalidate.
-- If the registry is unreachable, the last known version for an environment keeps serving.
-- A/B serving with sticky assignment. Every trace records the prompt version it used.
+**Serving that survives the registry** (`nexus-ai-pro/prompts/client`). A label is read at most once
+per TTL, answered from cache while it refreshes in the background, and when the registry is
+unreachable the last version seen keeps serving; a process that starts during an outage serves the
+prompts bundled in its code. A split label picks its arm by key, so a user sees one version.
 
-**Headless playground.** Run a prompt version against dataset examples; the output is a stored
-experiment, comparable with every other experiment.
+**Stores.** Memory, files (one reviewable JSON file per version, for version control), Redis, and
+Postgres, all tested against one contract, the Postgres one against real Postgres in process.
 
-**Budgets.** `/prompts` at most 12 KB. The storage adapters sit on their own subpaths.
+**Traces name the prompt.** A model call rendered from a version records its name, version, label, and
+arm, so a trace answers which prompt produced an output.
 
-**Proof.** A promotion from staging to production is refused until its experiment passes. A trace
-names the prompt version it ran. A simulated registry outage keeps serving the cached version.
+**A guide for every feature.** 24 guides under `docs/`, each covering every export of its entry points
+and ending with a reference generated from the doc comments. `npm run docs:guides` fails when an
+export is not named or a reference is stale, and runs in `npm test`. The README is an overview that
+links to them, down from 2,516 lines to about 230.
+
+**Budgets.** `/prompts` is 10 KB against a 12 KB target; serving is 15 KB and the write side 34 KB, on
+their own subpaths, so an application that only renders prompts loads the smallest of the three. No
+new entry point imports a third-party package, and `/prompts` and `/prompts/client` compile and run
+without Node's types.
+
+**Proof.** A promotion is refused until an experiment for that exact version passes, and refused again
+when it regresses against the version it would replace. A registry outage keeps serving the last
+version, and a cold start during one serves the bundled fallback. Four stores pass one contract suite.
+
+### What did not land, and where it went
+
+- **One set of type declarations moved to 1.18.0.** Every approach breaks the constraint it was set
+  under. Pointing the CommonJS `require` types at the ESM declarations makes them resolve as ESM for
+  consumers on `node16` resolution; re-exporting across formats needs TypeScript 5.3's
+  `resolution-mode`, which raises the floor for everyone. The package stays at about 4.2 MB unpacked.
+- **Image recordings moved to 1.18.0**, again. The suite replays from fixtures and reports each backend
+  that has none, but recording them needs live credentials for OpenAI, Google, and ComfyUI, which this
+  release did not have. The image family stays experimental.
 
 ---
 
 ## 18. 1.18.0 and 1.19.0: self-hosted server and local studio
+
+**Carried in: image recordings.** Record one live conformance run per image backend, commit the
+fixtures, and decide the image family's promotion on the result.
+
+**Carried in: one set of type declarations.** Shipping the declarations once, for both module formats,
+without breaking CommonJS type resolution or raising the TypeScript floor. If neither is possible, say
+so here and close the item rather than carrying it a third time.
 
 ### 1.18.0: agent server (`nexus-ai-pro/server`, experimental)
 
