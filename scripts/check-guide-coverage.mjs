@@ -8,7 +8,9 @@
  * guide covering it, and that the README links to every guide.
  *
  * An export is resolved to its declaration first, so a name the root re-exports from a family is
- * covered by that family's guide: the root guide only has to name what only the root exports.
+ * covered by that family's guide. A feature with no entry point of its own, reachable only from the
+ * root, is claimed by the guide that names its source directories in a second comment:
+ * `<!-- sources: src/security src/hallucination -->`.
  *
  * Each guide ends with a reference generated from the doc comments, between
  * `<!-- reference:start -->` and `<!-- reference:end -->`: every declaration is listed once, under the
@@ -29,6 +31,7 @@ const list = process.argv.includes('--list');
 const update = process.argv.includes('--update');
 const REFERENCE_START = '<!-- reference:start -->';
 const REFERENCE_END = '<!-- reference:end -->';
+const SOURCES = /<!--\s*sources:\s*([^>]*?)\s*-->/g;
 
 const packageJson = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 const sourceOf = (entry) =>
@@ -79,6 +82,7 @@ for (const entry of entries) {
     // Exported for other modules of this package only, as the doc-coverage check also treats it.
     if (target.getJsDocTags(checker).some((tag) => tag.name === 'internal')) continue;
     const declaration = target.declarations?.[0];
+    const file = declaration ? path.relative(root, declaration.getSourceFile().fileName).split(path.sep).join('/') : '';
     const key = declaration
       ? `${declaration.getSourceFile().fileName}:${declaration.pos}:${exported.name}`
       : `${entry.subpath}:${exported.name}`;
@@ -87,6 +91,7 @@ for (const entry of entries) {
       entries: new Set(),
       kind: kindOf(target, declaration),
       summary: summaryOf(target),
+      file,
     };
     item.entries.add(entry.subpath);
     declarations.set(key, item);
@@ -101,25 +106,55 @@ const guides = readdirSync(docsDir)
     const text = readFileSync(path.join(docsDir, file), 'utf8');
     const markers = [...text.matchAll(/<!--\s*covers:\s*([^>]*?)\s*-->/g)];
     const covers = markers.flatMap((match) => (match[1] ?? '').split(/\s+/).filter(Boolean));
-    return { file, text, covers: new Set(covers), marked: markers.length > 0 };
+    const sources = [...text.matchAll(SOURCES)].flatMap((match) => (match[1] ?? '').split(/\s+/).filter(Boolean));
+    return { file, text, covers: new Set(covers), sources, marked: markers.length > 0 };
   });
 
+/** The most specific entry point, so a family's declarations are listed in the family's guide. */
 function ownerOf(item) {
-  // The most specific entry point, so a family's declarations are listed in the family's guide.
   return [...item.entries].sort(
     (a, b) => Number(a === '.') - Number(b === '.') || b.length - a.length || a.localeCompare(b),
   )[0];
 }
 
+/**
+ * The guide that claims a declaration by its source directory, for a feature that has no entry point
+ * of its own. The longest matching directory wins, so `src/images/stores` beats `src/images`.
+ */
+function claimedBy(item) {
+  let best;
+  for (const guide of guides) {
+    for (const source of guide.sources) {
+      if (item.file === source || item.file.startsWith(`${source}/`)) {
+        if (!best || source.length > best.source.length) best = { guide, source };
+      }
+    }
+  }
+  return best?.guide;
+}
+
+/** Which guide lists a declaration, and under which heading. */
+function placementOf(item) {
+  const owner = ownerOf(item);
+  if (owner !== '.') return { guide: guides.find((guide) => guide.covers.has(owner)), section: owner };
+  const claimed = claimedBy(item);
+  if (claimed) return { guide: claimed, section: 'root' };
+  return { guide: guides.find((guide) => guide.covers.has('.')), section: '.' };
+}
+
 function referenceFor(guide) {
   const subpaths = [...guide.covers].sort((a, b) => (a === '.' ? -1 : b === '.' ? 1 : a.localeCompare(b)));
+  if (guide.sources.length > 0) subpaths.push('root');
   const sections = [];
   for (const subpath of subpaths) {
     const items = [...declarations.values()]
-      .filter((item) => ownerOf(item) === subpath)
+      .filter((item) => {
+        const placement = placementOf(item);
+        return placement.guide === guide && placement.section === subpath;
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
     if (items.length === 0) continue;
-    const specifier = subpath === '.' ? 'nexus-ai-pro' : `nexus-ai-pro/${subpath.slice(2)}`;
+    const specifier = subpath === '.' || subpath === 'root' ? 'nexus-ai-pro' : `nexus-ai-pro/${subpath.slice(2)}`;
     sections.push(
       [
         `### \`${specifier}\``,
@@ -168,11 +203,18 @@ for (const entry of entries) {
   if (!guides.some((guide) => guide.covers.has(entry.subpath))) problems.push(`no guide covers ${entry.subpath}`);
 }
 
+for (const item of declarations.values()) {
+  if (!placementOf(item).guide) problems.push(`no guide lists ${item.name} (${item.file || 'unknown file'})`);
+}
+
 const mentions = (text, name) =>
   new RegExp(`(^|[^A-Za-z0-9_$])${name.replace(/\$/g, '\\$')}([^A-Za-z0-9_$]|$)`).test(text);
 const missing = [];
 for (const item of declarations.values()) {
-  const covering = guides.filter((guide) => [...item.entries].some((subpath) => guide.covers.has(subpath)));
+  const placed = placementOf(item).guide;
+  const covering = guides.filter(
+    (guide) => guide === placed || [...item.entries].some((subpath) => guide.covers.has(subpath)),
+  );
   if (!covering.some((guide) => mentions(guide.text, item.name))) {
     missing.push({ name: item.name, entries: [...item.entries], guides: covering.map((guide) => guide.file) });
   }

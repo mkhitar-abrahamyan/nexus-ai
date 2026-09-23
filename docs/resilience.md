@@ -1,6 +1,7 @@
 # Resilience and observability
 
 <!-- covers: ./ops/circuit-breaker ./ops/circuit-store ./ops/rate-limit-adapters -->
+<!-- sources: src/ops -->
 
 Staying up when providers do not: health-aware routing, a circuit breaker whose state can be shared across workers through `nexus-ai-pro/ops/circuit-store`, rate limits that hold across processes through `nexus-ai-pro/ops/rate-limit-adapters`, and the metrics, traces, audit log, and logger that show what happened.
 
@@ -186,4 +187,28 @@ specific entry point that provides it.
 | `RedisRateLimitLikeClient` | interface | The Redis commands the rate-limit store needs. |
 | `RedisRateLimitStore` | class | Redis-backed counters, so one budget covers every process behind a load balancer. |
 | `RedisRateLimitStoreOptions` | interface | Options for the Redis rate-limit store. |
+
+### `nexus-ai-pro`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `AuditLogger` | class | Writes audit events to the configured sink, redacting sensitive data unless told otherwise. |
+| `FamilyCallDescriptor` | interface | What one family call is, for metrics labels, the audit log, and the rate limit. |
+| `FamilyRuntime` | interface | Shared observability wiring handed to an operation family. |
+| `FamilyTelemetry` | class | Wraps one family call in the platform's rate limit, audit log, and metrics. |
+| `HealthConfig` | interface | Health tracking for providers, used to route around unhealthy ones. |
+| `InMemoryMetrics` | class | Keeps metrics in memory, for a snapshot or a Prometheus scrape. |
+| `MetricsCollector` | class | Records request, response, error, and pipeline-step metrics for a client, when metrics are enabled. |
+| `MetricsConfig` | interface | Metrics collection for a client. |
+| `MetricsSink` | interface | Where metrics go: counters, histograms, and gauges, labelled. |
+| `NexusRateLimitError` | class | Raised when a caller exceeds its rate limit. |
+| `OpenTelemetryLikeMeter` | interface | The part of an OpenTelemetry meter the metrics sink uses. |
+| `OpenTelemetryLikeSpan` | interface | The part of an OpenTelemetry span the exporter uses. |
+| `OpenTelemetryLikeTracer` | interface | The part of an OpenTelemetry tracer the exporter uses. |
+| `OpenTelemetryMetricsSink` | class | Sends metrics to OpenTelemetry through a meter. |
+| `OpenTelemetryTraceExporter` | class | Exports pipeline traces as OpenTelemetry spans: one for the pipeline and one per step. |
+| `ProviderHealthMonitor` | class | Tracks provider health from call outcomes and scores each provider for routing. |
+| `ProviderHealthSnapshot` | interface | One provider's health, as tracked from real calls. |
+| `RateLimitedRequest` | interface | The parts of a request the limiter buckets on. |
+| `RateLimiter` | class | Fixed-window rate limiting, per user, per model, or globally, in memory or through a shared store. |
 <!-- reference:end -->

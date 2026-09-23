@@ -1,6 +1,7 @@
 # Workflows
 
 <!-- covers: ./workflows -->
+<!-- sources: src/workflow -->
 
 Ready-made workflows from `nexus-ai-pro/workflows`: chains for grounded answers, extraction, classification, comparison, and summarize-verify-format, and domain templates for support triage, sales qualification, legal review, and code review. Each is a function over any client with a `complete()` method, returning the final content, the last response, and every step.
 
@@ -37,4 +38,18 @@ specific entry point that provides it.
 | `WorkflowClient` | interface | The one method a workflow needs from a client. |
 | `WorkflowResult` | interface | The outcome of a workflow. |
 | `WorkflowStepResult` | interface | One step of a workflow and the response it produced. |
+
+### `nexus-ai-pro`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `codeReviewWorkflow` | function | Reviews code for bugs, security risks, performance issues, and missing tests, as JSON findings ordered by severity. |
+| `CodeReviewWorkflowOptions` | interface | Options for `codeReviewWorkflow()`. |
+| `DomainWorkflowOptions` | interface | What every domain workflow takes. |
+| `legalReviewWorkflow` | function | Flags legal risks, missing clauses, and questions to ask, as JSON, with an explicit fallback when the text is not enough. |
+| `LegalReviewWorkflowOptions` | interface | Options for `legalReviewWorkflow()`. |
+| `salesQualificationWorkflow` | function | Qualifies a sales lead into a fit score, pain points, a recommended offer, and a follow-up email, as JSON. |
+| `SalesWorkflowOptions` | interface | Options for `salesQualificationWorkflow()`. |
+| `supportTriageWorkflow` | function | Triages a support request into severity, category, next action, and a customer-safe reply, as JSON. |
+| `SupportWorkflowOptions` | interface | Options for `supportTriageWorkflow()`. |
 <!-- reference:end -->

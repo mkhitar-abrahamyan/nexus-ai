@@ -1,8 +1,8 @@
 # Embeddings and retrieval
 
-<!-- covers: ./embeddings ./embeddings/adapters ./embeddings/mock ./embeddings/models ./rag -->
+<!-- covers: ./embeddings ./embeddings/adapters ./embeddings/mock ./embeddings/models -->
 
-Embeddings as an operation family from `nexus-ai-pro/embeddings`: routing across providers, batching, caching, budgets, retries, and capability checks that refuse a dimension or input type a model cannot honor, with OpenAI, Google, Cohere, Ollama, and compatible adapters on `nexus-ai-pro/embeddings/adapters`. Retrieval-augmented generation helpers live on `nexus-ai-pro/rag`.
+Embeddings as an operation family from `nexus-ai-pro/embeddings`: routing across providers, batching, caching, budgets, retries, and capability checks that refuse a dimension or input type a model cannot honor, with OpenAI, Google, Cohere, Ollama, and compatible adapters on `nexus-ai-pro/embeddings/adapters`. Retrieval, grounding, and the checks that catch an unsupported answer are in the [grounding guide](./grounding.md).
 
 ## Embeddings
 
@@ -96,33 +96,6 @@ ai.registerEmbeddingProvider('mock', new MockEmbeddingProvider());
 Bundled embedding dimensions and prices are defaults, not financial truth. Override them through
 `embeddings.models.registry` when exact numbers matter.
 
-## RAG and Grounded Answers
-
-```ts
-import { MemoryVectorStore, withRagContext } from 'nexus-ai-pro';
-
-const store = new MemoryVectorStore();
-await store.add([
-  { id: 'doc-1', content: 'NexusAI supports RAG context with citations.', source: 'docs' },
-]);
-
-const chunks = await store.search('How does NexusAI ground answers?', { topK: 3 });
-
-const response = await ai.completeVerified(
-  withRagContext({
-    model: 'auto',
-    messages: [{ role: 'user', content: 'How does NexusAI ground answers?' }],
-  }, {
-    chunks,
-    requireCitations: true,
-  }),
-  {
-    context: chunks.map((chunk) => chunk.content),
-    minSupportRatio: 0.85,
-  },
-);
-```
-
 <!-- reference:start -->
 ## Reference
 
@@ -208,14 +181,4 @@ specific entry point that provides it.
 | `ResolvedEmbeddingModel` | interface | An embedding model name resolved through aliases to a model, provider, and capabilities. |
 | `resolveEmbeddingModel` | function | Resolves an alias and looks up embedding model capabilities. |
 | `resolveMaxBatchSize` | function | Largest batch the model and adapter both accept. |
-
-### `nexus-ai-pro/rag`
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `DocumentSource` | interface | A document to split into chunks. |
-| `ingestDocuments` | function | Splits documents into overlapping chunks for retrieval. |
-| `IngestionOptions` | interface | How documents are split. |
-| `IngestionResult` | interface | The chunks produced from a set of documents. |
-| `ingestText` | function | Splits one text into overlapping chunks for retrieval. |
 <!-- reference:end -->

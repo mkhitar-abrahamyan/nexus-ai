@@ -1,6 +1,7 @@
 # Testing with recorded traffic
 
 <!-- covers: ./testing/record -->
+<!-- sources: src/testing -->
 
 Suites that need credentials can run everywhere from recordings. `nexus-ai-pro/testing/record` captures provider traffic once, redacted, as reviewable fixture files, and replays it with no network. The conformance suites that run against those recordings are exported from the root and documented in the [client guide](./core.md): `runProviderConformance()`, `runEmbeddingProviderConformance()`, and `runImageProviderConformance()`.
 
@@ -53,4 +54,26 @@ specific entry point that provides it.
 | `RecordOptions` | interface | Options for recording. |
 | `replayFetch` | function | Serves recorded exchanges instead of calling the network. |
 | `ReplayOptions` | interface | Options for replaying. |
+
+### `nexus-ai-pro`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `EMBEDDING_PROVIDER_CONFORMANCE_FIXTURES` | constant | The default embeddings conformance cases: a single input, a batch, and a query-typed input. |
+| `EmbeddingProviderConformanceCase` | interface | One embeddings conformance case. |
+| `EmbeddingProviderConformanceOptions` | interface | Options for `runEmbeddingProviderConformance()`. |
+| `EmbeddingProviderConformanceResult` | interface | The outcome of one embeddings conformance case. |
+| `IMAGE_PROVIDER_CONFORMANCE_FIXTURES` | constant | The default image conformance cases: one generation, one edit, and one masked edit. |
+| `ImageEditProviderConformanceCase` | interface | A conformance case that edits an image. |
+| `ImageGenerateProviderConformanceCase` | interface | A conformance case that generates an image. |
+| `ImageProviderConformanceCase` | type | One image conformance case: a generation or an edit. |
+| `ImageProviderConformanceOptions` | interface | Options for `runImageProviderConformance()`. |
+| `ImageProviderConformanceResult` | interface | The outcome of one image conformance case. |
+| `PROVIDER_CONFORMANCE_FIXTURES` | constant | Default conformance cases for each bundled chat provider, keyed by provider name. |
+| `ProviderConformanceCase` | interface | One chat-provider conformance case: a request and a check on its response. |
+| `ProviderConformanceOptions` | interface | Options for `runProviderConformance()`. |
+| `ProviderConformanceResult` | interface | The outcome of one chat-provider conformance case. |
+| `runEmbeddingProviderConformance` | function | Checks an embeddings adapter against the neutral contract. |
+| `runImageProviderConformance` | function | Checks an image adapter against the neutral contract: the results it returns, the operations it declares, and optionally how it handles an aborted signal. |
+| `runProviderConformance` | function | Checks a chat provider against the neutral contract: completion, and optionally streaming, health, JSON output, and tool calls. |
 <!-- reference:end -->

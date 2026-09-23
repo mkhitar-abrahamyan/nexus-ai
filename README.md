@@ -118,6 +118,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Resilience and observability](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/resilience.md) | Circuit breaking, distributed rate limits, metrics, logs, and audit |
 | [Batch tiers](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/batch.md) | The providers' discounted batch APIs, resumable from any process |
 | [Caching](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/caching.md) | Exact and semantic response caches, with memory, Redis, and SQLite adapters |
+| [Grounding](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/grounding.md) | Retrieval, citations, verification, self-consistency, and knowledge graphs |
 | [Embeddings and retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/embeddings.md) | Embeddings as a routed operation family, and RAG helpers |
 | [Images (experimental)](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/images.md) | Generation and masked edits over three backends, input safety, moderation, asset stores |
 | [Voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/voice.md) | Transcription, speech, voice turns, and voice sessions |

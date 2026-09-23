@@ -1,6 +1,7 @@
 # Providers, routing, and the model registry
 
 <!-- covers: ./providers ./providers/anthropic ./providers/azure-openai ./providers/base ./providers/cohere ./providers/deepseek ./providers/errors ./providers/google ./providers/groq ./providers/llamacpp ./providers/lmstudio ./providers/mistral ./providers/ollama ./providers/openai ./providers/openrouter ./providers/type-guards ./models -->
+<!-- sources: src/router -->
 
 Twelve completion providers behind one contract, each on its own entry point so an application loads only the adapters it uses, plus the routing that chooses between them and the model registry it routes by. `BaseProvider` is the contract to implement for a provider that is not bundled.
 
@@ -206,4 +207,13 @@ specific entry point that provides it.
 | `getRecord` | function | A nested object at a key, or `undefined`. |
 | `getString` | function | A string at a key, or the fallback. |
 | `isRecord` | function | Whether a value is a plain object, not null or an array. |
+
+### `nexus-ai-pro`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `FailoverExecutor` | class | Runs a routing decision: the primary provider, then each fallback, honouring per-attempt timeouts, rate limits, and circuits. |
+| `RouteDecision` | interface | Where a request goes: the provider and model to try first, and what to try if they fail. |
+| `Router` | class | Chooses where a request goes: a direct model, a matching rule, or the auto-router's ranking, with the fallbacks `routing.fallback` adds on top. |
+| `RouterContext` | interface | What a routing strategy sees when it picks a provider. |
 <!-- reference:end -->
