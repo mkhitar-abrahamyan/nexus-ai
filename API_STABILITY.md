@@ -426,6 +426,22 @@ patch release. None is exported from the root.
 - The wording of gate reasons, of the note a forced promotion records, and of `formatPromptDiff()`
   output is for people and may improve in any release.
 
+## Agent server stage (Unreleased)
+
+The `nexus-ai-pro/server` subpaths are experimental in production readiness, as the image and prompt
+families are: their exported types, functions, and classes follow the 1.x semantic versioning rules,
+and the experimental label does not permit an incompatible minor or patch release. Neither is exported
+from the root.
+
+- The routes listed in the server guide, their status codes, and the shape of `RunRecord`,
+  `ThreadRecord`, and `RunEvent` follow the 1.x rules. A minor release may add routes and fields.
+- Event ids are per run and strictly increasing, which is what `Last-Event-ID` depends on. A client
+  that reconnects with an id never receives it again.
+- The server is not a security boundary on its own: authentication, authorization beyond tenancy and
+  scopes, and rate limiting are the application's, through the hooks.
+- Recovery re-runs a whole run rather than the step it died on, so an assistant with side effects
+  should be idempotent or be left at a single attempt.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

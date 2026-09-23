@@ -126,6 +126,19 @@ const imports = [
   { specifier: 'nexus-ai-pro/postgres/circuits', exports: ['PostgresCircuitStateStore', 'circuitStoreMigration'] },
   { specifier: 'nexus-ai-pro/postgres/prompts', exports: ['PostgresPromptStore', 'promptStoreMigration'] },
   {
+    specifier: 'nexus-ai-pro/server',
+    exports: [
+      'createAgentServer',
+      'graphAssistant',
+      'functionAssistant',
+      'toNodeListener',
+      'RunManager',
+      'CronScheduler',
+      'MemoryRunEventLog',
+    ],
+  },
+  { specifier: 'nexus-ai-pro/server/remote', exports: ['createRemoteGraph'] },
+  {
     specifier: 'nexus-ai-pro/prompts',
     exports: ['definePrompt', 'promptVersion', 'compilePrompt', 'PromptRenderError'],
   },

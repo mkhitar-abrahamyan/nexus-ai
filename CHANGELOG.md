@@ -4,6 +4,43 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+A server you can host. Assistants get an HTTP surface — threads, background runs, resumable event
+streams, and cron jobs — on top of the durability that already existed: a run is an operation, so it
+outlives the request that started it and the worker that was running it.
+
+### Added
+
+- **The agent server** (`nexus-ai-pro/server`, experimental). `createAgentServer()` serves assistants,
+  threads, runs, and cron jobs as one `Request`-to-`Response` handler. `toNodeListener()` runs it on
+  Node's `http`, and as Express or Fastify middleware.
+- **Assistants are structural.** `graphAssistant()` serves a compiled graph, mapping threads to graph
+  threads; `functionAssistant()` serves a plain function. The entry point imports neither runtime.
+- **Runs are durable operations**, so leases, heartbeats, retries, idempotency, dead-lettering, and
+  webhooks come from the operations family. A run abandoned by a crashed worker is re-claimed by
+  another replica through `start()` or `runs.recover()`.
+- **Resumable streaming.** `GET /runs/:id/events` is a server-sent event stream whose events carry
+  their log id, so a client reconnects with `Last-Event-ID` and gets exactly what it missed.
+  `MemoryRunEventLog` covers one replica; `RedisRunEventLog` lets a client reconnect to any replica.
+- **A busy thread is configurable**: `reject`, `enqueue`, `interrupt`, or `rollback`, per server or
+  per run.
+- **Cron jobs.** `CronScheduler` fires `{ everyMs }` or five-field cron schedules, parsed by
+  `parseCron()`. Every replica ticks and every firing carries the idempotency key `<job>:<slot>`, so a
+  job runs once however many replicas are up, with no lock and no leader election.
+- **Authentication and tenancy hooks.** `authenticate` returns a `Principal`; threads, runs, and cron
+  jobs record their tenant, and another tenant's resource is a `404`.
+- **`createRemoteGraph()`** (`nexus-ai-pro/server/remote`), the client: `invoke()`, `stream()` with
+  reconnection, `resume()`, and `asNode()`, which makes a deployed assistant a node in a local graph.
+- **Deployment templates**: `deploy/Dockerfile`, `deploy/compose.yaml` for two replicas behind Redis,
+  and an nginx configuration that does not buffer event streams. `examples/agent-server.ts` is a
+  runnable server.
+
+### Fixed
+
+- An operation whose record was settled by another worker — after its lease lapsed and the work was
+  taken over — crashed the original worker with an unhandled `OperationTransitionError` from its
+  heartbeat. The heartbeat now stops and fails its local run instead, and a heartbeat that throws for
+  any other reason no longer becomes an unhandled rejection.
+
 ## [1.17.0] - 2026-09-23
 
 Prompt versioning, and documentation you can navigate. Prompts are defined with typed variables,

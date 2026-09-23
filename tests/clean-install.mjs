@@ -41,8 +41,10 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // comments on every public declaration. The comments are stripped from the emitted JavaScript, so
 // runtime code shrank; the growth is in the type declarations, which carry the docs to editors and
 // are shipped once for ESM and once for CommonJS.
-const MAX_PACKED_BYTES = 700_000;
-const MAX_UNPACKED_BYTES = 4_300_000;
+// Raised again in 1.18.0 for the agent server and its guide. The declarations are still shipped once
+// per module format, which is the item the roadmap carries.
+const MAX_PACKED_BYTES = 760_000;
+const MAX_UNPACKED_BYTES = 4_600_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Most of
 // the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the
 // README size table reports third-party install cost per entry point.

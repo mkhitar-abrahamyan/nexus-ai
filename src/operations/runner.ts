@@ -325,6 +325,12 @@ export class OperationRunner<TResult = unknown> {
         handle.settleFailure(new OperationLeaseLostError(latest.id, current.lease.owner));
         return;
       }
+      // Another worker has already settled it, which is what a takeover after a lapsed lease leaves
+      // behind. There is nothing left to renew, and advancing a settled record would be illegal.
+      if (isTerminalOperationStatus(current.status)) {
+        handle.settleFailure(new OperationLeaseLostError(latest.id, current.lease?.owner ?? 'another worker'));
+        return;
+      }
 
       const renewed = this.advance(current, 'running');
       renewed.lease = {
@@ -336,7 +342,15 @@ export class OperationRunner<TResult = unknown> {
       if (await this.store.update(renewed, current.sequence)) latest = renewed;
     };
 
-    const timer = setInterval(() => void beat(), this.heartbeatMs);
+    const timer = setInterval(() => {
+      // A heartbeat that throws must not become an unhandled rejection: it stops the beat and fails
+      // the local run, which is what losing the record means for this worker.
+      void beat().catch((error: unknown) => {
+        stopped = true;
+        clearInterval(timer);
+        handle.settleFailure(error);
+      });
+    }, this.heartbeatMs);
     // A heartbeat must never hold the process open on its own.
     timer.unref?.();
 

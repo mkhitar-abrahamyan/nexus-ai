@@ -590,7 +590,9 @@ test('a registry on Postgres promotes and serves across instances', async () => 
   const writer = new PromptRegistry({ store });
   const version = await writer.commit(summarize, { label: 'production' });
   const reader = new PromptClient({
-    source: new PostgresPromptStore(db as unknown as PostgresLikeClient, { table: store['options'].table }),
+    source: new PostgresPromptStore(db as unknown as PostgresLikeClient, {
+      table: (store as unknown as { options: { table: string } }).options.table,
+    }),
   });
   assert.equal((await reader.get('summarize')).version.version, version.version);
   assert.match(postgresMigration({ adapters: ['prompts'] }), /nexus_prompt_versions/);

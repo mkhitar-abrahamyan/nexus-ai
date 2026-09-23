@@ -292,6 +292,8 @@ const expectedSubpaths = [
   './postgres/evaluate',
   './postgres/circuits',
   './postgres/prompts',
+  './server',
+  './server/remote',
   './prompts',
   './prompts/client',
   './prompts/registry',

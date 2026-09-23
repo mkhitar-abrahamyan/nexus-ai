@@ -570,6 +570,26 @@
         "default": "./dist-cjs/postgres/evaluate.js"
       }
     },
+    "./server": {
+      "import": {
+        "types": "./dist/server/index.d.ts",
+        "default": "./dist/server/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/server/index.d.ts",
+        "default": "./dist-cjs/server/index.js"
+      }
+    },
+    "./server/remote": {
+      "import": {
+        "types": "./dist/server/remote.d.ts",
+        "default": "./dist/server/remote.js"
+      },
+      "require": {
+        "types": "./dist-cjs/server/remote.d.ts",
+        "default": "./dist-cjs/server/remote.js"
+      }
+    },
     "./prompts": {
       "import": {
         "types": "./dist/prompts/index.d.ts",
@@ -1317,6 +1337,12 @@
       ],
       "postgres/evaluate": [
         "dist-cjs/postgres/evaluate.d.ts"
+      ],
+      "server": [
+        "dist-cjs/server/index.d.ts"
+      ],
+      "server/remote": [
+        "dist-cjs/server/remote.d.ts"
       ],
       "prompts": [
         "dist-cjs/prompts/index.d.ts"

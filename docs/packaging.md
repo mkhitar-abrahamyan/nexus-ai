@@ -59,20 +59,21 @@ The last column is the part a file-size table usually hides: what an entry point
 install. Most of them force nothing at all — `/graph`, `/operations`, `/images/*`, `/batch`,
 `/embeddings` and the rest import no third-party package. The root import, `/core`, `/config`, and
 `/security` do, because JSON-schema and Zod validation live there. A production install of this
-package is about 11 MB of `node_modules`, of which about 4 MB is this package; the clean-install test holds
+package is about 11.3 MB of `node_modules`, of which about 4.2 MB is this package; the clean-install test holds
 that total to a ceiling too. `@types/node` accounts for a further 2.4 MB at install time but is types
 only, so it never appears in an import graph.
 
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 572 KB | 100% | +4.7 MB |
+| `nexus-ai-pro` | 573 KB | 100% | +4.7 MB |
 | `nexus-ai-pro/config` | 441 KB | 77% | +4.7 MB |
 | `nexus-ai-pro/core` | 437 KB | 76% | +4.7 MB |
 | `nexus-ai-pro/realtime` | 156 KB | 27% | none |
 | `nexus-ai-pro/batch` | 101 KB | 18% | none |
 | `nexus-ai-pro/realtime/session` | 94 KB | 16% | none |
 | `nexus-ai-pro/embeddings` | 81 KB | 14% | none |
+| `nexus-ai-pro/server` | 80 KB | 14% | none |
 | `nexus-ai-pro/providers/groq` | 72 KB | 13% | none |
 | `nexus-ai-pro/providers/mistral` | 72 KB | 13% | none |
 | `nexus-ai-pro/providers/azure-openai` | 71 KB | 12% | none |
@@ -139,6 +140,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/capabilities` | 8 KB | 1% | none |
 | `nexus-ai-pro/store` | 6 KB | 1% | none |
 | `nexus-ai-pro/store/redis` | 6 KB | 1% | none |
+| `nexus-ai-pro/server/remote` | 6 KB | 1% | none |
 | `nexus-ai-pro/postgres/prompts` | 6 KB | 1% | none |
 | `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 1% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 0.9% | none |

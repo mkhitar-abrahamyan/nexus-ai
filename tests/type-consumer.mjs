@@ -215,6 +215,17 @@ import {
 import { PostgresStore as SubpathPostgresStore } from 'nexus-ai-pro/postgres/store';
 import { PostgresPromptStore } from 'nexus-ai-pro/postgres/prompts';
 import { definePrompt, type PromptVersion, type RenderedPrompt } from 'nexus-ai-pro/prompts';
+import {
+  createAgentServer,
+  graphAssistant,
+  functionAssistant,
+  toNodeListener,
+  fromStore as serverStateFromStore,
+  RedisRunEventLog,
+  type AgentServer,
+  type RunRecord as ServerRunRecord,
+} from 'nexus-ai-pro/server';
+import { createRemoteGraph, type RemoteRunResult } from 'nexus-ai-pro/server/remote';
 import { PromptClient } from 'nexus-ai-pro/prompts/client';
 import { PromptRegistry, experimentGate, servedByGate, evaluatePrompt, formatPromptDiff } from 'nexus-ai-pro/prompts/registry';
 import { FilePromptStore } from 'nexus-ai-pro/prompts/file';
@@ -529,6 +540,28 @@ const demoGraph = createGraph({ channels: { log: appendList<string>(), turns: co
 const graphRun: Promise<GraphResult<{ log: ReturnType<typeof appendList<string>>; turns: ReturnType<typeof counter> }>> =
   demoGraph.invoke({}, { threadId: 'consumer-thread', maxConcurrency: 4 });
 const nodeRetry: NodeOptions = { retry: { maxAttempts: 3 } satisfies RetryPolicy, timeoutMs: 5_000, ends: [END] };
+const agents: AgentServer = createAgentServer({
+  assistants: {
+    demo: graphAssistant(demoGraph),
+    echo: functionAssistant((input) => ({ echoed: input }), { description: 'echoes' }),
+  },
+  events: new RedisRunEventLog({
+    rpush: async () => 1,
+    lrange: async () => [],
+    ltrim: async () => 'OK',
+    expire: async () => 1,
+    del: async () => 1,
+  }),
+  operations: { retry: { maxAttempts: 2 } },
+  onBusy: 'enqueue',
+  authenticate: (request) => ({ tenantId: request.headers.get('x-tenant') ?? undefined, scopes: ['runs:write'] }),
+  cron: { tickMs: 30_000, jobs: [{ assistant: 'echo', schedule: { cron: '*/5 * * * *' } }] },
+});
+const agentListener = toNodeListener(agents);
+const remoteAgent = createRemoteGraph({ url: 'https://agents.internal', assistant: 'demo' });
+const remoteResult: Promise<RemoteRunResult> = remoteAgent.invoke({ topic: 'batteries' });
+const agentRuns: Promise<ServerRunRecord[]> = agents.runs.runs(undefined, { limit: 5 });
+void [agentListener, remoteResult, agentRuns, remoteAgent.asNode(), serverStateFromStore];
 const fanOutGraph = createGraph({ channels: { log: appendList<string>(), turns: counter() } })
   .addNode('plan', () => ({ turns: 1 }))
   .addNode('each', (ctx) => ({ log: [String(ctx.input)], turns: ctx.attempt }), nodeRetry)
