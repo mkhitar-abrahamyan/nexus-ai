@@ -7,6 +7,7 @@ import {
   type JsonRpcRequest,
   LineDecoder,
   MCP_PROTOCOL_VERSION,
+  McpError,
   type McpTransport,
   textContent,
 } from './protocol.js';
@@ -76,7 +77,7 @@ export class McpServer {
         jsonrpc: '2.0',
         id: message.id,
         error: {
-          code: JSON_RPC_ERRORS.internal,
+          code: error instanceof McpError ? error.code : JSON_RPC_ERRORS.internal,
           message: error instanceof Error ? error.message : String(error),
         },
       });
@@ -132,7 +133,7 @@ export class McpServer {
       case 'resources/read': {
         const uri = String(params.uri ?? '');
         const resource = this.options.resources?.find((item) => item.uri === uri);
-        if (!resource) throw new Error(`Unknown resource "${uri}"`);
+        if (!resource) throw new McpError(`Unknown resource "${uri}"`, JSON_RPC_ERRORS.invalidParams);
         const value = await resource.read();
         return {
           contents: [
@@ -145,7 +146,7 @@ export class McpServer {
         };
       }
       default:
-        throw new Error(`Unknown method "${request.method}"`);
+        throw new McpError(`Unknown method "${request.method}"`, JSON_RPC_ERRORS.methodNotFound);
     }
   }
 }

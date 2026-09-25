@@ -42,10 +42,11 @@ export class PIIDetector {
     return findings;
   }
 
-  /** Returns the request with personal data masked. */
+  /** Returns the request with personal data masked, or removed when the action is `remove`. */
   mask(request: CompletionRequest, config: PIIConfig = {}): CompletionRequest {
     const enabledTypes = config.detect || ['email', 'phone', 'credit-card', 'ip-address', 'aws-key', 'private-key'];
     const maskChar = config.maskChar || '█';
+    const remove = config.action === 'remove';
 
     return {
       ...request,
@@ -53,21 +54,25 @@ export class PIIDetector {
         ...message,
         content:
           typeof message.content === 'string'
-            ? this.maskText(message.content, enabledTypes, maskChar, config.preserveFormat !== false)
+            ? this.maskText(message.content, enabledTypes, maskChar, config.preserveFormat !== false, remove)
             : message.content.map((part) =>
                 part.type === 'text'
-                  ? { ...part, text: this.maskText(part.text, enabledTypes, maskChar, config.preserveFormat !== false) }
+                  ? {
+                      ...part,
+                      text: this.maskText(part.text, enabledTypes, maskChar, config.preserveFormat !== false, remove),
+                    }
                   : part,
               ),
       })),
     };
   }
 
-  private maskText(text: string, types: PIIType[], maskChar: string, preserveFormat: boolean): string {
+  private maskText(text: string, types: PIIType[], maskChar: string, preserveFormat: boolean, remove = false): string {
     let masked = text;
 
     for (const type of types) {
       masked = masked.replace(PII_PATTERNS[type], (value) => {
+        if (remove) return '';
         if (!preserveFormat) return maskChar.repeat(Math.min(value.length, 12));
         return value.replace(/[A-Za-z0-9]/g, maskChar);
       });

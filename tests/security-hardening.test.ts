@@ -406,3 +406,47 @@ test('scan JSON redacts raw secret and PII finding values', async (context) => {
   assert.doesNotMatch(cli.stdout, /alice@example\.com/);
   assert.match(cli.stdout, /\[REDACTED\]/);
 });
+
+test('input secret detection finds secrets under every action, and blocks by default', () => {
+  const request: CompletionRequest = {
+    model: 'test',
+    messages: [{ role: 'user', content: 'my key is AKIAABCDEFGHIJKLMNOP' }],
+  };
+
+  const blocked = new SecurityPipeline('standard').protectInput(request);
+  assert.equal(blocked.ok, false, 'the default action, block, refuses the request');
+  assert.ok(blocked.findings.some((finding) => finding.type === 'secret'));
+  assert.throws(() => new SecurityPipeline('standard').assertSafe(blocked), NexusSecurityError);
+
+  const flagged = new SecurityPipeline({ level: 'standard', input: { secrets: { action: 'flag' } } }).protectInput(
+    request,
+  );
+  assert.equal(flagged.ok, true, 'flag records the secret and lets the request through');
+  assert.ok(flagged.findings.some((finding) => finding.type === 'secret'));
+  assert.equal(flagged.value, request, 'flag leaves the request untouched');
+
+  const masked = new SecurityPipeline({ level: 'standard', input: { secrets: { action: 'mask' } } }).protectInput(
+    request,
+  );
+  assert.ok(masked.findings.some((finding) => finding.type === 'secret'));
+  assert.equal(masked.value.messages[0]?.content, 'my key is [REDACTED]');
+
+  const off = new SecurityPipeline({ level: 'standard', input: { secrets: { enabled: false } } }).protectInput(request);
+  assert.equal(
+    off.findings.some((finding) => finding.type === 'secret'),
+    false,
+  );
+});
+
+test('the PII remove action deletes the data instead of only recording it', () => {
+  const request: CompletionRequest = {
+    model: 'test',
+    messages: [{ role: 'user', content: 'Write to alice@example.com today' }],
+  };
+  const result = new SecurityPipeline({ level: 'standard', input: { pii: { action: 'remove' } } }).protectInput(
+    request,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.value.messages[0]?.content, 'Write to  today');
+  assert.ok(result.guardrailsApplied.includes('pii-removal'));
+});

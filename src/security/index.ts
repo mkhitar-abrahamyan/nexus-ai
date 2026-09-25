@@ -89,9 +89,9 @@ export class SecurityPipeline {
       guardrailsApplied.push('pii-detection');
 
       const action = piiConfig.action || (level === 'strict' || level === 'paranoid' ? 'mask' : 'flag');
-      if (piiFindings.length > 0 && action === 'mask') {
-        safeRequest = this.piiDetector.mask(safeRequest, piiConfig);
-        guardrailsApplied.push('pii-masking');
+      if (piiFindings.length > 0 && (action === 'mask' || action === 'remove')) {
+        safeRequest = this.piiDetector.mask(safeRequest, { ...piiConfig, action });
+        guardrailsApplied.push(action === 'remove' ? 'pii-removal' : 'pii-masking');
       }
     }
 

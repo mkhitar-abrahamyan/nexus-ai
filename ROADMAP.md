@@ -1136,7 +1136,8 @@ minor release to settle, and every removal below has been deprecated in a 1.x re
   2.0 branch opens.
 - Options that were accepted but never read are removed: `GoogleProviderConfig.projectId`,
   `OllamaProviderConfig.timeout`, `MetricsConfig.prometheus`, `DensificationConfig.preserveMarkdown`,
-  and `HealthConfig.latencyHalfLife`. All five are deprecated in 1.16.0.
+  and `HealthConfig.latencyHalfLife`, deprecated in 1.16.0; and `InjectionDetectionConfig.sensitivity`
+  and `ToolPolicyConfig.requiresApproval`, deprecated in 1.19.0.
 
 **Promotions to stable.** Advanced graph APIs, the store, agents, tracing, evaluation, prompts, and
 the server. Images too, if live conformance has passed.

@@ -51,6 +51,67 @@ const graph = builder.compile({ checkpointer: new OperationStoreCheckpointer(new
 The adapters are tested on every run against a real Postgres engine — PGlite, PostgreSQL compiled to
 WebAssembly — with the same contract tests the in-memory stores pass.
 
+## The client contract
+
+`PostgresLikeClient` is the one method every adapter needs: `query(text, values)`, resolving to
+`{ rows }` and, optionally, a `rowCount`. `PostgresJsLike` is the part of a `postgres.js` instance
+that `fromPostgresJs()` adapts — its `unsafe(text, values)` — so the tagged-template driver works too:
+
+```ts
+import postgres from 'postgres';
+import { fromPostgresJs, PostgresTraceStore } from 'nexus-ai-pro/postgres';
+
+const traces = new PostgresTraceStore(fromPostgresJs(postgres(process.env.DATABASE_URL!)));
+```
+
+Every adapter selects jsonb as text and parses it itself, because drivers disagree about whether
+they parse jsonb; reading text everywhere is what makes every driver return the same value.
+
+## Options and schemas
+
+Each adapter takes an options object whose `table` names its table, optionally as `schema.table`.
+A name that is not letters, digits, and underscores is refused, so a table option can never inject
+SQL:
+
+- `PostgresOperationStoreOptions` — `table`, `nexus_operations` by default.
+- `PostgresStoreOptions` — `table` (`nexus_store`), the `index` that embeds items for semantic
+  search, `vectorDimensions` to store embeddings as a pgvector column and rank in the database, and
+  a `now` clock for tests. Without `vectorDimensions`, embeddings are kept as JSON and ranked in
+  the process, which works on any Postgres and suits namespaces of a few thousand items.
+- `PostgresTraceStoreOptions` — `table`, `nexus_runs` by default.
+- `PostgresEvaluationStoreOptions` — `datasetsTable` and `experimentsTable`, `nexus_datasets` and
+  `nexus_experiments` by default, shared by the dataset and experiment stores.
+- `PostgresCircuitStateStoreOptions` — `table` (`nexus_circuits`), and the clock used for probe
+  leases, which must be the breaker's own clock.
+- `PostgresPromptStoreOptions` — `table`, a prefix: `nexus_prompt` gives `nexus_prompt_versions` and
+  the tables beside it.
+
+Each adapter's `migrate()` applies its schema. Its migration function returns the same statements,
+for tooling of your own, and takes the same table options: `operationStoreMigration()`,
+`storeMigration()` (which also creates the pgvector extension when `vectorDimensions` is set),
+`traceStoreMigration()`, `evaluationStoreMigration()`, `circuitStoreMigration()`, and
+`promptStoreMigration()`.
+
+`postgresMigration()` joins them into one script, which is what `nexus db sql` prints.
+`PostgresMigrationOptions` picks the adapters — each a `PostgresAdapter` name: `operations`, `store`,
+`traces`, `evaluation`, `circuits`, or `prompts`, all of them by default — and `vectorDimensions` for
+the store. The script uses the default table names; when you rename a table, build the script from
+the adapter's own migration function with the same options.
+
+```ts
+import { writeFileSync } from 'node:fs';
+import { postgresMigration } from 'nexus-ai-pro/postgres';
+
+writeFileSync('migrations/0007_nexus.sql', postgresMigration({ adapters: ['operations', 'traces'] }));
+```
+
+## Limitations
+
+- A migration creates what is missing; it does not alter a table an earlier version created. The
+  changelog says when a release changes a schema.
+- Without `vectorDimensions`, semantic search in `PostgresStore` reads and ranks every item under the
+  prefix in the process.
+
 <!-- reference:start -->
 ## Reference
 

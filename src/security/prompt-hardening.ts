@@ -1,7 +1,10 @@
 import type { CompletionRequest } from '../types/messages.js';
 
+/** Options for `hardenPrompt()`. */
 export interface PromptHardeningOptions {
+  /** What user text is wrapped in. Defaults to `"""`. */
   delimiter?: string;
+  /** The system message placed first, telling the model to treat delimited text as data. */
   systemInstruction?: string;
 }
 

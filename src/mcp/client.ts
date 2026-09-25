@@ -75,6 +75,7 @@ export class McpClient {
   >();
   private nextId = 1;
   private initialized = false;
+  private connecting: Promise<{ name?: string; version?: string }> | undefined;
   private serverInfo: { name?: string; version?: string } = {};
 
   constructor(
@@ -85,9 +86,19 @@ export class McpClient {
     transport.onClose?.(() => this.failAll(new McpError('The MCP connection closed')));
   }
 
-  /** Performs the handshake. Called automatically by the first request that needs it. */
+  /**
+   * Performs the handshake and returns the server's name and version. Called automatically by the
+   * first request that needs it; requests made together share one handshake.
+   */
   async connect(): Promise<{ name?: string; version?: string }> {
     if (this.initialized) return this.serverInfo;
+    this.connecting ??= this.handshake().finally(() => {
+      this.connecting = undefined;
+    });
+    return this.connecting;
+  }
+
+  private async handshake(): Promise<{ name?: string; version?: string }> {
     await this.transport.start?.();
     const result = (await this.request('initialize', {
       protocolVersion: MCP_PROTOCOL_VERSION,

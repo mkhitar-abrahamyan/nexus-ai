@@ -135,7 +135,13 @@ export class InputGuard {
       return output;
     };
 
-    if (action !== 'mask') return request;
+    // Every action scans; only `mask` rewrites the request. Blocking is decided from the findings.
+    if (action !== 'mask') {
+      request.messages.forEach((message, index) => {
+        for (const text of this.extractText(message)) maskText(text, `messages.${index}.content`);
+      });
+      return request;
+    }
 
     return {
       ...request,

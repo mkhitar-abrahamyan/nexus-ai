@@ -2,10 +2,15 @@ import type { CompletionRequest, Message } from '../types/messages.js';
 import type { SecurityFinding } from '../types/security.js';
 import { createHashEmbeddings, cosineSimilarity, type EmbeddingProvider } from '../hallucination/retrieval.js';
 
+/** Options for `SemanticInjectionClassifier`. */
 export interface SemanticInjectionClassifierOptions {
+  /** `false` turns `detect()` off. */
   enabled?: boolean;
+  /** Similarity at which a prompt is flagged, from 0 to 1. Defaults to 0.78; above 0.88 is critical. */
   threshold?: number;
+  /** Embeds text for `detect()`. Defaults to hashed term vectors; `detectSync()` always uses those. */
   embed?: EmbeddingProvider;
+  /** Example attacks to compare against, instead of the built-in ones. */
   examples?: string[];
 }
 
@@ -26,6 +31,7 @@ export class SemanticInjectionClassifier {
   private examples: string[];
   private embed: EmbeddingProvider;
   private exampleEmbeddings?: number[][];
+  private hashedExamples?: number[][];
 
   constructor(private options: SemanticInjectionClassifierOptions = {}) {
     this.examples = options.examples || DEFAULT_ATTACK_EXAMPLES;
@@ -62,7 +68,8 @@ export class SemanticInjectionClassifier {
   detectSync(request: CompletionRequest): SecurityFinding[] {
     const findings: SecurityFinding[] = [];
     const threshold = this.options.threshold ?? 0.78;
-    const exampleEmbeddings = createHashEmbeddings(this.examples);
+    this.hashedExamples ??= createHashEmbeddings(this.examples);
+    const exampleEmbeddings = this.hashedExamples;
 
     for (const [index, message] of request.messages.entries()) {
       for (const text of extractText(message)) {

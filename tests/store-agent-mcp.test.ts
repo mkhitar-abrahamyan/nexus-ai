@@ -476,3 +476,37 @@ test('an MCP request that goes unanswered fails with a timeout rather than hangi
   const client = new McpClient(silent, { timeoutMs: 20 });
   await assert.rejects(() => client.connect(), /timed out/);
 });
+
+test('an MCP server answers an unknown method with the method-not-found code', async () => {
+  const sent: JsonRpcMessage[] = [];
+  const server = new McpServer({ tools: [] });
+  await server.connect({
+    send: (message) => void sent.push(message),
+    onMessage: () => undefined,
+    close: () => undefined,
+  });
+
+  await server.handle({ jsonrpc: '2.0', id: 1, method: 'prompts/list' });
+  await server.handle({ jsonrpc: '2.0', id: 2, method: 'resources/read', params: { uri: 'missing://x' } });
+
+  const codes = sent.map((message) => ('error' in message ? message.error?.code : undefined));
+  assert.deepEqual(codes, [-32_601, -32_602]);
+});
+
+test('MCP requests made together share one handshake', async () => {
+  const pair = connectedPair();
+  const methods: string[] = [];
+  const clientSide: McpTransport = {
+    ...pair.clientSide,
+    send: (message) => {
+      if ('method' in message) methods.push(message.method);
+      return pair.clientSide.send(message);
+    },
+  };
+  await new McpServer({ tools: [] }).connect(pair.serverSide);
+  const client = new McpClient(clientSide, { timeoutMs: 2_000 });
+
+  await Promise.all([client.listTools(), client.listResources(), client.connect()]);
+  assert.equal(methods.filter((method) => method === 'initialize').length, 1);
+  await client.close();
+});

@@ -39,8 +39,15 @@ const response = await ai.completeVerified(
 
 `ingestDocuments()` and `ingestText()` split text into overlapping chunks, optionally at Markdown
 headings, and return `RagChunk` values ready for a vector store, with an `IngestionResult` saying how
-much was read. `ingestFilesAfterScan()` goes one step earlier: it scans uploaded files for unsafe
-content first, extracts their text, and then chunks them, skipping what it cannot read.
+much was read. Each `DocumentSource` is a text with an optional id, source, and metadata, all carried
+onto its chunks. `IngestionOptions` sets the split: `chunkSize` (1,200 characters by default),
+`overlap` (150), and `splitOnMarkdownHeadings`, which keeps every chunk inside one section.
+
+`ingestFilesAfterScan()` goes one step earlier: it scans uploaded files for unsafe content first,
+extracts their text, and then chunks them, skipping what it cannot read. It throws when the scan
+finds anything high or critical, before any file is read. `FileIngestionOptions` adds the scan
+settings and the extractors to try, in order, to the split options; text files need no extractor.
+`FileIngestionResult` adds how many files were scanned and, for each skipped file, its name and why.
 `createPdfExtractor()` and `createOcrExtractor()` wrap your own PDF or OCR function as a
 `FileTextExtractor`, so the library carries no parsing dependency of its own.
 

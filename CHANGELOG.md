@@ -32,6 +32,37 @@ machine, with no hosted service.
 - The operation-store checkpointer — the one behind Redis and Postgres — lists its threads through
   `threadIds()`, as the in-memory one already did, and `GraphCheckpointer` declares it as optional.
 
+### Fixed
+
+- **Secret detection on input now detects under every action.** It only scanned when the action
+  was `mask`. Under the default action, `block`, and under `flag`, a request carrying a private
+  key, a cloud or payment key, a token, or a secret assignment went out with no finding. Such a
+  request is now blocked by default, at every level but `off`. Set `input.secrets.action` to `flag`
+  to record secrets without blocking.
+- The PII action `remove` deletes the matched data. It was accepted but behaved like `flag`, so the
+  data stayed in the request.
+- The semantic injection check no longer re-embeds its example attacks on every request.
+- `McpServer` answers an unknown method with the JSON-RPC method-not-found code, and an unknown
+  resource with invalid-params, instead of an internal error, so a client can tell an unsupported
+  feature from a failure.
+- `McpClient` requests made together before the handshake finished each sent `initialize`; they now
+  share one handshake.
+- `summarizeVerifyFormat()`'s verify step sent the summary to the model with no instruction, so the
+  model answered the summary instead of restating it, and that reply was what got checked against
+  the sources. It now asks for a restatement against the sources. The final format is applied only in
+  the last step, and a verify step that was skipped is no longer recorded in `steps`.
+
+### Deprecated
+
+- `InjectionDetectionConfig.sensitivity` and `ToolPolicyConfig.requiresApproval` have never been
+  read. Both will be removed in 2.0; approval before a tool runs belongs to the agent loop.
+
+### Changed
+
+- Every guide under `docs/` now explains each export it lists in its text, not only in its generated
+  reference, and the guide check enforces that. The security configuration's nested settings have
+  doc comments.
+
 ## [1.18.0] - 2026-09-25
 
 A server you can host. Assistants get an HTTP surface — threads, background runs, resumable event

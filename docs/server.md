@@ -28,6 +28,12 @@ createServer(toNodeListener(server)).listen(8080);
 and `cron` expose the pieces behind it. `start()` re-claims runs abandoned by a crashed worker and
 starts the scheduler; `stop()` stops the scheduler and leaves runs in flight to finish.
 
+`AgentServerOptions` takes the `assistants` by id and everything the run manager takes — the state
+store, the event log, the operation runner's settings, the busy policy, and the timeouts — plus the
+HTTP concerns: `basePath`,
+`authenticate`, `allowAnonymous`, `scopes`, `cron` with the jobs that exist from startup, and
+`heartbeatMs` for live streams.
+
 ## The HTTP surface
 
 | Route | What it does |
@@ -51,7 +57,10 @@ Mount them under a prefix with `basePath`. A run is accepted with `202` and a `R
 An assistant is anything that streams events for an input — the `ServerAssistant` contract, whose only
 required member is `stream`. `graphAssistant()` serves a compiled graph, mapping threads to graph
 threads so state, interrupts, and history are the graph's own; `GraphLike` is the structural slice it
-needs, so the server entry point never imports the graph runtime. `functionAssistant()` serves a plain
+needs, so the server entry point never imports the graph runtime. `GraphAssistantOptions` gives it a
+`description` for the assistants endpoint and `metadata` recorded on every checkpoint its runs create.
+A graph compiled without a checkpointer still serves stateless runs, but cannot resume or roll back.
+`functionAssistant()` serves a plain
 function, which may return a value or yield events. Optional members are what a thread needs:
 `resume` to answer an interrupt, `state` to report it, and `step` with `restore` for the rollback
 policy. `AssistantRunContext` is what an assistant receives: the run id, the thread, an abort signal,
@@ -129,7 +138,9 @@ exists. Errors share `ServerError` and a stable code: `BadRequestError`, `Unauth
 
 ## Where state lives
 
-Threads, runs, and cron jobs are records in a `ServerStateStore`. `MemoryServerStore` is the default;
+Threads, runs, and cron jobs are records in a `ServerStateStore`. A `ThreadRecord` is a conversation:
+its assistant, tenant, creator, creation and last-run times, the run in flight, and the metadata it
+was created with. `MemoryServerStore` is the default;
 `fromStore()` puts them in any long-term store — `MemoryStore`, `RedisStore`, or `PostgresStore` —
 which is what lets a second replica see the first replica's threads. `StoreLike` is the slice of the
 store contract it uses. Point the operation store at the same backend and the server is stateless:
@@ -168,7 +179,8 @@ above are about.
 
 ## Calling a server
 
-`createRemoteGraph()`, from `nexus-ai-pro/server/remote`, is the client. `invoke()` runs to
+`createRemoteGraph()`, from `nexus-ai-pro/server/remote`, is the client; it returns a `RemoteGraph`,
+whose `invoke()` and `stream()` mirror a compiled graph's. `invoke()` runs to
 completion, `stream()` yields events and reconnects from the last one it saw, `resume()` answers an
 interrupt, and `createThread()`, `state()`, and `cancel()` cover the rest. `RemoteGraphOptions`
 configures the URL, assistant, headers, and timeouts; `RemoteRunResult` is what a run returns.

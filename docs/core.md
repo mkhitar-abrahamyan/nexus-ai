@@ -51,12 +51,23 @@ written.
 `PipelineConfig`. Each is documented in the guide for its feature; the reference below links every
 name to its summary.
 
+Routing is configured here and explained in the [providers guide](./providers.md): `RoutingConfig`
+names a `RoutingStrategy` — `cost`, `speed`, `quality`, or `privacy` — for the auto-router, an
+ordered list of `RoutingRule` values that send a matching request to a model, the models each
+strategy prefers as `RoutingModelPreference` entries (a model name, or a model with a weight), and a
+`FallbackConfig` that adds failover models, a first-attempt timeout, and rate-limit handling to every
+route, including a request that names its model. `LoggerConfig` receives each `LogEvent` — a
+`LogLevel` of `info`, `warn`, or `error`, a message, a timestamp, structured data, and the error when
+there is one — in a sink of your own, on the console, or both.
+
 ## A request and its response
 
 `CompletionRequest` is the request shape every provider takes: `model`, `messages`, and the settings
 a provider may honour — `temperature`, `maxTokens`, `topP`, `topK`, penalties, `seed`, `stop`,
 `timeoutMs`, `tools` with `ToolChoice`, `responseFormat`, `reasoning`, `cache`, `metadata`, and a
-`signal`. A `Message` has a `MessageRole` and either text or `ContentPart` values: `TextContent`,
+`signal`. Each tool is a `ToolDefinition`: a name, a description written for the model, a JSON Schema
+for its arguments, an optional `execute` function for loops that run tools themselves, and an
+optional cache breakpoint. A `Message` has a `MessageRole` and either text or `ContentPart` values: `TextContent`,
 `ImageContent`, `AudioContent`, and `VideoContent`, with `BinaryBuffer` standing in for Node's
 `Buffer` where the types must also compile in a browser.
 
@@ -134,6 +145,24 @@ contextWindow: {
 
 The result is visible in `response.meta.contextWindow` and `ai.plan(...).contextWindow`.
 
+`ContextWindowConfig` is the whole setting: a `ContextWindowStrategy`, how many conversation
+messages to keep (`lastMessages`, 20 by default), the token ceiling (`maxInputTokens`), the tokens
+held back for a summary, and whether system messages always survive (they do by default).
+`ContextSummaryConfig` decides how cut messages are summarized. Its `ContextSummaryMode` is `local`
+for an extractive summary with no model call, `provider` to have a model write it through the client,
+or `custom` for your own `ContextSummarizer`. It also sets the summary's length (512 tokens by
+default), model, temperature, instructions, heading, and whether the summary is inserted as a system
+or a user message. A `provider` summary that fails falls back to a local one unless
+`fallbackToLocal` is `false`. A custom summarizer receives a `ContextSummaryInput`: the request, the
+messages to fold, those messages as one text, the token limit, the model, and the instructions.
+
+`ContextWindowManager` does the work, and you can use it on its own. `optimize()` trims a request,
+calling the summarizer from a `ContextWindowRuntime` when one is given, and `preview()` reports what
+trimming would do without calling it. Both return a `ContextWindowResult`: the trimmed request, the
+techniques applied, warnings such as a summary that fell back to local, and a `ContextWindowUsage`
+with the strategy `auto` resolved to, tokens and messages before and after, and how many messages
+were kept, summarized, or dropped.
+
 ## Token optimization
 
 Use `tokenOptimizer` when you want lightweight token estimation, prompt densification, and budget enforcement.
@@ -150,12 +179,22 @@ tokenOptimizer: {
 }
 ```
 
-Budget actions:
+Budget actions, the `BudgetExceededAction` values:
 
-- `error` - throw `TokenBudgetError`
+- `error` - throw `TokenBudgetError` (the default)
 - `truncate` - remove or slice older prompt content
 - `densify` - compact prompt text before checking budget
 - `allow` - warn but send as-is
+
+`DensificationConfig` picks the techniques — whitespace cleanup, phrase compression, and list
+compaction, all three by default — and leaves fenced code blocks alone unless told otherwise. A
+warning is recorded once a request reaches `warnAt` of the budget, 80% by default.
+
+The three pieces are exported for use outside the client. `TokenOptimizer` runs both steps on a
+request and returns an `OptimizationResult`: the request, the techniques applied, warnings, and a
+`TokenUsageSnapshot` of estimated tokens before and after, saved, and the share saved.
+`PromptDensifier` rewrites text on its own, and `BudgetEnforcer` checks a request against a budget
+(`check()`) or applies the over-budget action (`enforce()`).
 
 ## Planning a request before sending it
 
@@ -175,6 +214,12 @@ console.log(plan.warnings);
 
 `plan()` does not call a provider. It estimates route, token use, context fit, cost, guardrail findings, and warnings, including any option the routed model cannot honor.
 
+The `NexusPlan` it returns has the model asked for and the provider and model it would use, the full
+routing decision with its fallbacks, what context-window trimming and token optimization would do,
+the estimated cost, the model's context window and whether the request fits it, whether the response
+cache could answer it, whether input guardrails would block it and what they found, and the
+guardrails that would apply.
+
 ## Reasoning
 
 ```ts
@@ -187,9 +232,12 @@ const response = await ai.complete({
 console.log(response.meta.usage?.reasoningTokens);
 ```
 
-`effort` is the portable control. It maps to OpenAI `reasoning_effort` and the Responses `reasoning`
-field, Anthropic extended thinking, and Gemini `thinkingConfig`. Use `reasoning.maxTokens` when you
-want to set a thinking budget directly instead of by level.
+`ReasoningConfig` has three fields, and leaving it unset keeps the model's own default. `effort` is
+the portable control, a `ReasoningEffort` from `none` through `minimal`, `low`, `medium`, `high`, and
+`xhigh` to `max`. It maps to OpenAI `reasoning_effort` and the Responses `reasoning` field, Anthropic
+extended thinking, and Gemini `thinkingConfig`. Use `reasoning.maxTokens` when you want to set a
+thinking budget directly instead of by level, and `summary` (`none`, `auto`, or `detailed`) to stream
+reasoning summaries.
 
 Requesting a summary emits `reasoning` stream chunks, which stay separate from visible output:
 
@@ -223,6 +271,11 @@ console.log(response.meta.cost?.amount);
 Mark the end of the stable prefix, not every message. A provider caps how many breakpoints it
 accepts (Anthropic allows four); when there are more marks than slots, the deepest ones are kept,
 because a deeper breakpoint caches strictly more of the prompt.
+
+`PromptCacheConfig` is the request's `cache` field: the `mode`, a `ttl` for breakpoints that set none
+of their own, and `maxBreakpoints` to send fewer than the provider allows. Messages and tools carry
+the breakpoints themselves. `off` suppresses caller-placed breakpoints; it cannot turn off caching a
+provider does on its own.
 
 ## Usage and cost
 
@@ -276,6 +329,16 @@ console.log(response.meta.capabilityWarnings);
 - `warn` drops or clamps the option and records it on `meta.capabilityWarnings`.
 - `off` sends the request exactly as written.
 
+Those are the three `CapabilityPolicy` values. Each `CapabilityWarning` names the option by its
+dotted path, such as `reasoning.effort`, with the model and provider, the value requested, the
+`CapabilityWarningAction` taken — `dropped`, or `adjusted` with the value actually sent — and why.
+
+`negotiateCompletionRequest()` is the negotiation on its own, for a custom provider or a gateway that
+checks requests before forwarding them. It takes a request, the model's capabilities, and
+`NegotiateOptions` (the policy and the provider name for messages), and returns a
+`NegotiationResult` with the adjusted request and its warnings. It checks only the options a request
+sets and copies the request only when something changes, so an ordinary call allocates nothing.
+
 An option a model does not declare is always passed through — absence means the registry does not
 know, not that the provider refuses — so a model you register yourself is never restricted by fields
 it omits. Set `capabilityPolicy: 'off'` on a single request to reach a provider feature that is
@@ -318,13 +381,21 @@ PII, and blocked phrases split across provider chunks from leaking partially, at
 token-by-token latency. `security: 'off'` preserves immediate streaming when that trade-off is
 explicitly acceptable for the application.
 
+Three helpers work on any `NexusStream`. `collectStream()` reads one to the end and returns its text,
+`mapStream()` transforms each chunk as it passes, and `createTextStream()` makes a stream that yields
+one text chunk and finishes, for tests and for answering from a cache in the streaming shape.
+
 ## The request pipeline
 
 Every request runs through the same stages — security, context window, optimization, routing, the
 provider call, output checks, and caching — and `PipelineConfig` is where you step into them.
 `PipelineHooksConfig` maps a `PipelineHookName` to your own function; `PipelineMiddleware` and
 `PipelineStep` add a stage of your own; and `PipelineRunner` with `createPipelineContext()` runs the
-whole thing, which is what the client itself uses. Each stage is timed into a `PipelineTrace` of
+whole thing, which is what the client itself uses. Every hook receives the `PipelineContext`: the
+request as earlier stages rewrote it, the response once there is one, the routing decision, what
+context-window trimming and optimization did, the security findings and guardrails so far, the
+timings, and a `metadata` object hooks can share. A hook may return a new context, a replacement
+request, a replacement response, or nothing. Each stage is timed into a `PipelineTrace` of
 `PipelineTraceStep` values, named by `PipelineStepName`, and returned on `response.meta.pipeline`
 unless `includeTraceInResponse` is off.
 
@@ -459,7 +530,6 @@ specific entry point that provides it.
 | `GoogleProviderConfig` | interface | Configuration for Google's Gemini API. |
 | `GroqProviderConfig` | interface | Configuration for Groq. |
 | `ImageContent` | interface | An image part of a message, for vision-capable models. |
-| `InjectionDetectionConfig` | interface | Prompt-injection detection on input. |
 | `KNOWN_MODELS` | constant | The bundled model registry: capabilities and prices for every model the package knows by name. |
 | `LlamaCppProviderConfig` | interface | Configuration for a local llama.cpp OpenAI-compatible server. |
 | `LMStudioProviderConfig` | interface | Configuration for a local LM Studio OpenAI-compatible server. |
@@ -482,8 +552,6 @@ specific entry point that provides it.
 | `OllamaProviderConfig` | interface | Configuration for a local Ollama server. |
 | `OpenAIProviderConfig` | interface | Configuration for OpenAI, and for any OpenAI-compatible server — vLLM, a gateway, a proxy — through `baseUrl`. |
 | `OptimizationResult` | interface | An optimized value with what optimization did to it. |
-| `PIIConfig` | interface | Detection of personal data in input. |
-| `PIIType` | type | Kinds of personal data and secrets the PII detector recognizes. |
 | `PipelineConfig` | interface | Hooks and tracing around every request. |
 | `PipelineContext` | interface | The request as it moves through the pipeline, handed to every hook. |
 | `PipelineHookName` | type | Points in a request's pipeline where application hooks run: before input processing, after security, around the provider call, and before the response returns. |
@@ -514,11 +582,6 @@ specific entry point that provides it.
 | `RoutingModelPreference` | type | A model the router should prefer, optionally weighted above others. |
 | `RoutingRule` | interface | A routing rule: when a request matches, route it to a model. |
 | `RoutingStrategy` | type | What the auto-router optimizes for: price, latency, quality, or keeping data on local models. |
-| `SecurityAction` | type | What a guardrail does with a match: let it through, block the request, mask the match, or record it. |
-| `SecurityConfig` | interface | Guardrails for input and output, from a preset, a level, or detailed settings. |
-| `SecurityFinding` | interface | One thing a guardrail found. |
-| `SecurityLevel` | type | How much protection a client applies, from none to maximal. |
-| `SecurityResult` | interface | The outcome of running guardrails on a value. |
 | `StreamChunk` | interface | One streamed event. |
 | `TextContent` | interface | A text part of a message. |
 | `Tokenizer` | class | Estimates token counts without a model-specific tokenizer, for budgets, planning, and context windows. |

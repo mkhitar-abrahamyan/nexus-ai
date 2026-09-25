@@ -38,7 +38,7 @@ export interface SummarizeVerifyFormatOptions {
   model: string;
   /** The content to summarize. */
   input: string;
-  /** Sources to check the summary against. Without them, verification is skipped. */
+  /** Sources to check the summary against. Without them, the verify step is skipped. */
   verifyContext?: string[];
   /** Format of the final answer, such as a JSON schema. */
   responseFormat?: ResponseFormatConfig;
@@ -99,8 +99,8 @@ export interface CompareOptions {
 type RequestResponseFormat = CompletionRequest['responseFormat'];
 
 /**
- * Summarizes content, verifies the summary against sources when given, then formats it: three
- * completions, each step returned.
+ * Summarizes content, verifies the summary against sources when given, then formats it: two
+ * completions, or three to four with verification, each step returned.
  */
 export async function summarizeVerifyFormat(
   client: WorkflowClient,
@@ -123,21 +123,34 @@ export async function summarizeVerifyFormat(
   );
   steps.push({ step: 'summarize', response: summary });
 
-  const verified = options.verifyContext?.length
-    ? await completeVerified(
-        client,
-        {
-          model: options.model,
-          messages: [{ role: 'user', content: summary.content }],
-          responseFormat: toRequestResponseFormat(options.responseFormat),
-        },
-        {
-          context: options.verifyContext,
-          repair: true,
-        } satisfies VerificationOptions,
-      )
-    : summary;
-  steps.push({ step: 'verify', response: verified });
+  // The verify step restates the summary against the sources, then checks the restatement and
+  // repairs any claim they do not support. It is skipped, and not recorded, without sources.
+  let verified = summary;
+  if (options.verifyContext?.length) {
+    verified = await completeVerified(
+      client,
+      {
+        model: options.model,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              'Restate this summary, keeping only what the sources support.',
+              'Sources:',
+              ...options.verifyContext.map((item, index) => `[source-${index + 1}] ${item}`),
+              'Summary:',
+              summary.content,
+            ].join('\n'),
+          },
+        ],
+      },
+      {
+        context: options.verifyContext,
+        repair: true,
+      } satisfies VerificationOptions,
+    );
+    steps.push({ step: 'verify', response: verified });
+  }
 
   const formatted = await client.complete({
     model: options.model,
