@@ -36,3 +36,21 @@ jobs:
 
       - name: Publish with provenance
         run: npm publish
+
+      # The studio is its own package with its own version. It is published when that version is not
+      # on npm yet. Trusted publishing needs the package to exist, so its first version is published by
+      # hand; until then this step only reports that it was skipped.
+      - name: Publish the studio
+        working-directory: studio
+        run: |
+          name=$(node --print "require('./package.json').name")
+          version=$(node --print "require('./package.json').version")
+          if [ "$version" = "0.0.0" ]; then
+            echo "The studio has no release version yet; skipped."
+          elif ! npm view "$name" name > /dev/null 2>&1; then
+            echo "::warning::$name is not on npm yet. Publish $version by hand once, then add this workflow as its trusted publisher."
+          elif npm view "$name@$version" version > /dev/null 2>&1; then
+            echo "$name@$version is already published; skipped."
+          else
+            npm publish
+          fi

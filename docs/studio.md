@@ -1,0 +1,129 @@
+# The studio (experimental)
+
+<!-- covers: -->
+
+A local UI for what a nexus-ai-pro application records: traces, threads, approvals, experiments,
+prompts, costs, provider health, and the operation queue. It is a separate package,
+`nexus-ai-pro-studio`, so the core install never carries a UI. It runs on your machine, reads your
+application's own stores through the adapters it already uses, and needs no hosted service.
+
+## Starting it
+
+```bash
+npm install --save-dev nexus-ai-pro-studio
+npx nexus-studio --config studio.config.mjs
+```
+
+The configuration module's default export is the studio's sources — or a function, possibly async,
+that returns them. It is ordinary application code, so it opens the stores the application opens:
+
+```js
+// studio.config.mjs
+import { PostgresTraceStore } from 'nexus-ai-pro/postgres/traces';
+import { PostgresExperimentStore, PostgresDatasetStore } from 'nexus-ai-pro/postgres/evaluate';
+import { pool, supportGraph, checkpointer, registry, ai, reviewQueue } from './src/app.js';
+
+export default {
+  traces: new PostgresTraceStore(pool),
+  experiments: new PostgresExperimentStore(pool),
+  datasets: new PostgresDatasetStore(pool),
+  graphs: { support: { graph: supportGraph, checkpointer } },
+  reviews: { answers: reviewQueue },
+  prompts: registry,
+  client: ai,
+  budgets: [{ name: 'production', limit: 200, period: 'month' }],
+};
+```
+
+The command prints an address such as `http://127.0.0.1:4747/?token=…`; open it. `--port` picks the
+port (`0` for any free one), `--token` fixes the token instead of generating one, and `--host` with
+`--allow-host` bind somewhere other than the loopback interface. A TypeScript config works under a
+loader: `node --import tsx node_modules/nexus-ai-pro-studio/dist/cli.js --config studio.config.ts`.
+
+To start it from code instead — inside a dev server, say — `startStudio()` takes the same sources and
+returns a `RunningStudio` with the `url`, `token`, `port`, and `close()`. `StartStudioOptions` adds the
+port and host to the `StudioOptions` every entry point takes. `createStudio()` returns the bare
+`Studio` handler, a `Request`-to-`Response` function, for mounting it in a server you already run.
+
+`npm run studio:demo` in the repository starts it on a demo application with something in every view.
+
+## What it shows
+
+Every source is optional. The studio shows a view for each one it is given, and hides the rest.
+
+| View | Source | What you can do |
+| --- | --- | --- |
+| Traces | `traces` | Filter runs by status, kind, name, model, and time; open a run tree with inputs, outputs, cost, and latency; compare two traces; record feedback on a run |
+| Threads | `graphs` | See each graph's diagram with the next nodes highlighted; list threads; read state at any step; fork from a step; edit state; answer an interrupt |
+| Inbox | `graphs`, `reviews` | Every thread waiting for a human, and every review item waiting for a grade, in one list |
+| Experiments | `experiments`, `datasets` | List experiments and datasets; compare two experiments with per-metric intervals and a verdict |
+| Prompts | `prompts`, `client` | Versions, labels, and history; diff two versions; promote through the registry's gates; roll back; render and run a version in the playground |
+| Costs | `traces`, `budgets` | Cost per day and per model, the most expensive runs, and each budget with what it has spent |
+| Health | `client`, `circuits` | Provider health scores, circuit states — local and shared across workers — metrics, and cache statistics |
+| Operations | `operations`, `assets` | The operation queue by status, with leases and errors; asset store totals |
+
+## The sources
+
+`StudioSources` is the whole configuration. Each field is structural, and the real objects satisfy
+it as they are:
+
+- `traces` is any `TraceStore`: memory, JSONL, or Postgres.
+- `graphs` maps a name to a compiled graph, or to a `StudioGraphSource` of the graph and how to list
+  its threads — its `checkpointer`, or a `threads()` function. `StudioGraphLike` is the part of a
+  compiled graph the view uses; `StudioCheckpoint` and `StudioInterrupt` are what it reads.
+  `MemoryGraphCheckpointer` and the operation-store checkpointer (Redis, Postgres) both list their
+  threads; a graph given alone can still open a thread by id.
+- `reviews` maps a name to an annotation queue, through `StudioReviewQueue`.
+- `datasets` and `experiments` are any `DatasetStore` and `ExperimentStore`.
+- `prompts` is a `PromptRegistry`, as `StudioPromptRegistry`.
+- `client` is a `NexusAI` client, as `StudioClient`: its `complete()` runs the playground, and its
+  health, circuit, metrics, and cache methods fill the health view. Each is optional.
+- `circuits` is a shared circuit store, as `StudioCircuitStore`, for a deployment whose workers
+  share circuit state.
+- `operations` is an operation store that can list, as `StudioOperationStore`. Graph checkpoint
+  records that live in the same store are left out of the queue.
+- `assets` is an asset store, as `StudioAssetStore`: its `snapshot()` totals, and a listing when it
+  has one.
+- `budgets` is a list of `StudioBudget` values: a name, a limit in US dollars, a period of a day, a
+  week, or a month, and an optional trace filter for which runs count.
+
+The costs view counts model runs, which is where the tracer records cost, so a parent run that sums
+its children is not counted twice. `StudioCostReport` is the shape it returns.
+
+## Access and safety
+
+The studio can change things — answer an interrupt, edit a thread, promote a prompt — so it is
+locked down even though it only runs locally:
+
+- It binds `127.0.0.1` by default, so nothing else on the network can reach it.
+- Every request needs the token. It arrives once, in the URL the command prints; the studio moves it
+  into an HTTP-only, same-site cookie and takes it out of the address bar. `createToken()` generates
+  one, and `tokensMatch()` compares in constant time.
+- A change must also carry the token in the `x-studio-token` header (`TOKEN_HEADER`), which a page on
+  another site cannot set, so the cookie alone cannot be used against you. The page's own script reads
+  the token from a same-origin session route; `SESSION_COOKIE` is the cookie's name.
+- Requests whose `Host` is not a loopback name are refused, which closes DNS rebinding: a hostile
+  page pointing its own domain at `127.0.0.1`. `hostAllowed()` is the check, and `allowedHosts` adds
+  names when you bind elsewhere on purpose.
+- Pages are served with a strict content security policy, and every value from a trace, a model, or
+  a person is inserted as text, never as HTML.
+- Actions are recorded under `actor` — `studio` by default — so a promotion's history says who moved
+  the label.
+
+Errors come back as JSON with a stable code, as a `StudioError`: a source that was not configured is a
+`404`, a refused promotion is a `409` with each gate's verdict, and a malformed request is a `400`.
+
+## Pieces you can reuse
+
+`layoutGraph()` lays a graph out in layers for drawing, returning a `GraphLayout` of `LaidOutNode` and
+`LaidOutEdge` values, with edges that point back up — cycles — marked so they can be drawn round the
+side. `parseArgs()` and `loadSources()` are the command's own argument parser and config loader.
+
+## Limitations
+
+- The studio is experimental: it is new, and its views will gain detail.
+- It reads what the stores can list. An operation store without `list()` hides the queue, and a
+  graph given without a way to list threads can only open a thread by id.
+- The costs view reads up to 100,000 runs in its window. Point it at a long window on a very large
+  trace store and it will be slow; narrow the window instead.
+- It is a local tool, not a shared dashboard: there are no user accounts, only the token.

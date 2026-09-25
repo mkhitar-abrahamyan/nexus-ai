@@ -378,6 +378,8 @@ export interface GraphCheckpointer {
   history(threadId: string, limit?: number): Promise<GraphCheckpoint[]> | GraphCheckpoint[];
   /** Deletes every checkpoint of a thread. */
   delete?(threadId: string): Promise<void> | void;
+  /** Every thread with a checkpoint, for tools that browse threads, such as the studio. */
+  threadIds?(): Promise<string[]> | string[];
 }
 
 /** Options for one run of a compiled graph. */

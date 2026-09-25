@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "declaration": true,
+    "removeComments": false,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "nexus-ai-pro": ["../dist/index.d.ts"],
+      "nexus-ai-pro/*": ["../dist/*/index.d.ts", "../dist/*.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

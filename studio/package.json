@@ -1,0 +1,46 @@
+{
+  "name": "nexus-ai-pro-studio",
+  "version": "0.0.0",
+  "description": "A local studio for nexus-ai-pro: traces, threads, approvals, experiments, prompts, costs, provider health, and the operation queue, served from your own machine with no hosted service.",
+  "type": "module",
+  "bin": {
+    "nexus-studio": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "prepublishOnly": "node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "nexus-ai-pro": ">=1.18.0 <2"
+  },
+  "keywords": [
+    "nexus-ai-pro",
+    "studio",
+    "llm",
+    "tracing",
+    "observability",
+    "evaluation",
+    "agents",
+    "human-in-the-loop"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mkhitar-abrahamyan/nexus-ai.git",
+    "directory": "studio"
+  },
+  "homepage": "https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md",
+  "sideEffects": false
+}

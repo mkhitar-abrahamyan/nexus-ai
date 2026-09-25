@@ -767,6 +767,34 @@ test('the operation-store checkpointer persists, reads back, and keeps history',
   );
 });
 
+test('the operation-store checkpointer lists its threads, and only its threads', async () => {
+  const store = new MemoryOperationStore<never>();
+  const checkpointer = new OperationStoreCheckpointer(store as never);
+  const graph = createGraph({ channels: basicChannels() })
+    .addNode('tick', () => ({ count: 1, log: ['tick'] }))
+    .setEntry('tick')
+    .addEdge('tick', END)
+    .compile({ checkpointer });
+  await graph.invoke({}, { threadId: 'beta' });
+  await graph.invoke({}, { threadId: 'alpha' });
+  // An ordinary operation in the same store is not a thread.
+  await store.create({
+    id: 'job-1',
+    status: 'succeeded',
+    attempt: 1,
+    maxAttempts: 1,
+    sequence: 0,
+    createdAt: '',
+    updatedAt: '',
+  } as never);
+
+  assert.deepEqual(await checkpointer.threadIds(), ['alpha', 'beta'], 'head records only, sorted');
+  await checkpointer.delete('alpha');
+  assert.deepEqual(await checkpointer.threadIds(), ['beta']);
+  const unlistable = new OperationStoreCheckpointer({ ...store, list: undefined } as never);
+  assert.deepEqual(await unlistable.threadIds(), [], 'a store that cannot list reports no threads');
+});
+
 test('a second graph instance resumes a thread the first suspended', async () => {
   // The point of a durable checkpointer: a different process finishes what another started.
   const store = new MemoryOperationStore<never>();

@@ -150,6 +150,19 @@ export class OperationStoreCheckpointer implements GraphCheckpointer {
     await this.store.delete?.(threadId);
   }
 
+  /**
+   * Every thread with a checkpoint, read from the head records. Empty when the store cannot list,
+   * since finding heads any other way would mean scanning every key.
+   */
+  async threadIds(): Promise<string[]> {
+    if (!this.store.list) return [];
+    const records = await this.store.list();
+    return records
+      .filter((record) => record.result !== undefined && isHead(record.result))
+      .map((record) => record.id)
+      .sort();
+  }
+
   private async readHead(threadId: string): Promise<ThreadHead | undefined> {
     const record = await this.store.read(threadId);
     return record?.result && isHead(record.result) ? record.result : undefined;

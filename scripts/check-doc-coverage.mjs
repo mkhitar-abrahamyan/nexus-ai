@@ -10,14 +10,18 @@
  *   node scripts/check-doc-coverage.mjs            report, and fail below 100%
  *   node scripts/check-doc-coverage.mjs --list     also list every undocumented item
  *   node scripts/check-doc-coverage.mjs --min 95   fail below another threshold
+ *   node scripts/check-doc-coverage.mjs --package studio   check another package in this repository
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const args = process.argv.slice(2);
+const packageIndex = args.indexOf('--package');
+// Another package in this repository, such as the studio, checked against its own exports and tsconfig.
+const root = packageIndex >= 0 ? path.resolve(repoRoot, args[packageIndex + 1] ?? '.') : repoRoot;
 const list = args.includes('--list');
 const minIndex = args.indexOf('--min');
 const minimum = minIndex >= 0 ? Number(args[minIndex + 1]) : 100;
@@ -26,7 +30,7 @@ const packageJson = JSON.parse(readFileSync(path.join(root, 'package.json'), 'ut
 const entries = [
   ...new Set(
     Object.values(packageJson.exports).map((entry) =>
-      path.join(root, entry.import.types.replace(/^\.\/dist\//, 'src/').replace(/\.d\.ts$/, '.ts')),
+      path.join(root, (entry.import?.types ?? entry.types).replace(/^\.\/dist\//, 'src/').replace(/\.d\.ts$/, '.ts')),
     ),
   ),
 ];

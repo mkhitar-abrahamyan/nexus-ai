@@ -125,6 +125,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Realtime voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/realtime.md) | Browser and server realtime sessions with barge-in, tools, and exports |
 | [Telephony](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/telephony.md) | Calls, webhooks, phone numbers, and phone agents on realtime sessions |
 | [Testing](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/testing.md) | Recording and replaying provider traffic, and conformance suites |
+| [Studio](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md) | A local UI for traces, threads, approvals, experiments, prompts, costs, and health, as a separate package |
 | [Agent server](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md) | Self-hosted HTTP server for assistants: threads, durable runs, resumable streams, cron |
 | [Workflows](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md) | Ready-made chains and domain workflows |
 | [Command line](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) | The `nexus` command |

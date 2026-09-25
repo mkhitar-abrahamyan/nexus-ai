@@ -442,6 +442,19 @@ from the root.
 - Recovery re-runs a whole run rather than the step it died on, so an assistant with side effects
   should be idempotent or be left at a single attempt.
 
+## Studio stage (Unreleased)
+
+`nexus-ai-pro-studio` is a separate package, experimental in production readiness. It is versioned
+with nexus-ai-pro and declares the core versions it works with as a peer dependency.
+
+- The `nexus-studio` command, its flags, and the shape of the config module's default export follow
+  the 1.x rules. A minor release may add sources and flags.
+- `createStudio()`, `startStudio()`, and the exported types follow the 1.x rules.
+- The JSON routes behind the page are for the page and may change in any release; build on the
+  stores themselves rather than on the studio's routes.
+- The access rules are a guarantee: loopback binding by default, a token on every request, the token
+  in a header for every change, and loopback hosts only unless others are allowed.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

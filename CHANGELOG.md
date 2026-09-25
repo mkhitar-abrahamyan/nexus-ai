@@ -4,6 +4,34 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+A studio to look at it all. `nexus-ai-pro-studio` is a separate package — so the core install never
+carries a UI — that shows what an application records, from its own stores, on the developer's
+machine, with no hosted service.
+
+### Added
+
+- **`nexus-ai-pro-studio`**, experimental, with the `nexus-studio` command. Given a config module
+  whose default export lists the application's stores, it serves eight views:
+  - **Traces**: filtered run lists, run trees with inputs, outputs, cost, and latency, trace
+    comparison, and feedback on a run.
+  - **Threads**: each graph's diagram with the next nodes highlighted, state at any step, and fork,
+    edit, and resume.
+  - **Inbox**: every thread waiting for a human and every review item waiting for a grade.
+  - **Experiments**: experiment and dataset lists, and comparisons with per-metric intervals and a
+    verdict.
+  - **Prompts**: versions, labels, history, diffs, gated promotion, rollback, and a playground.
+  - **Costs**: cost per day and per model, the most expensive runs, and budgets.
+  - **Health**: provider health, local and shared circuit state, metrics, and cache statistics.
+  - **Operations**: the operation queue by status, and asset store totals.
+- **Locked down for a local tool.** It binds `127.0.0.1`, requires a token that moves from the URL
+  into an HTTP-only same-site cookie, requires the token in a header for every change, refuses
+  non-loopback `Host` headers against DNS rebinding, and serves every page under a strict content
+  security policy with every value inserted as text.
+- `startStudio()` and `createStudio()` start it from code or mount it in an existing server.
+- `npm run studio:demo` starts it on a demo application with something in every view.
+- The operation-store checkpointer — the one behind Redis and Postgres — lists its threads through
+  `threadIds()`, as the in-memory one already did, and `GraphCheckpointer` declares it as optional.
+
 ## [1.18.0] - 2026-09-25
 
 A server you can host. Assistants get an HTTP surface — threads, background runs, resumable event

@@ -1,0 +1,355 @@
+:root {
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --text: #1c1e21;
+  --muted: #5f6670;
+  --border: #d9dde3;
+  --accent: #2458d6;
+  --good: #1f7a3a;
+  --bad: #b3261e;
+  --warn: #8a5a00;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --panel: #1e2126;
+    --text: #e7e9ec;
+    --muted: #9aa1ab;
+    --border: #33373e;
+    --accent: #7ea6ff;
+    --good: #5fcf85;
+    --bad: #ff8a80;
+    --warn: #f0c060;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: var(--accent);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px / 1.5 system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
+
+.top {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-wrap: wrap;
+}
+
+.brand {
+  font-weight: 600;
+}
+
+nav {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+nav a.active,
+nav a:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+main {
+  padding: 20px;
+  max-width: 1400px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0 0 16px;
+}
+h2 {
+  font-size: 16px;
+  margin: 24px 0 8px;
+}
+
+.muted {
+  color: var(--muted);
+}
+.good {
+  color: var(--good);
+}
+.bad {
+  color: var(--bad);
+}
+.warn {
+  color: var(--warn);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0 16px;
+}
+th,
+td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+tr.clickable {
+  cursor: pointer;
+}
+tr.clickable:hover td {
+  background: var(--panel);
+}
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+pre {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  overflow: auto;
+  max-height: 480px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.row > * {
+  flex: 1 1 380px;
+  min-width: 0;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 8px 0;
+  background: var(--bg);
+}
+
+.stat {
+  display: inline-block;
+  margin-right: 24px;
+}
+.stat b {
+  display: block;
+  font-size: 22px;
+}
+
+form.inline,
+.toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: end;
+  margin: 8px 0;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--muted);
+  gap: 2px;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+textarea {
+  font-family: var(--mono);
+  font-size: 12px;
+  min-height: 90px;
+  width: 100%;
+}
+
+button {
+  cursor: pointer;
+  background: var(--panel);
+}
+button.primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.badge.ok,
+.badge.succeeded,
+.badge.completed,
+.badge.closed,
+.badge.better {
+  color: var(--good);
+  border-color: var(--good);
+}
+.badge.error,
+.badge.failed,
+.badge.open,
+.badge.worse,
+.badge.cancelled,
+.badge.expired {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+.badge.awaiting_input,
+.badge.running,
+.badge.half-open,
+.badge.pending,
+.badge.claimed {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+ul.tree {
+  list-style: none;
+  padding-left: 18px;
+  margin: 0;
+}
+ul.tree.root {
+  padding-left: 0;
+}
+ul.tree li {
+  margin: 2px 0;
+}
+.tree-node {
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.tree-node:hover,
+.tree-node.selected {
+  background: var(--panel);
+}
+
+.notice {
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  background: var(--panel);
+  margin: 8px 0;
+}
+.notice.error {
+  border-color: var(--bad);
+}
+
+svg.diagram {
+  max-width: 100%;
+  height: auto;
+}
+svg.diagram rect {
+  fill: var(--panel);
+  stroke: var(--border);
+}
+svg.diagram rect.terminal {
+  fill: var(--bg);
+  stroke: var(--muted);
+}
+svg.diagram rect.highlight {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+svg.diagram text {
+  fill: var(--text);
+  font-size: 12px;
+}
+svg.diagram path {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.4;
+}
+svg.diagram path.conditional {
+  stroke-dasharray: 5 4;
+}
+svg.diagram path.back {
+  stroke: var(--warn);
+}
+svg.diagram polygon {
+  fill: var(--muted);
+}
+
+svg.bars rect {
+  fill: var(--accent);
+}
+svg.bars text {
+  fill: var(--muted);
+  font-size: 11px;
+}
+svg.meter rect.track {
+  fill: var(--panel);
+  stroke: var(--border);
+}
+svg.meter rect.fill {
+  fill: var(--good);
+}
+svg.meter rect.fill.over {
+  fill: var(--bad);
+}
+
+.diff-add {
+  color: var(--good);
+}
+.diff-del {
+  color: var(--bad);
+}
