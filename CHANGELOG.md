@@ -51,6 +51,10 @@ machine, with no hosted service.
   model answered the summary instead of restating it, and that reply was what got checked against
   the sources. It now asks for a restatement against the sources. The final format is applied only in
   the last step, and a verify step that was skipped is no longer recorded in `steps`.
+- `traceModelClient()` records the model and provider that answered on the run itself. It recorded
+  the model the request asked for — often `auto` — and left `provider` empty, so a `provider` query
+  never matched a model run and per-model views showed `auto`. `FinishRunOptions` gains `model` and
+  `provider` for the same purpose in your own instrumentation.
 
 ### Deprecated
 

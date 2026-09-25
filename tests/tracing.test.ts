@@ -313,7 +313,9 @@ test('an agent trace nests model calls inside the node that made them', async ()
   assert.equal(modelNodes.length, 2);
   const modelCall = modelNodes[0]?.children[0];
   assert.equal(modelCall?.kind, 'model');
-  assert.equal(modelCall?.model, 'auto');
+  assert.equal(modelCall?.model, 'gpt-test', 'the model that answered, not the one asked for');
+  assert.equal(modelCall?.provider, 'openai');
+  assert.equal(store.query({ kind: 'model', provider: 'openai' }).length, 2, 'model runs are queryable by provider');
   assert.deepEqual(modelCall?.usage, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
   assert.equal(modelCall?.cost, 0.01);
   assert.equal(modelCall?.metadata?.provider, 'openai');

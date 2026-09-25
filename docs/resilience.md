@@ -148,6 +148,105 @@ Production controls include:
 - OpenTelemetry metrics and trace export helpers
 - audit log sink
 - structured logger sink
+
+## The circuit breaker in detail
+
+`CircuitBreakerConfig` is the client's `circuitBreaker` option: `failureThreshold` consecutive
+failures (5 by default) or a `failureRateThreshold` share of calls over a rolling `windowMs` (60
+seconds), counted only after `minimumThroughput` calls (10), open a circuit. It stays open for
+`resetTimeoutMs` (30 seconds), then admits `halfOpenMaxCalls` probes (1), and closes after
+`successThreshold` probe successes (1). `isFailure` decides which errors count, and `onStateChange`
+receives every `CircuitStateChange`: the provider, the `CircuitState` it moved from and to —
+`closed`, `open`, or `half-open` — when, and why. For sharing, `store`, `workerId`, `syncIntervalMs`
+(1 second), `probeLeaseMs` (how long one worker holds the right to probe, 30 seconds), and
+`onStoreError` configure the rest; `now` replaces the clock in tests.
+
+`CircuitBreaker` is usable on its own around any call. `allowRequest()` says whether a call may go,
+`recordSuccess()` and `recordFailure()` report how it went, `state()`, `isOpen()`, and
+`openProviders()` read the circuits, `snapshot()` returns a `CircuitSnapshot` per provider — its
+state, consecutive failures, calls and failures in the window, failure rate, when it opened, when it
+will probe, and the last error — and `reset()` closes one circuit or all of them. With a store,
+`sync()` pulls shared state and `flush()` waits for pending writes, for a clean shutdown.
+
+A `CircuitStateStore` holds only the decisions every worker must agree on: `read()` every
+`SharedCircuitState` — a provider, `open` or `closed`, when it opened, when and by which worker it
+was last written, and why — `write()` one, and `claimProbe()`, which lets exactly one worker probe an
+open circuit for a lease. `MemoryCircuitStateStore` shares state within one process, for tests and
+for several clients in one process. `RedisCircuitStateStore` takes a `RedisCircuitLikeClient` —
+`hgetall`, `hget`, `hset`, `set` with `PX` and `NX`, `get`, `del`, and optionally `eval`, in `ioredis`
+argument order — and `RedisCircuitStateStoreOptions` with a key `prefix` and `useEval: false` to skip
+the Lua path. With `eval`, a transition is written only when it is newer than the stored one, in one
+step; without it, a stale transition can briefly win, and heals after one cooldown.
+
+## Rate limits in detail
+
+`RateLimiter` counts calls in fixed windows, keyed per user, per model, or globally as the client's
+`rateLimit.key` says, from a `RateLimitedRequest` (the model and user). `check()` counts in memory,
+synchronously; `checkAsync()` counts through the configured store. Both throw `NexusRateLimitError`
+once a bucket is full.
+
+A `RateLimitStore` is one method, `hit(key, windowMs)`, returning a `RateLimitHit`: the count in the
+current window and when it resets. `MemoryRateLimitStore` keeps counters in the process, with
+`reset()` and `clear()`. `RedisRateLimitStore` takes a `RedisRateLimitLikeClient` — `incr`, `pexpire`,
+`pttl`, and optionally `eval` — and `RedisRateLimitStoreOptions` with a key `prefix` and `useEval`.
+
+## Health
+
+`HealthConfig` turns provider health tracking on: `failureThreshold` consecutive failures (3 by
+default) or a score below `minScore` (20) mark a provider unhealthy, and the router ranks it lower.
+`ProviderHealthMonitor` does the tracking — `recordSuccess()` with a latency, `recordFailure()` with
+the error, `score()`, `isHealthy()`, and `snapshot()` — and each `ProviderHealthSnapshot` has the
+counts, consecutive failures, average latency, last error, and the score: 100, less 20 per
+consecutive failure up to 60, less 1 per second of average latency up to 30.
+
+## Metrics and export
+
+`MetricsConfig` turns metrics on, with a `prefix` for names (`nexus_ai` by default) and a `sink`. A
+`MetricsSink` takes counters (`increment()`), histograms (`observe()`), and optionally gauges.
+`InMemoryMetrics`, the default, keeps them for `getMetricsSnapshot()` and renders Prometheus text for
+`getPrometheusMetrics()`. `MetricsCollector` is what the client records through: requests,
+responses with latency and cost, errors, and each pipeline step.
+
+OpenTelemetry is reached through structural interfaces, so no OpenTelemetry package is a dependency.
+`OpenTelemetryMetricsSink` sends metrics through an `OpenTelemetryLikeMeter` — anything with
+`createCounter()` and `createHistogram()` — creating each instrument on first use.
+`OpenTelemetryTraceExporter` turns a pipeline trace into spans through an `OpenTelemetryLikeTracer`
+(`startSpan()`) and `OpenTelemetryLikeSpan` (`setAttribute()` and `end()`): one span for the pipeline
+and one per step, with the step's timing, outcome, and scalar metadata as attributes.
+
+```ts
+import { metrics, trace } from '@opentelemetry/api';
+import { OpenTelemetryMetricsSink, OpenTelemetryTraceExporter } from 'nexus-ai-pro';
+
+const ai = new NexusAI({ providers, metrics: { enabled: true, sink: new OpenTelemetryMetricsSink(metrics.getMeter('app')) } });
+const exporter = new OpenTelemetryTraceExporter(trace.getTracer('app'));
+
+const response = await ai.complete(request);
+if (response.meta.pipeline) exporter.exportTrace(response.meta.pipeline, { 'app.route': '/chat' });
+```
+
+## Audit log
+
+`AuditLogger` writes the client's audit events to the `auditLog.sink`, or to the console without
+one. Values are redacted — secrets, tokens, credentials, and personal data — unless
+`includeSensitiveData` is set, and that is refused without an explicit sink, so raw data never lands
+on a console by accident.
+
+## Other families
+
+`FamilyTelemetry` gives images, voice, and telephony the same rate limit, audit log, and metrics as
+completions. `run()` wraps one call described by a `FamilyCallDescriptor` — the operation, provider,
+model, user, request id, and metadata — and `FamilyRuntime` is the wiring the client hands down: its
+metrics collector, audit logger, rate limiter, and rate-limit settings. Cost is not recorded there,
+because media providers price per second, per image, or per character; each family records its own.
+
+## Limitations
+
+- The breaker's failure counts are per worker even with a shared store; only open, closed, and who
+  may probe are shared.
+- The rate limiter uses fixed windows, so a burst straddling a window boundary can reach twice the
+  limit for a moment.
+- Health scores come from real calls; a provider that receives no traffic keeps its last score.
 - rate limiting
 
 <!-- reference:start -->

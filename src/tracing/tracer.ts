@@ -54,6 +54,10 @@ export interface FinishRunOptions {
   cost?: number;
   /** Metadata merged into the run's. */
   metadata?: Record<string, unknown>;
+  /** The model that actually ran, replacing the one the run started with, such as `auto` after routing. */
+  model?: string;
+  /** The provider that actually ran. */
+  provider?: string;
 }
 
 /** A run in progress. Finishing it writes it to the store. */
@@ -181,6 +185,8 @@ export class Tracer {
         ...(options.error ? { error: describeError(options.error) } : {}),
         ...(options.usage ? { usage: options.usage } : {}),
         ...(options.cost === undefined ? {} : { cost: options.cost }),
+        ...(options.model ? { model: options.model } : {}),
+        ...(options.provider ? { provider: options.provider } : {}),
         metadata: { ...run.metadata, ...options.metadata },
       };
       await this.close(finished, sampled);

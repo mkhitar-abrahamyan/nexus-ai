@@ -3,7 +3,7 @@
 <!-- covers: ./testing/record -->
 <!-- sources: src/testing -->
 
-Suites that need credentials can run everywhere from recordings. `nexus-ai-pro/testing/record` captures provider traffic once, redacted, as reviewable fixture files, and replays it with no network. The conformance suites that run against those recordings are exported from the root and documented in the [client guide](./core.md): `runProviderConformance()`, `runEmbeddingProviderConformance()`, and `runImageProviderConformance()`.
+Suites that need credentials can run everywhere from recordings. `nexus-ai-pro/testing/record` captures provider traffic once, redacted, as reviewable fixture files, and replays it with no network. The conformance suites that run against those recordings — `runProviderConformance()`, `runEmbeddingProviderConformance()`, and `runImageProviderConformance()` — are exported from the root and described below.
 
 ## Recorded provider traffic
 
@@ -28,6 +28,80 @@ live API. `installFetch()` covers code that calls the global `fetch`.
 npm run test:conformance:images       # replays image recordings; needs no credentials
 npm run conformance:images:record     # records them; needs OPENAI_API_KEY, GOOGLE_API_KEY, or COMFYUI_URL
 ```
+
+## Recording and replay, piece by piece
+
+`fixtureFetch()` picks a `FixtureMode` — `record`, `replay`, or `live` — from its `mode` option, then
+from `NEXUS_FIXTURES`, then defaults to `replay`, so one test file serves all three. The pieces it
+chooses between are exported too:
+
+- `recordingFetch()` wraps a real fetch and writes every exchange to the directory. It returns a
+  `RecordingFetch`, a fetch with a `flush()` that waits until every fixture is on disk — await it
+  before a test ends. `RecordOptions` add the real `fetch`, the `redact` hook, and a clock.
+- `replayFetch()` serves the files back. `ReplayOptions` add `onMissing`: `throw`, the default, raises
+  `FixtureMissingError` with the request's method, URL, and match key, so you can find the recording
+  that should have matched; `live` falls through to the real `fetch` instead.
+- `readFixtures()` reads every `RecordedExchange` in a directory, for inspection or a replay of your
+  own.
+
+`FixtureOptions` is what both share: the `directory`, a `match` function that turns a request into
+its key, `ignoreBodyFields` for top-level fields that change between runs — a request id, a
+timestamp — and `redactHeaders` and `redactQuery` for anything beyond the credential names always
+removed. A custom matcher receives a `MatchInput`: the method, the URL with credentials removed and
+the query sorted, the redacted headers, and the body as text with multipart boundaries normalized.
+
+Each fixture file is one `RecordedExchange`: the match key, its position among requests that share
+the key — so a request made three times replays three responses in order — the `RecordedRequest`, the
+`RecordedResponse`, and when it was recorded. Bodies are text, or base64 for binary, and the
+transport headers `fetch` has already applied, such as content encoding, are left out so replay does
+not describe a body it no longer has.
+
+## Conformance suites
+
+Each suite checks an adapter against the neutral contract and returns one result per case, so a
+test asserts on them and a report prints them. Run them against recordings on every pull request,
+and live where credentials are.
+
+**Chat providers.** `runProviderConformance()` takes a provider name, a provider, and
+`ProviderConformanceOptions`. Each `ProviderConformanceCase` is a request and a `validate` function;
+the defaults are a plain text completion and a JSON response shape, with a tool-calling case when
+`testTools` is on, and `PROVIDER_CONFORMANCE_FIXTURES` holds them per bundled provider with a model
+that provider serves. `model` runs every case on one model, `fixtures` replaces the cases, and
+`testStream` and `testHealth` also stream each case and run the health check. Each
+`ProviderConformanceResult` says whether completion, streaming, and health passed, and what went
+wrong.
+
+```ts
+import { runProviderConformance } from 'nexus-ai-pro';
+
+const results = await runProviderConformance('openai', provider, { testStream: true, testTools: true });
+assert.ok(results.every((result) => result.completeOk && result.streamOk !== false), JSON.stringify(results));
+```
+
+**Embedding providers.** `runEmbeddingProviderConformance()` checks one vector per input, in order,
+of one width, with finite components, and a requested `dimensions` honored.
+`EMBEDDING_PROVIDER_CONFORMANCE_FIXTURES` is a single input, a batch, and a query-typed input; an
+`EmbeddingProviderConformanceCase` adds an input type, dimensions, and an extra `validate`.
+`EmbeddingProviderConformanceOptions` picks the model and cases, `testAbort` (on by default) checks
+that an already-aborted signal stops the call before the network, and `testDeterminism` embeds one
+input twice and compares. Each `EmbeddingProviderConformanceResult` has `ok`, `abortOk`, and the
+error.
+
+**Image providers.** `runImageProviderConformance()` runs `ImageProviderConformanceCase` values,
+each an `ImageGenerateProviderConformanceCase` or an `ImageEditProviderConformanceCase` with its
+request and an optional `validate`. `IMAGE_PROVIDER_CONFORMANCE_FIXTURES` is a generation, an edit,
+and a masked edit; edits run only when the provider declares them, and the masked edit only when it
+declares mask support. `ImageProviderConformanceOptions` sets the model, the cases, the image and
+mask the edits start from (a portable 1x1 PNG by default), and `testAbort`, `testEdit`, and
+`testMask`. Each `ImageProviderConformanceResult` names the operation, whether it met the contract —
+assets, metadata, and the call's operation and request ids echoed back — and every violation found.
+
+## Limitations
+
+- Replay matches requests exactly, after normalization. A change to a prompt or a request field
+  needs a new recording, which is the point: the fixture shows what changed.
+- Streaming responses are recorded whole and replayed in one chunk, so replay does not reproduce a
+  provider's chunk timing.
 
 <!-- reference:start -->
 ## Reference

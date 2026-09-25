@@ -168,6 +168,8 @@ export function traceModelClient<T extends ModelClientLike>(
               }
             : {}),
           ...(response.meta?.cost?.amount === undefined ? {} : { cost: response.meta.cost.amount }),
+          ...(response.meta?.modelUsed ? { model: response.meta.modelUsed } : {}),
+          ...(response.meta?.providerUsed ? { provider: response.meta.providerUsed } : {}),
           metadata: {
             provider: response.meta?.providerUsed,
             model: response.meta?.modelUsed,

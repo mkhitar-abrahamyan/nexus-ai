@@ -74,6 +74,99 @@ setInterval(() => void alerts.evaluate(), 60_000);
 An alert names the rule, the measured value, and three runs that contributed, so the next step is
 reading them rather than starting an investigation.
 
+## Runs and trees
+
+A `Run` is one unit of work: its id, the trace it belongs to and the run it ran inside, a name, a
+`RunKind` — `chain`, `model`, `tool`, `graph`, `node`, `agent`, `retriever`, `embedding`, `image`,
+`voice`, `realtime`, or `operation` — and a `RunStatus` of `running`, `ok`, or `error`. It carries
+start and end times, latency, inputs and outputs after redaction, the error, tags, metadata you can
+query by dot path, usage, cost, the model and provider for a model run, and its feedback. A `RunTree`
+is a run with its `children`, in start order, which is how a trace is read.
+
+`RunFeedback` is a judgement on a run — a `key` such as `helpful`, a numeric `score`, a non-numeric
+`value`, a `comment`, and the `source` that left it — and `tracer.recordFeedback()` attaches it,
+filling in the time.
+
+## Recording
+
+`Tracer` takes `TracerOptions`: the `store`, a `SamplingPolicy`, a `RedactionPolicy`, `tags` and
+`metadata` added to every run (the deployment, the release), a clock, and `onError` — store errors
+are swallowed so tracing never breaks a request, and the hook lets you notice them. The context
+travels through `AsyncLocalStorage`, created only when a tracer exists.
+
+- `startRun()` starts a run beneath the one in scope, or a new trace, and returns a `RunHandle`.
+  `StartRunOptions` give the name, kind (`chain` by default), inputs, tags, metadata, model and
+  provider, and a `parentId` or `traceId` to attach somewhere explicit.
+- `handle.finish()` ends it. `FinishRunOptions` give the outputs, an `error` (whose presence marks the
+  run failed), usage, cost, metadata merged into the run's, and the model and provider that actually
+  ran. `handle.child()` starts a run beneath it without relying on the ambient context.
+- `trace()` runs a function inside a new run and finishes it with the result or the error.
+  `traceable()` wraps a function so every call becomes a run, recording its arguments as inputs.
+- `current()` says which run is in scope.
+
+A trace is written when its root finishes, which is what lets tail sampling decide with the whole
+trace in hand. `SamplingPolicy.rate` keeps that share of traces, and `keepErrors`,
+`keepSlowerThanMs`, and `keepCostlierThan` keep any trace with a failure, a slow run, or an expensive
+one whatever the rate. `RedactionPolicy` drops inputs or outputs entirely, strips `hideFields` by dot
+path, and hands each run to `redact` last. `stripFields()` is that dot-path removal on its own; it
+copies rather than mutating what you pass.
+
+## Graphs and model calls
+
+`traceGraph()` records a graph or agent run: a root run with one child per task, retries included.
+`GraphTracingOptions` names the root, labels it `graph` or `agent`, and adds tags, metadata, and
+inputs. It returns `GraphTracing`: `runOptions` to spread into `invoke()`, the `root` handle,
+`runFor(node)` for the run of a node in progress, and `finish()` to close the root with the result.
+
+`traceModelClient()` wraps anything with `complete()` — the `ModelClientLike` contract — so every call
+becomes a `model` run with its request, content and tool calls, token usage, cost, finish reason, the
+model and provider that answered, and the prompt version when the request was rendered from a
+registry. Its `parent` option decides where the call hangs; `() => tracing.runFor('model')` nests it
+inside the node that made it.
+
+## Storing and querying
+
+`TraceStore` is the contract every store keeps: `save()`, `get()`, `query()`, and `tree()`, with
+optional `addFeedback()` and `prune()`. Three are included:
+
+- `MemoryTraceStore`, bounded by `MemoryTraceStoreOptions.maxRuns` (10,000 by default), for
+  development, tests, and a single process.
+- `JsonlTraceStore`, one JSON object per line in `JsonlTraceStoreOptions.file`, rewritten to its newer
+  half once it passes `maxBytes` (64 MB by default). It is durable without a database and greppable,
+  but a read loads the file, so it suits a service that writes far more than it queries.
+- `PostgresTraceStore`, in the [Postgres guide](./postgres.md), which runs every filter in SQL.
+
+`RunQuery` is the filter: a trace id, one kind or several, status, name, model, provider, tags (all
+must be present), metadata by dot path, minimum latency and cost, a `since` and `until` window on the
+start time, runs with feedback under a key, and `limit` (50 by default) and `offset`. Results come
+newest first. `applyQuery()` and `assembleTree()` are the filtering and tree-building every store
+shares, exported for a store of your own so a query means the same thing everywhere.
+
+## Comparing traces
+
+`compareTraces()` matches the runs of two trees by their path — `root/child#0/grandchild#1` — because
+two runs of the same graph never share ids. The `TraceComparison` lists each matched pair with its
+`RunDifference` values (a field added, removed, or changed, with both sides), the runs only one side
+has, and the change in root latency and total cost. `formatTree()` prints a tree as indented text.
+
+## Alerts
+
+An `AlertRule` has a name, an `AlertMetric` — `errorRate`, `latencyP95`, `latencyP50`, `cost`, or
+`count` — a threshold it fires above, a window (15 minutes by default), a `filter` to measure one
+model, kind, or tag, and `minRuns` so a quiet window does not fire. `AlertEvaluator.evaluate()` checks
+every rule once, returns an `AlertEvent` for each that fired — the value, the threshold, the run
+count, the window, and up to three sample runs — and hands each to an `AlertNotifier`. `measure()`
+computes a metric over runs on its own. `createWebhookNotifier()` posts to a URL, with
+`WebhookNotifierOptions` for headers, a `fetch`, and a `body` builder; the default payload is the
+`{ text }` shape chat webhooks accept, with the event beside it.
+
+## Limitations
+
+- Traces are written when the root finishes, so a process that dies mid-run loses that trace.
+- An alert measures up to 1,000 runs in its window unless its filter sets a larger `limit`.
+- Cost alerts sum every run in the window, so give a `filter` such as `{ kind: 'model' }` when
+  parent runs also record cost.
+
 <!-- reference:start -->
 ## Reference
 

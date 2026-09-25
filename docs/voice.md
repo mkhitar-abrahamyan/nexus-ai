@@ -173,7 +173,83 @@ ai.registerVoiceProvider('private-voice', {
 
 `VoiceSession` remains the batch-oriented path: each turn is transcription -> completion/tools -> optional
 speech. For a persistent connection with live microphone audio, streamed remote audio, barge-in, and
-provider events, use the separate realtime entry points below. Neither API replaces the other.
+provider events, use the [realtime guide](./realtime.md). Neither API replaces the other.
+
+## Requests and responses
+
+`TranscriptionRequest` takes the audio as a `VoiceAudioInput` — a file path, a URL, bytes, base64
+text, or a readable stream, each with an optional file name and MIME type for providers that infer
+the format from them — plus the provider, model, language, a `prompt` that guides spelling and
+names, temperature, the provider's `responseFormat` (text, JSON, verbose JSON with timings, or
+subtitles), `timestampGranularities`, a signal, and metadata. `TranscriptionResponse` has the text,
+the provider and model, the language, the audio's duration, timed `TranscriptionSegment` and
+`TranscriptionWord` values when asked for, and the provider's raw response.
+
+`SpeechRequest` takes the text, the provider, model, and voice, a `VoiceAudioFormat` — `mp3`, `wav`,
+`opus`, `aac`, `flac`, `pcm`, `webm`, or `ogg` — the speaking rate, `instructions` for models that
+take direction on tone and pace, a signal, and metadata. `SpeechResponse` carries the audio as a
+`VoiceAudioOutput` (the bytes, their format, and MIME type), with the provider, model, and voice that
+produced it.
+
+`VoiceTurnRequest` is a whole turn for `ai.voice()`: audio or a ready `transcript`, the transcription
+settings, the `completion` that answers, `transcriptMessage`, and `speech` settings or `false` for
+text only. `VoiceTranscriptMessageConfig` decides how the transcript joins the completion: `append:
+false` leaves it out for a prompt that already has it, `role` makes it a user or a system message,
+and `template` places it with `{{transcript}}`. `VoiceTurnResponse` returns the transcription, the
+text answered, the completion's response, and the speech.
+
+## Providers and the manager
+
+A `VoiceProvider` is `info` and two optional methods, `transcribe()` and `speak()`.
+`VoiceProviderInfo` gives its name, whether it runs locally, and `supports`, which operations it
+implements. `VoiceConfig` is the client's `voice` option: the default transcription and speech
+providers and the providers by name.
+
+`VoiceManager` routes each request to the provider it names, the configured default, or the first
+that supports the operation. `registerProvider()`, `hasProvider()`, and `listProviders()` manage
+them; `transcribe()`, `speak()`, and `runTurn()` do the work, and `createSession()` starts a session.
+It is what the client uses, and it works on its own with any `VoiceCompletionClient`, anything with
+`complete()`. A provider that fails, a provider name that is not registered, or no provider for the
+operation at all raises `VoiceProviderError`, naming the provider and carrying the cause. A named
+provider that lacks the operation asked for raises `VoiceCapabilityError`.
+
+`OpenAIVoiceProvider`, from `nexus-ai-pro/voice/openai`, takes `OpenAIVoiceProviderConfig`: the API
+key, base URL, organization, `transcriptionModel` (`gpt-4o-transcribe` by default), `speechModel`
+(`gpt-4o-mini-tts`), `defaultVoice` (`alloy`), extra headers, and a `fetch`.
+
+## Sessions
+
+`VoiceSessionConfig` sets up a conversation. Prompt text — `VoicePromptText`, one string or several
+joined with blank lines — goes in `systemPrompt`, `prompt`, and `instructions`, in that order. Beside
+them are the `taskPrompts`, the starting `messages`, the `tools`, and `toolSelection`: `all` offers
+every tool, and `task` offers only the tools of the task prompts that matched, or every tool when
+none did. `maxToolIterations` caps rounds of tool calls per turn (4 by default), and the sampling
+fields, `responseFormat`, `stop`, `userId`, and `metadata` pass through to each completion. It also
+holds the transcription, transcript message, and speech settings every turn shares,
+`maintainHistory` (on by default), and `onToolCall`, called after each tool call.
+
+A `VoiceTaskPrompt` has a name, prompt text and instructions added when it applies, the tools it
+needs, and `when`, a `VoiceTaskPromptMatcher`: a substring, a pattern, a list of either, or a function
+that receives a `VoiceTaskPromptMatcherInput` — the turn's transcript, the conversation, and its
+metadata. A task prompt without `when` always applies.
+
+`session.handleTurn()` takes a `VoiceSessionTurnInput`: audio or a transcript, and settings for this
+turn only — transcription, speech, completion fields merged over the session's, and extra prompt
+text, instructions, task prompts, and tools. It returns a `VoiceSessionTurnResponse`: the session
+id, the transcription and the text answered, the response, the speech, each tool call as a
+`VoiceSessionToolStep` (its round, call id, tool, arguments, and result or error), the task prompts
+that matched, and the conversation after the turn. `getHistory()` copies the conversation, and
+`reset()` starts it over.
+
+`VoiceSession`, from `nexus-ai-pro/voice/session`, can be built without a client: it takes the
+configuration, a `VoiceSessionRuntime` (anything with `transcribe()` and `speak()`, such as a
+`VoiceManager`), and a `VoiceSessionCompletionClient`.
+
+## Limitations
+
+- Each turn is a request and a reply: the user finishes speaking, then the answer is produced. For
+  interruption and streamed audio, use realtime.
+- `OpenAIVoiceProvider` is the only bundled adapter; others implement `VoiceProvider`.
 
 <!-- reference:start -->
 ## Reference
