@@ -52,6 +52,67 @@ Routing modes:
 - `rules` - route from request metadata
 - `hybrid` - try rules first, then fall back to auto routing
 
+## The adapters
+
+Each adapter has its own entry point, so an application that uses one provider loads one:
+
+| Adapter | Entry point | Notes |
+| --- | --- | --- |
+| `OpenAIProvider` | `/providers/openai` | Chat Completions and the Responses API; the base of the OpenAI-compatible adapters below |
+| `AnthropicProvider` | `/providers/anthropic` | Messages API, with extended thinking mapped from `reasoning.effort` and explicit cache breakpoints |
+| `GoogleProvider` | `/providers/google` | Gemini, with thinking budgets mapped from effort and cached tokens separated out of the prompt count |
+| `AzureOpenAIProvider` | `/providers/azure-openai` | OpenAI on an Azure endpoint and deployment |
+| `OpenRouterProvider` | `/providers/openrouter` | Many vendors' models through one OpenAI-compatible API |
+| `GroqProvider` | `/providers/groq` | Groq's OpenAI-compatible chat API |
+| `MistralProvider` | `/providers/mistral` | Mistral's chat API |
+| `DeepSeekProvider` | `/providers/deepseek` | DeepSeek's OpenAI-compatible API |
+| `CohereProvider` | `/providers/cohere` | Cohere's Chat API |
+| `OllamaProvider` | `/providers/ollama` | Models on this machine or a local server; local, so privacy routing prefers it |
+| `LMStudioProvider` | `/providers/lmstudio` | LM Studio's local OpenAI-compatible server |
+| `LlamaCppProvider` | `/providers/llamacpp` | llama.cpp's local OpenAI-compatible server |
+
+The client constructs them from `providers` configuration; construct one yourself to call it
+directly or to register it under another name.
+
+## Writing a provider
+
+`BaseProvider`, on `/providers/base`, is the contract: an `info` — a `ProviderInfo` with the name and
+whether it runs locally, which privacy routing prefers — `complete()`, `stream()`, and a
+`healthCheck()` that defaults to true. Protected helpers build the base response, extract text,
+format tools, normalize errors, honour an aborted signal, and turn an async generator into a
+`NexusStream`, so a new adapter is mostly its request and response mapping.
+
+`/providers/type-guards` has the small readers adapters use on untyped JSON: `isRecord()`,
+`asArray()`, `asString()`, and `asNumber()` coerce a value with a fallback, and `getRecord()`,
+`getArray()`, `getString()`, and `getNumber()` read one key safely.
+
+## Provider errors
+
+Every adapter reports failure as a `NexusProviderError`: the provider, the model, the HTTP status, a
+`NexusProviderErrorCategory` — `auth`, `abort`, `timeout`, `rate-limit`, `server-error`, `network`,
+`bad-response`, or `unknown` — whether retrying could succeed, and the cause. `NexusProviderErrorOptions`
+constructs one, inferring the category and retryability it is not given. Retries, failover, and the
+circuit breaker all decide from these fields.
+
+`/providers/errors` has the builders adapters share. `createProviderHttpError()` builds one from a
+failed response, with the first 1,000 characters of its body. `toNexusProviderError()` wraps any
+error, returning a provider error unchanged. `createAbortProviderError()` is for a request the caller
+aborted, never retryable; `createTimeoutProviderError()` is for one that ran past its timeout,
+retryable. `categorizeProviderError()` infers a category from the status, then the error's name,
+code, and message; `isRetryableProviderError()` says whether a category is worth retrying — timeouts,
+rate limits, server errors, and network failures are — and `isAbortError()` recognizes an abort.
+
+## Routing internals
+
+`Router` makes the decision: a directly named model, a matching rule, or the auto-router's ranking,
+then the fallbacks `routing.fallback` adds. A routing strategy sees a `RouterContext` — the request,
+the configuration, the providers, their health, and the providers whose circuit is open, which are
+excluded entirely rather than ranked lower. It returns a `RouteDecision`: the provider and model to
+try first, why, limits for that first attempt, and the fallbacks in order. `FailoverExecutor` runs
+the decision, trying each attempt with its own timeout, rate-limit retries, and circuit check, and
+throws with every attempt's error when none succeeds. Both are exported for a gateway that routes
+requests without the rest of the client.
+
 ## Model Registry Generation
 
 The registry is generated from versioned provider data in `data/models/`, not hand-edited. The
@@ -75,6 +136,42 @@ generator cannot quietly alter pricing data in the same release.
 `src/models/generated.ts` and `data/` are build-time artifacts and are **not** published. They
 duplicate `KNOWN_MODELS` exactly, and shipping them in both builds would add roughly 310KB to every
 install for data nothing reads. Both live in the repository, where a diff is what you actually want.
+
+## Reading the registry
+
+`KNOWN_MODELS` maps each model to its `ModelCapabilities`: the provider and family, each `Modality`
+it accepts, streaming, tool calling, structured output and JSON mode, reasoning with the efforts it
+takes, a `PromptCachingCapability` — whether the provider accepts caller-placed breakpoints, which
+`CacheTtl` lifetimes, the minimum prefix, and how many breakpoints — which request options it honours
+(tool choice, parallel tool calls, seed, top-k, penalties), context and output limits, prices,
+quality and speed scores, release and knowledge cutoff, a `ModelStatus`, the `ModelEndpoint` values
+it is served on, and when and from where the entry was verified. `ProviderCapabilities` groups a
+provider's models with its name and locality, and a `CacheHint` is a breakpoint on a message or tool. Aliases such as
+`openai/best` resolve by intent; `MODEL_ALIAS_METADATA` gives each one's `AliasMetadata` — its
+`AliasStage` and whether it floats — and `REGISTRY_PROVENANCE` says where the bundled data came from
+and when it was verified. `resolveProvider()` names the provider a model belongs to.
+
+`/models` reads it all through the application's own configuration, so a model registered with
+`models.registry` or an alias with `models.aliases` is seen like a bundled one:
+
+- `resolveModel()` resolves an alias to a `ResolvedModel` — the model, its provider, its
+  capabilities, and the alias metadata — and runs on every completion, so it reads the maps directly
+  instead of merging them. `resolveModelAlias()` resolves the name alone.
+- `getModelCapabilities()` returns one model's entry; `getModelRegistry()`, `getModelAliases()`, and
+  `getAliasMetadata()` return the merged maps, application entries winning.
+- `listKnownModels()` and `listModelsForProvider()` list names, sorted.
+- `describeModel()` returns `ModelProvenance`: the resolution plus when the entry was verified and
+  where its data came from, falling back to the registry-wide date for bundled entries.
+- `checkRegistryFreshness()` returns `RegistryFreshness` — when the data was verified, its age in
+  days, the window (180 days by default), whether it is stale, and entries older than the window —
+  and `assertRegistryFreshness()` throws when it is stale, for a release check.
+
+## Limitations
+
+- Bundled prices and capabilities are defaults, verified on the date the registry records. A
+  provider can change either between releases; override entries with `models.registry`.
+- An option a model does not declare passes through untouched, so a registry that does not know a
+  feature never blocks it; it also never warns about it.
 
 <!-- reference:start -->
 ## Reference

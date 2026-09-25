@@ -12,8 +12,9 @@ import { OperationTransitionError } from './errors.js';
  * - `cancelling` can still reach `succeeded` or `failed`. Cancellation asks an executor to stop; it
  *   does not guarantee it stopped in time, and reporting a discarded success as a cancellation
  *   would lose a result the provider already charged for.
- * - `retrying` returns to `queued`, never straight to `running`. A retry re-enters the queue so a
- *   different worker may pick it up, which is what makes recovery after a crash work.
+ * - `retrying` returns to `queued` after its delay, so a different worker may pick the retry up.
+ *   The one move straight to `running` is recovery: a worker that finds a lapsed lease marks the
+ *   record `retrying` and claims it in the same sweep.
  * - Nothing leaves a terminal status. A late provider callback cannot resurrect a cancelled
  *   operation.
  */

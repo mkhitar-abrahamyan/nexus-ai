@@ -264,6 +264,99 @@ caching code loads the first time a caching node runs.
 
 The graph is not in the root import. It costs nothing to a user who does not build graphs.
 
+## Building a graph
+
+`createGraph()` returns a `StateGraph` — the builder — over a `ChannelSchema`, the channels by name.
+Each `Channel` is a `reduce()` that combines the value already there with a write, and an optional
+`initial()`. `StateOf` is the state a schema describes, and `StateUpdate` is what a node may write
+back: any subset of the channels. `GraphInput` is what `invoke()` accepts, narrowed to the declared
+input channels.
+
+`addNode()` takes a name, a `NodeFn`, and `NodeOptions`: a `RetryPolicy` (attempts, the first delay,
+the backoff factor, a ceiling, jitter, and a `retryOn` test), `timeoutMs`, `ends`, `defer`, and a
+`NodeCachePolicy` (the `key`, a `ttlMs` of 5 minutes by default, and a `store`). A cached result is a
+`NodeCacheEntry`: the updates the node returned and where it routed. `addEdge()` joins two nodes,
+`setEntry()` names the first, and `addConditionalEdges()` takes an `EdgeRouter`, a function of state
+that returns a `GraphRouteTarget` — a node name, a `Send`, or a list of either — with an optional
+mapping from its answers to node names. `START` and `END` are the entry and exit sentinels.
+
+A node receives a `NodeContext`: the frozen state, its name, the step, the thread, its task id, a
+`Send` input, the attempt, an abort signal, `interrupt()`, the long-term `store`, `report()` for
+progress, and `emit()` for custom events. It returns a `NodeResult` — an update, a `Command`, or
+nothing. A `Command` names its successors with a `CommandTarget`: a node, a `Send`, or a list.
+
+`compile()` checks the graph and returns a `CompiledGraph`. `CompileOptions` holds the `store`, the
+default node `cache`, breakpoints, `maxConcurrency`, a default `retry`, `onNodeError`, the
+`checkpointer`, `maxSteps`, a `name` recorded on every checkpoint, and a clock for tests.
+
+## Running a graph
+
+`invoke()` runs to the end and returns a `GraphResult`: the thread, a `GraphStatus` (`running`,
+`awaiting_input`, `completed`, `failed`, or `interrupted`), the output state, the steps completed,
+and any interrupts, breakpoint, or error. `stream()` yields a `GraphStepEvent` per superstep — the
+nodes and tasks that ran, attempts where there were retries, the state, and the status — ending with
+an `interrupt`, `breakpoint`, or `done` event. A `GraphTask` is one unit of work: its id, its node,
+and its `Send` input.
+
+`GraphRunOptions` sets the `threadId`, `maxSteps`, a signal, metadata for every checkpoint,
+`maxConcurrency`, breakpoints for this run, `onEvent`, and `onProgress`. `onEvent` receives each
+`GraphEvent`: `task_start`, `task_retry`, `task_end` with the update and whether it was served from
+the cache, `checkpoint`, and `custom`. `onProgress` receives each `GraphProgress` a node reported.
+
+`resume()` and `resumeWith()` answer the one pending question, and `resumeInterrupts()` and
+`resumeInterruptsWith()` answer several by id. A node asks with an `InterruptRequest` — a `reason`
+and a JSON `payload` — and each question waits as a `PendingInterrupt` with its id, node, task, step,
+position within the node, and when it was asked. `interruptKey()` is the stable key an answer is
+stored under, by task, step, and index, so several `Send` tasks of one node keep their own answers.
+`continue()` carries on from a breakpoint, and `resumeFrom()` rewinds to a step and runs forward.
+
+## State and checkpoints
+
+A `GraphCheckpoint` is everything needed to resume a thread elsewhere: the step, every channel's
+value, the nodes and tasks to run next, the tasks of a paused step that already finished and the
+routes they chose, the status, the pending interrupts and answers already given, an error, a
+`GraphBreakpoint` (`before` or `after`, and its nodes), when it was written, and its metadata.
+`state()` and `history()` read them, `updateState()` edits one, and `fork()` copies a thread.
+
+A `GraphCheckpointer` stores them: `put()`, `get()` the latest or one step, `history()` newest first,
+and optionally `delete()` and `threadIds()`. `MemoryGraphCheckpointer` is the default, bounded by
+`MemoryGraphCheckpointerOptions` — `maxPerThread` checkpoints (50) and `maxThreads` (1,000, after
+which the least recently written thread is dropped). `OperationStoreCheckpointer` writes each
+checkpoint as an operation record, with `OperationStoreCheckpointerOptions.maxPerThread` (50), so any
+operation store — memory, Redis, or Postgres — makes a thread durable.
+
+## Errors
+
+Every graph error extends `GraphError` and carries a stable `code`:
+
+- `GraphValidationError` — the definition is invalid: an unknown node, no entry point, an
+  unreachable node, a bad channel.
+- `GraphInterrupt` — control flow, not a failure. `interrupt()` throws it, and the runtime catches it
+  and pauses. It reaches you only when a node interrupts on a graph compiled with `checkpointer:
+  false`, which has nowhere to keep the question.
+- `GraphStepLimitError` — the run exceeded `maxSteps`, naming the nodes still pending.
+- `GraphNodeError` — a node threw; the original error is its `cause`.
+- `GraphNodeTimeoutError` — a node outlived `timeoutMs`. It is separate because it is often worth
+  retrying.
+- `GraphThreadNotFoundError` — no checkpoint exists for the thread.
+- `GraphNotInterruptedError` — a resume was asked of a thread that is not waiting for input.
+
+## Describing and drawing
+
+`describe()` returns a `GraphDescription`: the name, each node with its options and any subgraph,
+each edge — conditional or not, with its label — the routers whose targets cannot be known in
+advance, and the input and output channels. `toMermaid()` takes anything `Describable` — a
+description, or anything with `describe()` — and `MermaidOptions` for the direction (`TD` or `LR`),
+whether subgraphs are expanded or collapsed, and which nodes to highlight. `toGraphJSON()` returns a
+copy of the description, for a UI or a test.
+
+## Limitations
+
+- A node before an interrupt runs twice: once to ask, once to receive the answer. Keep that work
+  cheap or idempotent.
+- The in-process checkpointer loses threads on restart; use an operation store for durability.
+- Cached node results must survive the cache store's serialization.
+
 <!-- reference:start -->
 ## Reference
 
