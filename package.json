@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "Typed AI framework for TypeScript: provider routing and failover, parallel agent graphs with checkpoints, durable operations, guardrails, and cost control",
   "type": "module",
   "main": "dist-cjs/index.js",

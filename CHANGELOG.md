@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-09-25
+
 A server you can host. Assistants get an HTTP surface — threads, background runs, resumable event
 streams, and cron jobs — on top of the durability that already existed: a run is an operation, so it
 outlives the request that started it and the worker that was running it.
@@ -33,6 +35,14 @@ outlives the request that started it and the worker that was running it.
 - **Deployment templates**: `deploy/Dockerfile`, `deploy/compose.yaml` for two replicas behind Redis,
   and an nginx configuration that does not buffer event streams. `examples/agent-server.ts` is a
   runnable server.
+
+### Changed
+
+- **Every feature's exports are documented in that feature's guide.** A guide can now claim exports by
+  source directory, so features reachable only from the root — guardrails, grounding, workflows,
+  metrics, conformance, routing — no longer pile into the client guide, which drops from 249 exports
+  to 141. Retrieval, citations, and verification get a guide of their own, and the agents, batch,
+  caching, and client guides now explain every export they cover.
 
 ### Fixed
 
@@ -931,7 +941,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.17.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.18.0...HEAD
+[1.18.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.14.0...v1.15.0

@@ -426,7 +426,7 @@ patch release. None is exported from the root.
 - The wording of gate reasons, of the note a forced promotion records, and of `formatPromptDiff()`
   output is for people and may improve in any release.
 
-## Agent server stage (Unreleased)
+## Agent server stage (1.18.0)
 
 The `nexus-ai-pro/server` subpaths are experimental in production readiness, as the image and prompt
 families are: their exported types, functions, and classes follow the 1.x semantic versioning rules,

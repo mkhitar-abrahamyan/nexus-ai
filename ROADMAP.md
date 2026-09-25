@@ -3,10 +3,10 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.17.0**. 97 export subpaths, each
+Status baseline: **1.18.0**. 99 export subpaths, each
 held to a size budget in CI, 12 completion providers, 5 embedding providers, 2 batch providers, 3
 image providers plus a mock, 101 completion registry models plus 63 aliases, and 11 embedding models
-plus 5 aliases. 623 unit tests pass; coverage sits at **92.0% lines / 77.4% branches / 87.2%
+plus 5 aliases. 643 unit tests pass; coverage sits at **92.1% lines / 77.6% branches / 87.2%
 functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry
 drift, per-subpath size, documentation and guide coverage, a graph benchmark, mock conformance, packed-package smoke, API contract,
 consumer type resolution, and clean install on Node 22 and 24.
@@ -21,8 +21,8 @@ weight is a constraint on every new feature rather than a feature of its own.
 
 Measured from the current build, an entry point costs a fraction of the root import: `/agent` 11%,
 `/graph` 9%, `/operations` 7%, `/evaluate` 5%, `/tracing` 4%, `/mcp` 2%, `/store` 1%,
-`/cache/memory-cache` 0.5%, `/streaming` 0.2%. Dependencies are counted as well as bytes: 93 of the
-97 entry points import no third-party package at all, and the four that do — the root, `/config`,
+`/cache/memory-cache` 0.5%, `/streaming` 0.2%. Dependencies are counted as well as bytes: 95 of the
+99 entry points import no third-party package at all, and the four that do — the root, `/config`,
 `/core`, and `/security` — are the ones that reach the schema validators. Every new capability gets its own export subpath and stays out of the
 root, and `npm run size:check` fails the build when any entry point grows past its budget or picks up
 a dependency it did not have.
@@ -480,7 +480,7 @@ Google Imagen, and ComfyUI. Everything below is implemented and tested.
 
   Scores in an uncertainty band go to a human-review queue.
 - **Modality cleanup: deferred to 2.0.** Splitting `inputModalities` from `outputModalities` is a
-  breaking registry change, and it is listed in section 19.
+  breaking registry change, and it is listed in section 20.
 
 - **Graph and agent correctness: all nine fixed.** Fixing number 5 also exposed a related defect
   that is now fixed: after a paused step resumed, the outgoing edges of siblings that had already
@@ -541,7 +541,7 @@ be large to get there. Three rules apply to every item below.
    - Ship the change additively in 1.x wherever possible.
    - Anything that must break is marked `@deprecated` and noted in the changelog at least one minor
      release before 2.0.0.
-   - Every breaking item is collected in section 19.
+   - Every breaking item is collected in section 20.
 
 | Release | Theme | Gap it closes | Proof it ships |
 | --- | --- | --- | --- |
@@ -615,7 +615,7 @@ in about three seconds, not twelve.
   are synchronous exported functions, and an ESM module cannot load a dependency synchronously on
   first use, so deferring `ajv` and `zod` behind a dynamic import would mean making public functions
   async — a breaking change. Moving them to optional peer dependencies in 2.0.0 fixes the install
-  cost properly, and section 19 already carries it.
+  cost properly, and section 20 already carries it.
 
 **Budgets.** `/graph` measured 52 KB after the work, against the 40 KB this section first guessed;
 the estimate was wrong, not the implementation, and the budget file records the real number. The root
@@ -1020,41 +1020,64 @@ version, and a cold start during one serves the bundled fallback. Four stores pa
 
 ---
 
-## 18. 1.18.0 and 1.19.0: self-hosted server and local studio
+## 18. Shipped in 1.18.0 — the self-hosted agent server
+
+`nexus-ai-pro/server`, experimental, with `nexus-ai-pro/server/remote` as its client.
+
+**One handler, any runtime.** `createAgentServer()` answers a `Request` with a `Response`, so it runs
+on Node's `http` through `toNodeListener()`, and as Express or Fastify middleware. Assistants are
+structural: `graphAssistant()` serves a compiled graph and `functionAssistant()` a plain function, so
+the entry point imports neither runtime.
+
+**Runs are durable operations.** Leases, heartbeats, retries, idempotency, dead-lettering, and
+webhooks come from the operations family rather than from anything new. A run outlives the request
+that started it; a worker that dies leaves a record whose lease lapses, and another replica claims it.
+
+**Resumable streaming.** Every event carries its id in the run's log, so a client that drops
+reconnects with `Last-Event-ID` and receives exactly what it missed. `MemoryRunEventLog` covers one
+replica and `RedisRunEventLog` lets a client reconnect to any of them.
+
+**A busy thread is a decision, not a race.** `reject`, `enqueue`, `interrupt`, or `rollback`, set per
+server or per run; `rollback` needs an assistant that can restore a thread, and one that cannot says
+so rather than doing something else.
+
+**Cron without coordination.** Every replica ticks and every firing carries the idempotency key
+`<job>:<slot>`, so the operation store decides which replica wins. No lock, no leader election. The
+five-field syntax is parsed in UTC.
+
+**Integration.** Authentication and tenancy are hooks: a `Principal` carries a tenant, a user, and
+scopes, and another tenant's resource is a `404` rather than a `403`. `createRemoteGraph()` calls a
+deployed assistant, and `asNode()` makes it a node in a local graph.
+
+**Deployment.** `deploy/Dockerfile`, a Compose file running two replicas behind Redis, an nginx
+configuration that does not buffer event streams, and `examples/agent-server.ts`.
+
+**Documentation.** Guides now hold their own family's exports rather than everything reachable only
+from the root: the client guide fell from 249 exports to 141, grounding gained a guide, and the
+agents, batch, caching, and client guides explain every export they cover.
+
+**Proof.** Twenty tests, including: a stream that disconnects and resumes with no gaps and no repeats;
+a run whose worker stops being finished by a second replica sharing the store; the four busy policies;
+a cron slot that fires once across two replicas; and a remote graph driven over real HTTP, both
+directly and as a node inside a local graph.
+
+### What did not land, and where it went
+
+- **One set of type declarations: closed, not carried.** Every route breaks the constraint it was set
+  under. Pointing the CommonJS `require` types at the ESM declarations makes them resolve as ESM for
+  consumers on `node16` resolution, and re-exporting across formats needs TypeScript 5.3's
+  `resolution-mode`, which raises the floor for everyone. Dual declarations stay until 2.0, where the
+  module layout is already being reworked and the floor can move with it.
+- **Image recordings moved to 1.19.0.** The conformance suite replays from fixtures and names each
+  backend that has none, but recording them needs live credentials for OpenAI, Google, and ComfyUI,
+  which this release did not have. The image family stays experimental.
+
+---
+
+## 19. 1.19.0: local studio (separate package)
 
 **Carried in: image recordings.** Record one live conformance run per image backend, commit the
 fixtures, and decide the image family's promotion on the result.
-
-**Carried in: one set of type declarations.** Shipping the declarations once, for both module formats,
-without breaking CommonJS type resolution or raising the TypeScript floor. If neither is possible, say
-so here and close the item rather than carrying it a third time.
-
-### 1.18.0: agent server (`nexus-ai-pro/server`, experimental)
-
-**API.**
-- REST and server-sent events for assistants, threads, runs, and cron jobs, over Node `http`.
-- Adapters for Express, Fastify, and NestJS.
-
-**Runs.**
-- Background runs execute through the operation runner, so leases, heartbeats, crash recovery, and
-  idempotency come from infrastructure that already exists.
-- Horizontal scaling through Redis.
-- When a new message arrives while a run is still going, the behaviour is configurable: `reject`,
-  `enqueue`, `interrupt`, or `rollback`.
-
-**Streaming.** Resumable with `Last-Event-ID`.
-
-**Integration.**
-- Authentication and tenancy through hooks.
-- Webhooks on completion.
-- A `RemoteGraph` client, so a deployed graph can be used as a subgraph.
-
-**Deployment.** Docker and Compose templates in the repository.
-
-**Proof.** A Compose example runs two replicas with Redis. A run keeps going after the replica that
-started it is killed, and a reconnecting client resumes its event stream.
-
-### 1.19.0: local studio (separate package)
 
 **Packaging.** A separate npm package, so the core install never carries a UI. Its name is still to
 be decided.
@@ -1077,7 +1100,7 @@ approval waiting in the inbox, and an experiment comparison.
 
 ---
 
-## 19. 2.0.0: consolidation
+## 20. 2.0.0: consolidation
 
 2.0.0 ships once 1.11.0 through 1.19.0 are released, each experimental surface has had at least one
 minor release to settle, and every removal below has been deprecated in a 1.x release.
@@ -1128,7 +1151,7 @@ moves to Node 24.
 
 ---
 
-## 20. Longer-term backlog
+## 21. Longer-term backlog
 
 **Absorbed by the releases above.** MCP adapters, human approval checkpoints, long-term memory, an
 evaluation platform, prompt and workflow versioning, record and replay fixtures, and the local
@@ -1158,7 +1181,7 @@ control plane.
 
 ---
 
-## 21. Design notes carried forward
+## 22. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -1210,7 +1233,7 @@ await ai.images.edit({
 
 ---
 
-## 22. How an item graduates
+## 23. How an item graduates
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.
