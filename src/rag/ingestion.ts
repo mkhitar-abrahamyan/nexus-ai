@@ -1,5 +1,20 @@
 import type { RagChunk } from '../hallucination/rag.js';
 
+// Retrieval lives here too, so an application that ingests and searches never loads the root import.
+export {
+  MemoryVectorStore,
+  createHashEmbeddings,
+  cosineSimilarity,
+  matchesMetadata,
+  normalizeVector,
+  type EmbeddingProvider,
+  type VectorDocument,
+  type VectorSearchOptions,
+  type VectorSearchResult,
+  type VectorStore,
+} from '../hallucination/retrieval.js';
+export type { RagChunk } from '../hallucination/rag.js';
+
 /** A document to split into chunks. */
 export interface DocumentSource {
   /** Its id, used in chunk ids. Defaults to `doc-1`, `doc-2`, and so on. */

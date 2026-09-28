@@ -1,6 +1,6 @@
 # Postgres
 
-<!-- covers: ./postgres ./postgres/operations ./postgres/store ./postgres/traces ./postgres/evaluate ./postgres/circuits ./postgres/prompts -->
+<!-- covers: ./postgres ./postgres/operations ./postgres/store ./postgres/traces ./postgres/evaluate ./postgres/circuits ./postgres/prompts ./postgres/vectors -->
 
 One Postgres adapter family for every store that has to outlive a process: durable operations and graph checkpoints, long-term memory with pgvector, traces, datasets and experiments, shared circuit state, and prompt versions. Each adapter has its own entry point, takes any client with a `query(text, values)` method, and never creates a schema at import. `PostgresPromptStore` is covered in the [prompts guide](./prompts.md).
 
@@ -25,6 +25,7 @@ await operations.migrate(); // or: nexus db sql | psql "$DATABASE_URL"
 | `PostgresTraceStore` | `/postgres/traces` | traces, with every query filter in SQL |
 | `PostgresDatasetStore`, `PostgresExperimentStore` | `/postgres/evaluate` | datasets and experiments |
 | `PostgresCircuitStateStore` | `/postgres/circuits` | circuit state shared between workers |
+| `PostgresVectorStore` | `/postgres/vectors` | retrieval chunks, ranked by pgvector in the database |
 
 **No driver is a dependency.** Each adapter takes anything with a `query(text, values)` method that
 resolves to `{ rows }`: `pg`'s `Pool` and `Client`, `@neondatabase/serverless`, PGlite.
@@ -85,17 +86,22 @@ SQL:
   leases, which must be the breaker's own clock.
 - `PostgresPromptStoreOptions` — `table`, a prefix: `nexus_prompt` gives `nexus_prompt_versions` and
   the tables beside it.
+- `PostgresVectorStoreOptions` — `dimensions`, the width of every vector, required; `embed`, the
+  function that embeds chunks and queries (hashed term vectors by default); `table` (`nexus_vectors`);
+  and `index`, `hnsw` by default for an approximate index that answers without scanning every row,
+  or `none` to scan exactly.
 
 Each adapter's `migrate()` applies its schema. Its migration function returns the same statements,
 for tooling of your own, and takes the same table options: `operationStoreMigration()`,
 `storeMigration()` (which also creates the pgvector extension when `vectorDimensions` is set),
-`traceStoreMigration()`, `evaluationStoreMigration()`, `circuitStoreMigration()`, and
-`promptStoreMigration()`.
+`traceStoreMigration()`, `evaluationStoreMigration()`, `circuitStoreMigration()`,
+`promptStoreMigration()`, and `vectorStoreMigration()`.
 
 `postgresMigration()` joins them into one script, which is what `nexus db sql` prints.
 `PostgresMigrationOptions` picks the adapters — each a `PostgresAdapter` name: `operations`, `store`,
-`traces`, `evaluation`, `circuits`, or `prompts`, all of them by default — and `vectorDimensions` for
-the store. The script uses the default table names; when you rename a table, build the script from
+`traces`, `evaluation`, `circuits`, `prompts`, or `vectors`, every one but `vectors` by default — and
+`vectorDimensions`, for the store and for the `vectors` table, which needs it and is included only
+when named: `nexus db sql --adapters vectors --vector-dimensions 1536`. The script uses the default table names; when you rename a table, build the script from
 the adapter's own migration function with the same options.
 
 ```ts
@@ -105,12 +111,36 @@ import { postgresMigration } from 'nexus-ai-pro/postgres';
 writeFileSync('migrations/0007_nexus.sql', postgresMigration({ adapters: ['operations', 'traces'] }));
 ```
 
+## Retrieval with pgvector
+
+`PostgresVectorStore` implements the retrieval contract — `add()`, `search()`, `searchVector()`, and
+`delete()` — that `MemoryVectorStore` and `QdrantVectorStore` share; the
+[grounding guide](./grounding.md) covers the contract. Only the nearest chunks leave the database,
+so a search costs the same whether the table holds a thousand chunks or ten million. Adding a chunk
+whose id exists replaces it, a metadata filter runs in SQL as a jsonb containment check, and a
+vector of the wrong width is refused before it reaches the database. `size()` counts the chunks.
+
+```ts
+import { PostgresVectorStore } from 'nexus-ai-pro/postgres/vectors';
+
+const chunks = new PostgresVectorStore(pool, {
+  dimensions: 1536,
+  embed: toEmbeddingFunction(ai, { model: 'text-embedding-3-small' }),
+});
+await chunks.migrate();
+await chunks.add(ingestDocuments(docs).chunks);
+const context = await chunks.search(question, { topK: 5, filter: { tenant: 'acme' } });
+```
+
 ## Limitations
 
 - A migration creates what is missing; it does not alter a table an earlier version created. The
   changelog says when a release changes a schema.
 - Without `vectorDimensions`, semantic search in `PostgresStore` reads and ranks every item under the
   prefix in the process.
+- The HNSW index is approximate: it can miss a match that an exact scan would return, and a metadata
+  filter is applied to the candidates it returns. For small tables, or when every match must be
+  found, use `index: 'none'`.
 
 <!-- reference:start -->
 ## Reference
@@ -177,4 +207,12 @@ specific entry point that provides it.
 | `PostgresTraceStore` | class | Traces in Postgres. |
 | `PostgresTraceStoreOptions` | interface | Options for the Postgres trace store. |
 | `traceStoreMigration` | function | The schema, as statements. |
+
+### `nexus-ai-pro/postgres/vectors`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `PostgresVectorStore` | class | Retrieval chunks in Postgres with pgvector, ranked by cosine similarity in the database. |
+| `PostgresVectorStoreOptions` | interface | Options for the pgvector store. |
+| `vectorStoreMigration` | function | The schema, as statements: the pgvector extension, the table, and its index. |
 <!-- reference:end -->

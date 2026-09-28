@@ -550,6 +550,16 @@
         "default": "./dist-cjs/postgres/store.js"
       }
     },
+    "./postgres/vectors": {
+      "import": {
+        "types": "./dist/postgres/vectors.d.ts",
+        "default": "./dist/postgres/vectors.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/vectors.d.ts",
+        "default": "./dist-cjs/postgres/vectors.js"
+      }
+    },
     "./postgres/traces": {
       "import": {
         "types": "./dist/postgres/traces.d.ts",
@@ -928,6 +938,16 @@
       "require": {
         "types": "./dist-cjs/rag/ingestion.d.ts",
         "default": "./dist-cjs/rag/ingestion.js"
+      }
+    },
+    "./rag/qdrant": {
+      "import": {
+        "types": "./dist/rag/qdrant.d.ts",
+        "default": "./dist/rag/qdrant.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/qdrant.d.ts",
+        "default": "./dist-cjs/rag/qdrant.js"
       }
     },
     "./evals": {
@@ -1337,6 +1357,9 @@
       "postgres/store": [
         "dist-cjs/postgres/store.d.ts"
       ],
+      "postgres/vectors": [
+        "dist-cjs/postgres/vectors.d.ts"
+      ],
       "postgres/traces": [
         "dist-cjs/postgres/traces.d.ts"
       ],
@@ -1450,6 +1473,9 @@
       ],
       "rag": [
         "dist-cjs/rag/ingestion.d.ts"
+      ],
+      "rag/qdrant": [
+        "dist-cjs/rag/qdrant.d.ts"
       ],
       "evals": [
         "dist-cjs/evals/index.d.ts"

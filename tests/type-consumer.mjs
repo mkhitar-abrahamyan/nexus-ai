@@ -213,6 +213,9 @@ import {
   type PostgresLikeClient,
 } from 'nexus-ai-pro/postgres';
 import { PostgresStore as SubpathPostgresStore } from 'nexus-ai-pro/postgres/store';
+import { PostgresVectorStore } from 'nexus-ai-pro/postgres/vectors';
+import { QdrantVectorStore } from 'nexus-ai-pro/rag/qdrant';
+import { MemoryVectorStore as RagMemoryVectorStore, type VectorStore } from 'nexus-ai-pro/rag';
 import { PostgresPromptStore } from 'nexus-ai-pro/postgres/prompts';
 import { definePrompt, type PromptVersion, type RenderedPrompt } from 'nexus-ai-pro/prompts';
 import {
@@ -619,6 +622,12 @@ const pool: PostgresLikeClient = { query: async () => ({ rows: [], rowCount: 0 }
 const durableOperations = new PostgresOperationStore(pool, { table: 'app.operations' });
 const postgresMemory: Store = new PostgresStore(pool, { vectorDimensions: 1536 });
 const subpathMemoryStore: Store = new SubpathPostgresStore(pool);
+const retrievalStores: VectorStore[] = [
+  new RagMemoryVectorStore(),
+  new PostgresVectorStore(pool, { dimensions: 1536, embed: async (texts) => texts.map(() => [0]), index: 'hnsw' }),
+  new QdrantVectorStore({ url: 'http://localhost:6333', collection: 'docs', dimensions: 1536, apiKey: 'key' }),
+];
+void retrievalStores[0]?.search('refunds', { topK: 3, filter: { tenant: 'acme' } });
 const postgresTraces: TraceStore = new PostgresTraceStore(pool);
 const postgresDatasets = new PostgresDatasetStore(pool);
 const postgresExperiments = new PostgresExperimentStore(pool);

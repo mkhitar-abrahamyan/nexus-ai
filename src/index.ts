@@ -199,10 +199,13 @@ export {
   MemoryVectorStore,
   createHashEmbeddings,
   cosineSimilarity,
+  matchesMetadata,
+  normalizeVector,
   type EmbeddingProvider,
   type VectorDocument,
   type VectorSearchOptions,
   type VectorSearchResult,
+  type VectorStore,
 } from './hallucination/retrieval.js';
 export {
   withKnowledgeGraphContext,

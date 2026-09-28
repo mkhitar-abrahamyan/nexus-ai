@@ -4,6 +4,7 @@ import { operationStoreMigration } from './operations.js';
 import { promptStoreMigration } from './prompts.js';
 import { storeMigration } from './store.js';
 import { traceStoreMigration } from './traces.js';
+import { vectorStoreMigration } from './vectors.js';
 
 export {
   circuitStoreMigration,
@@ -21,15 +22,19 @@ export { operationStoreMigration, PostgresOperationStore, type PostgresOperation
 export { PostgresPromptStore, type PostgresPromptStoreOptions, promptStoreMigration } from './prompts.js';
 export { PostgresStore, type PostgresStoreOptions, storeMigration } from './store.js';
 export { PostgresTraceStore, type PostgresTraceStoreOptions, traceStoreMigration } from './traces.js';
+export { PostgresVectorStore, type PostgresVectorStoreOptions, vectorStoreMigration } from './vectors.js';
 
 /** The Postgres adapters a migration can include. */
-export type PostgresAdapter = 'operations' | 'store' | 'traces' | 'evaluation' | 'circuits' | 'prompts';
+export type PostgresAdapter = 'operations' | 'store' | 'traces' | 'evaluation' | 'circuits' | 'prompts' | 'vectors';
 
 /** Options for `postgresMigration()`. */
 export interface PostgresMigrationOptions {
-  /** Adapters to include. Defaults to all of them. */
+  /**
+   * Adapters to include. Defaults to every one but `vectors`, which needs pgvector and
+   * `vectorDimensions`, so it is included only when named.
+   */
   adapters?: readonly PostgresAdapter[];
-  /** Enables pgvector for the long-term store. */
+  /** Enables pgvector for the long-term store, and sets the width of the `vectors` table. */
   vectorDimensions?: number;
 }
 
@@ -50,6 +55,12 @@ export function postgresMigration(options: PostgresMigrationOptions = {}): strin
     ...(adapters.has('evaluation') ? evaluationStoreMigration() : []),
     ...(adapters.has('circuits') ? circuitStoreMigration() : []),
     ...(adapters.has('prompts') ? promptStoreMigration() : []),
+    ...(adapters.has('vectors') ? vectorMigrationFor(options.vectorDimensions) : []),
   ];
   return `${statements.join(';\n\n')};\n`;
+}
+
+function vectorMigrationFor(dimensions: number | undefined): string[] {
+  if (dimensions === undefined) throw new RangeError('The vectors adapter needs vectorDimensions');
+  return vectorStoreMigration({ dimensions });
 }

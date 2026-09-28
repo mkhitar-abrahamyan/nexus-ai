@@ -1,6 +1,7 @@
 import type { CompletionRequest } from '../types/messages.js';
 import type { SecurityConfig, SecurityFinding, SecurityLevel, SecurityResult } from '../types/security.js';
 import { SchemaValidator } from './schema-validator.js';
+import { warnUnreadOption } from '../utils/deprecation.js';
 import { InjectionDetector } from './injection-detector.js';
 import { PIIDetector } from './pii-detector.js';
 import { OutputGuard, redactSensitiveText } from './output-guard.js';
@@ -36,7 +37,20 @@ export class SecurityPipeline {
   private inputGuard = new InputGuard();
   private semanticInjectionClassifier?: SemanticInjectionClassifier;
 
-  constructor(private config: SecurityLevel | SecurityConfig = 'standard') {}
+  constructor(private config: SecurityLevel | SecurityConfig = 'standard') {
+    if (typeof config === 'object') {
+      warnUnreadOption(
+        config.input?.injectionDetection?.sensitivity !== undefined,
+        'NEXUS_DEP_INJECTION_SENSITIVITY',
+        'InjectionDetectionConfig.sensitivity',
+      );
+      warnUnreadOption(
+        config.input?.tools?.requiresApproval !== undefined,
+        'NEXUS_DEP_TOOL_REQUIRES_APPROVAL',
+        'ToolPolicyConfig.requiresApproval',
+      );
+    }
+  }
 
   /** Checks and sanitizes a request before it is sent. */
   protectInput(request: CompletionRequest): SecurityResult<CompletionRequest> {

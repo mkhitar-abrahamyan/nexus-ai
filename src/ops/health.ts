@@ -1,3 +1,5 @@
+import { warnUnreadOption } from '../utils/deprecation.js';
+
 /** One provider's health, as tracked from real calls. */
 export interface ProviderHealthSnapshot {
   /** The provider. */
@@ -52,7 +54,13 @@ interface ProviderHealthState {
 export class ProviderHealthMonitor {
   private states = new Map<string, ProviderHealthState>();
 
-  constructor(private config: HealthConfig = {}) {}
+  constructor(private config: HealthConfig = {}) {
+    warnUnreadOption(
+      config.latencyHalfLife !== undefined,
+      'NEXUS_DEP_HEALTH_LATENCY_HALF_LIFE',
+      'HealthConfig.latencyHalfLife',
+    );
+  }
 
   /** Records a successful call and its latency. */
   recordSuccess(providerName: string, latencyMs: number): void {

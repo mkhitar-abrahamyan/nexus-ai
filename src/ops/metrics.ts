@@ -1,4 +1,5 @@
 import type { PipelineTraceStep } from '../pipeline/types.js';
+import { warnUnreadOption } from '../utils/deprecation.js';
 
 /** Where metrics go: counters, histograms, and gauges, labelled. */
 export interface MetricsSink {
@@ -155,6 +156,7 @@ export class MetricsCollector {
   constructor(private config: MetricsConfig = {}) {
     this.sink = config.sink || this.memory;
     this.prefix = config.prefix || 'nexus_ai';
+    warnUnreadOption(config.prometheus !== undefined, 'NEXUS_DEP_METRICS_PROMETHEUS', 'MetricsConfig.prometheus');
   }
 
   /** Counts a request. */

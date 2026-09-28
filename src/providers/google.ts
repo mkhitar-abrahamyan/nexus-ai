@@ -1,4 +1,5 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
+import { warnUnreadOption } from '../utils/deprecation.js';
 import type { CompletionRequest, ContentPart, Message } from '../types/messages.js';
 import type { GoogleProviderConfig } from '../types/config.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
@@ -79,6 +80,7 @@ export class GoogleProvider extends BaseProvider {
   constructor(config: GoogleProviderConfig) {
     super();
     this.config = config;
+    warnUnreadOption(config.projectId !== undefined, 'NEXUS_DEP_GOOGLE_PROJECT_ID', 'GoogleProviderConfig.projectId');
   }
 
   /** Runs one completion. */

@@ -1,6 +1,6 @@
 # Grounding: retrieval, citations, and verification
 
-<!-- covers: ./rag -->
+<!-- covers: ./rag ./rag/qdrant -->
 <!-- sources: src/hallucination src/rag -->
 
 Making an answer follow from evidence, and catching it when it does not. Ingestion splits documents
@@ -63,13 +63,53 @@ const { chunks, skippedFiles } = await ingestFilesAfterScan(uploads, {
 
 ## Retrieval
 
-`MemoryVectorStore` holds chunks and their vectors in process and searches them by cosine
-similarity, with `VectorSearchOptions` for how many results and how similar they must be. It takes
-any `EmbeddingProvider` — `toEmbeddingFunction()` adapts the embeddings family, so retrieval inherits
-routing, batching, and caching — and falls back to `createHashEmbeddings()`, deterministic hashed
-term vectors that need no provider and suit tests rather than production. `cosineSimilarity()` and
-`normalizeVector()` are the arithmetic underneath, and `VectorDocument` and `VectorSearchResult` are
-what goes in and comes out.
+Retrieval stores implement one contract, `VectorStore`: `add()` stores chunks — replacing any whose
+id already exists, so re-ingesting a document never duplicates its passages — `search()` finds the
+chunks closest to a text, `searchVector()` to a vector computed elsewhere, and `delete()` removes
+chunks by id. `VectorSearchOptions` sets `topK` (5 by default), `minScore` (0), and a `filter` of
+exact matches on top-level metadata fields, such as `{ tenant: 'acme' }`; `matchesMetadata()` is that
+test on its own. A `VectorDocument` is a chunk with an optional precomputed embedding, and a
+`VectorSearchResult` is a chunk with its cosine similarity.
+
+Three stores implement it, and pass the same contract tests:
+
+| Store | Entry point | Where the vectors live |
+| --- | --- | --- |
+| `MemoryVectorStore` | `nexus-ai-pro/rag` | In process. Development, tests, and a few thousand chunks. |
+| `PostgresVectorStore` | `nexus-ai-pro/postgres/vectors` | Postgres with pgvector, ranked in the database. See the [Postgres guide](./postgres.md). |
+| `QdrantVectorStore` | `nexus-ai-pro/rag/qdrant` | A Qdrant collection, through its REST API. |
+
+Each takes any `EmbeddingProvider` — `toEmbeddingFunction()` adapts the embeddings family, so
+retrieval inherits routing, batching, and caching — and falls back to `createHashEmbeddings()`,
+deterministic hashed term vectors that need no provider and suit tests rather than production.
+`cosineSimilarity()` and `normalizeVector()` are the arithmetic underneath.
+
+```ts
+import { ingestDocuments } from 'nexus-ai-pro/rag';
+import { QdrantVectorStore } from 'nexus-ai-pro/rag/qdrant';
+
+const store = new QdrantVectorStore({
+  url: process.env.QDRANT_URL!,
+  apiKey: process.env.QDRANT_API_KEY,
+  collection: 'support-docs',
+  dimensions: 1536,
+  embed: toEmbeddingFunction(ai, { model: 'text-embedding-3-small' }),
+});
+await store.migrate({ filterFields: ['tenant'] });
+
+await store.add(ingestDocuments(docs).chunks);
+const chunks = await store.search(question, { topK: 5, filter: { tenant: 'acme' } });
+const answer = await ai.complete(withRagContext({ model: 'auto', messages: [{ role: 'user', content: question }] }, { chunks }));
+```
+
+`QdrantVectorStore` needs no Qdrant client: it speaks HTTP through `fetch` and hashes ids with Web
+Crypto, so it runs on edge runtimes too. `QdrantVectorStoreOptions` takes the `url`, the
+`collection`, the `dimensions`, an `apiKey`, the `embed` function, and a `fetch`, extra `headers`,
+and a `timeoutMs` (30 seconds). `migrate()` creates the collection with cosine distance unless it
+exists, and indexes the metadata fields you filter on — a list as keywords, or a map naming each
+field's type. Qdrant point ids must be UUIDs, so each chunk id maps to a stable UUID and the original
+id travels in the payload. A failed request raises `QdrantError` with the status and Qdrant's
+response body.
 
 ## Answering from context
 
@@ -123,11 +163,30 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `cosineSimilarity` | function | Cosine similarity of two unit-length vectors, as their dot product. |
+| `createHashEmbeddings` | function | Hashed term-count vectors, normalized to unit length. |
 | `DocumentSource` | interface | A document to split into chunks. |
+| `EmbeddingProvider` | type | Turns texts into vectors, one per text, in order. |
 | `ingestDocuments` | function | Splits documents into overlapping chunks for retrieval. |
 | `IngestionOptions` | interface | How documents are split. |
 | `IngestionResult` | interface | The chunks produced from a set of documents. |
 | `ingestText` | function | Splits one text into overlapping chunks for retrieval. |
+| `matchesMetadata` | function | Whether a chunk's metadata satisfies an exact-match filter. |
+| `MemoryVectorStore` | class | Chunks and their vectors in process memory, searched by cosine similarity. |
+| `normalizeVector` | function | Scales a vector to unit length, so a dot product is its cosine similarity. |
+| `RagChunk` | interface | A passage of retrieved context. |
+| `VectorDocument` | interface | A chunk to store, with its vector when already computed. |
+| `VectorSearchOptions` | interface | Options for a vector search. |
+| `VectorSearchResult` | interface | A stored chunk returned by a search. |
+| `VectorStore` | interface | Where retrieval chunks live and how they are searched. |
+
+### `nexus-ai-pro/rag/qdrant`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `QdrantError` | class | Raised when Qdrant answers with an error. |
+| `QdrantVectorStore` | class | Retrieval chunks in a Qdrant collection, through its REST API. |
+| `QdrantVectorStoreOptions` | interface | Options for the Qdrant store. |
 
 ### `nexus-ai-pro`
 
@@ -137,11 +196,8 @@ specific entry point that provides it.
 | `completeVerified` | function | Completes a request, checks each claim in the answer against the context, and asks for one revision when claims are unsupported. |
 | `completeWithSelfConsistency` | function | Samples several answers and returns the one they agree with most. |
 | `ConsistencyClient` | interface | The part of a client that self-consistency needs. |
-| `cosineSimilarity` | function | Cosine similarity of two unit-length vectors, as their dot product. |
-| `createHashEmbeddings` | function | Hashed term-count vectors, normalized to unit length. |
 | `createOcrExtractor` | function | An extractor for images, around your own OCR function. |
 | `createPdfExtractor` | function | An extractor for PDF files, around your own PDF-to-text function. |
-| `EmbeddingProvider` | type | Turns texts into vectors, one per text, in order. |
 | `extractCitations` | function | Every distinct bracketed citation in a text. |
 | `extractFacts` | function | Splits an answer into sentence-level claims, dropping "I don't know" style answers. |
 | `FactualOptions` | interface | Options for `withFactualDefaults()`. |
@@ -154,18 +210,13 @@ specific entry point that provides it.
 | `KnowledgeGraphNode` | interface | An entity in a knowledge graph. |
 | `KnowledgeGraphOptions` | interface | Options for `withKnowledgeGraphContext()`. |
 | `lexicalEntailment` | function | Whether a context supports a claim by term overlap: at least 72% of its significant terms, or the claim appearing verbatim. |
-| `MemoryVectorStore` | class | Chunks and their vectors in process memory, searched by cosine similarity. |
 | `NliVerifier` | interface | A natural-language-inference model that judges whether a context entails a claim. |
-| `RagChunk` | interface | A passage of retrieved context. |
 | `RagOptions` | interface | Options for `withRagContext()`. |
 | `selectGraphFacts` | function | Ranks a graph's relationships by how many terms they share with the query and states the best as fact lines. |
 | `selectMostConsistent` | function | The response whose text is most similar to the others'. |
 | `SelfConsistencyOptions` | interface | Options for `completeWithSelfConsistency()`. |
 | `textSimilarity` | function | Jaccard similarity of two texts' terms, from 0 to 1. |
 | `validateCitations` | function | Checks that every bracketed citation in a response names a known chunk. |
-| `VectorDocument` | interface | A chunk to store, with its vector when already computed. |
-| `VectorSearchOptions` | interface | Options for a vector search. |
-| `VectorSearchResult` | interface | A stored chunk returned by a search. |
 | `VerificationClient` | interface | The part of a client that verified completion needs. |
 | `VerificationFact` | interface | One claim from an answer and whether the context supports it. |
 | `VerificationOptions` | interface | Options for checking an answer against its context. |

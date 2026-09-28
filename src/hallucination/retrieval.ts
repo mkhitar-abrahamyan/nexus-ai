@@ -21,21 +21,44 @@ export interface VectorSearchOptions {
   topK?: number;
   /** Lowest similarity returned. Defaults to 0. */
   minScore?: number;
+  /**
+   * Exact matches on top-level `metadata` fields, such as `{ tenant: 'acme' }`. Every field must
+   * match. Values are strings, numbers, or booleans, which every adapter can filter on natively.
+   */
+  filter?: Record<string, string | number | boolean>;
+}
+
+/**
+ * Where retrieval chunks live and how they are searched. `MemoryVectorStore`, `PostgresVectorStore`,
+ * and `QdrantVectorStore` implement it, and pass the same contract tests.
+ *
+ * Adding a chunk whose id already exists replaces it, so re-ingesting a document never duplicates
+ * its passages.
+ */
+export interface VectorStore {
+  /** Adds chunks, or replaces the ones whose id already exists, embedding those without a vector. */
+  add(documents: VectorDocument[]): Promise<void>;
+  /** The chunks most similar to a query text, best first. */
+  search(query: string, options?: VectorSearchOptions): Promise<VectorSearchResult[]>;
+  /** The chunks most similar to a vector computed elsewhere, best first. */
+  searchVector(vector: number[], options?: VectorSearchOptions): Promise<VectorSearchResult[]>;
+  /** Removes chunks by id. An id that is not stored is ignored. */
+  delete(ids: readonly string[]): Promise<void>;
 }
 
 /**
  * Chunks and their vectors in process memory, searched by cosine similarity. Defaults to hashed
  * term vectors, which need no provider.
  */
-export class MemoryVectorStore {
-  private documents: Array<VectorDocument & { embedding: number[] }> = [];
+export class MemoryVectorStore implements VectorStore {
+  private documents = new Map<string, VectorDocument & { embedding: number[] }>();
   private embed: EmbeddingProvider;
 
   constructor(embed: EmbeddingProvider = createHashEmbeddings) {
     this.embed = embed;
   }
 
-  /** Adds chunks, embedding those without a vector in one batch. */
+  /** Adds chunks, or replaces those whose id exists, embedding those without a vector in one batch. */
   async add(documents: VectorDocument[]): Promise<void> {
     const missing = documents.filter((doc) => !doc.embedding).map((doc) => doc.content);
     const generated = missing.length ? await this.embed(missing) : [];
@@ -43,36 +66,57 @@ export class MemoryVectorStore {
 
     for (const doc of documents) {
       const embedding = doc.embedding || generated[generatedIndex++];
-      this.documents.push({ ...doc, embedding: normalizeVector(embedding) });
+      this.documents.set(doc.id, { ...doc, embedding: normalizeVector(embedding) });
     }
   }
 
   /** The chunks most similar to a query, best first. */
   async search(query: string, options: VectorSearchOptions = {}): Promise<VectorSearchResult[]> {
+    const [queryEmbedding] = await this.embed([query]);
+    return this.searchVector(queryEmbedding, options);
+  }
+
+  /** The chunks most similar to a vector, best first. */
+  async searchVector(vector: number[], options: VectorSearchOptions = {}): Promise<VectorSearchResult[]> {
     const topK = options.topK || 5;
     const minScore = options.minScore ?? 0;
-    const [queryEmbedding] = await this.embed([query]);
-    const normalizedQuery = normalizeVector(queryEmbedding);
+    const normalizedQuery = normalizeVector(vector);
+    const results: VectorSearchResult[] = [];
 
-    return this.documents
-      .map(({ embedding, ...doc }) => ({
-        ...doc,
-        score: cosineSimilarity(normalizedQuery, embedding),
-      }))
-      .filter((doc) => doc.score >= minScore)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, topK);
+    for (const { embedding, ...doc } of this.documents.values()) {
+      if (!matchesMetadata(doc.metadata, options.filter)) continue;
+      const score = cosineSimilarity(normalizedQuery, embedding);
+      if (score >= minScore) results.push({ ...doc, score });
+    }
+    return results.sort((a, b) => b.score - a.score).slice(0, topK);
+  }
+
+  /** Removes chunks by id. */
+  async delete(ids: readonly string[]): Promise<void> {
+    for (const id of ids) this.documents.delete(id);
   }
 
   /** Removes every chunk. */
   clear(): void {
-    this.documents = [];
+    this.documents.clear();
   }
 
   /** Chunks held. */
   size(): number {
-    return this.documents.length;
+    return this.documents.size;
   }
+}
+
+/** Whether a chunk's metadata satisfies an exact-match filter. Every adapter filters the same way. */
+export function matchesMetadata(
+  metadata: Record<string, unknown> | undefined,
+  filter: VectorSearchOptions['filter'],
+): boolean {
+  if (!filter) return true;
+  for (const [key, expected] of Object.entries(filter)) {
+    if (metadata?.[key] !== expected) return false;
+  }
+  return true;
 }
 
 /**
@@ -105,6 +149,7 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot;
 }
 
+/** Scales a vector to unit length, so a dot product is its cosine similarity. A zero vector stays zero. */
 export function normalizeVector(vector: number[]): number[] {
   const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
   if (magnitude === 0) return vector.map(() => 0);
