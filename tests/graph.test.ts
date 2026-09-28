@@ -11,7 +11,7 @@ import {
   GraphValidationError,
 } from '../src/graph/errors.js';
 import { createGraph } from '../src/graph/graph.js';
-import { toGraphJSON, toMermaid } from '../src/graph/visualize.js';
+import { layoutGraph, toGraphJSON, toMermaid, toSvg } from '../src/graph/visualize.js';
 import { Command, END, Send } from '../src/types/graph.js';
 import { MemoryOperationStore } from '../src/operations/store.js';
 
@@ -1516,4 +1516,31 @@ test('describe() returns the shape, and toMermaid renders it with subgraphs and 
   assert.doesNotMatch(collapsed, /subgraph/);
 
   assert.deepEqual(toGraphJSON(description), description);
+});
+
+test('toSvg draws a standalone, escaped diagram with the same layout the studio uses', () => {
+  const graph = createGraph({ channels: { n: counter() } })
+    .addNode('plan', () => ({ n: 1 }))
+    .addNode('<act & "review">', () => ({ n: 1 }))
+    .setEntry('plan')
+    .addConditionalEdges('plan', (state) => (state.n > 3 ? END : '<act & "review">'), {
+      loop: '<act & "review">',
+      done: END,
+    })
+    .addEdge('<act & "review">', 'plan')
+    .compile({ name: 'loop' });
+
+  const svg = toSvg(graph, { highlight: ['plan'], colors: { highlight: '#ff0000' } });
+  assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+  assert.match(svg, /<title>loop<\/title>/);
+  assert.match(svg, /&#60;act &#38; &#34;review&#34;&#62;/, 'names are escaped');
+  assert.doesNotMatch(svg, /<act/, 'no raw markup from a node name');
+  assert.match(svg, /stroke-dasharray="5 4"/, 'conditional edges are dashed');
+  assert.match(svg, /stroke="#ff0000" stroke-width="2.5"/, 'the highlighted node');
+  assert.equal(
+    layoutGraph(graph).edges.some((edge) => edge.back),
+    true,
+    'the cycle is marked',
+  );
+  assert.equal(layoutGraph(graph.describe()).nodes.length, 4, 'a description lays out too');
 });

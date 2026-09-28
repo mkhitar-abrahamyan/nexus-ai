@@ -71,7 +71,7 @@ it as they are:
 - `graphs` maps a name to a compiled graph, or to a `StudioGraphSource` of the graph and how to list
   its threads — its `checkpointer`, or a `threads()` function. `StudioGraphLike` is the part of a
   compiled graph the view uses; `StudioCheckpoint` and `StudioInterrupt` are what it reads.
-  `MemoryGraphCheckpointer` and the operation-store checkpointer (Redis, Postgres) both list their
+  `MemoryGraphCheckpointer` and the operation-store checkpointer (Redis, Postgres, SQLite) both list their
   threads; a graph given alone can still open a thread by id.
 - `reviews` maps a name to an annotation queue, through `StudioReviewQueue`.
 - `datasets` and `experiments` are any `DatasetStore` and `ExperimentStore`.
@@ -115,7 +115,7 @@ Errors come back as JSON with a stable code, as a `StudioError`: a source that w
 
 ## Pieces you can reuse
 
-`layoutGraph()` lays a graph out in layers for drawing, returning a `GraphLayout` of `LaidOutNode` and
+`layoutGraph()`, re-exported from `nexus-ai-pro/graph/visualize`, lays a graph out in layers for drawing, returning a `GraphLayout` of `LaidOutNode` and
 `LaidOutEdge` values, with edges that point back up — cycles — marked so they can be drawn round the
 side. `parseArgs()` and `loadSources()` are the command's own argument parser and config loader.
 

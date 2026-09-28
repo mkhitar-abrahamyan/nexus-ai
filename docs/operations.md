@@ -158,7 +158,8 @@ the oldest settled records past `MemoryOperationStoreOptions.maxRecords` (1,000)
 `RedisOperationStore` takes a `RedisOperationLikeClient` — `hget`, `hset`, `hdel`, `hvals`, and
 optionally `eval` — and `RedisOperationStoreOptions` with a key `prefix` and `useEval`. With `eval`
 the compare-and-set is one atomic Lua call; without it, a read-compare-write that narrows the race
-but cannot close it. `PostgresOperationStore` is in the [Postgres guide](./postgres.md).
+but cannot close it. `PostgresOperationStore` is in the [Postgres guide](./postgres.md), and
+`SqliteOperationStore` in the [SQLite guide](./sqlite.md).
 
 An `OperationDispatcher` hands an accepted record to a worker. `BullMQOperationDispatcher` queues
 only the id and routing metadata on a `BullMQLikeOperationQueue`, using the operation id as the job
@@ -212,10 +213,12 @@ When work must survive a restart or run on another worker, use an operation inst
 
 ## Limitations
 
-- The in-memory operation store and `JobQueue` live in one process. A distributed deployment needs
-  `RedisOperationStore` or `PostgresOperationStore` and a dispatcher such as BullMQ.
+- The in-memory operation store and `JobQueue` live in one process. `SqliteOperationStore` shares
+  records between processes on one machine; a distributed deployment needs `RedisOperationStore` or
+  `PostgresOperationStore` and a dispatcher such as BullMQ.
 - Recovery re-runs a whole attempt, not the step it died on, so an executor with side effects should
-  be idempotent, using the operation id or its idempotency key.
+  be idempotent, using the operation id or its idempotency key. To lose only a step, run the work as
+  a graph or a [functional workflow](./graphs.md#functional-workflows), which checkpoints each step.
 
 ```ts
 import { runBatch } from 'nexus-ai-pro/jobs/batch';

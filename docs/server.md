@@ -74,9 +74,11 @@ available as `server.runs` and usable on its own — `StartRunOptions` and `RunM
 it, and `RunRecord` and `RunStatus` are what it reports.
 
 - **Crash recovery.** A worker that dies leaves a record whose lease lapses. Another replica's
-  `start()`, or `runs.recover()`, claims it and runs it again. Recovery re-runs an attempt, so allow
-  more than one: `operations: { retry: { maxAttempts: 2 } }`. Leave it at one when a re-run would
-  duplicate side effects.
+  `start()`, or `runs.recover()`, claims it as a new attempt, so allow more than one:
+  `operations: { retry: { maxAttempts: 2 } }`. A graph or workflow served by `graphAssistant()`
+  continues from the last checkpoint that run wrote, so only the step in flight when the worker died
+  runs again; any other assistant runs again from the start. The assistant sees the attempt in
+  `AssistantRunContext.attempt`, and its optional `recover()` hook is what continues the run.
 - **Idempotency.** `idempotencyKey` on a run replays the existing run instead of starting a second,
   which is what makes a retried request safe.
 - **Cancellation.** `POST /runs/:id/cancel` aborts a local run at once and is observed by another
@@ -141,7 +143,8 @@ exists. Errors share `ServerError` and a stable code: `BadRequestError`, `Unauth
 Threads, runs, and cron jobs are records in a `ServerStateStore`. A `ThreadRecord` is a conversation:
 its assistant, tenant, creator, creation and last-run times, the run in flight, and the metadata it
 was created with. `MemoryServerStore` is the default;
-`fromStore()` puts them in any long-term store — `MemoryStore`, `RedisStore`, or `PostgresStore` —
+`fromStore()` puts them in any long-term store — `MemoryStore`, `RedisStore`, `PostgresStore`, or
+`SqliteStore` —
 which is what lets a second replica see the first replica's threads. `StoreLike` is the slice of the
 store contract it uses. Point the operation store at the same backend and the server is stateless:
 
@@ -200,8 +203,9 @@ const graph = createGraph({ channels })
 ## Limitations
 
 - The family is experimental: it is new, and the shape of the HTTP surface may still gain routes.
-- Recovery re-runs a whole run, not the step it died on. An assistant with side effects should be
-  idempotent, or be left at one attempt.
+- Recovery repeats the step a run died in — for graphs and workflows — or the whole run, for any
+  other assistant. The repeated part should be idempotent — the run id makes a good key — or the run
+  should be left at one attempt.
 - The `enqueue` policy waits in the request that is queued, so a queued run holds a connection.
 - Cron resolution is one minute, and schedules are UTC.
 - Authentication is a hook, not an implementation: there is no bundled token format, user store, or

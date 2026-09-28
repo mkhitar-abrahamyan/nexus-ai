@@ -861,3 +861,31 @@ test('the runner reports the worker id it writes into leases', () => {
   assert.equal(runner.workerId, 'named-worker');
   assert.match(new OperationRunner().workerId, /^worker-[0-9a-f]{12}$/);
 });
+
+test('a workflow that crashed continues through the Redis operation store, without repeating a step', async () => {
+  const { workflow } = await import('../src/graph/functional.js');
+  const { OperationStoreCheckpointer } = await import('../src/graph/checkpointer.js');
+  const { client } = fakeRedis();
+  const charges: string[] = [];
+  let crash = true;
+  const build = () =>
+    workflow(
+      async (_: unknown, { step }) => {
+        await step('charge', () => {
+          charges.push('charge');
+          return 'charged';
+        });
+        return step('ship', () => {
+          if (crash) throw new Error('worker died');
+          return 'shipped';
+        });
+      },
+      { checkpointer: new OperationStoreCheckpointer(new RedisOperationStore(client) as never) },
+    );
+  await assert.rejects(build().invoke({}, { threadId: 'order-13' }), /worker died/);
+  crash = false;
+  let output: unknown;
+  for await (const event of build().continue('order-13')) output = (event as { output?: unknown }).output ?? output;
+  assert.equal(output, 'shipped');
+  assert.deepEqual(charges, ['charge']);
+});

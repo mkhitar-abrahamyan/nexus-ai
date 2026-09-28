@@ -43,12 +43,15 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // are shipped once for ESM and once for CommonJS.
 // Raised again in 1.18.0 for the agent server and its guide. The declarations are still shipped once
 // per module format, which is the item the roadmap carries.
+// Raised again in 1.21.0 for functional workflows, the SQLite adapters, and the SVG renderer: four new
+// subpaths, each dependency-free. The packed size still fits the earlier ceiling.
 const MAX_PACKED_BYTES = 760_000;
-const MAX_UNPACKED_BYTES = 4_600_000;
+const MAX_UNPACKED_BYTES = 4_800_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Most of
 // the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the
-// README size table reports third-party install cost per entry point.
-const MAX_INSTALLED_BYTES = 12_000_000;
+// README size table reports third-party install cost per entry point. Raised with the unpacked ceiling
+// in 1.21.0; slimming the root and making the validators optional in 2.0 is what brings it down.
+const MAX_INSTALLED_BYTES = 12_200_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

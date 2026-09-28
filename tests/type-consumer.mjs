@@ -184,7 +184,9 @@ import { MediaEvalRunner, MemoryReviewQueue } from 'nexus-ai-pro/images/evals';
 import type { MediaEvalReport } from 'nexus-ai-pro/images/evals';
 import { createGraph, MemoryGraphCheckpointer, appendList, counter, END, Send, Command } from 'nexus-ai-pro/graph';
 import type { GraphDescription, GraphEvent, GraphResult, GraphTask, NodeOptions, RetryPolicy } from 'nexus-ai-pro/graph';
-import { toMermaid } from 'nexus-ai-pro/graph/visualize';
+import { toMermaid, toSvg } from 'nexus-ai-pro/graph/visualize';
+import { workflow, type WorkflowContext } from 'nexus-ai-pro/graph/functional';
+import { SqliteOperationStore, SqliteStore, type SqliteLikeClient } from 'nexus-ai-pro/sqlite';
 import { createAgent, agentInput, type AgentMiddleware, type AgentState } from 'nexus-ai-pro/agent';
 import { MemoryStore, type Store, type StoreItem } from 'nexus-ai-pro/store';
 import { RedisStore } from 'nexus-ai-pro/store/redis';
@@ -583,6 +585,18 @@ const routedGraph = createGraph({ channels: { log: appendList<string>(), turns: 
   .compile({ interruptBefore: ['act'] });
 const shape: GraphDescription = routedGraph.describe();
 const diagram: string = toMermaid(shape, { direction: 'LR', highlight: ['act'] });
+const picture: string = toSvg(shape, { highlight: ['act'], colors: { background: '#000' } });
+const refund = workflow(
+  async (input: { orderId: string }, { step, interrupt }: WorkflowContext) => {
+    const total = await step('load', async () => 40, { retry: { maxAttempts: 2 }, timeoutMs: 1_000 });
+    return interrupt<boolean>({ reason: 'Refund ' + total + '?' }) ? { refunded: input.orderId } : undefined;
+  },
+  { name: 'refund' },
+);
+const sqliteClient: SqliteLikeClient = { run: () => ({ changes: 0 }), all: () => [], exec: () => undefined };
+const sqliteOperations = new SqliteOperationStore(sqliteClient, { table: 'ops' });
+const sqliteMemory = new SqliteStore(sqliteClient);
+void [picture, refund.invoke({ orderId: 'o-1' }, { threadId: 't' }), sqliteOperations, sqliteMemory];
 const edited = routedGraph.updateState('consumer-thread', { turns: 1 }, { asNode: 'decide' });
 const forked: Promise<string> = routedGraph.fork('consumer-thread', { step: 0 });
 const listened = routedGraph.invoke({}, { onEvent: (event: GraphEvent) => void event.type });

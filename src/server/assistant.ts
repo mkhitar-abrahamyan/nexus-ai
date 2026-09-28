@@ -19,7 +19,15 @@ export interface GraphLike {
     options: { signal?: AbortSignal; metadata?: Record<string, unknown> },
   ): AsyncIterable<unknown>;
   /** The thread's checkpoint, at its latest step or at one given. */
-  state(threadId: string, step?: number): Promise<{ step?: number; state?: unknown } | undefined>;
+  state(
+    threadId: string,
+    step?: number,
+  ): Promise<{ step?: number; state?: unknown; status?: string; metadata?: Record<string, unknown> } | undefined>;
+  /** Runs a thread on from its latest checkpoint, which is how a recovered run resumes at its last step. */
+  continue?(
+    threadId: string,
+    options: { signal?: AbortSignal; metadata?: Record<string, unknown> },
+  ): AsyncIterable<unknown>;
   /** Writes values into a thread's state, which is how a rollback is applied. */
   updateState?(threadId: string, values: Record<string, unknown>, options?: { asNode?: string }): Promise<unknown>;
 }
@@ -38,6 +46,10 @@ export interface GraphAssistantOptions {
  * Threads map to graph threads, so state, interrupts, history, and checkpoints are the graph's own;
  * the server adds only the record of which run owns a thread. A graph compiled without a
  * checkpointer still works for stateless runs, but cannot resume or roll back.
+ *
+ * A workflow from `nexus-ai-pro/graph/functional` is served the same way. When a worker recovers a
+ * run, the assistant continues from the last checkpoint that run wrote, so only the step in flight
+ * runs again.
  */
 export function graphAssistant(graph: GraphLike, options: GraphAssistantOptions = {}): ServerAssistant {
   return {
@@ -60,6 +72,20 @@ export function graphAssistant(graph: GraphLike, options: GraphAssistantOptions 
     },
     async step(threadId: string) {
       return (await graph.state(threadId))?.step;
+    },
+    async recover(threadId: string, context: AssistantRunContext) {
+      if (!graph.continue) return undefined;
+      const checkpoint = await graph.state(threadId);
+      // Only a checkpoint this run wrote, and one it had not finished with, is a place to continue
+      // from; anything else belongs to an earlier run, and the server starts this one again.
+      if (checkpoint?.metadata?.runId !== context.runId) return undefined;
+      if (checkpoint.status !== 'running' && checkpoint.status !== 'failed' && checkpoint.status !== 'interrupted') {
+        return undefined;
+      }
+      return graph.continue(threadId, {
+        signal: context.signal,
+        metadata: { ...options.metadata, runId: context.runId },
+      });
     },
     async restore(threadId: string, step: number) {
       if (!graph.updateState) return;

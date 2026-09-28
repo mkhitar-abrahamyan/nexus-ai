@@ -540,3 +540,80 @@ test('a remote graph is a node in a local graph', async () => {
     await new Promise<void>((resolve) => http.close(() => resolve()));
   }
 });
+
+test('a recovered run resumes at the step that died, for graphs and workflows alike', async () => {
+  const { workflow } = await import('../src/graph/functional.js');
+  const checkpointer = new MemoryGraphCheckpointer();
+  const charges: string[] = [];
+  let stuck = true;
+  const hang = () => new Promise<never>(() => undefined);
+
+  const graph = createGraph({ channels: { log: appendList<string>() } })
+    .addNode('charge', () => {
+      charges.push('graph');
+      return { log: ['charged'] };
+    })
+    .addNode('ship', async () => {
+      if (stuck) await hang();
+      return { log: ['shipped'] };
+    })
+    .addEdge('charge', 'ship')
+    .addEdge('ship', END)
+    .setEntry('charge')
+    .compile({ checkpointer });
+  const flow = workflow(
+    async (_: unknown, { step }) => {
+      await step('charge', () => {
+        charges.push('workflow');
+        return 'charged';
+      });
+      return step('ship', async () => {
+        if (stuck) await hang();
+        return 'shipped';
+      });
+    },
+    { checkpointer },
+  );
+
+  for (const [name, assistant] of [
+    ['graph', graphAssistant(graph)],
+    ['workflow', graphAssistant(flow)],
+  ] as const) {
+    const state = fromStore(new MemoryStore());
+    const operations = new MemoryOperationStore();
+    const events = new MemoryRunEventLog();
+    stuck = true;
+    const first = createAgentServer({
+      assistants: { orders: assistant },
+      state,
+      events,
+      operations: { store: operations, leaseMs: 40, heartbeatMs: 20, retry: { maxAttempts: 2 } },
+    });
+    const thread = await jsonOf<ThreadRecord>(await call(first, 'POST', '/threads', { assistant: 'orders' }));
+    const run = await jsonOf<RunRecord>(await call(first, 'POST', `/threads/${thread.id}/runs`, { input: {} }));
+    // Wait until the first step is checkpointed and the second is hanging, then let the lease lapse.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const abandoned = await operations.read(run.id);
+    assert.ok(abandoned, name);
+    await operations.update(
+      {
+        ...abandoned,
+        sequence: abandoned.sequence + 1,
+        lease: { owner: 'dead-worker', expiresAt: new Date(Date.now() - 60_000).toISOString() },
+      },
+      abandoned.sequence,
+    );
+
+    stuck = false;
+    const second = createAgentServer({
+      assistants: { orders: assistant },
+      state,
+      events,
+      operations: { store: operations, leaseMs: 1_000, retry: { maxAttempts: 2 } },
+    });
+    assert.deepEqual(await second.runs.recover(), [run.id], name);
+    const finished = await settled(second, run.id, 3_000);
+    assert.equal(finished.status, 'succeeded', name);
+    assert.equal(charges.filter((charge) => charge === name).length, 1, `${name}: the charge ran once`);
+  }
+});

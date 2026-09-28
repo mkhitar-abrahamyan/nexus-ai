@@ -439,8 +439,9 @@ from the root.
   that reconnects with an id never receives it again.
 - The server is not a security boundary on its own: authentication, authorization beyond tenancy and
   scopes, and rate limiting are the application's, through the hooks.
-- Recovery re-runs a whole run rather than the step it died on, so an assistant with side effects
-  should be idempotent or be left at a single attempt.
+- Recovery repeats the step a run died in for graphs and workflows served by `graphAssistant()`, and
+  the whole run for any other assistant, so the repeated part should be idempotent or the run left at a
+  single attempt.
 
 ## Studio stage (1.19.0)
 
@@ -454,6 +455,18 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
   stores themselves rather than on the studio's routes.
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
+
+## Durable execution stage (Unreleased)
+
+Functional workflows (`nexus-ai-pro/graph/functional`) and the SQLite adapters (`nexus-ai-pro/sqlite`)
+are experimental in production readiness. Their contracts follow the 1.x rules.
+
+- A workflow checkpoint is a graph checkpoint whose state holds the input, the recorded step results
+  keyed by step name and call order, and the output. That layout is stable across 1.x, so a thread
+  started by one release resumes on the next.
+- The SQLite table layouts may gain columns in a minor release; `migrate()` adds what is missing.
+- `ServerAssistant.recover()` and `AssistantRunContext.attempt` are optional additions: an assistant
+  without `recover()` behaves as before.
 
 ## Retrieval stores stage (1.20.0)
 

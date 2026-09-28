@@ -291,15 +291,23 @@ export class RunManager {
       signal: context.signal,
       principal: options.principal,
       metadata: options.metadata,
+      attempt: context.attempt,
     };
 
     await this.record(runId, 'status', { status: 'running' });
     await this.settle(runId, 'running');
 
+    // A later attempt continues from the run's own last checkpoint when the assistant can, so only the
+    // step in flight when the worker died runs again.
+    const recovered =
+      context.attempt > 1 && options.threadId && assistant.recover
+        ? await assistant.recover(options.threadId, runContext)
+        : undefined;
     const stream =
-      options.resume !== undefined && assistant.resume
+      recovered ??
+      (options.resume !== undefined && assistant.resume
         ? assistant.resume(options.threadId as string, options.resume, runContext)
-        : assistant.stream(options.input, runContext);
+        : assistant.stream(options.input, runContext));
 
     let last: unknown;
     try {
@@ -438,7 +446,8 @@ function typeOf(event: unknown): string {
 function outputOf(event: unknown): unknown {
   if (event === null || typeof event !== 'object') return event;
   const record = event as { state?: unknown; output?: unknown };
-  return record.state ?? record.output ?? event;
+  // A workflow's final event carries its return value as `output`; a graph's carries its state.
+  return record.output ?? record.state ?? event;
 }
 
 /** A graph reports an interrupt on the event that paused the run. */

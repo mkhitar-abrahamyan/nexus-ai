@@ -2,7 +2,7 @@
 
 <!-- covers: ./store ./store/redis -->
 
-Long-term memory from `nexus-ai-pro/store`: namespaced key-value items that outlive a run or a thread, with optional semantic search through an embedding function you inject. `MemoryStore` keeps them in process; `RedisStore`, on `nexus-ai-pro/store/redis`, shares them between processes; the Postgres adapter is in the [Postgres guide](./postgres.md).
+Long-term memory from `nexus-ai-pro/store`: namespaced key-value items that outlive a run or a thread, with optional semantic search through an embedding function you inject. `MemoryStore` keeps them in process; `RedisStore`, on `nexus-ai-pro/store/redis`, shares them between processes; the Postgres and SQLite adapters are in the [Postgres](./postgres.md) and [SQLite](./sqlite.md) guides.
 
 ## Long-term Memory
 
@@ -24,7 +24,8 @@ any embedding function you inject — the store never imports the embeddings run
 index a query falls back to matching text. `RedisStore` from `nexus-ai-pro/store/redis` carries the
 same contract across processes through a client-like interface, so no Redis package is a dependency
 here. `PostgresStore` from `nexus-ai-pro/postgres/store` does the same in Postgres, and ranks in the
-database with pgvector when `vectorDimensions` is set.
+database with pgvector when `vectorDimensions` is set. `SqliteStore` from `nexus-ai-pro/sqlite/store`
+keeps the same contract in one SQLite file.
 
 ## The contract
 
@@ -83,7 +84,7 @@ an agent with `createAgent({ store })`, and its tools and middleware receive it 
 - Semantic search ranks in the process for the memory and Redis stores: every item under the prefix
   is read and scored. Keep namespaces focused, or use `PostgresStore` with pgvector, which ranks in
   the database.
-- The Redis and Postgres stores keep values as JSON, so a value must survive `JSON.stringify()`. The
+- The Redis, Postgres, and SQLite stores keep values as JSON, so a value must survive `JSON.stringify()`. The
   memory store holds the object itself, so mutating it after `put()` changes what is stored.
 
 <!-- reference:start -->

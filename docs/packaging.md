@@ -73,7 +73,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/batch` | 101 KB | 18% | none |
 | `nexus-ai-pro/realtime/session` | 94 KB | 16% | none |
 | `nexus-ai-pro/embeddings` | 82 KB | 14% | none |
-| `nexus-ai-pro/server` | 80 KB | 14% | none |
+| `nexus-ai-pro/server` | 81 KB | 14% | none |
 | `nexus-ai-pro/providers/groq` | 72 KB | 13% | none |
 | `nexus-ai-pro/providers/mistral` | 72 KB | 13% | none |
 | `nexus-ai-pro/providers/azure-openai` | 71 KB | 12% | none |
@@ -102,11 +102,13 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 5% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 5% | none |
 | `nexus-ai-pro/evals` | 26 KB | 5% | none |
+| `nexus-ai-pro/graph/functional` | 24 KB | 4% | none |
 | `nexus-ai-pro/tracing` | 23 KB | 4% | none |
 | `nexus-ai-pro/images/stores` | 21 KB | 4% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 4% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 3% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 3% | none |
+| `nexus-ai-pro/sqlite` | 19 KB | 3% | none |
 | `nexus-ai-pro/voice` | 18 KB | 3% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 3% | none |
 | `nexus-ai-pro/telephony` | 18 KB | 3% | none |
@@ -124,6 +126,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/optimizer` | 11 KB | 2% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 2% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 2% | none |
+| `nexus-ai-pro/sqlite/operations` | 11 KB | 2% | none |
 | `nexus-ai-pro/postgres/operations` | 11 KB | 2% | none |
 | `nexus-ai-pro/postgres/store` | 11 KB | 2% | none |
 | `nexus-ai-pro/providers` | 10 KB | 2% | none |
@@ -134,6 +137,8 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/voice/openai` | 9 KB | 2% | none |
 | `nexus-ai-pro/images/moderation` | 9 KB | 2% | none |
 | `nexus-ai-pro/operations/adapters` | 9 KB | 2% | none |
+| `nexus-ai-pro/sqlite/store` | 9 KB | 2% | none |
+| `nexus-ai-pro/graph/visualize` | 9 KB | 2% | none |
 | `nexus-ai-pro/testing/record` | 9 KB | 2% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 2% | none |
 | `nexus-ai-pro/embeddings/models` | 8 KB | 1% | none |
@@ -154,7 +159,6 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/prompts/file` | 4 KB | 0.7% | none |
 | `nexus-ai-pro/prompts/redis` | 4 KB | 0.7% | none |
 | `nexus-ai-pro/operations/webhooks` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/graph/visualize` | 3 KB | 0.5% | none |
 | `nexus-ai-pro/postgres/circuits` | 3 KB | 0.5% | none |
 | `nexus-ai-pro/ops/circuit-store` | 3 KB | 0.5% | none |
 | `nexus-ai-pro/cache/memory-cache` | 3 KB | 0.5% | none |

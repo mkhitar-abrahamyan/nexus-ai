@@ -450,6 +450,46 @@
         "default": "./dist-cjs/graph/index.js"
       }
     },
+    "./graph/functional": {
+      "import": {
+        "types": "./dist/graph/functional.d.ts",
+        "default": "./dist/graph/functional.js"
+      },
+      "require": {
+        "types": "./dist-cjs/graph/functional.d.ts",
+        "default": "./dist-cjs/graph/functional.js"
+      }
+    },
+    "./sqlite": {
+      "import": {
+        "types": "./dist/sqlite/index.d.ts",
+        "default": "./dist/sqlite/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/sqlite/index.d.ts",
+        "default": "./dist-cjs/sqlite/index.js"
+      }
+    },
+    "./sqlite/operations": {
+      "import": {
+        "types": "./dist/sqlite/operations.d.ts",
+        "default": "./dist/sqlite/operations.js"
+      },
+      "require": {
+        "types": "./dist-cjs/sqlite/operations.d.ts",
+        "default": "./dist-cjs/sqlite/operations.js"
+      }
+    },
+    "./sqlite/store": {
+      "import": {
+        "types": "./dist/sqlite/store.d.ts",
+        "default": "./dist/sqlite/store.js"
+      },
+      "require": {
+        "types": "./dist-cjs/sqlite/store.d.ts",
+        "default": "./dist-cjs/sqlite/store.js"
+      }
+    },
     "./graph/visualize": {
       "import": {
         "types": "./dist/graph/visualize.d.ts",
@@ -1326,6 +1366,18 @@
       ],
       "graph": [
         "dist-cjs/graph/index.d.ts"
+      ],
+      "graph/functional": [
+        "dist-cjs/graph/functional.d.ts"
+      ],
+      "sqlite": [
+        "dist-cjs/sqlite/index.d.ts"
+      ],
+      "sqlite/operations": [
+        "dist-cjs/sqlite/operations.d.ts"
+      ],
+      "sqlite/store": [
+        "dist-cjs/sqlite/store.d.ts"
       ],
       "graph/visualize": [
         "dist-cjs/graph/visualize.d.ts"

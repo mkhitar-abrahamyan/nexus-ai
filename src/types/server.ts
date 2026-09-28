@@ -128,6 +128,8 @@ export interface AssistantRunContext {
   principal?: Principal;
   /** Application data submitted with the run. */
   metadata?: Record<string, unknown>;
+  /** Which attempt this is, starting at 1. Above 1 when a worker recovers the run after a crash or retries it. */
+  attempt?: number;
 }
 
 /**
@@ -150,6 +152,16 @@ export interface ServerAssistant {
   restore?(threadId: string, step: number): Promise<void> | void;
   /** The step the thread is at now, recorded before a run so `restore` has somewhere to go back to. */
   step?(threadId: string): Promise<number | undefined> | number | undefined;
+  /**
+   * Continues a run from where it stopped, on a later attempt. Resolves to the events of the
+   * continued run, or `undefined` when there is nothing of this run to continue, in which case the
+   * server starts it again. `graphAssistant()` provides it, so a recovered graph or workflow run
+   * repeats only the step that was in flight.
+   */
+  recover?(
+    threadId: string,
+    context: AssistantRunContext,
+  ): Promise<AsyncIterable<unknown> | undefined> | AsyncIterable<unknown> | undefined;
 }
 
 /** A scheduled run of an assistant. */

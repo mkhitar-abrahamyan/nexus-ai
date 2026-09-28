@@ -5,7 +5,7 @@
 // Requires the core package to be built (`npm run build`); builds the studio itself.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -87,7 +87,7 @@ try {
     path.join(consumerDir, 'package.json'),
     JSON.stringify({ name: 'studio-consumer', private: true, type: 'module' }, null, 2),
   );
-  npm(['install', core, studio], consumerDir);
+  npm(['install', ...peerFlags(), core, studio], consumerDir);
   const bin = path.join(
     consumerDir,
     'node_modules',
@@ -156,6 +156,30 @@ try {
   await stop(child);
   console.error(`Studio install fixture kept at ${tempRoot}`);
   throw error;
+}
+
+// Between releases the working tree is the next release, but its version field still names the last
+// one, so a studio whose peer floor is the next version cannot install against it. That one case — the
+// floor is exactly the next patch, minor, or major — installs without the peer check; any other
+// mismatch fails. Once the release bumps the version, the check is strict again.
+function peerFlags() {
+  const read = (dir) => JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  const version = read(repoRoot).version.split('.').map(Number);
+  const floor = /^>=(\d+)\.(\d+)\.(\d+)/.exec(read(studioDir).peerDependencies['nexus-ai-pro'] ?? '');
+  assert.ok(floor, 'the studio names a nexus-ai-pro floor');
+  const [major, minor, patch] = floor.slice(1).map(Number);
+  const below = major - version[0] || minor - version[1] || patch - version[2];
+  if (below <= 0) return [];
+  const [M, m, p] = version;
+  const next = [`${M}.${m}.${p + 1}`, `${M}.${m + 1}.0`, `${M + 1}.0.0`];
+  assert.ok(
+    next.includes(`${major}.${minor}.${patch}`),
+    `the studio needs nexus-ai-pro ${major}.${minor}.${patch}, which is not the next release after ${version.join('.')}`,
+  );
+  console.log(
+    `Unreleased: the studio needs nexus-ai-pro ${major}.${minor}.${patch}; installing without the peer check.`,
+  );
+  return ['--legacy-peer-deps'];
 }
 
 function stop(process) {

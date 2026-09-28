@@ -1,6 +1,6 @@
 # Graphs
 
-<!-- covers: ./graph ./graph/visualize -->
+<!-- covers: ./graph ./graph/functional ./graph/visualize -->
 
 Stateful graphs from `nexus-ai-pro/graph`: typed channels, parallel branches, conditional and deferred edges, interrupts for human input, checkpoints that survive a restart, time travel, subgraphs, per-node caching, and a Mermaid visualizer on `nexus-ai-pro/graph/visualize`. A graph-only application imports no third-party package.
 
@@ -220,7 +220,8 @@ const checkpointer = new OperationStoreCheckpointer(new RedisOperationStore(redi
 ```
 
 Writes are compare-and-set on the record's sequence, so two workers advancing the same thread cannot
-both win. `PostgresOperationStore` works the same way; see [Postgres](./postgres.md).
+both win. `PostgresOperationStore` and `SqliteOperationStore` work the same way; see
+[Postgres](./postgres.md) and [SQLite](./sqlite.md).
 
 **Subgraphs.** A compiled graph is a node:
 
@@ -350,12 +351,98 @@ description, or anything with `describe()` — and `MermaidOptions` for the dire
 whether subgraphs are expanded or collapsed, and which nodes to highlight. `toGraphJSON()` returns a
 copy of the description, for a UI or a test.
 
+`toSvg()` draws the graph as a standalone SVG document with no dependency — write it to a file,
+inline it in a page, or hand it to any SVG rasterizer for PNG. `SvgOptions` sets the nodes to
+highlight, a title for screen readers, and the colours: background, nodes, lines, text, highlights,
+and edges that point back up. Names are escaped, conditional edges are dashed, and cycles curve round
+the side.
+
+```ts
+import { writeFileSync } from 'node:fs';
+import { toSvg } from 'nexus-ai-pro/graph/visualize';
+
+writeFileSync('support-agent.svg', toSvg(graph, { highlight: checkpoint.next }));
+```
+
+`layoutGraph()` is the layered layout underneath — the same one the studio draws with. Each node sits
+one layer below the nearest node that leads to it, unreachable nodes are placed below everything
+else, and the result is a `GraphLayout`: each `LaidOutNode` with its position, size, kind, and
+deferred or cached marks, and each `LaidOutEdge` with a `back` flag for an edge that points up.
+
+## Functional workflows
+
+Some programs are better written as plain control flow — loops, early returns, `Promise.all` — and
+still need what a graph gives. `workflow()`, on `nexus-ai-pro/graph/functional`, makes a function
+durable: each `step()` records its result, so when the workflow runs again — resumed, continued, or
+recovered on another worker — finished steps return their recorded result without running, and the
+function carries on from the first step that did not finish.
+
+```ts
+import { workflow } from 'nexus-ai-pro/graph/functional';
+
+const refund = workflow(
+  async (input: { orderId: string }, { step, interrupt }) => {
+    const order = await step('load', () => orders.get(input.orderId));
+    const [risk, history] = await Promise.all([
+      step('score-risk', () => risk.score(order), { timeoutMs: 5_000 }),
+      step('load-history', () => orders.history(order.customerId)),
+    ]);
+    if (!interrupt<boolean>({ reason: `Refund ${order.total}?`, payload: { order, risk, history } })) {
+      return { refunded: false };
+    }
+    await step('refund', () => payments.refund(order.id, { idempotencyKey: order.id }), {
+      retry: { maxAttempts: 3 },
+    });
+    return { refunded: true };
+  },
+  { name: 'refund', checkpointer },
+);
+
+const paused = await refund.invoke({ orderId: 'o-42' }, { threadId: 'refund-o-42' });
+// Hours later, on any worker with the same checkpointer:
+const done = await refund.resumeWith('refund-o-42', true);
+```
+
+The function receives its input and a `WorkflowContext`: the thread id, a signal, the long-term
+`store`, `step()`, `interrupt()`, and `emit()` for custom events. A `WorkflowFn` is that function.
+
+- **`step(name, run, options)`** runs `run` once per thread. It receives a `StepContext` — the step's
+  name, the key its result is recorded under, the attempt, and a signal — and `StepOptions` set a
+  `retry` policy and a `timeoutMs`, which raises `WorkflowStepTimeoutError`. Name steps so the same
+  call has the same name every time; a name used more than once is numbered in call order, `name#2`.
+  Steps started together run in parallel, up to the workflow's `maxConcurrency`, and when one fails
+  its siblings still finish and are recorded, so a retry repeats only the failure.
+- **`interrupt(request)`** stops the run with status `awaiting_input` and the question pending. After
+  an answer, the function runs again from the top — finished steps return their recorded results —
+  and `interrupt()` returns the answer instead of stopping.
+
+`WorkflowOptions` names the workflow and sets the `checkpointer` (in memory by default, `false` for
+none), the `store`, a default `retry` for every step, `maxConcurrency` (16), and a clock. The
+`Workflow` it returns has `invoke()`, `stream()`, `resume()`, `resumeWith()`, `resumeInterrupts()` to
+answer several questions by id, `continue()` to run a thread on after a crash, a failure, or a
+cancellation, `state()`, `history()`, and `describe()`. `WorkflowRunOptions` sets the thread id, a
+signal, metadata for every checkpoint, and `onEvent`, which receives the same step events a graph's
+tasks produce, so `traceGraph()` records a workflow too.
+
+`invoke()` returns a `WorkflowResult`: the thread, the status, the `output`, the `WorkflowState` —
+the input, every recorded step result, and the output — the number of recorded steps, and any
+pending questions. `stream()` yields a `WorkflowEvent` for each finished step, then one for the
+outcome. A failed workflow records a `failed` checkpoint and throws, exactly as a graph does.
+
+A workflow's checkpoints are ordinary graph checkpoints, so every checkpointer stores them —
+memory, Redis, Postgres, and SQLite — and `graphAssistant()` serves a workflow on the agent server
+like a graph.
+
 ## Limitations
 
 - A node before an interrupt runs twice: once to ask, once to receive the answer. Keep that work
   cheap or idempotent.
 - The in-process checkpointer loses threads on restart; use an operation store for durability.
 - Cached node results must survive the cache store's serialization.
+- A workflow's code between steps runs again on every resume, so keep side effects inside steps,
+  and keep the order of step calls the same on every run: steps are matched to their recorded
+  results by name and call order. Step results must survive JSON serialization.
+- Catching the error `interrupt()` throws inside a workflow hides the question; let it propagate.
 
 <!-- reference:start -->
 ## Reference
@@ -423,12 +510,35 @@ specific entry point that provides it.
 | `StateOf` | type | The state object a schema describes. |
 | `StateUpdate` | type | What a node may write back. |
 
+### `nexus-ai-pro/graph/functional`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `StepContext` | interface | What a step's function receives. |
+| `StepOptions` | interface | How one step runs. |
+| `workflow` | function | Creates a durable workflow from a function. |
+| `Workflow` | class | A durable workflow: a function whose steps are checkpointed, so it survives interrupts, restarts, and a move to another worker. |
+| `WorkflowContext` | interface | What a workflow function receives besides its input. |
+| `WorkflowEvent` | type | One event of a streamed workflow run. |
+| `WorkflowFn` | type | A workflow function: its input and context in, its output out. |
+| `WorkflowOptions` | interface | Options for `workflow()`. |
+| `WorkflowResult` | interface | The outcome of a workflow run. |
+| `WorkflowRunOptions` | interface | Options for one run of a workflow. |
+| `WorkflowState` | interface | What a workflow checkpoint holds: the input, every completed step's result, and the output. |
+| `WorkflowStepTimeoutError` | class | Raised when a step outlives its `timeoutMs`. |
+
 ### `nexus-ai-pro/graph/visualize`
 
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `Describable` | type | Anything that can describe itself: a compiled graph, or a description already taken from one. |
+| `GraphLayout` | interface | A graph laid out for drawing. |
+| `LaidOutEdge` | interface | An edge between two placed nodes. |
+| `LaidOutNode` | interface | A node placed on the diagram. |
+| `layoutGraph` | function | Lays a graph out in layers: each node sits one layer below the nearest node that leads to it. |
 | `MermaidOptions` | interface | Options for `toMermaid()`. |
+| `SvgOptions` | interface | Colours and marks for `toSvg()`. |
 | `toGraphJSON` | function | The description as JSON, for a UI or a test that wants the shape rather than a picture. |
 | `toMermaid` | function | Renders a graph as a Mermaid flowchart. |
+| `toSvg` | function | Draws a graph as a standalone SVG document. |
 <!-- reference:end -->

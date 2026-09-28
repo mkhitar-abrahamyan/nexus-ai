@@ -42,4 +42,4 @@ refuses non-loopback hosts, and inserts every value as text.
 
 Full guide: [docs/studio.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md).
 
-Requires Node.js 22 and nexus-ai-pro 1.18 or newer. Experimental.
+Requires Node.js 22 and nexus-ai-pro 1.21 or newer. Experimental.

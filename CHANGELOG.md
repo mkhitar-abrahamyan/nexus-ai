@@ -4,6 +4,38 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Durable execution everywhere. Durability no longer requires drawing a graph, and a crash costs a
+step rather than a run.
+
+### Added
+
+- **Functional workflows**, experimental, on `nexus-ai-pro/graph/functional`. `workflow()` makes an
+  ordinary async function durable: each `step()` records its result, so a workflow that is resumed,
+  continued, or recovered on another worker returns finished steps from its checkpoint and carries on
+  from the first that did not finish. Steps run in parallel through `Promise.all`, bounded by
+  `maxConcurrency`, with per-step retries and timeouts; `interrupt()` pauses for a person exactly as in
+  a graph node; and the checkpoints are ordinary graph checkpoints, so every checkpointer stores
+  them, `traceGraph()` records them, and `graphAssistant()` serves a workflow on the agent server.
+- **Step-level recovery in the agent server.** A run recovered after its worker died continues from
+  the last checkpoint that run wrote — for graphs and workflows served by `graphAssistant()` — so
+  only the step in flight runs again. `AssistantRunContext.attempt` reports the attempt, and the new
+  optional `ServerAssistant.recover()` hook is how an assistant continues.
+- **SQLite persistence** on `nexus-ai-pro/sqlite`: `SqliteOperationStore` for durable operations and,
+  through `OperationStoreCheckpointer`, graph and workflow checkpoints; and `SqliteStore` for
+  long-term memory. Both take the database you open — `node:sqlite` and `better-sqlite3` directly,
+  libSQL through `fromLibsql()` — so no driver is a dependency, and both pass the same contract tests as
+  the memory, Redis, and Postgres stores.
+- **Diagrams as images.** `toSvg()` on `nexus-ai-pro/graph/visualize` draws a graph as a standalone,
+  escaped SVG document with no dependency. `layoutGraph()`, the layered layout underneath, moved from
+  the studio into the core visualizer, so both draw the same diagram.
+
+### Changed
+
+- The server reads a streamed event's `output` before its `state` when it records a run's output, so a
+  workflow's return value is the run's output.
+- `nexus-ai-pro-studio` requires nexus-ai-pro 1.21 or newer, and re-exports `layoutGraph()` from the
+  core visualizer.
+
 ## [1.20.0] - 2026-09-28
 
 Retrieval that scales past one process. Deprecated options now say so at run time, and every guide

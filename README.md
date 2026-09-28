@@ -114,6 +114,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Evaluation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md) | Datasets, evaluators, experiments, comparisons with a verdict, review queues, LLM judges |
 | [Prompts](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/prompts.md) | Typed templates, content versions, gated promotion, rollback, A/B splits, serving through outages |
 | [Postgres](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.md) | One adapter family for operations, memory, traces, evaluation, circuits, and prompts |
+| [SQLite](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/sqlite.md) | Durable operations, checkpoints, and memory on one machine, over any SQLite driver |
 | [Durable operations and jobs](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/operations.md) | Operations that survive a restart, webhooks, and in-process job helpers |
 | [Resilience and observability](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/resilience.md) | Circuit breaking, distributed rate limits, metrics, logs, and audit |
 | [Batch tiers](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/batch.md) | The providers' discounted batch APIs, resumable from any process |
