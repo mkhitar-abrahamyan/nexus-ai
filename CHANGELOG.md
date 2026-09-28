@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-09-28
+
 Retrieval that scales past one process. Deprecated options now say so at run time, and every guide
 explains every export it lists.
 
@@ -1041,7 +1043,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.20.0...HEAD
+[1.20.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.16.0...v1.17.0

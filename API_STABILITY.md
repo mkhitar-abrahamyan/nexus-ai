@@ -455,7 +455,7 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
 
-## Retrieval stores stage (Unreleased)
+## Retrieval stores stage (1.20.0)
 
 `PostgresVectorStore` (`nexus-ai-pro/postgres/vectors`) and `QdrantVectorStore` (`nexus-ai-pro/rag/qdrant`)
 are experimental in production readiness. The `VectorStore` contract they share with

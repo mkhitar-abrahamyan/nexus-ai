@@ -1116,7 +1116,7 @@ model runs record the model and provider that answered.
 
 ---
 
-## 20. 1.20.0: retrieval stores and deprecation warnings
+## 20. Shipped in 1.20.0 — retrieval stores and deprecation warnings
 
 **Retrieval that scales past one process.** A shared `VectorStore` contract — upsert by id, search by
 text or vector, delete, and a metadata filter — with pgvector (`nexus-ai-pro/postgres/vectors`) and
@@ -1131,6 +1131,13 @@ platform's deprecation channel, which 2.0 requires before it removes them.
 
 **Proof.** One contract test passes unchanged on the memory store, on pgvector with and without an
 HNSW index (PGlite), and on Qdrant's REST API.
+
+### What did not land, and where it went
+
+- **Qdrant is tested against a stand-in for its REST API**, not a live server; a run against a real
+  Qdrant joins the opt-in live conformance suite in 1.22.0, with the other vector stores.
+- **Image recordings** still need live credentials, and remain the condition for the image family
+  leaving experimental.
 
 ---
 
