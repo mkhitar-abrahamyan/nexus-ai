@@ -203,6 +203,169 @@ corruption blast radius; per-asset sidecars let concurrent writers proceed and l
 record. `purgeExpired()` is exact but costs a directory listing, so on a large S3 bucket prefer the
 provider's own lifecycle rules and keep this as the fallback.
 
+## Requests
+
+Every request shares `ImageRequestBase`: the `provider` and `model` (or `auto`), the `prompt`, a
+`negativePrompt`, a `count`, exact `dimensions` (an `ImageDimensions` of width and height) or an
+`aspectRatio`, a `quality` (an `ImageQuality` of `auto`, `low`, `medium`, `high`, or a provider's
+own), an `outputFormat` (an `ImageOutputFormat` such as `png`, `jpeg`, `webp`, or `avif`), a
+`delivery`, a `background` (an `ImageBackground` of `auto`, `opaque`, or `transparent`), a `seed`,
+a `requestId`, an `idempotencyKey`, a `signal`, and metadata.
+
+An `ImageGenerateRequest` is exactly that. An `ImageEditRequest` adds the `input` image, an optional
+`mask`, and `references` whose style or content the edit should follow. An `ImageMaskInput` is an
+image with its `polarity` stated explicitly — providers disagree about which colour is editable — and
+a `resizeMode`. An `ImageOperation` is `generate` or `edit`, and `ImageOperationSubmission` pairs one
+with its request for `submit()`.
+
+`ImageDelivery` says how results come back: `bytes`, a `url` with an expiry, or `stored` straight
+into an asset store.
+
+## Assets
+
+An `AssetInput` is an image going in: its `location`, its MIME type, a file name, a checksum, and
+metadata. An `AssetLocation` is one of three, by `AssetLocationKind`: an `AssetBytesLocation` holding
+the bytes, an `AssetUrlLocation` with a URL and when it expires, or an `AssetStoredLocation` naming an
+asset store's URI and id. An `AssetDescriptor` is an image coming out: the same fields plus width,
+height, byte length, and an `AssetProvenance` — the provider, model, operation, request, the assets
+it was derived from, and metadata. An `AssetChecksum` is an algorithm and a hex digest.
+
+## Results
+
+An `ImageResult` has the `assets` in order, `MediaUsage` (images and bytes in and out, megapixels, and
+provider units), `safetyFindings`, `warnings` — each an `ImageWarning` naming an option the provider
+could not honour exactly, with its code and the value requested — the raw response when asked for,
+and `OperationMeta`: the operation and request ids, the provider and model, the route when failover
+happened, start and completion times, latency, and the cost in its currency, absent rather than
+guessed when unknown.
+
+## The manager and configuration
+
+`ImageConfig` is the client's `images` option: a `defaultProvider`, `providers` by name, a `safety`
+policy, an `inputResolver`, the `tenantId` for stored inputs, an id generator, and a clock.
+`ImageManagerConfig` is a deprecated alias for it. `ImageManager` is the family behind `ai.images`:
+`registerImageProvider()`, `hasImageProvider()`, `listImageProviders()`, `generate()`, `edit()`,
+and `submit()`, which returns an in-process handle with the operation lifecycle's events.
+
+## Writing a provider
+
+An `ImageProvider` has an `info` — `ImageProviderInfo` with the name, locality, version, and
+`ImageProviderCapabilities`: the operations it implements, models, the input location kinds and
+delivery kinds it handles, input MIME types and output formats, fixed dimensions, aspect ratios,
+qualities, count limits, and whether it supports masks, references (and how many), transparency,
+seeds, and negative prompts — and `generate()` and `edit()`. Each call receives an
+`ImageProviderCallContext`: the operation and request ids, a signal, a deadline, the idempotency key,
+and trace headers.
+
+## Safety
+
+An `ImageSafetyPolicy` has `inspectInput()`, run on the prompt and inputs before the provider sees
+them, and `inspectOutput()`, run on each generated image before the caller does; both receive an
+`ImageSafetyContext` with the operation, provider, and model. Each returns `MediaSafetyFinding` values
+— an id, a category, a severity, an action (allow, review, or block), whether the input or an output
+triggered it, a confidence, which image, a message, and metadata. A blocking finding raises
+`ImageSafetyError`.
+
+`createOpenAIVisualModeration()` builds a policy from `VisualModerationOptions`: the API key, base
+URL, model (`omni-moderation-latest` by default), a `fetch`, a `blockThreshold` (the provider's own
+flag when omitted), a `reviewThreshold` below it, per-category `categoryThresholds`, whether to
+inspect input and output (both on), and `failOpen` (off, so a moderation outage blocks rather than
+waves content through). `combineSafetyPolicies()` runs several as one.
+
+## Validating inputs in detail
+
+`createImageInputResolver()` returns an `ImageInputResolver` built from an `ImageInputPolicy`: the
+URL policy of the web connector — pinned DNS, private networks blocked — plus `maxBytes` (20 MB),
+`maxPixels` (40 megapixels), `allowedMimeTypes` (PNG, JPEG, WebP, and GIF),
+`allowUnmeasurableDimensions` (off, because a format whose size cannot be read from its header is
+exactly what a decompression bomb looks like), `maxRedirects` (3), `timeoutMs` (15 seconds), an asset
+`store` for stored inputs, and a `tenantId`. A refused input is an `ImageInputError` whose `reason` is
+an `ImageInputRejection`: `too-large`, `too-many-pixels`, `unmeasurable`, `mime-mismatch`,
+`unsupported-type`, `fetch-failed`, `blocked-url`, or `not-found`.
+
+## The adapters in detail
+
+- `OpenAIImageProvider` takes `OpenAIImageProviderConfig`: the API key, base URL, organization and
+  project headers, default headers, a default model (`gpt-image-2`), `maxInputBytes` (50 MiB), a
+  `fetch`, `includeRawResponse`, and a `maskTransformer`. A refusal by OpenAI's own moderation raises
+  `OpenAIImageProviderError` with `OpenAIModerationDetails`: the stage that refused and the categories.
+- `GoogleImageProvider` takes `GoogleImageProviderConfig`: an API key, or an OAuth `accessToken` for
+  Vertex AI with its `baseUrl`, the generate model (`imagen-4.0-generate-001`) and edit model
+  (`imagen-3.0-capability-001`), default headers, a `fetch`, a `maskTransformer`, `personGeneration`,
+  and `includeRawResponse`.
+- `ComfyUIImageProvider` takes `ComfyUIImageProviderConfig`: the `baseUrl` (`http://127.0.0.1:8188`), a
+  `workflow` builder, the `checkpoint` for the bundled workflows, a `fetch`, the poll interval (500 ms,
+  backing off to 5 seconds), a `timeoutMs` (10 minutes), the supported `dimensions`, a
+  `maskTransformer`, headers, and a `clientId`. A `ComfyWorkflowBuilder` turns a request and a
+  `ComfyWorkflowContext` — the operation, the uploaded input and mask as `ComfyUploadedImage` values, and
+  a seed — into a `ComfyWorkflow`, a map of `ComfyNode` values whose inputs are literals or links to
+  other nodes.
+- `MockImageProvider` takes `MockImageProviderOptions` — a name, model, latency, and capabilities — and
+  returns deterministic images for tests.
+
+## Masks and image bytes
+
+An `AssetTransformer` converts a mask with `prepareMask()` for a `MaskTarget` — the provider's
+`MaskSemantics` (`white-is-editable`, `black-is-editable`, or `alpha-transparent-is-editable`) and the
+image's width and height — returning a `PreparedMask` of the same size with its editable
+`coverage`. `PngMaskTransformer` is the bundled one, with `PngMaskTransformerOptions` for the
+luminance `threshold` (128) and a `maxPixels` guard; `defaultMaskTransformer()` returns a shared one.
+`requireImageDimensions()` reads an input's size or refuses it.
+
+`nexus-ai-pro/images/transform` also exposes the small codec underneath: `decodePng()` into an
+`RgbaImage` — width, height, and RGBA bytes — with `DecodePngOptions.maxPixels` checked against the
+header before any pixel memory is allocated, and `encodePng()` back. `sniffImageType()` identifies a
+`SniffedImage` — a `SniffedImageFormat` of PNG, JPEG, GIF, WebP, AVIF, or BMP, and its MIME type — from
+the bytes alone, and `readImageDimensions()` reads an `ImageDimensionsInfo` from the header.
+
+## Media evaluation in detail
+
+`MediaEvalRunner` runs `MediaEvalCase` values — an id, the operation, the request, runs per case, and
+`MediaEvalExpectations` (text the image should contain and a minimum OCR accuracy of 0.8, a minimum
+prompt alignment, an image an edit should stay close to, whether it should be blocked, and latency
+and cost limits) — through a `MediaEvalTarget`. `MediaEvalOptions` supplies the `MediaEvalScorers` —
+an `alignment` judge, an `ocr` function, and a pixel `decode` — a review queue, review bands, and
+default runs. `MediaEvalRunOptions` names the experiment and sets a store, metadata, and a signal.
+
+The `MediaEvalReport` has a `MediaEvalCaseReport` per case — each run as a `MediaEvalRunReport` with
+its scores and failures, the pass rate, and `MetricStats` per metric — the overall pass rate and
+metrics, blocking accuracy, operational totals, the runs sent to review, and the run as an
+experiment. A run whose score falls in an uncertain band becomes a `ReviewItem` — the case, run,
+reason, scores, image, and findings — on a `ReviewQueue`; `MemoryReviewQueue` keeps them in memory.
+`perceptualSimilarity()` compares two images by a difference hash that survives re-encoding,
+`textAccuracy()` scores OCR text by edit distance, and `stats()` summarizes values.
+
+## Asset stores in detail
+
+An `AssetStore` has `put()`, `get()`, `stat()`, `delete()`, `sign()`, and `purgeExpired()`; each may
+answer synchronously or with a promise, as `AssetStoreResult` says. `put()` takes a `ByteAssetInput`
+— only bytes, not a URL or another store's asset — and `AssetPutOptions`: the tenant, the provenance,
+dimensions, and a `ttlSeconds` or an `expiresAt`. It returns an `AssetStat` — the asset id, tenant,
+a descriptor pointing back at the store, and its times — and `get()` returns a `ByteAssetDescriptor`
+with the bytes. `sign()` produces a URL through an `AssetSigner`, which receives an
+`AssetSignerContext` (the stat, the current time, and the requested lifetime from
+`AssetSignOptions`).
+
+`MemoryAssetStoreOptions` bounds the in-process store — `maxEntries` (1,000), `maxTotalBytes`
+(64 MiB), and `maxAssetBytes` (10 MiB) — with a default lifetime, an id generator, a clock, and a
+signer; `snapshot()` returns a `MemoryAssetStoreSnapshot` of what it holds against those limits.
+`FilesystemAssetStoreOptions` takes the `directory` and the same size, lifetime, id, clock, and signer
+settings. `S3AssetStoreOptions` takes a `client` — an `S3LikeClient` with `putObject`, `getObject`,
+`deleteObject`, `listObjects`, and optionally `headObject` and `getSignedUrl`, so no AWS SDK is a
+dependency — the `bucket`, a `prefix` (`nexus-assets/`), and the rest.
+
+Store errors extend `AssetStoreError`: `AssetStoreValidationError` for a malformed input,
+`AssetStoreCapacityError` naming the `AssetCapacityConstraint` that would be exceeded, and
+`AssetStoreSigningError` when no URL can be produced.
+
+## Errors
+
+Every image error extends `ImageError` with a stable code. `ImageValidationError` is a bad request or
+input, `ImageProviderError` a provider failure — with `ImageProviderNotFoundError`,
+`ImageCapabilityError` for an option the provider cannot honour, and `ImageProviderResponseError` for
+a response of the wrong shape — `ImageOperationCancelledError` is what a cancelled `submit()` rejects
+with, and `ImageSafetyError` is a blocking finding.
+
 <!-- reference:start -->
 ## Reference
 

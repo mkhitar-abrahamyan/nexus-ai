@@ -92,7 +92,8 @@ payload inflates it by a third and most queue backends cap job size well below o
 bytes belong in an `AssetStore` with only a reference on the record. The BullMQ dispatcher likewise
 queues the operation id and nothing else.
 
-The image family already runs on this lifecycle, so `ai.images.submit()` reports the same events.
+The image family already runs on this lifecycle, so `ai.images.submit()` reports the same events —
+through an in-process handle, not a store, so an image operation does not survive a restart.
 
 ## The lifecycle
 
