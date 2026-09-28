@@ -480,7 +480,7 @@ Google Imagen, and ComfyUI. Everything below is implemented and tested.
 
   Scores in an uncertainty band go to a human-review queue.
 - **Modality cleanup: deferred to 2.0.** Splitting `inputModalities` from `outputModalities` is a
-  breaking registry change, and it is listed in section 21.
+  breaking registry change, and it is listed in section 25.
 
 - **Graph and agent correctness: all nine fixed.** Fixing number 5 also exposed a related defect
   that is now fixed: after a paused step resumed, the outgoing edges of siblings that had already
@@ -541,7 +541,7 @@ be large to get there. Three rules apply to every item below.
    - Ship the change additively in 1.x wherever possible.
    - Anything that must break is marked `@deprecated` and noted in the changelog at least one minor
      release before 2.0.0.
-   - Every breaking item is collected in section 21.
+   - Every breaking item is collected in section 25.
 
 | Release | Theme | Gap it closes | Proof it ships |
 | --- | --- | --- | --- |
@@ -555,6 +555,10 @@ be large to get there. Three rules apply to every item below.
 | 1.18.0 | Self-hosted agent server | Deployment: runs, threads, background work, horizontal scale | Two replicas; a run survives killing the one that started it |
 | 1.19.0 | Local studio | UIs for traces, threads, approvals, experiments, prompts | `npx` studio against the example application |
 | 1.20.0 | Retrieval stores, deprecation warnings | Vector search that scales past one process; deprecations visible at run time | One contract test passing on memory, pgvector, and Qdrant |
+| 1.21.0 | Durable execution everywhere | Durable plain control flow; recovery at the step, not the run; SQLite; diagram images | A killed workflow and a killed server run each resume at the step that died |
+| 1.22.0 | Retrieval and integration breadth | Loaders, more vector stores, hybrid and reranked retrieval, an MCP registry | Hybrid retrieval beats vector-only on a stored dataset |
+| 1.23.0 | Team engineering platform | Shared studio with roles, a context hub, insights with proposed fixes, evaluation caching | A seeded regression found, clustered, and answered with an evaluated fix |
+| 1.24.0 | Deployment at scale, self-managed | Revisions, canaries, autoscaling signals, Helm, tenant quotas | A canary rolled back on a regression; workers scaling on queue depth |
 | 2.0.0 | Consolidation | One lifecycle, slim root, optional validators, stable surfaces | Migration guide and codemod; install-footprint targets met |
 
 ---
@@ -616,7 +620,7 @@ in about three seconds, not twelve.
   are synchronous exported functions, and an ESM module cannot load a dependency synchronously on
   first use, so deferring `ajv` and `zod` behind a dynamic import would mean making public functions
   async — a breaking change. Moving them to optional peer dependencies in 2.0.0 fixes the install
-  cost properly, and section 21 already carries it.
+  cost properly, and section 25 already carries it.
 
 **Budgets.** `/graph` measured 52 KB after the work, against the 40 KB this section first guessed;
 the estimate was wrong, not the implementation, and the budget file records the real number. The root
@@ -1112,7 +1116,7 @@ model runs record the model and provider that answered.
 
 ---
 
-## 20. 1.20.0: retrieval stores, and the last 1.x release
+## 20. 1.20.0: retrieval stores and deprecation warnings
 
 **Retrieval that scales past one process.** A shared `VectorStore` contract — upsert by id, search by
 text or vector, delete, and a metadata filter — with pgvector (`nexus-ai-pro/postgres/vectors`) and
@@ -1121,7 +1125,7 @@ Postgres adapter takes the client contract the family already uses, and the Qdra
 REST through `fetch`.
 
 **Deprecations visible at run time.** Every deprecated option warns once per process through the
-platform's deprecation channel, which 2.0 requires of the last 1.x release.
+platform's deprecation channel, which 2.0 requires before it removes them.
 
 **Documentation.** Every guide explains every export it lists, enforced by the guide check.
 
@@ -1130,9 +1134,107 @@ HNSW index (PGlite), and on Qdrant's REST API.
 
 ---
 
-## 21. 2.0.0: consolidation
+## 21. 1.21.0: durable execution everywhere
 
-2.0.0 ships once 1.11.0 through 1.20.0 are released, each experimental surface has had at least one
+Durability should not require drawing a graph, and a crash should cost a step, not a run.
+
+**Functional workflows.** `workflow()` and `step()`, on `nexus-ai-pro/graph/functional`, make ordinary
+TypeScript control flow durable: each `step()` result is checkpointed, so a workflow that is
+interrupted, crashes, or is resumed on another worker replays completed steps from the checkpoint and
+continues from the first one that did not finish. Steps run in parallel with `Promise.all`,
+`interrupt()` works inside a workflow exactly as in a graph node, and the same checkpointers, stores,
+retries, timeouts, tracing, and events apply. A workflow is also an assistant the server can host.
+
+**Step-level recovery in the server.** A run whose worker dies resumes from its last checkpoint rather
+than starting again, for graph and workflow assistants. Only the step in flight re-runs, so the
+idempotency requirement shrinks from "the whole run" to "one step".
+
+**SQLite persistence.** A checkpointer, a long-term store, and an operation store over SQLite,
+through an injected client (`node:sqlite`, `better-sqlite3`, or libSQL), on
+`nexus-ai-pro/sqlite/*`: durable single-node persistence with no server to run.
+
+**Diagrams as images.** `toSvg()` on `nexus-ai-pro/graph/visualize` draws a graph with the layout the
+studio already uses, with no dependency; any SVG rasterizer turns it into PNG.
+
+**Proof.** A workflow killed between two steps finishes on a second worker without re-running the
+first; a server run killed mid-graph resumes at the node it died on; the same tests pass on the
+memory, Redis, Postgres, and SQLite checkpointers.
+
+---
+
+## 22. 1.22.0: retrieval and integration breadth
+
+Retrieval quality and the breadth of sources it reads from, without a catalogue of dependencies.
+
+**Document loaders.** A `nexus-ai-pro/loaders/*` family — text, Markdown, HTML, CSV, JSON, PDF through
+an injected parser, web pages and sitemaps through the SSRF-safe fetch, and Git repositories — each
+streaming `DocumentSource` values into ingestion, each on its own subpath.
+
+**More vector stores**, behind the `VectorStore` contract and its contract test: Redis, SQLite
+(`sqlite-vec`), Pinecone, Weaviate, and Chroma, each through an injected client or REST.
+
+**Better retrieval.** Hybrid search — keyword and vector, fused by reciprocal rank — rerankers through
+an injected model, maximal marginal relevance, parent-document and multi-query retrieval, all as
+composable retrievers over any store.
+
+**Integration breadth through MCP.** A registry of MCP servers from one configuration file, with
+per-server allowlists, credentials from the environment, health checks, and tool bundles an agent
+receives by name.
+
+**Proof.** A fixed corpus loaded through the loaders into three stores; hybrid retrieval with
+reranking beats vector-only retrieval on a stored evaluation dataset, with the verdict from
+`compareExperiments()`.
+
+---
+
+## 23. 1.23.0: the team engineering platform
+
+The studio becomes something a team shares, and it starts finding problems on its own.
+
+**A shared studio.** Accounts through an authentication hook — OIDC, or identity headers from a
+reverse proxy — with roles (viewer, reviewer, editor, admin), an audit log of every action, comments
+on runs and review items, and safe binding beyond the loopback interface. Local, token-only use stays
+the default.
+
+**A context hub.** The prompt registry grows into versioned context bundles: prompts, instructions,
+tool sets, and skills versioned together, promoted through the same evaluation gates, diffed, rolled
+back, and exported to files so bundles move between projects and repositories.
+
+**Insights.** Failing and slow runs clustered by error, trajectory, and meaning; regressions detected
+across time windows; and, opt-in, a proposed fix — a candidate prompt or context version — evaluated
+against the dataset before a person is asked to promote it, with an optional pull request through an
+injected client.
+
+**Evaluation caching.** Target outputs reused across experiments when the example and the target's
+fingerprint are unchanged, so a comparison re-runs only what changed.
+
+**Proof.** Two users with different roles share one studio; a seeded regression is detected, clustered,
+and answered with a proposed fix that is evaluated and shown in the inbox for promotion.
+
+---
+
+## 24. 1.24.0: deployment at scale, self-managed
+
+Running assistants as a service without a hosted platform.
+
+**Revisions.** Deploy an assistant as a versioned revision, roll back, and split traffic between two
+revisions for a canary, with the split recorded on every run.
+
+**Scaling signals.** Queue depth, run latency, and lease health exposed as metrics an autoscaler reads,
+with a Helm chart and Kubernetes manifests that scale workers on them.
+
+**Tenancy at the server.** Per-tenant quotas, rate limits, and budgets enforced by the server.
+
+**A deployments view.** Revisions, traffic splits, and replica health in the studio.
+
+**Proof.** A canary revision takes a tenth of the traffic, is rolled back on a regression the insights
+detect, and a load test scales workers up and down on queue depth.
+
+---
+
+## 25. 2.0.0: consolidation
+
+2.0.0 ships once 1.11.0 through 1.24.0 are released, each experimental surface has had at least one
 minor release to settle, and every removal below has been deprecated in a 1.x release.
 
 **Breaking changes.**
@@ -1182,7 +1284,7 @@ moves to Node 24.
 
 ---
 
-## 22. Longer-term backlog
+## 26. Longer-term backlog
 
 **Absorbed by the releases above.** MCP adapters, human approval checkpoints, long-term memory, an
 evaluation platform, prompt and workflow versioning, record and replay fixtures, and the local
@@ -1209,7 +1311,7 @@ control plane.
 
 ---
 
-## 23. Design notes carried forward
+## 27. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -1261,7 +1363,7 @@ await ai.images.edit({
 
 ---
 
-## 24. How an item graduates
+## 28. How an item graduates
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.

@@ -200,8 +200,9 @@ Shipped so far:
 - a self-hosted agent server, and a local studio as a separate package;
 - per-entry-point size budgets.
 
-Next is 2.0.0: one lifecycle for every operation, a slim root import, and optional validators. The
-image family leaves experimental once recorded live conformance passes on all three backends.
+Next: durable functional workflows and step-level recovery, then retrieval and integration breadth,
+a shared team studio, and self-managed deployment at scale, before 2.0.0 consolidates. The image
+family leaves experimental once recorded live conformance passes on all three backends.
 
 ## Before Production
 

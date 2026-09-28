@@ -4,8 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-Retrieval that scales past one process, and the last 1.x release before 2.0: deprecated options now
-say so at run time, and every guide explains every export it lists.
+Retrieval that scales past one process. Deprecated options now say so at run time, and every guide
+explains every export it lists.
 
 ### Added
 
