@@ -197,37 +197,21 @@ Shipped so far:
 - queryable traces, an evaluation platform, and a CI gate on top of it;
 - record and replay of provider traffic;
 - prompt versioning: typed templates, content versions, gated promotion, and serving through outages;
+- a self-hosted agent server, and a local studio as a separate package;
 - per-entry-point size budgets.
 
-Next is a self-hosted agent server. The image family leaves experimental once recorded live
-conformance passes on all three backends.
+Next is 2.0.0: one lifecycle for every operation, a slim root import, and optional validators. The
+image family leaves experimental once recorded live conformance passes on all three backends.
 
-## Known Limitations
+## Before Production
 
-- Voice, telephony, images, local models, and custom providers are optional layers; enable only what
-  you use.
-- Audio and video preprocessing is limited, and provider modality support differs.
-- Bundled model metadata is a routing and estimation convenience, not a pricing contract.
-- Process-memory cache, queues, and asset storage are not enough for a distributed deployment; use
-  the Redis, BullMQ, filesystem, or S3 adapters instead.
-- Default hash embeddings suit tests and demos, not strong semantic search. Register a real
-  embedding provider for production retrieval.
-- NLI verification is an interface; bring a specialized verifier for high-confidence entailment.
-- Guardrails reduce risk but do not replace application authorization, provider-side moderation, or
-  human review of high-impact actions.
-- Realtime sessions are not yet routed through the metrics, audit, and rate-limit path that every
-  other family uses.
-- The image adapters are verified against documented wire shapes; recorded live conformance for all
-  three backends is still to come, which is why the family is experimental.
-
-## Production Notes
-
-- Use direct or rules-based routing when model choice is already known.
-- Keep semantic cache, semantic security, and custom hooks off latency-sensitive routes unless needed.
-- Disable response traces with `pipeline.includeTraceInResponse = false`.
-- Use shared adapters for distributed apps instead of process memory.
-- Treat bundled model pricing and context metadata as defaults, not financial truth.
-- Keep server-side authorization and provider moderation around high-risk workflows.
+Each guide ends with its limitations. The ones worth reading first: the
+[client guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/core.md#in-production) on latency, traces,
+and shared adapters; the [security guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/security.md#limitations)
+on what guardrails do not replace; and the
+[grounding guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/grounding.md#limitations) on embeddings
+and verification. Voice, telephony, images, realtime, local models, and custom providers are optional
+layers; enable only what you use.
 
 ## Donations
 

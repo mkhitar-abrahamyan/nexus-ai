@@ -172,6 +172,8 @@ and when it was verified. `resolveProvider()` names the provider a model belongs
   provider can change either between releases; override entries with `models.registry`.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
+- When the model is already known, use `direct` or `rules` routing: the auto-router ranks every
+  candidate on each request, which is work a known choice does not need.
 
 <!-- reference:start -->
 ## Reference

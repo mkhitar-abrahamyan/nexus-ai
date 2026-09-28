@@ -455,6 +455,17 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
 
+## Retrieval stores stage (Unreleased)
+
+`PostgresVectorStore` (`nexus-ai-pro/postgres/vectors`) and `QdrantVectorStore` (`nexus-ai-pro/rag/qdrant`)
+are experimental in production readiness. The `VectorStore` contract they share with
+`MemoryVectorStore` follows the 1.x rules: a minor release may add optional methods and options, not
+remove or reshape these.
+
+- The pgvector table layout may gain columns in a minor release; `migrate()` adds what is missing.
+- A Qdrant point id is derived from the chunk id and is stable across releases, so a collection
+  written by one version is read by the next.
+
 ## Deprecation process
 
 Deprecated APIs are marked with `@deprecated` in declarations and described in the changelog. Removals

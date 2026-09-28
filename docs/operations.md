@@ -210,6 +210,13 @@ does.
 
 When work must survive a restart or run on another worker, use an operation instead.
 
+## Limitations
+
+- The in-memory operation store and `JobQueue` live in one process. A distributed deployment needs
+  `RedisOperationStore` or `PostgresOperationStore` and a dispatcher such as BullMQ.
+- Recovery re-runs a whole attempt, not the step it died on, so an executor with side effects should
+  be idempotent, using the operation id or its idempotency key.
+
 ```ts
 import { runBatch } from 'nexus-ai-pro/jobs/batch';
 

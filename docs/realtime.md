@@ -205,6 +205,165 @@ Focused public imports are available for `realtime`, `realtime/session`, `realti
 `realtime/openai-server`, and `realtime/mock`. The deterministic mock is suitable for tests and demos;
 see [`examples/realtime-scheduling.ts`](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/examples/realtime-scheduling.ts).
 
+## Sessions in detail
+
+`createRealtimeSession()` builds a `RealtimeSession` from a `RealtimeSessionConfig`: an id, the
+`provider` name (a `RealtimeProviderName`, `openai` by default), the `model`, the `transport`, the
+`modalities` (each a `RealtimeModality`, `audio` or `text`), `instructions`, `tools` with a
+`toolChoice` and `toolExecution`, `interruption`, `reconnect`, `audio`, `conversation`, `telemetry`,
+`security`, browser `connection` options, metadata, `providerSession` fields passed through as they
+are, a `signal` that ends the session, a `clock`, and an `idFactory`.
+
+- `RealtimeAudioOptions` sets the input — its `RealtimeAudioFormat` (an encoding and a sample rate),
+  a transcription model, and `RealtimeTurnDetectionOptions`: `server_vad` by silence, `semantic_vad`
+  by meaning with an eagerness, or `null` to leave turn-taking to you — and the output format and
+  voice.
+- `RealtimeInterruptionOptions` decides what barge-in does: `enabled`, `cancelResponse`,
+  `truncateUnheardAudio`, a `stopPlayback` hook for your speaker, and `getPlaybackPositionMs`, where
+  truncation cuts.
+- `RealtimeReconnectOptions` sets `maxAttempts` and a backoff from `initialDelayMs` by `multiplier` up
+  to `maxDelayMs`.
+- `RealtimeSecurityOptions` sets `maxSessionDurationMs` and `maxAudioDurationMs`, both fatal when
+  reached, a `toolAllowlist`, `retainTranscripts`, and a `piiHook` that rewrites every transcript
+  before anything sees it.
+- `RealtimeConversationOptions` sets what the record keeps: transcripts, tool calls, raw events and
+  how many (10,000), and a `redactTranscript` hook.
+- `RealtimeTelemetryOptions` connects a `RealtimeTracerLike` — spans through `RealtimeSpanLike` — and a
+  `RealtimeMeterLike` whose instruments are `RealtimeMetricInstrumentLike` values, so OpenTelemetry
+  plugs in without a dependency; it also takes `includeTranscripts`, an `estimateCost` callback that
+  receives `RealtimeTokenUsage` (provider, model, token counts, and the raw payload), attributes, and
+  `onEvent` and `onMetrics` callbacks.
+- `RealtimeConnectOptions` is what `connect()` takes in a browser: a signal, the microphone (`true`
+  or `getUserMedia` constraints), an `audioElement` — anything shaped like a `RealtimeAudioElementLike`
+  — or a `remoteAudioSink` for your own playback.
+
+A session moves through `RealtimeSessionState`: `idle`, `connecting`, `connected`, `reconnecting`,
+`disconnecting`, `disconnected`, and `failed`. Beyond `connect()` and `disconnect()`, it has
+`sendText()`, `sendAudio()`, `commitAudio()`, `clearAudio()`, `createResponse()`, `updateSession()`,
+`sendEvent()` for a raw `RealtimeClientEvent`, `interrupt()`, `markAudioPlayed()`, `confirmTool()`,
+`executeTool()` and `submitToolResult()` for manual tool execution, `getConversation()`,
+`getMetrics()`, `getRawEvents()` (each a `RealtimeServerEvent`), `whenIdle()`, and `export()`.
+
+Every session event is a `RealtimeEvent`, and `RealtimeSessionEvents` maps each name to its payload for
+`on()`. `TypedEventEmitter` is the small emitter underneath, with no dependency on Node's `events`.
+`RealtimeClock` and `RealtimeIdFactory` are what tests replace; `createRealtimeId()` makes
+`<prefix>_<uuid>` ids, falling back where `crypto.randomUUID` is missing.
+
+## Agents and providers
+
+`createRealtimeAgent()` takes `CreateRealtimeAgentOptions` — a session configuration with the
+`provider` and `voice` kept apart — and `RealtimeAgentVoiceOptions`: the transport kind, interruption,
+turn detection, the voice, and full audio settings. `OpenAIRealtimeProvider` is a
+`RealtimeTransportProvider`: a name and `createTransport()`. `OpenAIRealtimeProviderOptions` sets the
+default transport (`webrtc`), a `sessionEndpoint` for WebRTC, an `apiKey` for server WebSockets, and
+options for each transport.
+
+`createOpenAISessionUpdate()` builds OpenAI's `session.update` event from a configuration,
+`createOpenAIToolResultEvents()` builds the events that return a tool result and ask the model to
+continue, and `normalizeOpenAIRealtimeEvent()` turns one OpenAI event into neutral session events —
+the pieces a custom transport for OpenAI reuses.
+
+## Transports
+
+A `RealtimeTransport` has a `kind` — a `RealtimeTransportKind`: `webrtc`, `websocket`, `mock`, or your
+own — a `state` (a `RealtimeTransportState` from `idle` to `disconnected` or `failed`), `connect()`,
+`sendAudio()`, `sendEvent()`, `interrupt()`, `disconnect()`, and `on()`. `RealtimeTransportEvents`
+names what it emits: a `RealtimeTransportConnectedEvent`, each `RealtimeTransportDataEvent` from the
+provider, each `RealtimeTransportAudioEvent` of model audio, and a `RealtimeTransportDisconnectedEvent`.
+
+**Browser WebRTC.** `OpenAIWebRTCTransport` takes `OpenAIWebRTCTransportOptions`. An
+`OpenAIWebRTCSessionMode` of `unified-sdp` sends the browser's offer to your `sessionEndpoint`;
+`ephemeral-token` connects to OpenAI with an `OpenAIEphemeralCredential`, given directly or fetched by
+an `OpenAIWebRTCTokenProvider`. It also takes headers for your endpoint, peer-connection settings and
+a `RealtimePeerConnectionFactory`, the microphone or a stream or track of your own, a `fetch`, an abort
+controller factory, timers, a connect timeout (15 seconds), an ICE-disconnect grace period, the data
+channel's label and options, and whether `sendAudio()` may use the data channel. Every platform API
+is structural — `RealtimePeerConnectionLike`, `RealtimeDataChannelLike`,
+`RealtimeSessionDescriptionLike`, `RealtimeMediaDevicesLike`, `RealtimeMediaStreamLike`,
+`RealtimeMediaTrackLike`, `RealtimeFetchLike` with `RealtimeFetchInitLike` and
+`RealtimeFetchResponseLike`, and `RealtimeAbortControllerLike` — so it runs without a DOM shim and is
+tested without a browser.
+
+**Server WebSocket.** `OpenAIWebSocketTransport` takes `OpenAIWebSocketTransportOptions`: the URL, an
+`apiKey` or an ephemeral token or an `OpenAIEphemeralTokenProvider`, headers and subprotocols, the
+`OpenAIWebSocketFactory` that opens the socket — it receives `OpenAIWebSocketFactoryOptions` with the
+headers and protocols, and returns a `RealtimeWebSocketLike` — connect and disconnect timeouts (10
+seconds and 1 second), the largest audio chunk (15 MiB), a text codec, timers, and a clock.
+
+**Server helpers.** `nexus-ai-pro/realtime/openai-server` keeps the API key on your server, through
+`OpenAIRealtimeServerOptions`: the key, model, session settings, base URL, a `safetyIdentifier` for the
+end user, a `fetch` (an `OpenAIRealtimeServerFetch` returning an `OpenAIRealtimeServerFetchResponse`),
+and a `formDataFactory` for runtimes without `FormData` (a `FormDataLike`).
+`createOpenAIRealtimeCall()` exchanges an SDP offer, `createOpenAIRealtimeSessionEndpoint()` wraps
+that as a function for your route, and `createOpenAIRealtimeClientSecret()` mints an
+`OpenAIRealtimeClientSecret` — a token, its expiry, and OpenAI's response — for a browser.
+
+**Mock.** `MockRealtimeTransport` plays a script of `MockRealtimeTransportStep` values — provider
+events, audio, errors, and disconnects — with `MockRealtimeTransportOptions` for the script,
+`autoPlay`, a session id, a clock, and `strictState`. `enqueue()`, `advance()`, `flush()`, and the
+`emit` methods drive it by hand.
+
+## Tools in detail
+
+A `RealtimeTool` has a name, a description, JSON Schema `parameters` or a `schema` — a
+`RealtimeToolSchema` with `parse`, `safeParse` (returning a `RealtimeSchemaResult`), or `validate` —
+`execute()`, `requiresConfirmation` (a flag or a function of the input), `safe`, `cache`, and metadata.
+`defineTool()` checks it and, with `DefineRealtimeToolOptions`, infers the input type from the
+schema through `InferRealtimeSchema`. `AnyRealtimeTool` is the type-erased shape a mixed list holds.
+`toOpenAIRealtimeTools()` converts tools to OpenAI's definitions.
+
+`execute()` receives a `RealtimeToolContext`: the session id, the call id, an idempotency key stable
+across retries, the attempt, and a signal. The executor sees each call as a `RealtimeToolCall` — the
+id, name, parsed arguments, the raw arguments and the parse error when parsing failed (the tool is not
+run then), the item and response it belongs to, and its idempotency key — and returns a
+`RealtimeToolResult`: the call, whether it succeeded, the result or error, the duration, and the
+attempts.
+
+`RealtimeToolExecutionOptions` is the session's `toolExecution`: `automatic` or `manual` mode, a
+per-attempt timeout, parallel calls, retries and their delay (for `safe` tools only), allowed tools
+intersected with the security allowlist, a `RealtimeToolCache` (`get` and `set` with a lifetime) with
+its failure mode, and a `confirm` function. `RealtimeToolExecutor` is the executor on its own, with
+`RealtimeToolExecutorOptions` — the session id, a signal, a clock, an id factory, and
+`RealtimeToolExecutorHooks` for a call starting, needing confirmation, and completing — and
+`register()`, `has()`, `list()`, `execute()`, and `clearCompleted()`. Each call id runs at most once.
+
+## The conversation record
+
+A `RealtimeConversation` has its id, provider, model, start and end, a status of `active`,
+`completed`, or `failed`, the items in order, `ConversationMetrics` — turns, tool calls,
+interruptions, reconnects, errors, audio durations, tokens, and the estimated cost, beside the
+`RealtimeLatencyMetrics` of the latest turn: connection setup, speech end to response, speech end to
+first audio, tool duration, tool result to first audio, and the whole turn — and metadata.
+
+Each `ConversationItem` shares `ConversationItemBase` — an id, a time, the provider's item id, the raw
+event, and metadata — and is one of `UserSpeechItem`, `AssistantSpeechItem`, `TextMessageItem`,
+`ToolCallItem`, `ToolResultItem`, `InterruptionItem`, or `RealtimeConversationErrorItem`.
+
+`nexus-ai-pro/realtime/conversation` is the record's logic as pure functions, for a server that
+rebuilds a record from stored events: `createRealtimeConversation()` from
+`CreateRealtimeConversationOptions`, `reduceRealtimeConversation()` to apply one event (with
+`RealtimeConversationReducerOptions`), `createConversationMetrics()`, `withConversationMetrics()`,
+`snapshotRealtimeConversation()`, and `exportRealtimeConversation()` in any
+`RealtimeConversationExportFormat`: `json`, `openai-events`, `text`, or `analytics` — a
+`RealtimeAnalyticsExport` of durations, item counts, and metrics, without transcripts.
+
+## Errors
+
+A `RealtimeError` has a message, the provider's code, a `RealtimeErrorCategory` — `authentication`,
+`permission`, `configuration`, `capability`, `network`, `timeout`, `rate-limit`, `provider`,
+`protocol`, `tool`, `confirmation`, `abort`, or `unknown` — whether retrying could succeed, whether it
+is fatal to the session, the HTTP status, the provider event that reported it, the cause, and the raw
+payload; `RealtimeErrorOptions` constructs one. `toRealtimeError()` wraps any error, inferring the
+category.
+
+## Limitations
+
+- OpenAI is the only bundled provider. Another provider implements `RealtimeTransportProvider`.
+- A session is not durable: a process that dies loses it, and the conversation record is what you
+  store to keep it.
+- Realtime sessions report through their own `telemetry` hooks, not yet through the client's shared
+  metrics, audit log, and rate limiter that every other family uses.
+
 <!-- reference:start -->
 ## Reference
 

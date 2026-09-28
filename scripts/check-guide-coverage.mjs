@@ -4,8 +4,9 @@
  *
  * Every feature has a guide under `docs/`, and each guide declares the entry points it covers in a
  * comment: `<!-- covers: ./graph ./graph/visualize -->`. This checks that every entry point in
- * `package.json` `exports` is covered by a guide, that every export of an entry point is named in a
- * guide covering it, and that the README links to every guide.
+ * `package.json` `exports` is covered by a guide, that every export of an entry point is named in the
+ * text of a guide covering it — not only in its generated reference, which lists names without
+ * explaining them — and that the README links to every guide.
  *
  * An export is resolved to its declaration first, so a name the root re-exports from a family is
  * covered by that family's guide. A feature with no entry point of its own, reachable only from the
@@ -19,7 +20,7 @@
  *
  *   node scripts/check-guide-coverage.mjs            report, and fail on any gap or stale reference
  *   node scripts/check-guide-coverage.mjs --update   regenerate every guide's reference
- *   node scripts/check-guide-coverage.mjs --list     also list every export no guide names
+ *   node scripts/check-guide-coverage.mjs --list     also list every export no guide's text explains
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -207,6 +208,11 @@ for (const item of declarations.values()) {
   if (!placementOf(item).guide) problems.push(`no guide lists ${item.name} (${item.file || 'unknown file'})`);
 }
 
+/** A guide's own text: everything before its generated reference. */
+const proseOf = (text) => {
+  const start = text.indexOf(REFERENCE_START);
+  return start < 0 ? text : text.slice(0, start);
+};
 const mentions = (text, name) =>
   new RegExp(`(^|[^A-Za-z0-9_$])${name.replace(/\$/g, '\\$')}([^A-Za-z0-9_$]|$)`).test(text);
 const missing = [];
@@ -215,7 +221,7 @@ for (const item of declarations.values()) {
   const covering = guides.filter(
     (guide) => guide === placed || [...item.entries].some((subpath) => guide.covers.has(subpath)),
   );
-  if (!covering.some((guide) => mentions(guide.text, item.name))) {
+  if (!covering.some((guide) => mentions(proseOf(guide.text), item.name))) {
     missing.push({ name: item.name, entries: [...item.entries], guides: covering.map((guide) => guide.file) });
   }
 }
@@ -228,7 +234,7 @@ for (const guide of guides) {
 const total = declarations.size;
 const covered = total - missing.length;
 console.log(
-  `Guide coverage: ${covered.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} exports named in a guide (${(
+  `Guide coverage: ${covered.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} exports explained in a guide's text (${(
     (covered / total) * 100
   ).toFixed(2)}%), ${guides.length} guides covering ${entries.length} entry points.`,
 );
@@ -239,6 +245,6 @@ if (list) {
 }
 for (const problem of problems) console.log(`  - ${problem}`);
 if (missing.length > 0 || problems.length > 0) {
-  console.log('Guide coverage is incomplete. Run with --list to see every export no guide names.');
+  console.log("Guide coverage is incomplete. Run with --list to see every export no guide's text explains.");
   process.exit(1);
 }

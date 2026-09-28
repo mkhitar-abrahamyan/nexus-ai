@@ -250,6 +250,8 @@ configuration, a `VoiceSessionRuntime` (anything with `transcribe()` and `speak(
 - Each turn is a request and a reply: the user finishes speaking, then the answer is produced. For
   interruption and streamed audio, use realtime.
 - `OpenAIVoiceProvider` is the only bundled adapter; others implement `VoiceProvider`.
+- Audio preprocessing is limited to what the provider does: no resampling, denoising, or format
+  conversion happens here, and providers differ in the formats and languages they accept.
 
 <!-- reference:start -->
 ## Reference

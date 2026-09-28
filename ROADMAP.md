@@ -480,7 +480,7 @@ Google Imagen, and ComfyUI. Everything below is implemented and tested.
 
   Scores in an uncertainty band go to a human-review queue.
 - **Modality cleanup: deferred to 2.0.** Splitting `inputModalities` from `outputModalities` is a
-  breaking registry change, and it is listed in section 20.
+  breaking registry change, and it is listed in section 21.
 
 - **Graph and agent correctness: all nine fixed.** Fixing number 5 also exposed a related defect
   that is now fixed: after a paused step resumed, the outgoing edges of siblings that had already
@@ -541,7 +541,7 @@ be large to get there. Three rules apply to every item below.
    - Ship the change additively in 1.x wherever possible.
    - Anything that must break is marked `@deprecated` and noted in the changelog at least one minor
      release before 2.0.0.
-   - Every breaking item is collected in section 20.
+   - Every breaking item is collected in section 21.
 
 | Release | Theme | Gap it closes | Proof it ships |
 | --- | --- | --- | --- |
@@ -554,6 +554,7 @@ be large to get there. Three rules apply to every item below.
 | 1.17.0 | Prompt and config versioning | Versioned prompts with environments and gated promotion | Promotion blocked until an experiment passes |
 | 1.18.0 | Self-hosted agent server | Deployment: runs, threads, background work, horizontal scale | Two replicas; a run survives killing the one that started it |
 | 1.19.0 | Local studio | UIs for traces, threads, approvals, experiments, prompts | `npx` studio against the example application |
+| 1.20.0 | Retrieval stores, deprecation warnings | Vector search that scales past one process; deprecations visible at run time | One contract test passing on memory, pgvector, and Qdrant |
 | 2.0.0 | Consolidation | One lifecycle, slim root, optional validators, stable surfaces | Migration guide and codemod; install-footprint targets met |
 
 ---
@@ -615,7 +616,7 @@ in about three seconds, not twelve.
   are synchronous exported functions, and an ESM module cannot load a dependency synchronously on
   first use, so deferring `ajv` and `zod` behind a dynamic import would mean making public functions
   async — a breaking change. Moving them to optional peer dependencies in 2.0.0 fixes the install
-  cost properly, and section 20 already carries it.
+  cost properly, and section 21 already carries it.
 
 **Budgets.** `/graph` measured 52 KB after the work, against the 40 KB this section first guessed;
 the estimate was wrong, not the implementation, and the budget file records the real number. The root
@@ -1111,9 +1112,27 @@ model runs record the model and provider that answered.
 
 ---
 
-## 20. 2.0.0: consolidation
+## 20. 1.20.0: retrieval stores, and the last 1.x release
 
-2.0.0 ships once 1.11.0 through 1.19.0 are released, each experimental surface has had at least one
+**Retrieval that scales past one process.** A shared `VectorStore` contract — upsert by id, search by
+text or vector, delete, and a metadata filter — with pgvector (`nexus-ai-pro/postgres/vectors`) and
+Qdrant (`nexus-ai-pro/rag/qdrant`) adapters beside the in-memory store. Neither adds a dependency: the
+Postgres adapter takes the client contract the family already uses, and the Qdrant adapter speaks
+REST through `fetch`.
+
+**Deprecations visible at run time.** Every deprecated option warns once per process through the
+platform's deprecation channel, which 2.0 requires of the last 1.x release.
+
+**Documentation.** Every guide explains every export it lists, enforced by the guide check.
+
+**Proof.** One contract test passes unchanged on the memory store, on pgvector with and without an
+HNSW index (PGlite), and on Qdrant's REST API.
+
+---
+
+## 21. 2.0.0: consolidation
+
+2.0.0 ships once 1.11.0 through 1.20.0 are released, each experimental surface has had at least one
 minor release to settle, and every removal below has been deprecated in a 1.x release.
 
 **Breaking changes.**
@@ -1163,7 +1182,7 @@ moves to Node 24.
 
 ---
 
-## 21. Longer-term backlog
+## 22. Longer-term backlog
 
 **Absorbed by the releases above.** MCP adapters, human approval checkpoints, long-term memory, an
 evaluation platform, prompt and workflow versioning, record and replay fixtures, and the local
@@ -1182,9 +1201,6 @@ control plane.
 7. Browser and edge builds: Node filesystem, crypto, DNS, and stream dependencies isolated behind
    adapters, so that compatibility is explicit.
 8. Streaming reads and writes for the filesystem and S3 asset stores.
-9. Vector store adapters for retrieval (pgvector, Qdrant) through injected client interfaces. The
-   Postgres adapter family in section 16 carries most of the cost of the first one, so this becomes
-   a small addition rather than a release of its own.
 
 **Deliberately not planned.**
 - A hosted service. Deployment stays self-hosted through the server and templates.
@@ -1193,7 +1209,7 @@ control plane.
 
 ---
 
-## 22. Design notes carried forward
+## 23. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -1245,7 +1261,7 @@ await ai.images.edit({
 
 ---
 
-## 23. How an item graduates
+## 24. How an item graduates
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.

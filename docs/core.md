@@ -413,6 +413,20 @@ export const POST = createNexusRouteHandler({ ai, stream: true });
 For a full HTTP surface — threads, background runs, resumable streams — see the
 [agent server guide](./server.md).
 
+## In production
+
+- Keep what adds latency off the routes that are sensitive to it: the semantic cache and the
+  semantic injection check each embed the request, and every pipeline hook runs on every call.
+- Turn `pipeline.includeTraceInResponse` off when responses leave your service, so stage timings stay
+  internal.
+- Replace process-memory caches, rate limits, circuit state, and stores with their shared adapters
+  before running more than one process; the [resilience guide](./resilience.md) and the
+  [Postgres guide](./postgres.md) list them.
+- Bundled prices and context limits are defaults, not a pricing contract; see the
+  [providers guide](./providers.md).
+- Guardrails reduce risk; keep server-side authorization and provider moderation around high-impact
+  actions, as the [security guide](./security.md) says.
+
 ## The registry, in passing
 
 `KNOWN_MODELS`, `MODEL_ALIAS_METADATA`, `REGISTRY_PROVENANCE`, `resolveProvider()`,

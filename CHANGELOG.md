@@ -4,6 +4,39 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Retrieval that scales past one process, and the last 1.x release before 2.0: deprecated options now
+say so at run time, and every guide explains every export it lists.
+
+### Added
+
+- **Vector stores for retrieval.** `VectorStore` is a shared contract — `add()`, which replaces a chunk
+  whose id already exists, `search()`, `searchVector()` for a vector computed elsewhere, `delete()`,
+  and an exact-match metadata `filter` — with three implementations checked by one contract test:
+  - `PostgresVectorStore` on `nexus-ai-pro/postgres/vectors`, ranking with pgvector in the database,
+    with an HNSW index by default or an exact scan. `vectorStoreMigration()` gives its schema, and
+    `postgresMigration()` and `nexus db sql` include it when `vectors` is named.
+  - `QdrantVectorStore` on `nexus-ai-pro/rag/qdrant`, through Qdrant's REST API with `fetch` and Web
+    Crypto, so no Qdrant client is a dependency and it runs on edge runtimes. `migrate()` creates the
+    collection and indexes filter fields; failures raise `QdrantError`.
+  - `MemoryVectorStore`, which gains `searchVector()`, `delete()`, and the filter.
+- Retrieval is reachable from `nexus-ai-pro/rag` — `MemoryVectorStore`, `createHashEmbeddings()`,
+  `cosineSimilarity()`, `normalizeVector()`, `matchesMetadata()`, and the types — so an application
+  that ingests and searches no longer loads the root import.
+- **Deprecated options warn once per process** through Node's `DeprecationWarning` channel, with a
+  `NEXUS_DEP_*` code each, so `--no-deprecation` silences them and `--throw-deprecation` fails a CI
+  job on them: `GoogleProviderConfig.projectId`, `OllamaProviderConfig.timeout`,
+  `MetricsConfig.prometheus`, `HealthConfig.latencyHalfLife`, `DensificationConfig.preserveMarkdown`,
+  `InjectionDetectionConfig.sensitivity`, and `ToolPolicyConfig.requiresApproval`.
+
+### Changed
+
+- `MemoryVectorStore.add()` replaces a chunk whose id already exists instead of storing a second
+  copy, so re-ingesting a document no longer duplicates its passages in search results.
+- The guide check enforces that every export is explained in a guide's own text, not only named in
+  its generated reference; the five remaining guides — operations, embeddings, evaluation, images,
+  and realtime — now are. The README's limitations and production notes moved into the guides they
+  belong to.
+
 ## [1.19.0] - 2026-09-28
 
 A studio to look at it all. `nexus-ai-pro-studio` is a separate package — so the core install never

@@ -66,13 +66,13 @@ only, so it never appears in an import graph.
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 574 KB | 100% | +4.7 MB |
-| `nexus-ai-pro/config` | 442 KB | 77% | +4.7 MB |
-| `nexus-ai-pro/core` | 438 KB | 76% | +4.7 MB |
+| `nexus-ai-pro` | 576 KB | 100% | +4.7 MB |
+| `nexus-ai-pro/config` | 444 KB | 77% | +4.7 MB |
+| `nexus-ai-pro/core` | 440 KB | 76% | +4.7 MB |
 | `nexus-ai-pro/realtime` | 156 KB | 27% | none |
 | `nexus-ai-pro/batch` | 101 KB | 18% | none |
 | `nexus-ai-pro/realtime/session` | 94 KB | 16% | none |
-| `nexus-ai-pro/embeddings` | 81 KB | 14% | none |
+| `nexus-ai-pro/embeddings` | 82 KB | 14% | none |
 | `nexus-ai-pro/server` | 80 KB | 14% | none |
 | `nexus-ai-pro/providers/groq` | 72 KB | 13% | none |
 | `nexus-ai-pro/providers/mistral` | 72 KB | 13% | none |
@@ -84,24 +84,24 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/providers/openai` | 70 KB | 12% | none |
 | `nexus-ai-pro/agent` | 63 KB | 11% | none |
 | `nexus-ai-pro/providers/anthropic` | 62 KB | 11% | none |
-| `nexus-ai-pro/providers/google` | 59 KB | 10% | none |
+| `nexus-ai-pro/providers/google` | 60 KB | 10% | none |
 | `nexus-ai-pro/images` | 59 KB | 10% | none |
-| `nexus-ai-pro/providers/ollama` | 53 KB | 9% | none |
+| `nexus-ai-pro/providers/ollama` | 54 KB | 9% | none |
 | `nexus-ai-pro/graph` | 49 KB | 9% | none |
+| `nexus-ai-pro/postgres` | 49 KB | 9% | none |
 | `nexus-ai-pro/batch/openai` | 46 KB | 8% | none |
 | `nexus-ai-pro/batch/anthropic` | 46 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% | none |
 | `nexus-ai-pro/providers/cohere` | 44 KB | 8% | none |
-| `nexus-ai-pro/postgres` | 41 KB | 7% | none |
+| `nexus-ai-pro/security` | 41 KB | 7% | +3.4 MB |
 | `nexus-ai-pro/batch/mock` | 41 KB | 7% | none |
-| `nexus-ai-pro/security` | 40 KB | 7% | +3.4 MB |
 | `nexus-ai-pro/operations` | 40 KB | 7% | none |
 | `nexus-ai-pro/prompts/registry` | 34 KB | 6% | none |
 | `nexus-ai-pro/models` | 32 KB | 6% | none |
 | `nexus-ai-pro/evaluate` | 31 KB | 5% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 5% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 5% | none |
-| `nexus-ai-pro/evals` | 25 KB | 4% | none |
+| `nexus-ai-pro/evals` | 26 KB | 5% | none |
 | `nexus-ai-pro/tracing` | 23 KB | 4% | none |
 | `nexus-ai-pro/images/stores` | 21 KB | 4% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 4% | none |
@@ -128,6 +128,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/postgres/store` | 11 KB | 2% | none |
 | `nexus-ai-pro/providers` | 10 KB | 2% | none |
 | `nexus-ai-pro/providers/base` | 10 KB | 2% | none |
+| `nexus-ai-pro/postgres/vectors` | 10 KB | 2% | none |
 | `nexus-ai-pro/postgres/traces` | 10 KB | 2% | none |
 | `nexus-ai-pro/prompts` | 10 KB | 2% | none |
 | `nexus-ai-pro/voice/openai` | 9 KB | 2% | none |
@@ -138,16 +139,18 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/embeddings/models` | 8 KB | 1% | none |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 1% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 1% | none |
+| `nexus-ai-pro/rag/qdrant` | 8 KB | 1% | none |
 | `nexus-ai-pro/store` | 6 KB | 1% | none |
 | `nexus-ai-pro/store/redis` | 6 KB | 1% | none |
 | `nexus-ai-pro/server/remote` | 6 KB | 1% | none |
 | `nexus-ai-pro/postgres/prompts` | 6 KB | 1% | none |
 | `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 1% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 0.9% | none |
+| `nexus-ai-pro/embeddings/mock` | 5 KB | 0.9% | none |
 | `nexus-ai-pro/postgres/evaluate` | 5 KB | 0.9% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 0.9% | none |
+| `nexus-ai-pro/rag` | 5 KB | 0.9% | none |
 | `nexus-ai-pro/evals/judge` | 5 KB | 0.9% | none |
-| `nexus-ai-pro/embeddings/mock` | 4 KB | 0.7% | none |
 | `nexus-ai-pro/prompts/file` | 4 KB | 0.7% | none |
 | `nexus-ai-pro/prompts/redis` | 4 KB | 0.7% | none |
 | `nexus-ai-pro/operations/webhooks` | 3 KB | 0.5% | none |
@@ -158,7 +161,6 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/ops/rate-limit-adapters` | 2 KB | 0.3% | none |
 | `nexus-ai-pro/cache` | 2 KB | 0.3% | none |
 | `nexus-ai-pro/cache/adapters` | 2 KB | 0.3% | none |
-| `nexus-ai-pro/rag` | 2 KB | 0.3% | none |
 | `nexus-ai-pro/jobs` | 2 KB | 0.3% | none |
 | `nexus-ai-pro/jobs/durable-adapters` | 2 KB | 0.3% | none |
 | `nexus-ai-pro/jobs/queue` | 2 KB | 0.3% | none |
