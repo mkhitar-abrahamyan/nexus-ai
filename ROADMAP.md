@@ -1074,29 +1074,40 @@ directly and as a node inside a local graph.
 
 ---
 
-## 19. 1.19.0: local studio (separate package)
+## 19. Shipped in 1.19.0 — the local studio
 
-**Carried in: image recordings.** Record one live conformance run per image backend, commit the
-fixtures, and decide the image family's promotion on the result.
+`nexus-ai-pro-studio`, experimental, a separate package with the `nexus-studio` command, so the
+core install never carries a UI.
 
-**Packaging.** A separate npm package, so the core install never carries a UI. Its name is still to
-be decided.
+**Eight views over the application's own stores.** Traces with run trees, comparison, and feedback;
+threads with a diagram, state at any step, fork, edit, and resume; an inbox of interrupts and review
+items; experiments and datasets with comparisons; prompts with diffs, gated promotion, rollback, and
+a playground; costs against budgets; provider health and circuit state; and the operation queue with
+asset totals. A config module's default export lists the stores; every source is optional.
 
-**Views.**
-- Traces, with trees and diffs.
-- Threads, with a live diagram, state, forks, edit, and resume.
-- An approvals inbox covering interrupts and annotation queues.
-- Datasets and experiment comparisons.
-- Prompts and the playground.
-- Costs and budgets.
-- Provider health and circuit states.
-- The operation queue and assets.
+**Locked down for a local tool.** It binds `127.0.0.1`, takes a token that moves from the URL into an
+HTTP-only same-site cookie, requires the token in a header for every change, refuses non-loopback
+`Host` headers, and serves every page under a strict content security policy with every value
+inserted as text.
 
-**Architecture.** It reads the stores above through their adapters, requires no hosted service, and
-protects local access with a token.
+**Proof.** The packaged install test runs `nexus-studio` from the packed tarballs against a config
+with a traced agent run, an interrupted thread, and two experiments, and reads each back through the
+studio.
 
-**Proof.** `npx <studio-package>` against the example application shows a traced agent run, an
-approval waiting in the inbox, and an experiment comparison.
+**Also in this release.** The operation-store checkpointer lists its threads. Fixes found while
+documenting: input secret detection now detects and blocks by default; PII `remove` removes;
+`summarizeVerifyFormat()` verifies what it summarized; MCP error codes and handshakes; and traced
+model runs record the model and provider that answered.
+
+### What did not land, and where it went
+
+- **Image recordings moved to 2.0.0.** Recording needs live OpenAI, Google, and ComfyUI credentials,
+  which this release did not have. The image family stays experimental until they exist.
+- **The studio's first npm publish is manual.** Trusted publishing can only be configured for a
+  package that exists, so the release workflow skips the studio until its first version is published
+  by hand.
+- **The documentation prose pass is partial.** Operations, embeddings, evaluation, images, and
+  realtime still describe some exports only in their generated reference.
 
 ---
 

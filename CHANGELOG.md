@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-09-28
+
 A studio to look at it all. `nexus-ai-pro-studio` is a separate package — so the core install never
 carries a UI — that shows what an application records, from its own stores, on the developer's
 machine, with no hosted service.
@@ -63,9 +65,11 @@ machine, with no hosted service.
 
 ### Changed
 
-- Every guide under `docs/` now explains each export it lists in its text, not only in its generated
-  reference, and the guide check enforces that. The security configuration's nested settings have
-  doc comments.
+- Nineteen guides under `docs/` — agents, batch, caching, core, graphs, grounding, MCP, memory,
+  Postgres, prompts, providers, resilience, security, server, telephony, testing, tracing, voice, and
+  workflows — now explain each export they list in their text, not only in the generated reference.
+  The security configuration's nested settings have doc comments.
+- The documentation coverage check also covers the studio package's exports.
 
 ## [1.18.0] - 2026-09-25
 
@@ -1004,7 +1008,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.18.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.15.0...v1.16.0

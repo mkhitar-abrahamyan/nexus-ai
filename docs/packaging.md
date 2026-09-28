@@ -66,9 +66,9 @@ only, so it never appears in an import graph.
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 573 KB | 100% | +4.7 MB |
-| `nexus-ai-pro/config` | 441 KB | 77% | +4.7 MB |
-| `nexus-ai-pro/core` | 437 KB | 76% | +4.7 MB |
+| `nexus-ai-pro` | 574 KB | 100% | +4.7 MB |
+| `nexus-ai-pro/config` | 442 KB | 77% | +4.7 MB |
+| `nexus-ai-pro/core` | 438 KB | 76% | +4.7 MB |
 | `nexus-ai-pro/realtime` | 156 KB | 27% | none |
 | `nexus-ai-pro/batch` | 101 KB | 18% | none |
 | `nexus-ai-pro/realtime/session` | 94 KB | 16% | none |
@@ -94,8 +94,8 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/providers/cohere` | 44 KB | 8% | none |
 | `nexus-ai-pro/postgres` | 41 KB | 7% | none |
 | `nexus-ai-pro/batch/mock` | 41 KB | 7% | none |
+| `nexus-ai-pro/security` | 40 KB | 7% | +3.4 MB |
 | `nexus-ai-pro/operations` | 40 KB | 7% | none |
-| `nexus-ai-pro/security` | 39 KB | 7% | +3.4 MB |
 | `nexus-ai-pro/prompts/registry` | 34 KB | 6% | none |
 | `nexus-ai-pro/models` | 32 KB | 6% | none |
 | `nexus-ai-pro/evaluate` | 31 KB | 5% | none |
@@ -114,10 +114,10 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/images/comfyui` | 16 KB | 3% | none |
 | `nexus-ai-pro/embeddings/adapters` | 16 KB | 3% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 3% | none |
+| `nexus-ai-pro/mcp` | 15 KB | 3% | none |
 | `nexus-ai-pro/prompts/client` | 15 KB | 3% | none |
 | `nexus-ai-pro/images/assets` | 14 KB | 2% | none |
 | `nexus-ai-pro/images/google` | 14 KB | 2% | none |
-| `nexus-ai-pro/mcp` | 14 KB | 2% | none |
 | `nexus-ai-pro/context` | 13 KB | 2% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 2% | none |
 | `nexus-ai-pro/workflows` | 13 KB | 2% | none |

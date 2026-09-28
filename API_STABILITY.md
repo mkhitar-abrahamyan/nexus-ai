@@ -442,7 +442,7 @@ from the root.
 - Recovery re-runs a whole run rather than the step it died on, so an assistant with side effects
   should be idempotent or be left at a single attempt.
 
-## Studio stage (Unreleased)
+## Studio stage (1.19.0)
 
 `nexus-ai-pro-studio` is a separate package, experimental in production readiness. It is versioned
 with nexus-ai-pro and declares the core versions it works with as a peer dependency.
