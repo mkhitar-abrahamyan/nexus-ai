@@ -112,6 +112,78 @@ tab does not strand an item; `consensus` lets two reviewers see the same item wh
 enough; and `toExamples()` turns reviewed items into dataset examples, which closes the loop from a
 production failure to a permanent regression test.
 
+## Datasets
+
+A `Dataset` has a name, a content `version`, a description, tags, its creation time, and its
+examples. Each `DatasetExample` has an `id` — which is what pairs results across experiments — the
+`inputs` the target receives, an optional `expected` answer, metadata, a `split`, tags, and, for
+an example built from production, the `sourceRunId` it came from.
+
+`createDataset()` builds one from `CreateDatasetOptions`: the name, the examples (numbered `ex-1`,
+`ex-2`, … when they have no id), a description, tags, and a version that defaults to
+`contentVersion()`, a hash of the examples, so identical content is the same version.
+`splitOf()` returns one split as a dataset of its own. `datasetFromTraces()` reads recorded runs
+through `FromTracesOptions` — the store, a trace query, a `toExample` mapping (inputs and outputs by
+default), and a limit of 100.
+
+A `DatasetStore` saves versions, gets one by name and version (the newest when none is given), and
+lists names with their versions. `MemoryDatasetStore` keeps them in memory and `FileDatasetStore` as
+one JSON file per version; `PostgresDatasetStore` is in the [Postgres guide](./postgres.md).
+
+## Targets, evaluators, and experiments
+
+An `EvaluationTarget` turns an example's inputs into an output. An `Evaluator` receives an
+`EvaluationContext` — the example, the output or the error, the latency, the cost, and which
+repetition it was — and returns a number, a pass or fail, or one or more `EvaluationScore` values: a
+key, the score, whether it passed, a comment, and metadata. Scores with the same key are summarized
+and compared together. A `SummaryEvaluator` scores the experiment as a whole.
+
+The bundled evaluators are `exactMatch()`, `contains()`, `mustNotMatch()`, `completed()`,
+`underLatency()`, `underCost()`, `embeddingSimilarity()`, `pairwise()`, and `trajectory()`, which
+takes `TrajectoryOptions`: the `expected` tool or node names, a `path` reader (the agent's tool calls
+by default), a `mode` — `exact` for the same sequence, `subset` for each expected step appearing —
+and the score `key`. `passRate()` is a summary evaluator.
+
+`EvaluateOptions` names the experiment and sets `concurrency` (4), `repetitions` (a number, or a
+function of the example), `summary` evaluators, a `store`, metadata, a per-example `timeoutMs`, a
+`signal`, a `cost` reader, `onResult` for progress, and a clock.
+
+An `Experiment` records its id and name, the dataset and exact version it ran over, its start and
+finish, the examples that produced no output, every `ExampleResult` — the example id, repetition,
+output or error, latency, cost, and scores — a `MetricSummary` per metric (count, mean, standard
+deviation, minimum, maximum, and the pass rate when the evaluator reported passes), the summary
+scores, and metadata. `summarize()` computes the metric summaries, `stats()` is the arithmetic
+underneath with a 95% interval of the mean, `scoreMap()` returns summary scores as a map for a test
+or a gate, and `totalCost()` sums the experiment.
+
+An `ExperimentStore` saves experiments, gets one by id, and lists them newest first, for one dataset
+or name. `MemoryExperimentStore` keeps them in memory and `FileExperimentStore` as one file each;
+`readExperiment()` reads a file, returning `undefined` for anything that is not an experiment.
+
+## Comparisons in detail
+
+`compareExperiments()` takes `CompareOptions`: the metrics where `lowerIsBetter`, such as latency or
+cost, the bootstrap `resamples` (2,000), a `seed` for reproducible CI, and `topExamples` (10). It
+returns an `ExperimentComparison`: both experiments, a dataset mismatch when there is one, a
+`MetricComparison` per metric — the two means, the mean paired difference, and a verdict of
+`better`, `worse`, or `unchanged` — the examples that regressed and improved most, each an
+`ExampleComparison` whose `delta` is signed so positive always means better, the new and fixed
+errors, and `regressed`. `formatComparison()` renders it as text for a pull request or a CI log.
+
+## Online evaluation and review
+
+`evaluateOnline()` takes `OnlineEvaluationOptions`: the trace `store`, the `evaluators`, a `query`
+(finished model runs by default), a `sampleRate`, a `reviewQueue` with a `reviewWhen` test, whether
+to `recordFeedback` on the runs (on by default), and a clock. It returns an
+`OnlineEvaluationReport`: runs scanned, evaluated, and queued for review, and every score.
+
+`AnnotationQueue` takes `AnnotationQueueOptions`: the `rubric` of `ReviewQuestion` values — a key,
+the prompt, a type, and choices for a choice question — a claim `leaseMs` (15 minutes), `consensus`
+(1), and a clock. `enqueue()` adds a `ReviewItem` — its subject, rubric, status (`pending`,
+`claimed`, or `reviewed`), live claims, answers, creation time, and metadata — `claim()` hands the
+next one to a reviewer, and `submit()` records a `ReviewAnswer`: the reviewer, their answers as
+scores, a comment, and when.
+
 ## LLM judges and eval cases
 
 Use a plain assertion for small evals, or add an LLM judge when a rubric is more useful than exact matching:
@@ -138,6 +210,45 @@ const run = await ai.runEvals([
   },
 ]);
 ```
+
+## Eval cases in detail
+
+`EvalRunner` runs `EvalCase` values through anything with `complete()` — the `EvalClient` contract.
+A case has a name, the `request`, and an `assert` function, a `judge`, or both, with an `expected`
+answer, a `metrics` function for `calculateEvalMetrics()`, and tags. An `EvalJudge` returns true or
+false, or an `EvalJudgment`: a score from 0 to 1, whether it passed, a rationale, labels, the raw
+output, and the judge's provider and model. `EvalRunOptions` names the run and sets `concurrency`
+(1, in order), a `store`, and metadata. Each `EvalResult` says whether the case passed, how long it
+took, and holds the response, metrics, judgment, or error; the `EvalRunResult` totals them and carries
+the run as an `experiment`, so it can be compared and gated like any other.
+
+`LLMJudge` takes `LLMJudgeOptions`: the `client` — anything with `complete()`, the `JudgeClient`
+contract — the `model`, a `rubric`, a `systemPrompt` to replace the default, `passThreshold` (the
+middle of the range by default), the `range` (0 to 1), `temperature` (0, for repeatable verdicts),
+`maxTokens` (512), and metadata. It judges an `LLMJudgeInput` — the answer, a reference, the
+question, a rubric for this answer, and source passages — and returns an `LLMJudgeResult` with the
+score clamped to the range. `parseJudgeResponse()` reads the judge's reply, JSON or a number in
+prose. `createLLMJudgeEval()` and `asEvalJudge()` adapt it to a case, with an
+`LLMJudgeInputMapper` to turn a response and its case into what the judge sees.
+
+## Metrics
+
+`calculateEvalMetrics()` computes every metric its `MetricInputs` allow — the answer, and any of the
+expected answer, the question, contexts, ranked retrieved chunks and the relevant ids, candidates
+and which passed, token log-probabilities, latency and time to first token, token counts, cost, a
+policy of forbidden and required terms, and an embedder — and returns `EvalMetrics` grouped by kind:
+
+- `QualityMetrics`: `exactMatch()` after normalizing case, punctuation, and whitespace;
+  `semanticSimilarity()` under the embedder; `passAtK()`; and `perplexity()` from log-probabilities.
+  `f1Score()` gives token-overlap F1 on its own.
+- `RagMetrics`: `faithfulness()`, the share of factual statements the contexts support lexically;
+  `contextualPrecision()` and `contextualRecall()` of the ranked chunks; and answer relevancy.
+- `SafetyMetrics`: hallucination rate (one minus faithfulness), `toxicityScore()`, `biasScore()`,
+  `policyAdherence()`, and `refusalRate()`.
+- `OperationalMetrics`: `tokensPerSecond()`, time to first token, latency, cost, and token counts.
+
+The safety metrics are heuristics — short term lists and fixed patterns — suited to catching a
+regression in a test, not to judging content in production; use a model judge for that.
 
 <!-- reference:start -->
 ## Reference
