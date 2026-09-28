@@ -13,11 +13,6 @@ covering the rest. `OperationRunner` owns it end to end, so a crashed worker doe
 The default store is in-process, so the small case needs no infrastructure:
 
 ```ts
-import { BatchManager } from 'nexus-ai-pro/batch';
-import { OpenAIBatchProvider } from 'nexus-ai-pro/batch/openai';
-import { FilesystemAssetStore, S3AssetStore } from 'nexus-ai-pro/images/stores';
-import { CircuitBreaker } from 'nexus-ai-pro/ops/circuit-breaker';
-import { RedisRateLimitStore } from 'nexus-ai-pro/ops/rate-limit-adapters';
 import { OperationRunner } from 'nexus-ai-pro/operations';
 
 const runner = new OperationRunner<string>({ retry: { maxAttempts: 3, baseDelayMs: 500 } });
@@ -99,9 +94,120 @@ queues the operation id and nothing else.
 
 The image family already runs on this lifecycle, so `ai.images.submit()` reports the same events.
 
+## The lifecycle
+
+An `OperationStatus` is `queued`, `running`, `retrying`, `succeeded`, `failed`, `cancelling`,
+`cancelled`, or `expired`. `TERMINAL_OPERATION_STATUSES` — succeeded, failed, cancelled, and
+expired — are final: `isTerminalOperationStatus()` and `isSettled()` test for them, and nothing
+leaves one, so a late provider callback cannot resurrect a cancelled operation. `isClaimable()`
+says whether a worker may start one (`queued` or `retrying`). `canTransition()`,
+`assertTransition()` — which throws `OperationTransitionError` — and `allowedTransitions()` expose
+the whole table, for a custom store or runner. `cancelling` can still reach `succeeded` or
+`failed`, because a cancel asks an executor to stop and does not guarantee it stopped in time.
+
+## Running operations
+
+`OperationRunner` takes an `OperationRunnerConfig`: the `store`, a `dispatcher`, the worker's `owner`
+name, `leaseMs` (30 seconds) and `heartbeatMs` (a third of it), a `timeoutMs` for a whole operation,
+an `OperationRetryConfig` — attempts, the first and the longest delay, fixed or exponential backoff,
+jitter, and an `isRetryable` test that by default retries anything but a cancellation — a
+`webhook`, `onWebhookError`, an id generator, and a clock.
+
+- `submit()` takes an `OperationExecutor` — a function of an `OperationContext` that returns the
+  result — and `OperationSubmitOptions`: an id, a `kind` such as `image.generate`, an
+  `idempotencyKey`, `maxAttempts` and `timeoutMs` for this operation, `expiresAt`, trace headers,
+  metadata, and a signal.
+- `read()` returns the stored record, `cancel()` cancels by id from any worker, and `recover()`
+  resumes operations whose lease lapsed.
+
+The executor's `OperationContext` has the id, the attempt, a signal aborted on cancellation,
+timeout, or a lost lease, `report()` for progress, `heartbeat()` to extend the lease before a long
+step, and the trace headers and metadata from submission.
+
+Submitting returns a `DurableOperationHandle`: the `OperationHandle` contract — `id`, `status()`,
+`result()`, `cancel()`, and `events()` — plus `record()` for the stored snapshot and `progress()`.
+An `OperationProgress` has any of a ratio, a count done and a total, a message, and metadata; render
+what is present rather than assuming a percentage. `LocalOperationHandle` is the process-local
+handle the runner builds on, for a family that needs one without a store;
+`LocalOperationHandleOptions` sets its clock, the error a cancellation rejects with, and an event
+listener.
+
+## Events
+
+Each `OperationEvent` is one of `queued`, `running` with its attempt, `progress`, `retrying` with
+the delay and the error, `cancelling`, `succeeded` with the result, `failed` with the error and
+whether it was dead-lettered, `cancelled`, and `expired`. Every one carries the
+`OperationEventBase` fields — the operation id, the record's sequence for ordering and
+de-duplication, and a timestamp — and `OperationEventType` names them. A failure is an
+`OperationErrorDescriptor`: the error's name, message, stable code, and whether it was retryable, a
+shape that survives a store and a webhook; `describeOperationError()` builds one from any error.
+
+## Records and stores
+
+An `OperationRecord` is what a store keeps: the id, status, attempt and attempt budget, the
+`sequence` bumped on every write, the creation, start, completion, and expiry times, the
+`OperationLease` (the owner, when it lapses, and the last heartbeat), progress, the result or the
+error, whether it was dead-lettered, the idempotency key, the kind, trace headers, and metadata.
+`assertSerializableRecord()` refuses a record carrying raw bytes, naming the path.
+
+`OperationStore` is `create()`, `read()`, and `update()` — a compare-and-set that returns `false`
+when another worker moved the record first — with optional `delete()`, `claimExpired()` for
+recovery, `findByIdempotencyKey()`, and `list()`. `MemoryOperationStore` is the default, evicting
+the oldest settled records past `MemoryOperationStoreOptions.maxRecords` (1,000).
+`RedisOperationStore` takes a `RedisOperationLikeClient` — `hget`, `hset`, `hdel`, `hvals`, and
+optionally `eval` — and `RedisOperationStoreOptions` with a key `prefix` and `useEval`. With `eval`
+the compare-and-set is one atomic Lua call; without it, a read-compare-write that narrows the race
+but cannot close it. `PostgresOperationStore` is in the [Postgres guide](./postgres.md).
+
+An `OperationDispatcher` hands an accepted record to a worker. `BullMQOperationDispatcher` queues
+only the id and routing metadata on a `BullMQLikeOperationQueue`, using the operation id as the job
+id so a duplicate dispatch is ignored; `BullMQOperationDispatcherOptions` sets the job name and the
+job options.
+
+## Errors
+
+Every operation error extends `OperationError` with a stable code:
+
+- `OperationCancelledError` and `OperationExpiredError` — what `result()` rejects with when the
+  operation was cancelled or expired.
+- `OperationConflictError` — a compare-and-set lost to another worker; reload the record rather
+  than retrying the write.
+- `OperationLeaseLostError` — another worker took over the operation.
+- `OperationDuplicateError` — a store with unique idempotency keys refused a second record; the
+  runner attaches to the winner's operation instead.
+- `OperationNotFoundError` — no record has that id.
+- `OperationTransitionError` — a move the lifecycle forbids, which is a bug in a runner or a store.
+- `OperationSerializationError` — a result carrying raw bytes.
+
+## Webhooks in detail
+
+`OperationWebhookConfig` has the `url`, the `secret`, which `events` to send — terminal ones by
+default — extra headers, a `fetch`, and a timeout (10 seconds). `deliverOperationWebhook()` sends
+one event and throws on a failed delivery, which the runner reports and moves past.
+`signOperationWebhook()` builds the `t=…,v1=…` signature over the timestamp and the body, and
+`verifyOperationWebhook()` checks it in constant time, rejecting a delivery older than
+`VerifyOperationWebhookOptions.toleranceSeconds` (300).
+
 ## In-process jobs
 
-`nexus-ai-pro/jobs` holds the lighter helpers. `runBatch()` runs a worker over items with bounded concurrency and a result per item; `JobQueue` is an in-process queue with retries; `RedisQueueAdapter` and `BullMQQueueAdapter` move jobs to Redis or to an existing BullMQ queue. None of them survives a restart the way an operation does.
+`nexus-ai-pro/jobs` holds the lighter helpers. None of them survives a restart the way an operation
+does.
+
+- `runBatch()` runs a worker over items with bounded concurrency and returns a `BatchItemResult` per
+  item, in input order: its index, whether it succeeded, and the value or the error. `BatchOptions`
+  sets the `concurrency` (3 by default) and `stopOnError`, which stops starting new items after the
+  first failure.
+- `JobQueue` runs a worker over enqueued payloads in process, with `QueueOptions` for `concurrency`
+  (1) and `maxAttempts` (1). Each `QueueJob` has an id, the payload, its attempts, a status of
+  `queued`, `running`, `completed`, or `failed`, and the result or the error. `list()` and `get()`
+  read them.
+- `DurableQueueAdapter` is storage for job records — `enqueue()`, `get()`, `update()`, and `list()`
+  — and `RedisQueueAdapter` keeps them in Redis through a `RedisQueueLikeClient` (`lpush`, `hset`,
+  `hget`, `hvals`). It stores jobs; running them is up to your worker.
+- `BullMQQueueAdapter` hands jobs to an existing BullMQ queue through the `BullMQLikeQueue` slice,
+  whose own workers run them, and reads a job's result back by id.
+
+When work must survive a restart or run on another worker, use an operation instead.
 
 ```ts
 import { runBatch } from 'nexus-ai-pro/jobs/batch';
