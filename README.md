@@ -190,10 +190,11 @@ interface, or enum, has no doc comment, and `npm run docs:guides` fails when a g
 every export of the entry points it covers, or its generated reference is stale. Both hold at 100%;
 `--list` names what is missing, and `npm run docs:update` regenerates the references.
 
-Real provider conformance is opt-in:
+Real provider conformance, and the vector store contract against real servers, are opt-in:
 
 ```bash
 npm run test:conformance:real
+npm run test:vectors:live
 ```
 
 ## Roadmap

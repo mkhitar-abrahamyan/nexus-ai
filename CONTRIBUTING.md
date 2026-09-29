@@ -26,6 +26,13 @@ Real-provider conformance tests are optional and require your own credentials:
 npm run test:conformance:real
 ```
 
+The vector store contract runs against real Qdrant, Pinecone, Weaviate, Chroma, and Redis servers
+when their variables are set; the variables are listed at the top of `tests/vector-stores.live.ts`:
+
+```bash
+npm run test:vectors:live
+```
+
 Never commit provider keys, user data, generated tarballs, or local environment files.
 
 

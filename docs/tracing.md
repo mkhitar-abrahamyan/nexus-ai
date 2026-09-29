@@ -160,6 +160,10 @@ computes a metric over runs on its own. `createWebhookNotifier()` posts to a URL
 `WebhookNotifierOptions` for headers, a `fetch`, and a `body` builder; the default payload is the
 `{ text }` shape chat webhooks accept, with the event beside it.
 
+An alert answers a question you asked in advance. To find problems you did not expect — failing and
+slow runs grouped by what went wrong, and metrics that got worse than the week before — use
+[insights](./insights.md) over the same trace store.
+
 ## Limitations
 
 - Traces are written when the root finishes, so a process that dies mid-run loses that trace.

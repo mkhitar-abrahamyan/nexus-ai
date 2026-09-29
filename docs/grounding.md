@@ -43,6 +43,10 @@ much was read. Each `DocumentSource` is a text with an optional id, source, and 
 onto its chunks. `IngestionOptions` sets the split: `chunkSize` (1,200 characters by default),
 `overlap` (150), and `splitOnMarkdownHeadings`, which keeps every chunk inside one section.
 
+To read files, directories, web pages, sitemaps, CSV, JSON, PDF, and Git repositories into
+`DocumentSource` values, use the [loaders](./loaders.md); `loadIntoStore()` streams them through
+this split into one or more stores.
+
 `ingestFilesAfterScan()` goes one step earlier: it scans uploaded files for unsafe content first,
 extracts their text, and then chunks them, skipping what it cannot read. It throws when the scan
 finds anything high or critical, before any file is read. `FileIngestionOptions` adds the scan

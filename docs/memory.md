@@ -81,8 +81,8 @@ an agent with `createAgent({ store })`, and its tools and middleware receive it 
 
 ## Limitations
 
-- Semantic search ranks in the process for the memory and Redis stores: every item under the prefix
-  is read and scored. Keep namespaces focused, or use `PostgresStore` with pgvector, which ranks in
+- Semantic search ranks in the process for the memory, Redis, and SQLite stores: every item under
+  the prefix is read and scored. Keep namespaces focused, or use `PostgresStore` with pgvector, which ranks in
   the database.
 - The Redis, Postgres, and SQLite stores keep values as JSON, so a value must survive `JSON.stringify()`. The
   memory store holds the object itself, so mutating it after `put()` changes what is stored.
