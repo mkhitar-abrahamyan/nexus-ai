@@ -6,6 +6,7 @@ import {
   type VectorSearchResult,
   type VectorStore,
 } from '../hallucination/retrieval.js';
+import { stableUuid as pointId } from './vector-helpers.js';
 
 /** Options for the Qdrant store. */
 export interface QdrantVectorStoreOptions {
@@ -186,13 +187,4 @@ export class QdrantVectorStore implements VectorStore {
       clearTimeout(timer);
     }
   }
-}
-
-/** A stable UUID for a chunk id, from the first 16 bytes of its SHA-256, shaped as version 5. */
-async function pointId(id: string): Promise<string> {
-  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(id)));
-  digest[6] = (digest[6] & 0x0f) | 0x50;
-  digest[8] = (digest[8] & 0x3f) | 0x80;
-  const hex = Array.from(digest.subarray(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }

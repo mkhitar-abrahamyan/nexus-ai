@@ -51,7 +51,7 @@ export interface IngestionResult {
 export function ingestDocuments(documents: DocumentSource[], options: IngestionOptions = {}): IngestionResult {
   const chunks: RagChunk[] = [];
   const chunkSize = options.chunkSize || 1200;
-  const overlap = Math.min(options.overlap || 150, Math.max(0, chunkSize - 1));
+  const overlap = Math.min(options.overlap ?? 150, Math.max(0, chunkSize - 1));
 
   for (const [docIndex, doc] of documents.entries()) {
     const sections = options.splitOnMarkdownHeadings ? splitMarkdownSections(doc.text) : [doc.text];

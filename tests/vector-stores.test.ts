@@ -12,7 +12,16 @@ import type { VectorStore } from '../src/hallucination/retrieval.js';
 import type { PostgresLikeClient } from '../src/postgres/client.js';
 import { postgresMigration } from '../src/postgres/index.js';
 import { PostgresVectorStore, vectorStoreMigration } from '../src/postgres/vectors.js';
+import { DatabaseSync } from 'node:sqlite';
+import { ChromaError, ChromaVectorStore } from '../src/rag/chroma.js';
+import { PineconeVectorStore } from '../src/rag/pinecone.js';
 import { QdrantError, QdrantVectorStore } from '../src/rag/qdrant.js';
+import { RedisVectorStore } from '../src/rag/redis.js';
+import { WeaviateError, WeaviateVectorStore } from '../src/rag/weaviate.js';
+import { fromSqliteDatabase } from '../src/sqlite/client.js';
+import { SqliteVectorStore, sqliteVectorStoreMigration } from '../src/sqlite/vectors.js';
+import { typedFilterContract, vectorStoreContract } from './vector-contract.js';
+import { chromaStub, pineconeStub, redisStub, weaviateStub } from './vector-stubs.js';
 
 const DIMENSIONS = 64;
 const embed = (texts: string[]) => createHashEmbeddings(texts, DIMENSIONS);
@@ -117,76 +126,77 @@ async function stores(): Promise<Array<[string, VectorStore]>> {
     fetch: qdrantStub().fetch,
   });
   await qdrant.migrate({ filterFields: ['tenant'] });
+
+  const sqlite = new DatabaseSync(':memory:');
+  // sqlite-vec's vec_distance_cosine, over the same float32 blobs, so the SQL path runs without the extension.
+  const floats = (blob: Uint8Array) => Array.from(new Float32Array(blob.slice().buffer));
+  sqlite.function('vec_distance_cosine', { deterministic: true }, (a, b) => {
+    return 1 - cosineSimilarity(normalizeVector(floats(a as Uint8Array)), normalizeVector(floats(b as Uint8Array)));
+  });
+  const scan = new SqliteVectorStore(sqlite, { dimensions: DIMENSIONS, embed, table: `scan_${++tables}` });
+  await scan.migrate();
+  const sqliteVec = new SqliteVectorStore(fromSqliteDatabase(sqlite), {
+    dimensions: DIMENSIONS,
+    embed,
+    table: `vec_${++tables}`,
+    search: 'sqlite-vec',
+  });
+  await sqliteVec.migrate();
+
+  const redis = new RedisVectorStore(redisStub().client, {
+    dimensions: DIMENSIONS,
+    embed,
+    index: `idx-${++tables}`,
+    prefix: `chunk:${tables}:`,
+    filterFields: ['tenant', 'page'],
+  });
+  await redis.migrate();
+  await redis.migrate();
+  const pinecone = new PineconeVectorStore({
+    host: 'docs-abc.svc.pinecone.test',
+    apiKey: 'pc-key',
+    dimensions: DIMENSIONS,
+    embed,
+    fetch: pineconeStub().fetch,
+  });
+  const weaviate = new WeaviateVectorStore({
+    url: 'http://weaviate.test:8080',
+    collection: `Chunk${++tables}`,
+    dimensions: DIMENSIONS,
+    embed,
+    fetch: weaviateStub().fetch,
+  });
+  await weaviate.migrate({ filterFields: { tenant: 'text', page: 'number' } });
+  const chroma = new ChromaVectorStore({
+    url: 'http://chroma.test:8000',
+    collection: `chunks-${++tables}`,
+    dimensions: DIMENSIONS,
+    embed,
+    fetch: chromaStub().fetch,
+  });
+  await chroma.migrate();
   return [
     ['memory', new MemoryVectorStore(embed)],
     ['pgvector (hnsw)', postgres],
     ['pgvector (exact)', exact],
     ['qdrant', qdrant],
+    ['sqlite (scan)', scan],
+    ['sqlite (sqlite-vec)', sqliteVec],
+    ['redis', redis],
+    ['pinecone', pinecone],
+    ['weaviate', weaviate],
+    ['chroma', chroma],
   ];
 }
 
-const passages = [
-  {
-    id: 'refunds#0',
-    content: 'Refunds are issued within fourteen days of a return',
-    source: 'policy.md',
-    metadata: { tenant: 'acme', page: 3 },
-  },
-  {
-    id: 'shipping#0',
-    content: 'Orders ship from the warehouse within two business days',
-    source: 'policy.md',
-    metadata: { tenant: 'acme' },
-  },
-  { id: 'refunds#1', content: 'A refund goes back to the original payment method', metadata: { tenant: 'globex' } },
-  { id: 'careers#0', content: 'We are hiring engineers in three offices' },
-];
-
 test('every vector store ranks, filters, replaces, and deletes the same way', async () => {
+  for (const [name, store] of await stores()) await vectorStoreContract(name, store, embed);
+});
+
+test('a filter matches type as well as value, in every store that filters natively', async () => {
   for (const [name, store] of await stores()) {
-    await store.add(passages);
-
-    const refunds = await store.search('how long do refunds take', { topK: 2 });
-    assert.equal(refunds[0]?.id, 'refunds#0', `${name}: the closest passage ranks first`);
-    assert.equal(refunds.length, 2, `${name}: topK limits the results`);
-    assert.ok(refunds[0].score > refunds[1].score, `${name}: best first`);
-    assert.equal(refunds[0].source, 'policy.md', `${name}: the source comes back`);
-    assert.deepEqual(refunds[0].metadata, { tenant: 'acme', page: 3 }, `${name}: metadata comes back whole`);
-
-    const globex = await store.search('refund', { filter: { tenant: 'globex' } });
-    assert.deepEqual(
-      globex.map((result) => result.id),
-      ['refunds#1'],
-      `${name}: a metadata filter narrows the search`,
-    );
-
-    const strict = await store.search('how long do refunds take', { minScore: 0.99 });
-    assert.equal(strict.length, 0, `${name}: minScore drops weak matches`);
-
-    const [queryVector] = embed(['orders ship from the warehouse']);
-    const byVector = await store.searchVector(queryVector, { topK: 1 });
-    assert.equal(byVector[0]?.id, 'shipping#0', `${name}: a precomputed vector searches too`);
-
-    await store.add([
-      { id: 'careers#0', content: 'Refunds for event tickets are not available', metadata: { tenant: 'acme' } },
-    ]);
-    const replaced = await store.search('event tickets refunds', { topK: 10 });
-    assert.equal(
-      replaced.filter((result) => result.id === 'careers#0').length,
-      1,
-      `${name}: adding an existing id replaces it rather than duplicating it`,
-    );
-    assert.match(replaced.find((result) => result.id === 'careers#0')?.content ?? '', /event tickets/);
-
-    await store.delete(['refunds#0', 'not-stored']);
-    const afterDelete = await store.search('how long do refunds take', { topK: 10 });
-    assert.equal(
-      afterDelete.some((result) => result.id === 'refunds#0'),
-      false,
-      `${name}: a deleted chunk is gone`,
-    );
-    await store.delete([]);
-    await store.add([]);
+    if (name === 'qdrant' || name.startsWith('pgvector')) continue;
+    await typedFilterContract(name, store);
   }
 });
 
@@ -252,4 +262,51 @@ test('the memory store replaces by id and keeps its size honest', async () => {
   assert.equal(store.size(), 1);
   store.clear();
   assert.equal(store.size(), 0);
+});
+
+test('the SQLite migration is idempotent and the Redis store refuses a filter it did not index', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(sqliteVectorStoreMigration({ table: 'chunks' }));
+  sqlite.exec(sqliteVectorStoreMigration({ table: 'chunks' }));
+  assert.throws(() => new SqliteVectorStore(sqlite, { dimensions: 0 }), /positive integer/);
+
+  const redis = new RedisVectorStore(redisStub().client, { dimensions: DIMENSIONS, embed, filterFields: ['tenant'] });
+  await redis.migrate();
+  await assert.rejects(redis.search('x', { filter: { region: 'eu' } }), /not a filter field/);
+  assert.throws(
+    () => new RedisVectorStore(redisStub().client, { dimensions: 4, filterFields: ['bad field'] }),
+    /filter field/,
+  );
+});
+
+test('the REST stores authenticate and report errors with their status', async () => {
+  const pinecone = pineconeStub();
+  const store = new PineconeVectorStore({
+    host: 'https://idx.pinecone.test/',
+    apiKey: 'pc-key',
+    dimensions: DIMENSIONS,
+    embed,
+    fetch: pinecone.fetch,
+  });
+  await store.add([{ id: 'a', content: 'alpha' }]);
+  assert.equal(pinecone.headers[0]?.['Api-Key'], 'pc-key');
+  assert.ok(pinecone.headers[0]?.['X-Pinecone-API-Version']);
+
+  const chroma = new ChromaVectorStore({ collection: 'absent', dimensions: DIMENSIONS, fetch: chromaStub().fetch });
+  const chromaError = await chroma.search('x').catch((caught: unknown) => caught);
+  assert.ok(chromaError instanceof ChromaError);
+  assert.equal(chromaError.status, 404);
+
+  const weaviate = new WeaviateVectorStore({
+    url: 'http://w.test',
+    collection: 'Missing',
+    dimensions: DIMENSIONS,
+    fetch: weaviateStub().fetch,
+  });
+  await assert.rejects(weaviate.search('x'), WeaviateError);
+  await assert.rejects(weaviate.add([{ id: 'a', content: 'a' }]), /refused 1 object/);
+  assert.throws(
+    () => new WeaviateVectorStore({ url: 'http://w.test', collection: 'lower', dimensions: 4 }),
+    /capital letter/,
+  );
 });

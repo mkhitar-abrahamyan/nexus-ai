@@ -490,6 +490,16 @@
         "default": "./dist-cjs/sqlite/store.js"
       }
     },
+    "./sqlite/vectors": {
+      "import": {
+        "types": "./dist/sqlite/vectors.d.ts",
+        "default": "./dist/sqlite/vectors.js"
+      },
+      "require": {
+        "types": "./dist-cjs/sqlite/vectors.d.ts",
+        "default": "./dist-cjs/sqlite/vectors.js"
+      }
+    },
     "./graph/visualize": {
       "import": {
         "types": "./dist/graph/visualize.d.ts",
@@ -538,6 +548,16 @@
       "require": {
         "types": "./dist-cjs/mcp/index.d.ts",
         "default": "./dist-cjs/mcp/index.js"
+      }
+    },
+    "./mcp/registry": {
+      "import": {
+        "types": "./dist/mcp/registry.d.ts",
+        "default": "./dist/mcp/registry.js"
+      },
+      "require": {
+        "types": "./dist-cjs/mcp/registry.d.ts",
+        "default": "./dist-cjs/mcp/registry.js"
       }
     },
     "./tracing": {
@@ -980,6 +1000,96 @@
         "default": "./dist-cjs/rag/ingestion.js"
       }
     },
+    "./loaders": {
+      "import": {
+        "types": "./dist/loaders/index.d.ts",
+        "default": "./dist/loaders/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/loaders/index.d.ts",
+        "default": "./dist-cjs/loaders/index.js"
+      }
+    },
+    "./loaders/text": {
+      "import": {
+        "types": "./dist/loaders/text.d.ts",
+        "default": "./dist/loaders/text.js"
+      },
+      "require": {
+        "types": "./dist-cjs/loaders/text.d.ts",
+        "default": "./dist-cjs/loaders/text.js"
+      }
+    },
+    "./loaders/markdown": {
+      "import": {
+        "types": "./dist/loaders/markdown.d.ts",
+        "default": "./dist/loaders/markdown.js"
+      },
+      "require": {
+        "types": "./dist-cjs/loaders/markdown.d.ts",
+        "default": "./dist-cjs/loaders/markdown.js"
+      }
+    },
+    "./loaders/html": {
+      "import": {
+        "types": "./dist/loaders/html.d.ts",
+        "default": "./dist/loaders/html.js"
+      },
+      "require": {
+        "types": "./dist-cjs/loaders/html.d.ts",
+        "default": "./dist-cjs/loaders/html.js"
+      }
+    },
+    "./loaders/csv": {
+      "import": {
+        "types": "./dist/loaders/csv.d.ts",
+        "default": "./dist/loaders/csv.js"
+      },
+      "require": {
+        "types": "./dist-cjs/loaders/csv.d.ts",
+        "default": "./dist-cjs/loaders/csv.js"
+      }
+    },
+    "./loaders/json": {
+      "import": {
+        "types": "./dist/loaders/json.d.ts",
+        "default": "./dist/loaders/json.js"
+      },
+      "require": {
+        "types": "./dist-cjs/loaders/json.d.ts",
+        "default": "./dist-cjs/loaders/json.js"
+      }
+    },
+    "./loaders/pdf": {
+      "import": {
+        "types": "./dist/loaders/pdf.d.ts",
+        "default": "./dist/loaders/pdf.js"
+      },
+      "require": {
+        "types": "./dist-cjs/loaders/pdf.d.ts",
+        "default": "./dist-cjs/loaders/pdf.js"
+      }
+    },
+    "./loaders/web": {
+      "import": {
+        "types": "./dist/loaders/web.d.ts",
+        "default": "./dist/loaders/web.js"
+      },
+      "require": {
+        "types": "./dist-cjs/loaders/web.d.ts",
+        "default": "./dist-cjs/loaders/web.js"
+      }
+    },
+    "./loaders/git": {
+      "import": {
+        "types": "./dist/loaders/git.d.ts",
+        "default": "./dist/loaders/git.js"
+      },
+      "require": {
+        "types": "./dist-cjs/loaders/git.d.ts",
+        "default": "./dist-cjs/loaders/git.js"
+      }
+    },
     "./rag/qdrant": {
       "import": {
         "types": "./dist/rag/qdrant.d.ts",
@@ -988,6 +1098,56 @@
       "require": {
         "types": "./dist-cjs/rag/qdrant.d.ts",
         "default": "./dist-cjs/rag/qdrant.js"
+      }
+    },
+    "./rag/redis": {
+      "import": {
+        "types": "./dist/rag/redis.d.ts",
+        "default": "./dist/rag/redis.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/redis.d.ts",
+        "default": "./dist-cjs/rag/redis.js"
+      }
+    },
+    "./rag/pinecone": {
+      "import": {
+        "types": "./dist/rag/pinecone.d.ts",
+        "default": "./dist/rag/pinecone.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/pinecone.d.ts",
+        "default": "./dist-cjs/rag/pinecone.js"
+      }
+    },
+    "./rag/weaviate": {
+      "import": {
+        "types": "./dist/rag/weaviate.d.ts",
+        "default": "./dist/rag/weaviate.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/weaviate.d.ts",
+        "default": "./dist-cjs/rag/weaviate.js"
+      }
+    },
+    "./rag/chroma": {
+      "import": {
+        "types": "./dist/rag/chroma.d.ts",
+        "default": "./dist/rag/chroma.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/chroma.d.ts",
+        "default": "./dist-cjs/rag/chroma.js"
+      }
+    },
+    "./rag/retrievers": {
+      "import": {
+        "types": "./dist/rag/retrievers.d.ts",
+        "default": "./dist/rag/retrievers.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/retrievers.d.ts",
+        "default": "./dist-cjs/rag/retrievers.js"
       }
     },
     "./evals": {
@@ -1104,6 +1264,7 @@
     "test:clean-install": "node tests/clean-install.mjs",
     "test:conformance:mock": "tsx tests/conformance.mock.ts",
     "test:conformance:real": "tsx tests/conformance.real.ts",
+    "test:vectors:live": "tsx tests/vector-stores.live.ts",
     "bench:graph": "node scripts/bench-graph.mjs",
     "pack:dry-run": "npm pack --dry-run --cache .tmp-nexus-ai-tests/npm-cache",
     "check": "npm run format:check && npm run registry:check && npm run lint && npm test && npm run typecheck:tests && npm run studio:typecheck && npm run typecheck:examples && npm run typecheck:examples:browser && npm run test:coverage",
@@ -1549,6 +1710,54 @@
       ],
       "workflows": [
         "dist-cjs/workflow/chains.d.ts"
+      ],
+      "loaders": [
+        "dist-cjs/loaders/index.d.ts"
+      ],
+      "loaders/text": [
+        "dist-cjs/loaders/text.d.ts"
+      ],
+      "loaders/markdown": [
+        "dist-cjs/loaders/markdown.d.ts"
+      ],
+      "loaders/html": [
+        "dist-cjs/loaders/html.d.ts"
+      ],
+      "loaders/csv": [
+        "dist-cjs/loaders/csv.d.ts"
+      ],
+      "loaders/json": [
+        "dist-cjs/loaders/json.d.ts"
+      ],
+      "loaders/pdf": [
+        "dist-cjs/loaders/pdf.d.ts"
+      ],
+      "loaders/web": [
+        "dist-cjs/loaders/web.d.ts"
+      ],
+      "loaders/git": [
+        "dist-cjs/loaders/git.d.ts"
+      ],
+      "rag/redis": [
+        "dist-cjs/rag/redis.d.ts"
+      ],
+      "rag/pinecone": [
+        "dist-cjs/rag/pinecone.d.ts"
+      ],
+      "rag/weaviate": [
+        "dist-cjs/rag/weaviate.d.ts"
+      ],
+      "rag/chroma": [
+        "dist-cjs/rag/chroma.d.ts"
+      ],
+      "rag/retrievers": [
+        "dist-cjs/rag/retrievers.d.ts"
+      ],
+      "sqlite/vectors": [
+        "dist-cjs/sqlite/vectors.d.ts"
+      ],
+      "mcp/registry": [
+        "dist-cjs/mcp/registry.d.ts"
       ]
     }
   }

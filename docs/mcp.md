@@ -1,6 +1,6 @@
 # MCP
 
-<!-- covers: ./mcp -->
+<!-- covers: ./mcp ./mcp/registry -->
 
 The Model Context Protocol in both directions, from `nexus-ai-pro/mcp`: `McpClient` borrows another server's tools as ordinary tool definitions, and `McpServer` lends this application's tools to other assistants, over stdio or any transport you supply.
 
@@ -79,6 +79,55 @@ reports it as unknown when called. A tool that throws answers with `isError` and
 than failing the request. `createStdioServerTransport()` serves over this process's stdin and stdout,
 which is how an editor or desktop assistant launches it; nothing else may be written to stdout.
 
+## A registry of servers
+
+`McpRegistry`, on `nexus-ai-pro/mcp/registry`, runs many MCP servers behind one configuration, which is
+the package's integration catalogue: whatever an MCP server exposes, under your policy. An
+`McpRegistryConfig` names the `servers` — or `mcpServers`, so the configuration file desktop MCP
+clients use works as it is — and `bundles` of their tools. `McpRegistry.fromFile()` reads one from
+JSON, and `validateMcpConfig()` checks one, naming the server and field at fault in an
+`McpRegistryError`.
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "github-mcp-server",
+      "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" },
+      "allowTools": ["list_*", "get_*", "create_issue"],
+      "denyTools": ["delete_*"]
+    },
+    "docs": { "url": "https://docs.example.com/mcp", "headers": { "authorization": "Bearer ${DOCS_KEY}" } }
+  },
+  "bundles": { "support": ["github/create_issue", "docs"] }
+}
+```
+
+```ts
+import { McpRegistry } from 'nexus-ai-pro/mcp/registry';
+
+const registry = await McpRegistry.fromFile('mcp.json');
+const agent = createAgent({ client: ai, model: 'gpt-5.4', tools: await registry.tools('support') });
+```
+
+An `McpServerConfig` is a `command` run over stdio, with `args`, `env`, and `cwd`, or a `url` reached
+over HTTP with `headers`. `allowTools` and `denyTools` decide which tools agents see — `*` matches
+any run of characters, and deny wins — and `prefix` names them, the server's name by default, so two
+servers' `search` stay apart. `timeoutMs` bounds each request, and `enabled: false` keeps a server in
+the file but out of the registry. Any string may hold `${NAME}` placeholders, filled from the
+environment when the server connects, so the file names credentials without containing them; a
+missing variable is named in the error, never its value.
+
+Servers connect on first use and stay connected. `tools()` takes bundles or server names — every
+server's tools when given none — and returns each tool once; a bundle entry is a server, or
+`server/tool` with a pattern such as `github/list_*`. `client()` returns one server's `McpClient`,
+`serverNames()` and `bundleNames()` list what is configured, and `refresh()` forgets the tool lists
+read so far. `health()` connects to every server in parallel and reports each as an `McpServerHealth`
+— whether it answered, how long it took, and how many tools it offers — without one failure failing the
+check. `McpRegistryOptions` sets where placeholders are read from (`process.env`), the handshake's
+`clientInfo`, a `fetch` for HTTP servers, and a `transport` factory for custom transports and tests.
+`close()` closes every connection.
+
 ## Errors and versions
 
 `McpError` carries a JSON-RPC error code, with `JSON_RPC_ERRORS` naming the standard ones: parse,
@@ -123,4 +172,16 @@ specific entry point that provides it.
 | `McpToolResult` | interface | What a tool call returned. |
 | `McpTransport` | interface | Carries a transport's messages in both directions. |
 | `StdioClientOptions` | interface | Launches a local MCP server as a child process and talks to it over stdin and stdout. |
+
+### `nexus-ai-pro/mcp/registry`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `McpRegistry` | class | Many MCP servers behind one configuration. |
+| `McpRegistryConfig` | interface | A registry's configuration: the servers by name, and named bundles of their tools. |
+| `McpRegistryError` | class | Raised for a configuration the registry cannot use, or a server or bundle it does not know. |
+| `McpRegistryOptions` | interface | Options for an `McpRegistry`. |
+| `McpServerConfig` | interface | One MCP server in a registry: a `command` to run over stdio, or a `url` to reach over HTTP. |
+| `McpServerHealth` | interface | One server's health, from `McpRegistry.health()`. |
+| `validateMcpConfig` | function | Checks a registry configuration and returns it, or throws an `McpRegistryError` that names the server and the field at fault. |
 <!-- reference:end -->

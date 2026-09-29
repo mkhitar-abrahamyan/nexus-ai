@@ -217,6 +217,25 @@ import {
 import { PostgresStore as SubpathPostgresStore } from 'nexus-ai-pro/postgres/store';
 import { PostgresVectorStore } from 'nexus-ai-pro/postgres/vectors';
 import { QdrantVectorStore } from 'nexus-ai-pro/rag/qdrant';
+import { ChromaVectorStore } from 'nexus-ai-pro/rag/chroma';
+import { PineconeVectorStore } from 'nexus-ai-pro/rag/pinecone';
+import { RedisVectorStore, type RedisVectorLikeClient } from 'nexus-ai-pro/rag/redis';
+import { WeaviateVectorStore } from 'nexus-ai-pro/rag/weaviate';
+import { SqliteVectorStore } from 'nexus-ai-pro/sqlite/vectors';
+import {
+  hybridRetriever,
+  KeywordIndex,
+  modelReranker,
+  rerankRetriever,
+  type Retriever,
+  vectorRetriever,
+} from 'nexus-ai-pro/rag/retrievers';
+import { type DocumentLoader, loadIntoStore } from 'nexus-ai-pro/loaders';
+import { loadMarkdown } from 'nexus-ai-pro/loaders/markdown';
+import { loadDirectory } from 'nexus-ai-pro/loaders/text';
+import { loadWebPages } from 'nexus-ai-pro/loaders/web';
+import { McpRegistry, type McpServerHealth } from 'nexus-ai-pro/mcp/registry';
+import { recallAtK, reciprocalRank } from 'nexus-ai-pro/evaluate';
 import { MemoryVectorStore as RagMemoryVectorStore, type VectorStore } from 'nexus-ai-pro/rag';
 import { PostgresPromptStore } from 'nexus-ai-pro/postgres/prompts';
 import { definePrompt, type PromptVersion, type RenderedPrompt } from 'nexus-ai-pro/prompts';
@@ -640,7 +659,27 @@ const retrievalStores: VectorStore[] = [
   new RagMemoryVectorStore(),
   new PostgresVectorStore(pool, { dimensions: 1536, embed: async (texts) => texts.map(() => [0]), index: 'hnsw' }),
   new QdrantVectorStore({ url: 'http://localhost:6333', collection: 'docs', dimensions: 1536, apiKey: 'key' }),
+  new PineconeVectorStore({ host: 'docs.svc.pinecone.io', apiKey: 'key', dimensions: 1536, namespace: 'acme' }),
+  new WeaviateVectorStore({ url: 'http://localhost:8080', dimensions: 1536 }),
+  new ChromaVectorStore({ collection: 'docs', dimensions: 1536 }),
 ];
+const redisClient: RedisVectorLikeClient = { call: async () => [0] };
+retrievalStores.push(new RedisVectorStore(redisClient, { dimensions: 1536, filterFields: ['tenant'] }));
+retrievalStores.push(
+  new SqliteVectorStore({ run: () => ({ changes: 0 }), all: () => [], exec: () => undefined }, { dimensions: 1536 }),
+);
+const keywords = new KeywordIndex();
+const loaders: DocumentLoader[] = [loadMarkdown('README.md'), loadDirectory('docs'), loadWebPages(['https://example.com'])];
+void loadIntoStore([retrievalStores[0] as VectorStore, keywords], loaders, { batchSize: 16 });
+const retriever: Retriever = rerankRetriever(
+  hybridRetriever([vectorRetriever(retrievalStores[0] as VectorStore), keywords]),
+  modelReranker({ complete: async () => ({ content: '[]' }) }, { model: 'judge' }),
+  { topK: 5 },
+);
+void retriever.retrieve('refunds', { filter: { tenant: 'acme' } });
+void [recallAtK({ k: 3 }), reciprocalRank()];
+const mcpRegistry = new McpRegistry({ mcpServers: { files: { command: 'files-mcp' } }, bundles: { ops: ['files'] } });
+void mcpRegistry.health().then((health: McpServerHealth[]) => health.length);
 void retrievalStores[0]?.search('refunds', { topK: 3, filter: { tenant: 'acme' } });
 const postgresTraces: TraceStore = new PostgresTraceStore(pool);
 const postgresDatasets = new PostgresDatasetStore(pool);

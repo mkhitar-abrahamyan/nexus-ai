@@ -27,7 +27,12 @@ export class UrlPolicyError extends Error {
 
 export type WebResolvedAddress = string | { address: string; family?: 4 | 6 };
 
+/**
+ * Which URLs a fetch may reach. Private, loopback, link-local, and cloud-metadata addresses are refused
+ * unless explicitly allowed, and every redirect hop is checked against the same policy.
+ */
 export interface SafeFetchPolicy {
+  /** Hosts a fetch may reach, each also matching its subdomains. Defaults to any public host. */
   allowedDomains?: string[];
   /** Explicitly allow loopback/private targets, for example a trusted local development service. */
   allowPrivateNetworks?: boolean;
@@ -35,6 +40,7 @@ export interface SafeFetchPolicy {
   allowCloudMetadata?: boolean;
   /** Optional resolver for split-horizon DNS or deterministic tests. Every returned address is validated. */
   resolveHostname?: (hostname: string) => Promise<readonly WebResolvedAddress[]>;
+  /** The `user-agent` header sent. Defaults to `nexus-ai-pro`. */
   userAgent?: string;
 }
 

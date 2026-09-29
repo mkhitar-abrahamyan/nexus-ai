@@ -4,6 +4,37 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Retrieval and integration breadth. Getting documents in, finding the right ones, and reaching the
+tools a team already runs, without a catalogue of dependencies.
+
+### Added
+
+- **Document loaders** on `nexus-ai-pro/loaders/*`, one entry point per format: text files and
+  directories, Markdown with front matter, HTML, CSV, JSON and JSON Lines, PDF through a parser you
+  inject, web pages and sitemaps through the SSRF-safe fetch, and Git repositories. Each streams
+  documents, and `loadIntoStore()` splits them into chunks and adds them to one or more stores in
+  batches.
+- **Four more vector stores** behind the `VectorStore` contract, each through REST or an injected
+  client: Redis with RediSearch (`nexus-ai-pro/rag/redis`), Pinecone, Weaviate, and Chroma
+  (`nexus-ai-pro/rag/pinecone`, `/weaviate`, `/chroma`), plus `SqliteVectorStore` on
+  `nexus-ai-pro/sqlite/vectors`, ranked in JavaScript or by sqlite-vec. All pass the same contract
+  test, which now also checks that a filter matches a value's type.
+- **Composable retrievers** on `nexus-ai-pro/rag/retrievers`: BM25 keyword search (`KeywordIndex`),
+  hybrid search fused by reciprocal rank, reranking through any scorer or a chat model, maximal
+  marginal relevance, parent-document retrieval, and multi-query retrieval.
+- **Retrieval evaluators**: `recallAtK()` and `reciprocalRank()` on `nexus-ai-pro/evaluate`.
+- **An MCP registry** on `nexus-ai-pro/mcp/registry`: many servers from one configuration file —
+  including the file desktop MCP clients use — with per-server allow and deny lists, credentials from
+  the environment by placeholder, health checks, and named tool bundles.
+
+### Changed
+
+- `SqliteValue` includes bytes, which the drivers bind as blobs.
+
+### Fixed
+
+- `ingestDocuments()` honours `overlap: 0`. It used the default overlap of 150 characters instead.
+
 ## [1.21.0] - 2026-09-29
 
 Durable execution everywhere. Durability no longer requires drawing a graph, and a crash costs a

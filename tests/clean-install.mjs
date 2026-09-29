@@ -45,13 +45,16 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // per module format, which is the item the roadmap carries.
 // Raised again in 1.21.0 for functional workflows, the SQLite adapters, and the SVG renderer: four new
 // subpaths, each dependency-free. The packed size still fits the earlier ceiling.
-const MAX_PACKED_BYTES = 760_000;
-const MAX_UNPACKED_BYTES = 4_800_000;
+// Raised again in 1.22.0 for retrieval breadth: nine loader entry points, five vector stores, the
+// retrievers, and the MCP registry — sixteen subpaths, each dependency-free and never loaded by the root.
+const MAX_PACKED_BYTES = 800_000;
+const MAX_UNPACKED_BYTES = 5_000_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Most of
 // the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the
 // README size table reports third-party install cost per entry point. Raised with the unpacked ceiling
-// in 1.21.0; slimming the root and making the validators optional in 2.0 is what brings it down.
-const MAX_INSTALLED_BYTES = 12_200_000;
+// in 1.21.0 and 1.22.0; slimming the root and making the validators optional in 2.0 is what brings it
+// down.
+const MAX_INSTALLED_BYTES = 12_400_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

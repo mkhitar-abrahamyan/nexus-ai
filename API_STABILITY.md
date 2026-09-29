@@ -456,6 +456,22 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
 
+## Retrieval breadth stage (Unreleased)
+
+The loaders (`nexus-ai-pro/loaders/*`), the Redis, Pinecone, Weaviate, Chroma, and SQLite vector
+stores, the retrievers (`nexus-ai-pro/rag/retrievers`), and the MCP registry
+(`nexus-ai-pro/mcp/registry`) are experimental in production readiness. Their contracts follow the
+1.x rules.
+
+- Every vector store keeps the `VectorStore` contract and its contract test, which checks that a
+  metadata filter matches type as well as value.
+- A loader's document ids are stable: the path relative to a directory or repository, the final URL
+  of a page, and the file name plus key or position of a row or record. Chunk ids built from them do
+  not change in a minor release, so a reload keeps replacing the same chunks.
+- The REST stores' payload layout — `content`, `source`, `metadata` as JSON, and `meta_` filter fields
+  — is stable across 1.x, so an index written by one release is read by the next.
+- The registry reads `servers` and `mcpServers`; new configuration fields are optional.
+
 ## Durable execution stage (1.21.0)
 
 Functional workflows (`nexus-ai-pro/graph/functional`) and the SQLite adapters (`nexus-ai-pro/sqlite`)

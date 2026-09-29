@@ -144,6 +144,13 @@ takes `TrajectoryOptions`: the `expected` tool or node names, a `path` reader (t
 by default), a `mode` — `exact` for the same sequence, `subset` for each expected step appearing —
 and the score `key`. `passRate()` is a summary evaluator.
 
+For retrieval, `recallAtK()` scores the share of an example's relevant ids found in the output's top
+`k`, and `reciprocalRank()` scores one over the rank of the first relevant one, whose mean over a
+dataset is the mean reciprocal rank. The output is a ranked list of ids or chunks, such as a
+retriever's results, and `expected` is the relevant id or a list of them; `RetrievalEvaluatorOptions`
+sets `k` and the score `key`. Comparing two retrievers this way is how the
+[retrieval guide](./retrieval.md) shows that hybrid search with reranking is a real improvement.
+
 `EvaluateOptions` names the experiment and sets `concurrency` (4), `repetitions` (a number, or a
 function of the example), `summary` evaluators, a `store`, metadata, a per-example `timeoutMs`, a
 `signal`, a `cost` reader, `onResult` for progress, and a clock.
@@ -347,6 +354,9 @@ specific entry point that provides it.
 | `pairwise` | function | Compares two outputs for the same example and says which is better. |
 | `passRate` | function | Pass rate over every example, as a summary score for the experiment. |
 | `readExperiment` | function | Reads an experiment file, or `undefined` when it is missing or is not an experiment. |
+| `recallAtK` | function | The share of an example's relevant ids found in the output's top `k`. |
+| `reciprocalRank` | function | One over the rank of the first relevant id in the output's top `k`, or 0 when none is there. |
+| `RetrievalEvaluatorOptions` | interface | Options for the retrieval evaluators. |
 | `ReviewAnswer` | interface | One reviewer's answers to an item. |
 | `ReviewItem` | interface | One item waiting for a person, with its claims and the answers it has. |
 | `ReviewQuestion` | interface | One question a reviewer answers. |

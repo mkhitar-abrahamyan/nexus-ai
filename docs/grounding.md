@@ -71,13 +71,15 @@ exact matches on top-level metadata fields, such as `{ tenant: 'acme' }`; `match
 test on its own. A `VectorDocument` is a chunk with an optional precomputed embedding, and a
 `VectorSearchResult` is a chunk with its cosine similarity.
 
-Three stores implement it, and pass the same contract tests:
+These stores implement it, and pass the same contract tests; Redis, Pinecone, Weaviate, and Chroma are
+in the [retrieval guide](./retrieval.md), with hybrid search, reranking, and the other retrievers:
 
 | Store | Entry point | Where the vectors live |
 | --- | --- | --- |
 | `MemoryVectorStore` | `nexus-ai-pro/rag` | In process. Development, tests, and a few thousand chunks. |
 | `PostgresVectorStore` | `nexus-ai-pro/postgres/vectors` | Postgres with pgvector, ranked in the database. See the [Postgres guide](./postgres.md). |
 | `QdrantVectorStore` | `nexus-ai-pro/rag/qdrant` | A Qdrant collection, through its REST API. |
+| `SqliteVectorStore` | `nexus-ai-pro/sqlite/vectors` | A SQLite file, optionally ranked by sqlite-vec. See the [SQLite guide](./sqlite.md). |
 
 Each takes any `EmbeddingProvider` — `toEmbeddingFunction()` adapts the embeddings family, so
 retrieval inherits routing, batching, and caching — and falls back to `createHashEmbeddings()`,
@@ -165,7 +167,6 @@ specific entry point that provides it.
 | --- | --- | --- |
 | `cosineSimilarity` | function | Cosine similarity of two unit-length vectors, as their dot product. |
 | `createHashEmbeddings` | function | Hashed term-count vectors, normalized to unit length. |
-| `DocumentSource` | interface | A document to split into chunks. |
 | `EmbeddingProvider` | type | Turns texts into vectors, one per text, in order. |
 | `ingestDocuments` | function | Splits documents into overlapping chunks for retrieval. |
 | `IngestionOptions` | interface | How documents are split. |

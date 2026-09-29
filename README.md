@@ -109,7 +109,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Graphs](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/graphs.md) | Parallel branches, interrupts, checkpoints, time travel, subgraphs, caching, diagrams |
 | [Agents and tools](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/agents.md) | Graph-based agents with approvals and middleware, and the simple tool loop |
 | [Long-term memory](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/memory.md) | Namespaced memory with semantic search, in memory or Redis |
-| [MCP](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/mcp.md) | Borrowing tools from MCP servers and serving your own |
+| [MCP](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/mcp.md) | Borrowing tools from MCP servers, a registry of many, and serving your own |
 | [Traces](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tracing.md) | Run trees, queries, feedback, comparison, and alerts |
 | [Evaluation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md) | Datasets, evaluators, experiments, comparisons with a verdict, review queues, LLM judges |
 | [Prompts](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/prompts.md) | Typed templates, content versions, gated promotion, rollback, A/B splits, serving through outages |
@@ -120,6 +120,8 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Batch tiers](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/batch.md) | The providers' discounted batch APIs, resumable from any process |
 | [Caching](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/caching.md) | Exact and semantic response caches, with memory, Redis, and SQLite adapters |
 | [Grounding](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/grounding.md) | Retrieval, citations, verification, self-consistency, and knowledge graphs |
+| [Loaders](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/loaders.md) | Files, Markdown, HTML, CSV, JSON, PDF, web pages, sitemaps, and Git repositories into retrieval |
+| [Retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/retrieval.md) | Hybrid search, reranking, MMR, parent documents, and Redis, Pinecone, Weaviate, and Chroma stores |
 | [Embeddings and retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/embeddings.md) | Embeddings as a routed operation family, and RAG helpers |
 | [Images (experimental)](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/images.md) | Generation and masked edits over three backends, input safety, moderation, asset stores |
 | [Voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/voice.md) | Transcription, speech, voice turns, and voice sessions |

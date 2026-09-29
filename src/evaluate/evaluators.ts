@@ -221,6 +221,62 @@ export function totalCost(key = 'total-cost'): SummaryEvaluator {
   ];
 }
 
+/** Options for the retrieval evaluators. */
+export interface RetrievalEvaluatorOptions {
+  /** Results considered, from the top. Defaults to every result. */
+  k?: number;
+  /** The metric's name. */
+  key?: string;
+}
+
+/**
+ * The share of an example's relevant ids found in the output's top `k`. The output is a ranked list
+ * of ids or of chunks with an `id`, such as a retriever's results; the example's `expected` is the
+ * relevant id, or a list of them.
+ */
+export function recallAtK(options: RetrievalEvaluatorOptions = {}): Evaluator {
+  return (context) => {
+    const relevant = relevantIds(context.example.expected);
+    const found = rankedIds(context.output).slice(0, options.k);
+    const hits = relevant.filter((id) => found.includes(id));
+    const score = relevant.length === 0 ? 1 : hits.length / relevant.length;
+    return {
+      key: options.key ?? (options.k ? `recall@${options.k}` : 'recall'),
+      score,
+      passed: hits.length === relevant.length,
+      ...(hits.length === relevant.length
+        ? {}
+        : { comment: `missing: ${relevant.filter((id) => !hits.includes(id)).join(', ')}` }),
+    };
+  };
+}
+
+/**
+ * One over the rank of the first relevant id in the output's top `k`, or 0 when none is there. Its
+ * mean over a dataset is the mean reciprocal rank, which rewards putting the right chunk first.
+ */
+export function reciprocalRank(options: RetrievalEvaluatorOptions = {}): Evaluator {
+  return (context) => {
+    const relevant = new Set(relevantIds(context.example.expected));
+    const rank = rankedIds(context.output)
+      .slice(0, options.k)
+      .findIndex((id) => relevant.has(id));
+    return { key: options.key ?? 'reciprocal-rank', score: rank < 0 ? 0 : 1 / (rank + 1), passed: rank === 0 };
+  };
+}
+
+function relevantIds(expected: unknown): string[] {
+  if (Array.isArray(expected)) return expected.map(String);
+  return expected === undefined || expected === null ? [] : [String(expected)];
+}
+
+function rankedIds(output: unknown): string[] {
+  if (!Array.isArray(output)) return [];
+  return output.map((item) =>
+    item !== null && typeof item === 'object' && 'id' in item ? String((item as { id: unknown }).id) : String(item),
+  );
+}
+
 function asText(value: unknown): string {
   if (value === undefined || value === null) return '';
   if (typeof value === 'string') return value;

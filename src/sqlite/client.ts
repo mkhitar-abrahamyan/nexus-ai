@@ -14,8 +14,11 @@ export interface SqliteLikeClient {
   exec(sql: string): unknown;
 }
 
-/** A value bound to a SQLite parameter. Adapters only ever bind these. */
-export type SqliteValue = string | number | null;
+/**
+ * A value bound to a SQLite parameter. Adapters only ever bind these; bytes are bound as a blob, which
+ * is how the vector store keeps embeddings compact.
+ */
+export type SqliteValue = string | number | null | Uint8Array;
 
 /**
  * The part of a synchronous SQLite handle the adapters need: `node:sqlite`'s `DatabaseSync` and
