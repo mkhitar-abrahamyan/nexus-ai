@@ -456,7 +456,7 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
 
-## Retrieval breadth stage (Unreleased)
+## Retrieval breadth stage (1.22.0)
 
 The loaders (`nexus-ai-pro/loaders/*`), the Redis, Pinecone, Weaviate, Chroma, and SQLite vector
 stores, the retrievers (`nexus-ai-pro/rag/retrievers`), and the MCP registry

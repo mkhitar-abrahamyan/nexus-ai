@@ -1177,28 +1177,41 @@ resumes at the step it died on, for a graph and a workflow alike.
 
 ---
 
-## 22. 1.22.0: retrieval and integration breadth
+## 22. Shipped in 1.22.0 — retrieval and integration breadth
 
-Retrieval quality and the breadth of sources it reads from, without a catalogue of dependencies.
+**Document loaders.** `nexus-ai-pro/loaders/*`, one entry point per format: text files and
+directories, Markdown with front matter, HTML, CSV, JSON and JSON Lines, PDF through a parser you
+inject, web pages and sitemaps through the SSRF-safe fetch, and Git repositories through the `git`
+executable. Each streams `DocumentSource` values, and `loadIntoStore()` splits them into chunks and
+adds them to one or more stores in batches — a vector store and a keyword index in one pass.
 
-**Document loaders.** A `nexus-ai-pro/loaders/*` family — text, Markdown, HTML, CSV, JSON, PDF through
-an injected parser, web pages and sitemaps through the SSRF-safe fetch, and Git repositories — each
-streaming `DocumentSource` values into ingestion, each on its own subpath.
+**More vector stores**, behind the `VectorStore` contract and its contract test, which now also
+checks that a filter matches a value's type: Redis with RediSearch, Pinecone, Weaviate, and Chroma,
+each through REST or an injected client, and SQLite, ranked in JavaScript or by sqlite-vec.
 
-**More vector stores**, behind the `VectorStore` contract and its contract test: Redis, SQLite
-(`sqlite-vec`), Pinecone, Weaviate, and Chroma, each through an injected client or REST.
+**Better retrieval.** `nexus-ai-pro/rag/retrievers`: BM25 keyword search, hybrid search fused by
+reciprocal rank, reranking through any scorer or a chat model, maximal marginal relevance,
+parent-document retrieval, and multi-query retrieval, all composable over any store; `recallAtK()`
+and `reciprocalRank()` measure them.
 
-**Better retrieval.** Hybrid search — keyword and vector, fused by reciprocal rank — rerankers through
-an injected model, maximal marginal relevance, parent-document and multi-query retrieval, all as
-composable retrievers over any store.
-
-**Integration breadth through MCP.** A registry of MCP servers from one configuration file, with
-per-server allowlists, credentials from the environment, health checks, and tool bundles an agent
+**Integration breadth through MCP.** `McpRegistry` on `nexus-ai-pro/mcp/registry`: many servers from
+one configuration file — including the one desktop MCP clients use — with per-server allow and deny
+lists, credentials from the environment by placeholder, health checks, and tool bundles an agent
 receives by name.
 
-**Proof.** A fixed corpus loaded through the loaders into three stores; hybrid retrieval with
-reranking beats vector-only retrieval on a stored evaluation dataset, with the verdict from
-`compareExperiments()`.
+**Proof.** A fixed corpus loaded through the Markdown, CSV, and HTML loaders into the memory, SQLite,
+and Redis stores; on each, hybrid retrieval with reranking finds every question's page first where
+vector-only misses most, and `compareExperiments()` over a dataset stored on disk calls it better.
+
+### What did not land, and where it went
+
+- **The new stores are proven against stand-ins for their APIs**, not live servers. The opt-in live
+  suite (`npm run test:vectors:live`) runs the same contract against real Qdrant, Pinecone, Weaviate,
+  Chroma, and Redis when their variables are set; running it against each is the condition for the
+  retrieval family leaving experimental.
+- **Keyword search is in memory.** A database's own full-text search plugs in as a `Retriever`; a
+  bundled Postgres full-text retriever is a candidate for a later release.
+- **Pinecone indexes are not created by the store**, which is a control-plane operation.
 
 ---
 

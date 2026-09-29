@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-09-29
+
 Retrieval and integration breadth. Getting documents in, finding the right ones, and reaching the
 tools a team already runs, without a catalogue of dependencies.
 
@@ -1116,7 +1118,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.21.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.22.0...HEAD
+[1.22.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.18.0...v1.19.0
