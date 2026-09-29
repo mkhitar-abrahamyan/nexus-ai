@@ -2,7 +2,14 @@
 
 <!-- covers: ./embeddings ./embeddings/adapters ./embeddings/mock ./embeddings/models -->
 
-Embeddings as an operation family from `nexus-ai-pro/embeddings`: routing across providers, batching, caching, budgets, retries, and capability checks that refuse a dimension or input type a model cannot honor, with OpenAI, Google, Cohere, Ollama, and compatible adapters on `nexus-ai-pro/embeddings/adapters`. Retrieval, grounding, and the checks that catch an unsupported answer are in the [grounding guide](./grounding.md).
+Turning text into vectors, from `nexus-ai-pro/embeddings`. An embedding call gets what a completion
+gets: routing across providers, batching, caching, budgets, and retries. It also refuses an option a
+model cannot honour, such as a dimension it does not produce, so a store never mixes incompatible
+vectors. Adapters for OpenAI, Google, Cohere, Mistral, Ollama, and compatible servers are on
+`nexus-ai-pro/embeddings/adapters`.
+
+Searching the vectors, grounding answers in them, and checking those answers are in the
+[grounding guide](./grounding.md).
 
 ## Embeddings
 
@@ -98,98 +105,129 @@ Bundled embedding dimensions and prices are defaults, not financial truth. Overr
 
 ## Requests and responses
 
-`EmbeddingRequest` takes the `input` — an `EmbeddingInput`, one string or a list — and optionally the
-`model` or an alias, the `provider`, and:
+`EmbeddingRequest` needs only the `input`: an `EmbeddingInput`, which is one string or a list. The
+rest is optional.
 
-- `inputType`, an `EmbeddingInputType` of `document`, `query`, `classification`, or `clustering`.
-  Store with `document` and search with `query` on providers that return different vectors for each.
-- `dimensions` to shorten the vector on models that can, refused on a model with a fixed size.
-- `encodingFormat`, an `EmbeddingEncodingFormat` of `float` or `base64`; `base64` is smaller on the
-  wire, and both decode to numbers.
-- `normalize` to scale vectors to unit length when the provider does not.
-- `truncate`, an `EmbeddingTruncateMode`: `none` refuses a long input, and `start` or `end` cuts
-  from that side.
-- `user` for provider abuse monitoring, `userId` for rate limits and audit, a `requestId`, an
-  `idempotencyKey`, a `signal`, `timeoutMs`, `retry`, `cache`, and `concurrency` for this call,
-  `metadata`, and `providerOptions` merged into the provider body verbatim.
+| Field | What it does |
+| --- | --- |
+| `model`, `provider` | A model or alias, and a provider, when routing should not choose. |
+| `inputType` | An `EmbeddingInputType`: `document`, `query`, `classification`, or `clustering`. Store with `document` and search with `query` on providers that embed the two differently. |
+| `dimensions` | Shortens the vector on models that can. Refused on a model with a fixed size. |
+| `encodingFormat` | An `EmbeddingEncodingFormat`: `float`, or `base64`, which is smaller on the wire. Both come back as numbers. |
+| `normalize` | Scales vectors to unit length when the provider does not. |
+| `truncate` | An `EmbeddingTruncateMode`: `none` refuses a long input; `start` or `end` cuts from that side. |
+| `user`, `userId` | For provider abuse monitoring, and for your rate limits and audit. |
+| `requestId`, `idempotencyKey`, `signal`, `timeoutMs` | Per-call identity and control. |
+| `retry`, `cache`, `concurrency` | Overrides for this call. |
+| `metadata`, `providerOptions` | Application data, and fields merged into the provider body as they are. |
 
-`EmbeddingResponse` has `vectors` in input order, `embeddings` — each an `Embedding` with its index,
-values, size, and whether the provider cut its text — the last batch's raw payload, and
-`EmbeddingMeta`: the provider and model, dimensions, count, latency, batches, usage, cost, whether it
-was a full cache hit, how many inputs came from the cache or were de-duplicated, retries, and the
-routing decision.
+`EmbeddingResponse` returns:
+
+- `vectors`, in input order;
+- `embeddings`, each an `Embedding` with its index, values, size, and whether the provider cut its
+  text;
+- the last batch's raw payload;
+- `EmbeddingMeta`: the provider and model, dimensions, count, latency, batches, usage, cost, cache and
+  de-duplication counts, retries, and the routing decision.
 
 ## Configuration
 
-`EmbeddingConfig` is the client's `embeddings` option: `providers` by name, a `defaultProvider` and
-`defaultModel`, `fallback` routes tried on a retryable failure, `models` — an
-`EmbeddingModelRegistryConfig` of aliases, registry entries, and whether to keep the bundled ones —
-per-input `cache`, `rateLimit`, `retry`, an `EmbeddingCostBudgetConfig` (a limit in US dollars, and
-`error` to refuse or `warn` to report), `concurrency` for split batches (4 by default),
-`deduplicate` (on by default), `timeoutMs`, and `autoRegisterProviders`, which builds adapters from
-the chat credentials already in `providers` — `createConfiguredEmbeddingProviders()` is that step
-on its own.
+`EmbeddingConfig` is the client's `embeddings` option.
 
-`EmbeddingManager` is the family behind `ai.embed()`, and works standalone:
-`registerEmbeddingProvider()`, `hasEmbeddingProvider()`, `listEmbeddingProviders()`, `embed()`, and
-`embedOne()`. `ai.embeddings` exposes the client's own. Anything with `embed()` is an
-`EmbeddingSource`, which is what `toEmbeddingFunction()` adapts.
+| Option | What it sets |
+| --- | --- |
+| `providers`, `defaultProvider`, `defaultModel` | Adapters by name, and what a request uses by default. |
+| `fallback` | Routes tried, in order, on a retryable failure. |
+| `models` | An `EmbeddingModelRegistryConfig`: aliases, registry entries, and whether to keep the bundled ones. |
+| `cache` | Caching per input, so a repeated text is embedded once. |
+| `rateLimit`, `retry`, `timeoutMs` | Limits and retries, as for completions. |
+| `costBudget` | An `EmbeddingCostBudgetConfig`: a limit in US dollars, and `error` to refuse or `warn` to report. |
+| `concurrency` | Batches sent at once when a request is split. Defaults to 4. |
+| `deduplicate` | Sends repeated texts once. On by default. |
+| `autoRegisterProviders` | Builds adapters from the chat credentials already in `providers`. `createConfiguredEmbeddingProviders()` does this step on its own. |
+
+`EmbeddingManager` is the family behind `ai.embed()`, and it works without a client too. Its methods
+are `registerEmbeddingProvider()`, `hasEmbeddingProvider()`, `listEmbeddingProviders()`, `embed()`,
+and `embedOne()`. A client exposes its own as `ai.embeddings`.
+
+Anything with an `embed()` method is an `EmbeddingSource`. That is what `toEmbeddingFunction()` adapts
+into the plain function vector stores take.
 
 ## Writing an adapter
 
-An adapter implements `EmbeddingsProvider`: an `info` — `EmbeddingProviderInfo` with its name,
-locality, version, default model, and `EmbeddingProviderCapabilities` (models, batch size, input
-length, dimensions, input types, encodings, truncation, and whether vectors come back normalized; an
-omitted field means unknown, not unsupported) — and `embed()`. It receives an
-`EmbeddingProviderRequest`, a batch already split to fit and resolved to a concrete model, with an
-`EmbeddingProviderCallContext`: the request id, a signal, the attempt, the batch index, a deadline,
-the idempotency key, and trace headers. It returns an `EmbeddingProviderResult`: one vector per
-input in order, `EmbeddingProviderUsage` when the provider reports tokens, the model it actually
-used, whether it truncated, and the raw payload.
+An adapter implements `EmbeddingsProvider`: an `info` description and an `embed()` method.
 
-The bundled adapters, on `nexus-ai-pro/embeddings/adapters`, take `EmbeddingAdapterOptions` — an API
-key, base URL, model, headers, and a `fetch`:
+`info` is an `EmbeddingProviderInfo`: a name, locality, version, default model, and
+`EmbeddingProviderCapabilities`. Capabilities declare models, batch size, input length, dimensions,
+input types, encodings, truncation, and whether vectors come back normalized. A field you leave out
+means unknown, not unsupported.
 
-- `OpenAIEmbeddingProvider`, which also serves any OpenAI-compatible `/embeddings` server through
-  `OpenAICompatibleEmbeddingOptions`: a `providerName` and the `capabilities` it declares.
-- `GoogleEmbeddingProvider` and `CohereEmbeddingProvider`, which map input types to their own task
-  names.
-- `MistralEmbeddingProvider`, OpenAI-compatible.
-- `OllamaEmbeddingProvider`, local.
+`embed()` is called once per batch:
 
-`MockEmbeddingProvider`, on `nexus-ai-pro/embeddings/mock`, is deterministic for tests.
-`MockEmbeddingProviderOptions` sets its name, model, dimensions (16), capabilities, the usage it
-reports, a call to fail on — for retry and failover tests — and a latency.
+| Type | Contents |
+| --- | --- |
+| `EmbeddingProviderRequest` | One batch, already split to fit and resolved to a concrete model. |
+| `EmbeddingProviderCallContext` | The request id, a signal, the attempt, the batch index, a deadline, the idempotency key, and trace headers. |
+| `EmbeddingProviderResult` | What you return: one vector per input in order, the model actually used, whether it truncated, and the raw payload. |
+| `EmbeddingProviderUsage` | Token counts, when the provider reports them. |
 
-For a vector store that needs no routing or retries at all, `createOpenAIEmbeddingProvider()`,
-`createGeminiEmbeddingProvider()`, and `createCohereEmbeddingProvider()` return a bare embedding
-function from `OpenAIEmbeddingOptions`, `GeminiEmbeddingOptions`, and `CohereEmbeddingOptions`.
+### Bundled adapters
+
+The adapters on `nexus-ai-pro/embeddings/adapters` take `EmbeddingAdapterOptions`: an API key, a base
+URL, a model, headers, and a `fetch`.
+
+| Adapter | Notes |
+| --- | --- |
+| `OpenAIEmbeddingProvider` | Also serves any OpenAI-compatible `/embeddings` server, through `OpenAICompatibleEmbeddingOptions`: a `providerName` and the `capabilities` it declares. |
+| `GoogleEmbeddingProvider` | Maps input types to Google's task names. |
+| `CohereEmbeddingProvider` | Maps input types to Cohere's. |
+| `MistralEmbeddingProvider` | OpenAI-compatible. |
+| `OllamaEmbeddingProvider` | Local models. |
+
+`MockEmbeddingProvider`, on `nexus-ai-pro/embeddings/mock`, is deterministic, for tests.
+`MockEmbeddingProviderOptions` sets its name, model, dimensions (16), capabilities, and reported
+usage. It can also fail on a chosen call, for retry and failover tests, and add latency.
+
+A vector store that needs no routing or retries can use a bare function instead:
+`createOpenAIEmbeddingProvider()`, `createGeminiEmbeddingProvider()`, or
+`createCohereEmbeddingProvider()`. They take `OpenAIEmbeddingOptions`, `GeminiEmbeddingOptions`, and
+`CohereEmbeddingOptions`.
 
 ## The embedding registry
 
-`KNOWN_EMBEDDING_MODELS` maps each model to its `EmbeddingModelCapabilities`: the provider and
-family, native dimensions and the sizes it can shorten to, input and batch limits, the price per
-1,000 input tokens, whether it normalizes, the input types it distinguishes, its status, and when and
-from where the entry was verified. `EMBEDDING_MODEL_ALIASES` holds stable names such as
-`embed-quality`, and `EMBEDDING_REGISTRY_PROVENANCE` says when the bundled data was checked.
+`KNOWN_EMBEDDING_MODELS` maps each model to its `EmbeddingModelCapabilities`: provider and family,
+native dimensions and the sizes it can shorten to, input and batch limits, the price per 1,000 input
+tokens, whether it normalizes, the input types it distinguishes, and its status. Each entry also
+records when and where it was verified.
 
-`/embeddings/models` reads it through your configuration: `resolveEmbeddingModel()` resolves an
-alias to a `ResolvedEmbeddingModel`; `getEmbeddingModelCapabilities()`,
-`getEmbeddingModelRegistry()`, and `getEmbeddingModelAliases()` return entries and merged maps;
-`listEmbeddingModels()` and `listEmbeddingModelsForProvider()` list names;
-`estimateEmbeddingCost()` prices an `EmbeddingCostEstimateInput` and `priceEmbeddingUsage()` prices
-reported usage — embeddings bill on input only; `embeddingDimensions()` gives the size a model
-produces, honouring a requested truncation; and `resolveMaxBatchSize()` takes the smaller of the
-model's and the adapter's batch limits.
+`EMBEDDING_MODEL_ALIASES` holds stable names such as `embed-quality`. `EMBEDDING_REGISTRY_PROVENANCE`
+says when the bundled data was checked.
+
+`nexus-ai-pro/embeddings/models` reads the registry through your configuration:
+
+| Function | Returns |
+| --- | --- |
+| `resolveEmbeddingModel()` | A `ResolvedEmbeddingModel` for a name or alias. |
+| `getEmbeddingModelCapabilities()` | One model's entry. |
+| `getEmbeddingModelRegistry()`, `getEmbeddingModelAliases()` | The merged maps. |
+| `listEmbeddingModels()`, `listEmbeddingModelsForProvider()` | Model names. |
+| `estimateEmbeddingCost()` | The price of an `EmbeddingCostEstimateInput`, before the call. |
+| `priceEmbeddingUsage()` | The price of reported usage. Embeddings bill on input only. |
+| `embeddingDimensions()` | The size a model produces, honouring a requested truncation. |
+| `resolveMaxBatchSize()` | The smaller of the model's and the adapter's batch limits. |
 
 ## Errors
 
-Every embedding error extends `EmbeddingError` with a stable code. `EmbeddingValidationError` is a
-malformed request. `EmbeddingProviderError` is a provider failure, with
-`EmbeddingProviderNotFoundError` when no adapter serves the request, `EmbeddingCapabilityError` when
-it cannot honour an option, and `EmbeddingProviderResponseError` when the response has the wrong
-shape, such as the wrong number of vectors. `EmbeddingModelNotFoundError` names a model the registry
-does not know.
+Every embedding error extends `EmbeddingError` and has a stable code.
+
+| Error | When |
+| --- | --- |
+| `EmbeddingValidationError` | The request is malformed. |
+| `EmbeddingProviderError` | The provider failed. The next three extend it. |
+| `EmbeddingProviderNotFoundError` | No adapter serves the request. |
+| `EmbeddingCapabilityError` | The model cannot honour an option. |
+| `EmbeddingProviderResponseError` | The response has the wrong shape, such as the wrong number of vectors. |
+| `EmbeddingModelNotFoundError` | The registry does not know the model. |
 
 ## Limitations
 

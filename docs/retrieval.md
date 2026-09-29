@@ -24,53 +24,116 @@ const chunks = await retriever.retrieve('what does error E4012 mean', { filter: 
 
 ## Retrievers
 
-A `Retriever` answers a query with ranked chunks through `retrieve()`, and `RetrieveOptions` asks
-for a `topK`, a metadata `filter` passed down to every store searched, and a `signal`. Each
-retriever here takes others and returns one, so they compose in any order.
+A `Retriever` answers a query with ranked chunks through `retrieve()`. `RetrieveOptions` asks for a
+`topK`, a metadata `filter` passed to every store searched, and a `signal`.
 
-- **Vector search.** `vectorRetriever()` makes a store a retriever, with defaults for every search.
-- **Keyword search.** `KeywordIndex` ranks chunks in memory by BM25, which finds the exact terms —
-  product codes, error numbers, names — that vector search misses. `KeywordIndexOptions` tunes `k1`
-  and `b` and replaces the tokenizer; `tokenize()`, the default, splits into lower-cased runs of
-  letters and digits in any script. Adding a chunk whose id is held replaces it, as in a store.
-- **Hybrid search.** `hybridRetriever()` runs several retrievers in parallel — typically a store and a
-  keyword index over the same chunks — and fuses their rankings. `reciprocalRankFusion()` is the
-  fusion on its own: each chunk scores the sum of `weight / (k + rank)` over the rankings it appears
-  in, which combines scores on different scales without normalizing them. `FusionOptions` sets `k`
-  (60), a weight per ranking, and a `topK`; `FusedRetrieverOptions` adds the `candidates` asked of
-  each retriever (four times `topK`).
-- **Reranking.** `rerankRetriever()` asks its base for more candidates than it returns, scores them
-  all with a `Reranker` — a cross-encoder, a hosted rerank API, or any function that scores chunks
-  against a query — and keeps the best. `RerankRetrieverOptions` sets the `topK`, the `candidates`
-  (20), and a `minScore`. `modelReranker()` is a reranker over a chat model: one call scores every
-  candidate from 0 to 10, and a reply it cannot read scores them all 0 rather than failing the
-  retrieval. `ModelRerankerOptions` names the `model` and limits the characters shown per chunk. The
-  client is a `RetrievalModelClient` — a `NexusAI` instance, or anything with the same `complete()`.
-- **Diversity.** `mmrRetriever()` reorders its base's results by maximal marginal relevance, so
-  near-duplicates stop crowding out other evidence; `MmrRetrieverOptions` takes the `embed` function
-  and the `candidates`, and `MmrOptions` the `lambda` between relevance (1) and diversity (0).
-  `maximalMarginalRelevance()` is the selection on its own, over vectors you already have.
-- **Parent documents.** `parentDocumentRetriever()` searches small chunks, which match precisely, and
-  returns the larger parents they came from, which give the model enough context. Parents come back
-  in the order of their best child, each once. A `ParentLookup` finds them — a map, or a function that
-  fetches them by id — and `ParentDocumentRetrieverOptions` names the child's `parentKey`, which
-  defaults to the `documentId` ingestion sets. `splitParentChild()` produces both sides from your
-  documents, with `ParentChildOptions` for each split.
-- **Several phrasings.** `multiQueryRetriever()` searches a query's rewrites in parallel and fuses the
-  results, so a question worded differently from the documents still finds them. `QueryVariants`
-  produces the rewrites; `modelQueryVariants()` asks a chat model for them, with
-  `ModelQueryVariantsOptions` naming the `model` and the `count`. `MultiQueryRetrieverOptions` can
-  leave the original query out.
+Every retriever here takes other retrievers and returns one, so they stack in any order:
 
-To measure a retriever, run it over a dataset with `recallAtK()` and `reciprocalRank()` from the
-[evaluation guide](./evaluation.md), and compare two retrievers with `compareExperiments()`.
+| Retriever | Use it when |
+| --- | --- |
+| `vectorRetriever()` | You want a store's search as a retriever, with defaults for every call. |
+| `KeywordIndex` | Queries contain exact terms — codes, error numbers, names — that vectors miss. |
+| `hybridRetriever()` | You want both, fused. The usual production setup. |
+| `rerankRetriever()` | The right answer is in the top 20 but not the top 5. |
+| `mmrRetriever()` | Results are near-duplicates of each other. |
+| `parentDocumentRetriever()` | Small chunks match well but are too short to answer from. |
+| `multiQueryRetriever()` | Users phrase questions differently from your documents. |
+
+### Keyword and hybrid search
+
+`KeywordIndex` ranks chunks in memory by BM25. `KeywordIndexOptions` tunes the BM25 constants `k1` and
+`b`, and can replace the tokenizer. The default, `tokenize()`, splits text into lower-cased runs of
+letters and digits in any script. Adding a chunk whose id is already held replaces it, as in a store.
+
+```ts
+const keywords = new KeywordIndex();
+await loadIntoStore([store, keywords], loaders); // fill both in one pass
+
+const hybrid = hybridRetriever([vectorRetriever(store), keywords], { topK: 5 });
+const results = await hybrid.retrieve('error E4012');
+```
+
+`hybridRetriever()` runs its retrievers in parallel and fuses their rankings.
+`reciprocalRankFusion()` is the fusion on its own: each chunk scores the sum of `weight / (k + rank)`
+over the rankings it appears in. It uses ranks, not scores, so BM25 and cosine combine without
+normalizing.
+
+| Option | Type | Default |
+| --- | --- | --- |
+| `k` | `FusionOptions` | 60 |
+| `weights` | `FusionOptions` | 1 for each ranking |
+| `topK` | `FusionOptions` | every chunk, for the function; 5, for the retriever |
+| `candidates` | `FusedRetrieverOptions` | four times `topK`, asked of each retriever |
+
+### Reranking
+
+`rerankRetriever()` asks its base for more candidates than it returns, scores them all, and keeps the
+best. The scorer is a `Reranker`: any function that scores chunks against a query, such as a
+cross-encoder or a hosted rerank API. `RerankRetrieverOptions` sets `topK` (5), `candidates` (20), and
+a `minScore`.
+
+`modelReranker()` is a reranker over a chat model. One call scores every candidate from 0 to 10; a
+reply it cannot read scores them all 0 instead of failing the search. `ModelRerankerOptions` names the
+`model` and limits the characters shown per chunk. The client is a `RetrievalModelClient`: a
+`NexusAI` instance, or anything with the same `complete()`.
+
+```ts
+const reranked = rerankRetriever(hybrid, modelReranker(ai, { model: 'gpt-5.4-mini' }), { topK: 5 });
+```
+
+### Diversity
+
+`mmrRetriever()` reorders its base's results by maximal marginal relevance, so near-duplicates stop
+crowding out other evidence. `MmrRetrieverOptions` takes the `embed` function and the number of
+`candidates`. `MmrOptions` sets `lambda`: 1 is pure relevance, 0 pure diversity, and the default is
+0.5. `maximalMarginalRelevance()` is the selection on its own, over vectors you already have.
+
+```ts
+const diverse = mmrRetriever(vectorRetriever(store), { embed, lambda: 0.5, topK: 5 });
+```
+
+### Parent documents
+
+Small chunks match a query precisely, but are often too short to answer from.
+`parentDocumentRetriever()` searches small chunks and returns the larger parents they came from. Each
+parent comes back once, in the order of its best child.
+
+`splitParentChild()` produces both sides from your documents, with `ParentChildOptions` for each
+split. Parents are found through a `ParentLookup`: a map, or a function that fetches them by id.
+`ParentDocumentRetrieverOptions` names the child's `parentKey`, which defaults to the `documentId`
+that ingestion sets.
+
+```ts
+const { parents, children } = splitParentChild(documents);
+await store.add(children);
+const retriever = parentDocumentRetriever(vectorRetriever(store), {
+  parents: new Map(parents.map((parent) => [parent.id, parent])),
+});
+```
+
+### Several phrasings
+
+`multiQueryRetriever()` searches several rewrites of a query in parallel and fuses the results. A
+`QueryVariants` function produces the rewrites. `modelQueryVariants()` asks a chat model for them;
+`ModelQueryVariantsOptions` names the `model` and the `count`. `MultiQueryRetrieverOptions` can leave
+the original query out.
+
+```ts
+const retriever = multiQueryRetriever(hybrid, modelQueryVariants(ai, { model: 'gpt-5.4-mini', count: 3 }));
+```
+
+### Measuring a retriever
+
+Run a retriever over a dataset with `recallAtK()` and `reciprocalRank()` from the
+[evaluation guide](./evaluation.md), then compare two retrievers with `compareExperiments()`. That is
+how you know a change helped rather than guessing.
 
 ## More vector stores
 
-Each implements `VectorStore`, takes any embedding function, and passes the same contract test as
-the other stores — ranking, typed metadata filters, replacement by id, and deletes. None adds a
-dependency: the REST stores speak HTTP through `fetch`, and the Redis store sends commands through
-the client you pass. Each has a `migrate()` that never runs implicitly, where the database needs one.
+Each store implements `VectorStore`, takes any embedding function, and passes the same contract test:
+ranking, typed metadata filters, replacement by id, and deletes. None adds a dependency. The REST
+stores speak HTTP through `fetch`, and the Redis store sends commands through the client you pass.
+Call `migrate()` once where a store has one; it never runs on its own.
 
 | Store | Entry point | Where the vectors live |
 | --- | --- | --- |
@@ -80,33 +143,57 @@ the client you pass. Each has a `migrate()` that never runs implicitly, where th
 | `ChromaVectorStore` | `nexus-ai-pro/rag/chroma` | A Chroma collection, through its v2 API. |
 | `SqliteVectorStore` | `nexus-ai-pro/sqlite/vectors` | A SQLite file, optionally ranked by sqlite-vec. See the [SQLite guide](./sqlite.md). |
 
-**Redis.** `RedisVectorStore` keeps each chunk as a hash and searches a RediSearch vector index. A
-`RedisVectorLikeClient` is ioredis, with `call()`, or node-redis, with `sendCommand()`.
-`RedisVectorStoreOptions` sets the `dimensions`, the `index` and key `prefix`, the `algorithm` —
-`HNSW` or exact `FLAT` — and the `filterFields`: RediSearch filters only on fields declared in the
-index, so those are indexed as tags, stored with their type, and a filter on any other field is
-refused rather than silently ignored.
+```ts
+import Redis from 'ioredis';
+import { RedisVectorStore } from 'nexus-ai-pro/rag/redis';
 
-**Pinecone.** `PineconeVectorStore` upserts, queries, and deletes in batches. Create the index with
-the cosine metric and the store's width; `PineconeVectorStoreOptions` takes the index `host`, the
-`apiKey`, a `namespace`, the `apiVersion` header, and the upsert `batchSize` (100). A failed request
-raises a `PineconeError` with the status and body.
+const store = new RedisVectorStore(new Redis(process.env.REDIS_URL!), {
+  dimensions: 1536,
+  embed,
+  filterFields: ['tenant'],
+});
+await store.migrate();
+```
 
-**Weaviate.** `WeaviateVectorStore` brings its own vectors to a collection with no vectorizer and
-cosine distance. `migrate()` creates the collection and adds a property for each field you filter on,
-typed by a `WeaviateFieldType` — `text`, `number`, or `boolean`. `WeaviateVectorStoreOptions` takes
-the `url`, the `collection` (`NexusChunk`), an `apiKey` sent as a bearer token, and the usual `fetch`,
-`headers`, and `timeoutMs`. Errors — including ones Weaviate reports inside a successful batch —
-raise a `WeaviateError`.
+### Redis
 
-**Chroma.** `ChromaVectorStore` uses a collection with cosine distance, which `migrate()` creates.
+`RedisVectorStore` keeps each chunk as a hash and searches a RediSearch vector index. The client is a
+`RedisVectorLikeClient`: ioredis, with `call()`, or node-redis, with `sendCommand()`.
+
+`RedisVectorStoreOptions` sets the `dimensions`, the `index` and key `prefix`, the `algorithm` (`HNSW`,
+or exact `FLAT`), and the `filterFields`. RediSearch can only filter on fields declared in the index.
+So declared fields are indexed as tags with their type, and a filter on any other field is refused
+instead of being silently ignored.
+
+### Pinecone
+
+`PineconeVectorStore` upserts, queries, and deletes in batches. Create the index yourself, with the
+cosine metric and the store's width. `PineconeVectorStoreOptions` takes the index `host`, the `apiKey`,
+a `namespace`, the `apiVersion` header, and the upsert `batchSize` (100). A failed request raises a
+`PineconeError` with the status and body.
+
+### Weaviate
+
+`WeaviateVectorStore` brings its own vectors to a collection with no vectorizer and cosine distance.
+`migrate()` creates the collection and adds a property for each field you filter on. Each field's type
+is a `WeaviateFieldType`: `text`, `number`, or `boolean`.
+
+`WeaviateVectorStoreOptions` takes the `url`, the `collection` (`NexusChunk`), an `apiKey` sent as a
+bearer token, and the usual `fetch`, `headers`, and `timeoutMs`. Errors raise a `WeaviateError`,
+including errors Weaviate reports inside a successful batch.
+
+### Chroma
+
+`ChromaVectorStore` uses a collection with cosine distance, which `migrate()` creates.
 `ChromaVectorStoreOptions` takes the `url`, the `collection`, the `tenant` and `database`, and an
 `apiKey` sent as `x-chroma-token`. A failed request raises a `ChromaError`.
 
-In the REST stores, a chunk's top-level string, number, and boolean metadata fields are copied under
-`meta_` names, which is what filters match on, and its whole metadata travels as JSON, so nested
-values still come back. Scores are cosine similarity in every store, so a `minScore` means the same
-wherever the vectors live.
+### How the REST stores keep metadata
+
+In the REST stores, each chunk's top-level string, number, and boolean metadata fields are copied under
+`meta_` names; that is what filters match on. The whole metadata also travels as JSON, so nested values
+still come back. Scores are cosine similarity in every store, so a `minScore` means the same wherever
+the vectors live.
 
 ## Limitations
 

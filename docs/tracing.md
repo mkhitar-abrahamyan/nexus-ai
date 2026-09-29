@@ -2,7 +2,10 @@
 
 <!-- covers: ./tracing -->
 
-Queryable traces from `nexus-ai-pro/tracing`: run trees for graphs, agents, and model calls, stored in memory, in a JSONL file, or in Postgres, filterable by status, kind, model, tag, and metadata path, with feedback, trace comparison, and alert rules over stored runs. A model call rendered from a versioned prompt records which prompt ran, in `metadata.prompt`.
+Traces you can search, from `nexus-ai-pro/tracing`. Each request becomes a tree of runs — the graph,
+its nodes, its model and tool calls — stored in memory, a JSONL file, or Postgres. You can filter
+them, leave feedback on them, compare two of them, and alert on them. A model call rendered from a
+versioned prompt records which prompt ran, in `metadata.prompt`.
 
 ## Overview
 
@@ -76,89 +79,140 @@ reading them rather than starting an investigation.
 
 ## Runs and trees
 
-A `Run` is one unit of work: its id, the trace it belongs to and the run it ran inside, a name, a
-`RunKind` — `chain`, `model`, `tool`, `graph`, `node`, `agent`, `retriever`, `embedding`, `image`,
-`voice`, `realtime`, or `operation` — and a `RunStatus` of `running`, `ok`, or `error`. It carries
-start and end times, latency, inputs and outputs after redaction, the error, tags, metadata you can
-query by dot path, usage, cost, the model and provider for a model run, and its feedback. A `RunTree`
-is a run with its `children`, in start order, which is how a trace is read.
+A `Run` is one unit of work.
 
-`RunFeedback` is a judgement on a run — a `key` such as `helpful`, a numeric `score`, a non-numeric
-`value`, a `comment`, and the `source` that left it — and `tracer.recordFeedback()` attaches it,
-filling in the time.
+| Field | Contents |
+| --- | --- |
+| id, trace id, parent id | Which trace it belongs to, and the run it ran inside. |
+| name, kind | A `RunKind`: `chain`, `model`, `tool`, `graph`, `node`, `agent`, `retriever`, `embedding`, `image`, `voice`, `realtime`, or `operation`. |
+| status | A `RunStatus`: `running`, `ok`, or `error`. |
+| times, latency | When it started and ended. |
+| inputs, outputs, error | After redaction. |
+| tags, metadata | Metadata can be queried by dot path. |
+| usage, cost, model, provider | For model runs. |
+| feedback | Judgements left on it. |
+
+A `RunTree` is a run with its `children` in start order. That is how a trace is read.
+
+`RunFeedback` is a judgement on a run: a `key` such as `helpful`, a numeric `score`, a non-numeric
+`value`, a `comment`, and the `source` that left it. `tracer.recordFeedback()` attaches one and fills
+in the time.
 
 ## Recording
 
-`Tracer` takes `TracerOptions`: the `store`, a `SamplingPolicy`, a `RedactionPolicy`, `tags` and
-`metadata` added to every run (the deployment, the release), a clock, and `onError` — store errors
-are swallowed so tracing never breaks a request, and the hook lets you notice them. The context
-travels through `AsyncLocalStorage`, created only when a tracer exists.
+`Tracer` takes `TracerOptions`:
 
-- `startRun()` starts a run beneath the one in scope, or a new trace, and returns a `RunHandle`.
-  `StartRunOptions` give the name, kind (`chain` by default), inputs, tags, metadata, model and
-  provider, and a `parentId` or `traceId` to attach somewhere explicit.
-- `handle.finish()` ends it. `FinishRunOptions` give the outputs, an `error` (whose presence marks the
-  run failed), usage, cost, metadata merged into the run's, and the model and provider that actually
-  ran. `handle.child()` starts a run beneath it without relying on the ambient context.
-- `trace()` runs a function inside a new run and finishes it with the result or the error.
-  `traceable()` wraps a function so every call becomes a run, recording its arguments as inputs.
-- `current()` says which run is in scope.
+| Option | What it sets |
+| --- | --- |
+| `store` | Where finished traces are written. |
+| `sampling` | A `SamplingPolicy`, below. |
+| `redaction` | A `RedactionPolicy`, below. |
+| `tags`, `metadata` | Added to every run, such as the deployment or release. |
+| `onError` | Store errors are swallowed so tracing never breaks a request; this hook lets you notice them. |
+| clock | For tests. |
 
-A trace is written when its root finishes, which is what lets tail sampling decide with the whole
-trace in hand. `SamplingPolicy.rate` keeps that share of traces, and `keepErrors`,
-`keepSlowerThanMs`, and `keepCostlierThan` keep any trace with a failure, a slow run, or an expensive
-one whatever the rate. `RedactionPolicy` drops inputs or outputs entirely, strips `hideFields` by dot
-path, and hands each run to `redact` last. `stripFields()` is that dot-path removal on its own; it
-copies rather than mutating what you pass.
+The current run travels through `AsyncLocalStorage`, which is created only when a tracer exists.
+
+| Method | What it does |
+| --- | --- |
+| `startRun()` | Starts a run beneath the one in scope, or a new trace. Returns a `RunHandle`. |
+| `handle.finish()` | Ends the run. |
+| `handle.child()` | Starts a run beneath it, without relying on the ambient context. |
+| `trace()` | Runs a function inside a new run, and finishes it with the result or error. |
+| `traceable()` | Wraps a function so every call becomes a run, with its arguments as inputs. |
+| `current()` | The run in scope. |
+
+`StartRunOptions` give the name, kind (`chain` by default), inputs, tags, metadata, model, and
+provider. A `parentId` or `traceId` attaches the run somewhere explicit.
+
+`FinishRunOptions` give the outputs, usage, cost, metadata to merge, and the model and provider that
+actually ran. Passing an `error` marks the run failed.
+
+### Sampling and redaction
+
+A trace is written when its root finishes, so sampling decides with the whole trace in hand.
+`SamplingPolicy.rate` keeps that share of traces. Three options keep a trace whatever the rate:
+`keepErrors`, `keepSlowerThanMs`, and `keepCostlierThan`.
+
+`RedactionPolicy` can drop inputs or outputs entirely, and strips `hideFields` by dot path. Its `redact`
+hook sees each run last. `stripFields()` is the dot-path removal on its own; it copies rather than
+changing what you pass.
 
 ## Graphs and model calls
 
 `traceGraph()` records a graph or agent run: a root run with one child per task, retries included.
 `GraphTracingOptions` names the root, labels it `graph` or `agent`, and adds tags, metadata, and
-inputs. It returns `GraphTracing`: `runOptions` to spread into `invoke()`, the `root` handle,
-`runFor(node)` for the run of a node in progress, and `finish()` to close the root with the result.
+inputs. It returns `GraphTracing`:
 
-`traceModelClient()` wraps anything with `complete()` — the `ModelClientLike` contract — so every call
-becomes a `model` run with its request, content and tool calls, token usage, cost, finish reason, the
-model and provider that answered, and the prompt version when the request was rendered from a
-registry. Its `parent` option decides where the call hangs; `() => tracing.runFor('model')` nests it
-inside the node that made it.
+- `runOptions`, to spread into `invoke()`;
+- `root`, the root run's handle;
+- `runFor(node)`, the run of a node in progress;
+- `finish()`, which closes the root with the result.
+
+`traceModelClient()` wraps anything with a `complete()` method — the `ModelClientLike` contract — so
+every call becomes a `model` run. The run records the request, the content and tool calls, token usage,
+cost, finish reason, the model and provider that answered, and the prompt version when the request came
+from a registry. Its `parent` option decides where the call hangs: `() => tracing.runFor('model')`
+nests it inside the node that made it.
 
 ## Storing and querying
 
-`TraceStore` is the contract every store keeps: `save()`, `get()`, `query()`, and `tree()`, with
-optional `addFeedback()` and `prune()`. Three are included:
+A `TraceStore` has `save()`, `get()`, `query()`, and `tree()`, and optionally `addFeedback()` and
+`prune()`. Three stores are included:
 
-- `MemoryTraceStore`, bounded by `MemoryTraceStoreOptions.maxRuns` (10,000 by default), for
-  development, tests, and a single process.
-- `JsonlTraceStore`, one JSON object per line in `JsonlTraceStoreOptions.file`, rewritten to its newer
-  half once it passes `maxBytes` (64 MB by default). It is durable without a database and greppable,
-  but a read loads the file, so it suits a service that writes far more than it queries.
-- `PostgresTraceStore`, in the [Postgres guide](./postgres.md), which runs every filter in SQL.
+| Store | Best for |
+| --- | --- |
+| `MemoryTraceStore` | Development, tests, and one process. Bounded by `MemoryTraceStoreOptions.maxRuns` (10,000). |
+| `JsonlTraceStore` | Durable without a database: one JSON object per line in `JsonlTraceStoreOptions.file`, trimmed to its newer half past `maxBytes` (64 MB). A read loads the file, so it suits a service that writes far more than it queries. |
+| `PostgresTraceStore` | Production queries, with every filter in SQL. See the [Postgres guide](./postgres.md). |
 
-`RunQuery` is the filter: a trace id, one kind or several, status, name, model, provider, tags (all
-must be present), metadata by dot path, minimum latency and cost, a `since` and `until` window on the
-start time, runs with feedback under a key, and `limit` (50 by default) and `offset`. Results come
-newest first. `applyQuery()` and `assembleTree()` are the filtering and tree-building every store
-shares, exported for a store of your own so a query means the same thing everywhere.
+A `RunQuery` filters runs. Results come newest first.
+
+| Filter | Matches |
+| --- | --- |
+| trace id, kind (one or several), status, name, model, provider | Exactly. |
+| tags | Runs with all of them. |
+| metadata | By dot path. |
+| minimum latency, minimum cost | Runs at least that slow or expensive. |
+| `since`, `until` | A window on the start time. |
+| feedback key | Runs with feedback under that key. |
+| `limit`, `offset` | Paging. `limit` defaults to 50. |
+
+`applyQuery()` and `assembleTree()` are the filtering and tree-building every store shares. They are
+exported for a store of your own, so a query means the same everywhere.
 
 ## Comparing traces
 
-`compareTraces()` matches the runs of two trees by their path — `root/child#0/grandchild#1` — because
-two runs of the same graph never share ids. The `TraceComparison` lists each matched pair with its
-`RunDifference` values (a field added, removed, or changed, with both sides), the runs only one side
-has, and the change in root latency and total cost. `formatTree()` prints a tree as indented text.
+`compareTraces()` matches the runs of two trees by path, such as `root/child#0/grandchild#1`, because
+two runs of the same graph never share ids. It returns a `TraceComparison`:
+
+- each matched pair, with its `RunDifference` values: a field added, removed, or changed, with both
+  sides;
+- the runs only one side has;
+- the change in root latency and total cost.
+
+`formatTree()` prints a tree as indented text.
 
 ## Alerts
 
-An `AlertRule` has a name, an `AlertMetric` — `errorRate`, `latencyP95`, `latencyP50`, `cost`, or
-`count` — a threshold it fires above, a window (15 minutes by default), a `filter` to measure one
-model, kind, or tag, and `minRuns` so a quiet window does not fire. `AlertEvaluator.evaluate()` checks
-every rule once, returns an `AlertEvent` for each that fired — the value, the threshold, the run
-count, the window, and up to three sample runs — and hands each to an `AlertNotifier`. `measure()`
-computes a metric over runs on its own. `createWebhookNotifier()` posts to a URL, with
-`WebhookNotifierOptions` for headers, a `fetch`, and a `body` builder; the default payload is the
-`{ text }` shape chat webhooks accept, with the event beside it.
+An `AlertRule` watches one metric.
+
+| Field | Meaning |
+| --- | --- |
+| name | What the alert says. |
+| metric | An `AlertMetric`: `errorRate`, `latencyP95`, `latencyP50`, `cost`, or `count`. |
+| threshold | It fires above this. |
+| window | How far back it looks. Defaults to 15 minutes. |
+| `filter` | Measures one model, kind, or tag. |
+| `minRuns` | So a quiet window does not fire. |
+
+`AlertEvaluator.evaluate()` checks every rule once. Each rule that fires produces an `AlertEvent` —
+the value, the threshold, the run count, the window, and up to three sample runs — which goes to an
+`AlertNotifier`. `measure()` computes a metric over runs on its own.
+
+`createWebhookNotifier()` posts events to a URL. `WebhookNotifierOptions` sets headers, a `fetch`, and
+a `body` builder. By default it sends the `{ text }` shape chat webhooks accept, with the event beside
+it.
 
 An alert answers a question you asked in advance. To find problems you did not expect — failing and
 slow runs grouped by what went wrong, and metrics that got worse than the week before — use

@@ -3,7 +3,14 @@
 <!-- covers: ./workflows -->
 <!-- sources: src/workflow -->
 
-Ready-made workflows from `nexus-ai-pro/workflows`: chains for grounded answers, extraction, classification, comparison, and summarize-verify-format, and domain templates for support triage, sales qualification, legal review, and code review. Each is a function over any client with a `complete()` method, returning the final content, the last response, and every step.
+Ready-made workflows from `nexus-ai-pro/workflows`, for common jobs you would otherwise prompt by hand.
+
+- **Chains** answer from sources, extract structured data, classify, compare options, and summarize
+  with verification.
+- **Domain templates** triage support tickets, qualify sales leads, review contracts, and review code.
+
+Each is a function over any client with a `complete()` method. It returns the final content, the
+last response, and every step taken.
 
 ```ts
 import { ragAnswer, supportTriageWorkflow } from 'nexus-ai-pro/workflows';
@@ -15,31 +22,36 @@ console.log(triage.content, triage.steps.length);
 
 ## The shape every workflow shares
 
-A workflow needs one thing from a client: a `complete()` method, the `WorkflowClient` contract. A
-`NexusAI` client satisfies it, and so does a test double that returns scripted responses. Every
-workflow returns a `WorkflowResult`: the final `content`, the final `response` with its usage and
-cost, and `steps`, a `WorkflowStepResult` per completion — its name and its response — so you can see
-how the answer was reached. The client also exposes `ai.summarizeVerifyFormat()` directly.
+A workflow needs one thing from a client: a `complete()` method. That is the `WorkflowClient`
+contract. A `NexusAI` client satisfies it, and so does a test double that returns scripted responses.
+
+Every workflow returns a `WorkflowResult`:
+
+- `content`, the final answer;
+- `response`, the final response, with its usage and cost;
+- `steps`, one `WorkflowStepResult` per completion — its name and its response — so you can see how
+  the answer was reached.
+
+The client also offers `ai.summarizeVerifyFormat()` directly.
 
 ## Chains
 
-- **`ragAnswer()`** answers a question from retrieved passages and cites them by id. `RagAnswerOptions`
-  takes the `model`, the `question`, the `chunks`, and `verify`, which checks the answer against the
-  passages and repairs any claim they do not support, at the cost of a second completion when a
-  repair is needed.
-- **`extractStructured()`** pulls data matching a JSON Schema out of text. `ExtractStructuredOptions`
-  takes the `model`, the `input`, the `schema`, and an `instruction` to replace the default one. The
-  client validates the output against the schema.
-- **`classifyRoute()`** picks exactly one label, at temperature 0, and answers `{ label, confidence }`
-  as JSON. `ClassifyRouteOptions` takes the `labels` and an optional `instruction`.
-- **`compareAndDecide()`** weighs options against criteria and chooses one, reasoning privately before
-  it answers. `CompareOptions` takes the `input`, the `options`, and the `criteria`.
-- **`summarizeVerifyFormat()`** summarizes, verifies, and formats. `SummarizeVerifyFormatOptions` takes
-  the `input`, `verifyContext` — the sources the summary must agree with — a `responseFormat` for the
-  final answer, and instructions to replace the defaults. With sources, the verify step restates the
-  summary against them and repairs any claim they do not support; without them, it is skipped. The
-  format is applied only in the last step, so it is two completions, or three or four with
-  verification.
+| Chain | What it does | Its options |
+| --- | --- | --- |
+| `ragAnswer()` | Answers a question from retrieved passages, citing them by id. | `RagAnswerOptions`: `model`, `question`, `chunks`, and `verify`, which repairs claims the passages do not support. A repair costs a second completion. |
+| `extractStructured()` | Pulls data matching a JSON Schema out of text. The client validates the output. | `ExtractStructuredOptions`: `model`, `input`, `schema`, and an optional `instruction`. |
+| `classifyRoute()` | Picks exactly one label, at temperature 0, answering `{ label, confidence }`. | `ClassifyRouteOptions`: `labels`, and an optional `instruction`. |
+| `compareAndDecide()` | Weighs options against criteria and chooses one, reasoning privately first. | `CompareOptions`: `input`, `options`, and `criteria`. |
+| `summarizeVerifyFormat()` | Summarizes, checks the summary against sources, and formats the result. | `SummarizeVerifyFormatOptions`, below. |
+
+`SummarizeVerifyFormatOptions` takes the `input`, and optionally:
+
+- `verifyContext`, the sources the summary must agree with. The verify step repairs any claim they do
+  not support. Without sources, that step is skipped.
+- `responseFormat`, applied only to the final answer;
+- instructions that replace each step's default.
+
+So it costs two completions, or three or four with verification.
 
 ```ts
 import { summarizeVerifyFormat } from 'nexus-ai-pro/workflows';
@@ -54,9 +66,9 @@ const brief = await summarizeVerifyFormat(ai, {
 
 ## Domain templates
 
-The domain workflows ask for JSON with a fixed set of fields, so their output can be parsed and
-routed. Each takes `DomainWorkflowOptions` — the `model`, the `input`, and optional `context` passages
-included in the prompt — plus one field of its own:
+The domain workflows answer in JSON with a fixed set of fields, so their output can be parsed and
+routed. Each takes `DomainWorkflowOptions`: the `model`, the `input`, and optional `context` passages
+for the prompt. Each also has one option of its own:
 
 | Workflow | Its option | Required fields in the answer |
 | --- | --- | --- |
