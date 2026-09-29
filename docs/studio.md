@@ -5,8 +5,9 @@
 A UI for what a nexus-ai-pro application records: traces, threads, approvals, experiments, prompts,
 context bundles, issues found in traces, proposed fixes, costs, provider health, and the operation
 queue. Local and token-only by default, or shared by a team with accounts and roles. It is a separate package,
-`nexus-ai-pro-studio`, so the core install never carries a UI. It runs on your machine, reads your
-application's own stores through the adapters it already uses, and needs no hosted service.
+`nexus-ai-pro-studio`, so the core install never carries a UI. It runs wherever you start it — your
+machine, or a server your team reaches — reads your application's own stores through the adapters
+it already uses, and needs no hosted service.
 
 ## Starting it
 
@@ -100,7 +101,7 @@ its children is not counted twice. `StudioCostReport` is the shape it returns.
 ## Access and safety
 
 The studio can change things — answer an interrupt, edit a thread, promote a prompt — so it is
-locked down even though it only runs locally:
+locked down, even on its local default:
 
 - It binds `127.0.0.1` by default, so nothing else on the network can reach it.
 - Every request needs the token. It arrives once, in the URL the command prints; the studio moves it

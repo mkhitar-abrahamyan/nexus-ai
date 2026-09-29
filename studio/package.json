@@ -1,7 +1,7 @@
 {
   "name": "nexus-ai-pro-studio",
   "version": "1.22.0",
-  "description": "A local studio for nexus-ai-pro: traces, threads, approvals, experiments, prompts, costs, provider health, and the operation queue, served from your own machine with no hosted service.",
+  "description": "A studio for nexus-ai-pro: traces, threads, approvals, experiments, prompts, context bundles, issues, and proposed fixes, run locally or shared by a team with roles and an audit log, with no hosted service.",
   "type": "module",
   "bin": {
     "nexus-studio": "dist/cli.js"
@@ -33,7 +33,15 @@
     "observability",
     "evaluation",
     "agents",
-    "human-in-the-loop"
+    "human-in-the-loop",
+    "llmops",
+    "prompt-management",
+    "self-hosted",
+    "team",
+    "rbac",
+    "audit-log",
+    "issue-detection",
+    "context-engineering"
   ],
   "license": "MIT",
   "repository": {

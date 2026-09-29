@@ -1,8 +1,9 @@
 # nexus-ai-pro
 
-The typed AI framework for TypeScript. One API for provider routing and failover, agent graphs that
-run branches in parallel and survive a restart, durable background operations, guardrails, cost
-control, images, voice, and evals.
+The typed AI framework for TypeScript. One API for provider routing and failover, agent graphs and
+workflows that run branches in parallel and survive a restart, retrieval over any vector store, MCP,
+durable background operations, guardrails, cost control, images, voice, and evals — with a studio a
+team can share.
 
 Import the whole runtime, or one piece: every capability has its own entry point with a size budget
 CI enforces, and [the packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md) publishes what each one costs. A graph-only application loads 49 KB
@@ -90,6 +91,14 @@ You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want f
 - embed text through the same routing, caching, batching, budget, retry, and metrics as a completion
 - run long operations that survive a restart, with leases, retries, dead-lettering, and signed webhooks
 - build stateful graphs with cycles, fan-out, subgraphs, human approval, and resumable checkpoints
+- make ordinary async functions durable step by step, and recover a crashed run at the step it died on
+- load files, web pages, sitemaps, and Git repositories into retrieval, over memory, Postgres, SQLite,
+  Redis, Qdrant, Pinecone, Weaviate, or Chroma
+- retrieve with hybrid keyword and vector search, reranking, and diversity, and measure it with evals
+- reach tools from many MCP servers under one configuration, with allowlists and credentials from the
+  environment
+- version prompts, instructions, tools, and skills together, and promote them through evaluation gates
+- find failing and slow runs, detect regressions, and review evaluated fix proposals in a shared studio
 - trip routing away from a failing provider, and share one rate-limit budget across workers
 - reach the providers' half-price asynchronous batch tier behind one operation handle
 - persist generated media to disk or S3 with tenant isolation, retention, and checksums
@@ -203,11 +212,16 @@ Shipped so far:
 - record and replay of provider traffic;
 - prompt versioning: typed templates, content versions, gated promotion, and serving through outages;
 - a self-hosted agent server, and a local studio as a separate package;
-- per-entry-point size budgets.
+- per-entry-point size budgets;
+- vector stores behind one contract, and deprecation warnings at run time;
+- durable functional workflows, step-level recovery in the server, SQLite persistence, and diagrams
+  as images;
+- document loaders, five more vector stores, hybrid retrieval with reranking, and an MCP registry.
 
-Next: durable functional workflows and step-level recovery, then retrieval and integration breadth,
-a shared team studio, and self-managed deployment at scale, before 2.0.0 consolidates. The image
-family leaves experimental once recorded live conformance passes on all three backends.
+Next: the team engineering platform — a shared studio with accounts and roles, a context hub,
+insights with evaluated fix proposals, and evaluation caching — then self-managed deployment at
+scale, before 2.0.0 consolidates. The image family leaves experimental once recorded live
+conformance passes on all three backends.
 
 ## Before Production
 
