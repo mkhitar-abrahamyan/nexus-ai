@@ -185,6 +185,12 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `calibrateSemanticInjectionClassifier` | function | Scores the semantic injection classifier at several thresholds, so you can pick one for your own traffic. |
+| `GUARDRAIL_POLICIES` | constant | The bundled guardrail presets, as security configurations. |
+| `guardrailPolicy` | function | A bundled guardrail preset, with your overrides merged over it. |
+| `GuardrailPolicyName` | type | Names of the bundled guardrail presets. |
+| `InjectionCalibrationExample` | interface | One labelled prompt for calibrating the injection classifier. |
+| `InjectionCalibrationResult` | interface | How the classifier performed at one threshold. |
 | `InjectionDetector` | class | Finds prompt-injection attempts by pattern. |
 | `InputGuard` | class | Checks requests for secrets, dangerous URLs, and other unsafe input. |
 | `NexusSecurityError` | class | Raised when guardrails block a request or a response. |
@@ -192,20 +198,15 @@ specific entry point that provides it.
 | `PIIDetector` | class | Finds and masks personal data such as emails, phone numbers, and card numbers. |
 | `SchemaValidator` | class | Validates a request's shape before it is sent. |
 | `SecurityPipeline` | class | Runs the input and output guardrails: schema validation, injection and PII detection, and output checks, at a security level or with a full configuration. |
+| `SEMANTIC_INJECTION_CALIBRATION_SET` | constant | A small built-in calibration set: five attacks and five safe prompts that look like them. |
 | `SemanticInjectionClassifier` | class | Finds prompt-injection attempts by embedding similarity to known attacks, catching rephrasings a pattern misses. |
 
 ### `nexus-ai-pro`
 
 | Export | Kind | Summary |
 | --- | --- | --- |
-| `calibrateSemanticInjectionClassifier` | function | Scores the semantic injection classifier at several thresholds, so you can pick one for your own traffic. |
 | `FileUpload` | interface | A file offered for upload. |
-| `GUARDRAIL_POLICIES` | constant | The bundled guardrail presets, as security configurations. |
-| `guardrailPolicy` | function | A bundled guardrail preset, with your overrides merged over it. |
-| `GuardrailPolicyName` | type | Names of the bundled guardrail presets. |
 | `hardenPrompt` | function | Wraps user content in delimiters and adds a system instruction to treat it as data, not instructions. |
-| `InjectionCalibrationExample` | interface | One labelled prompt for calibrating the injection classifier. |
-| `InjectionCalibrationResult` | interface | How the classifier performed at one threshold. |
 | `InjectionDetectionConfig` | interface | Prompt-injection detection on input. |
 | `PIIConfig` | interface | Detection of personal data in input. |
 | `PIIType` | type | Kinds of personal data and secrets the PII detector recognizes. |
@@ -215,7 +216,6 @@ specific entry point that provides it.
 | `SecurityFinding` | interface | One thing a guardrail found. |
 | `SecurityLevel` | type | How much protection a client applies, from none to maximal. |
 | `SecurityResult` | interface | The outcome of running guardrails on a value. |
-| `SEMANTIC_INJECTION_CALIBRATION_SET` | constant | A small built-in calibration set: five attacks and five safe prompts that look like them. |
 | `UploadScanFinding` | interface | One problem found in an upload. |
 | `UploadScanner` | class | Checks uploads for size, extension, MIME type, and forbidden content before they reach a model or a store. |
 | `UploadScannerOptions` | interface | Options for scanning uploads. |

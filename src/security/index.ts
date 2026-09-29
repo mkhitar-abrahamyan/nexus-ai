@@ -1,12 +1,12 @@
 import type { CompletionRequest } from '../types/messages.js';
+import type { NexusResponse } from '../types/response.js';
 import type { SecurityConfig, SecurityFinding, SecurityLevel, SecurityResult } from '../types/security.js';
-import { SchemaValidator } from './schema-validator.js';
 import { warnUnreadOption } from '../utils/deprecation.js';
 import { InjectionDetector } from './injection-detector.js';
-import { PIIDetector } from './pii-detector.js';
-import { OutputGuard, redactSensitiveText } from './output-guard.js';
 import { InputGuard } from './input-guard.js';
-import type { NexusResponse } from '../types/response.js';
+import { OutputGuard, redactSensitiveText } from './output-guard.js';
+import { PIIDetector } from './pii-detector.js';
+import { SchemaValidator } from './schema-validator.js';
 import { SemanticInjectionClassifier } from './semantic-injection-classifier.js';
 
 /**
@@ -242,11 +242,18 @@ export class SecurityPipeline {
   }
 }
 
-export { SchemaValidator } from './schema-validator.js';
+export {
+  calibrateSemanticInjectionClassifier,
+  type InjectionCalibrationExample,
+  type InjectionCalibrationResult,
+  SEMANTIC_INJECTION_CALIBRATION_SET,
+} from './injection-calibration.js';
 export { InjectionDetector } from './injection-detector.js';
-export { PIIDetector } from './pii-detector.js';
-export { OutputGuard } from './output-guard.js';
 export { InputGuard } from './input-guard.js';
+export { OutputGuard } from './output-guard.js';
+export { PIIDetector } from './pii-detector.js';
+export { GUARDRAIL_POLICIES, type GuardrailPolicyName, guardrailPolicy } from './policies.js';
+export { SchemaValidator } from './schema-validator.js';
 export { SemanticInjectionClassifier } from './semantic-injection-classifier.js';
 
 function sanitizeFindingForError(finding: SecurityFinding): SecurityFinding {

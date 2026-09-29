@@ -66,16 +66,16 @@ only, so it never appears in an import graph.
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 576 KB | 100% | +4.7 MB |
-| `nexus-ai-pro/config` | 444 KB | 77% | +4.7 MB |
-| `nexus-ai-pro/core` | 440 KB | 76% | +4.7 MB |
+| `nexus-ai-pro` | 577 KB | 100% | +4.7 MB |
+| `nexus-ai-pro/config` | 453 KB | 79% | +4.7 MB |
+| `nexus-ai-pro/core` | 449 KB | 78% | +4.7 MB |
 | `nexus-ai-pro/realtime` | 156 KB | 27% | none |
 | `nexus-ai-pro/batch` | 101 KB | 18% | none |
 | `nexus-ai-pro/realtime/session` | 94 KB | 16% | none |
 | `nexus-ai-pro/embeddings` | 82 KB | 14% | none |
 | `nexus-ai-pro/server` | 81 KB | 14% | none |
-| `nexus-ai-pro/providers/groq` | 72 KB | 13% | none |
-| `nexus-ai-pro/providers/mistral` | 72 KB | 13% | none |
+| `nexus-ai-pro/providers/groq` | 72 KB | 12% | none |
+| `nexus-ai-pro/providers/mistral` | 72 KB | 12% | none |
 | `nexus-ai-pro/providers/azure-openai` | 71 KB | 12% | none |
 | `nexus-ai-pro/providers/openrouter` | 71 KB | 12% | none |
 | `nexus-ai-pro/providers/deepseek` | 70 KB | 12% | none |
@@ -87,13 +87,13 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/providers/google` | 60 KB | 10% | none |
 | `nexus-ai-pro/images` | 59 KB | 10% | none |
 | `nexus-ai-pro/providers/ollama` | 54 KB | 9% | none |
-| `nexus-ai-pro/graph` | 49 KB | 9% | none |
-| `nexus-ai-pro/postgres` | 49 KB | 9% | none |
+| `nexus-ai-pro/graph` | 49 KB | 8% | none |
+| `nexus-ai-pro/postgres` | 49 KB | 8% | none |
+| `nexus-ai-pro/security` | 46 KB | 8% | +3.4 MB |
 | `nexus-ai-pro/batch/openai` | 46 KB | 8% | none |
 | `nexus-ai-pro/batch/anthropic` | 46 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% | none |
 | `nexus-ai-pro/providers/cohere` | 44 KB | 8% | none |
-| `nexus-ai-pro/security` | 41 KB | 7% | +3.4 MB |
 | `nexus-ai-pro/batch/mock` | 41 KB | 7% | none |
 | `nexus-ai-pro/operations` | 40 KB | 7% | none |
 | `nexus-ai-pro/prompts/registry` | 34 KB | 6% | none |
@@ -113,6 +113,7 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/realtime/mock` | 18 KB | 3% | none |
 | `nexus-ai-pro/telephony` | 18 KB | 3% | none |
 | `nexus-ai-pro/images/evals` | 17 KB | 3% | none |
+| `nexus-ai-pro/workflows` | 17 KB | 3% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 3% | none |
 | `nexus-ai-pro/embeddings/adapters` | 16 KB | 3% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 3% | none |
@@ -122,7 +123,6 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/images/google` | 14 KB | 2% | none |
 | `nexus-ai-pro/context` | 13 KB | 2% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 2% | none |
-| `nexus-ai-pro/workflows` | 13 KB | 2% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 2% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 2% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 2% | none |

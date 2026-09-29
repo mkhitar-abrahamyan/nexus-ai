@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro",
-  "version": "1.20.0",
+  "version": "1.21.0",
   "description": "Typed AI framework for TypeScript: provider routing and failover, parallel agent graphs with checkpoints, durable operations, guardrails, and cost control",
   "type": "module",
   "main": "dist-cjs/index.js",
@@ -1083,7 +1083,7 @@
     "studio:demo": "node studio/scripts/run.mjs studio/example/start.ts",
     "test:studio": "node studio/scripts/run.mjs test",
     "test:studio-install": "node studio/scripts/install-smoke.mjs",
-    "docs:guides": "node scripts/check-guide-coverage.mjs",
+    "docs:guides": "node scripts/check-guide-coverage.mjs && node scripts/check-doc-imports.mjs",
     "docs:update": "node scripts/check-guide-coverage.mjs --update",
     "size:update": "node scripts/check-subpath-sizes.mjs --update",
     "registry:generate": "node scripts/generate-model-registry.mjs",

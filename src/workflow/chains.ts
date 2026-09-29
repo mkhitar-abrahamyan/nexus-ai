@@ -1,9 +1,9 @@
+import { withFactualDefaults } from '../hallucination/factual.js';
+import { type RagChunk, withRagContext } from '../hallucination/rag.js';
+import { completeVerified, type VerificationOptions } from '../hallucination/verification.js';
+import type { ResponseFormatConfig } from '../types/config.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
-import type { ResponseFormatConfig } from '../types/config.js';
-import { withFactualDefaults } from '../hallucination/factual.js';
-import { withRagContext, type RagChunk } from '../hallucination/rag.js';
-import { completeVerified, type VerificationOptions } from '../hallucination/verification.js';
 
 /**
  * The one method a workflow needs from a client. A `NexusAI` client fits, and so does a test
@@ -285,3 +285,15 @@ function toRequestResponseFormat(format?: ResponseFormatConfig): RequestResponse
   if (!format || format.type === 'text') return undefined;
   return { type: format.type, schema: format.schema };
 }
+
+export {
+  type CodeReviewWorkflowOptions,
+  codeReviewWorkflow,
+  type DomainWorkflowOptions,
+  type LegalReviewWorkflowOptions,
+  legalReviewWorkflow,
+  type SalesWorkflowOptions,
+  type SupportWorkflowOptions,
+  salesQualificationWorkflow,
+  supportTriageWorkflow,
+} from './domain.js';

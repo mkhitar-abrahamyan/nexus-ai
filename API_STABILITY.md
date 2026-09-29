@@ -456,7 +456,7 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
 
-## Durable execution stage (Unreleased)
+## Durable execution stage (1.21.0)
 
 Functional workflows (`nexus-ai-pro/graph/functional`) and the SQLite adapters (`nexus-ai-pro/sqlite`)
 are experimental in production readiness. Their contracts follow the 1.x rules.

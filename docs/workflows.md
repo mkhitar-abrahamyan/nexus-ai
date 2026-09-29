@@ -88,29 +88,24 @@ specific entry point that provides it.
 | --- | --- | --- |
 | `classifyRoute` | function | Picks exactly one label for the input, at temperature 0, returning `{ label, confidence }` as JSON. |
 | `ClassifyRouteOptions` | interface | Options for `classifyRoute`. |
+| `codeReviewWorkflow` | function | Reviews code for bugs, security risks, performance issues, and missing tests, as JSON findings ordered by severity. |
+| `CodeReviewWorkflowOptions` | interface | Options for `codeReviewWorkflow()`. |
 | `compareAndDecide` | function | Compares options against criteria and chooses one, reasoning privately before answering. |
 | `CompareOptions` | interface | Options for `compareAndDecide`. |
+| `DomainWorkflowOptions` | interface | What every domain workflow takes. |
 | `extractStructured` | function | Extracts structured data matching a JSON schema. |
 | `ExtractStructuredOptions` | interface | Options for `extractStructured`. |
+| `legalReviewWorkflow` | function | Flags legal risks, missing clauses, and questions to ask, as JSON, with an explicit fallback when the text is not enough. |
+| `LegalReviewWorkflowOptions` | interface | Options for `legalReviewWorkflow()`. |
 | `ragAnswer` | function | Answers a question from retrieved passages with citations, optionally verifying and repairing the answer against them. |
 | `RagAnswerOptions` | interface | Options for `ragAnswer`. |
+| `salesQualificationWorkflow` | function | Qualifies a sales lead into a fit score, pain points, a recommended offer, and a follow-up email, as JSON. |
+| `SalesWorkflowOptions` | interface | Options for `salesQualificationWorkflow()`. |
 | `summarizeVerifyFormat` | function | Summarizes content, verifies the summary against sources when given, then formats it: two completions, or three to four with verification, each step returned. |
 | `SummarizeVerifyFormatOptions` | interface | Options for `summarizeVerifyFormat`. |
+| `supportTriageWorkflow` | function | Triages a support request into severity, category, next action, and a customer-safe reply, as JSON. |
+| `SupportWorkflowOptions` | interface | Options for `supportTriageWorkflow()`. |
 | `WorkflowClient` | interface | The one method a workflow needs from a client. |
 | `WorkflowResult` | interface | The outcome of a workflow. |
 | `WorkflowStepResult` | interface | One step of a workflow and the response it produced. |
-
-### `nexus-ai-pro`
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `codeReviewWorkflow` | function | Reviews code for bugs, security risks, performance issues, and missing tests, as JSON findings ordered by severity. |
-| `CodeReviewWorkflowOptions` | interface | Options for `codeReviewWorkflow()`. |
-| `DomainWorkflowOptions` | interface | What every domain workflow takes. |
-| `legalReviewWorkflow` | function | Flags legal risks, missing clauses, and questions to ask, as JSON, with an explicit fallback when the text is not enough. |
-| `LegalReviewWorkflowOptions` | interface | Options for `legalReviewWorkflow()`. |
-| `salesQualificationWorkflow` | function | Qualifies a sales lead into a fit score, pain points, a recommended offer, and a follow-up email, as JSON. |
-| `SalesWorkflowOptions` | interface | Options for `salesQualificationWorkflow()`. |
-| `supportTriageWorkflow` | function | Triages a support request into severity, category, next action, and a customer-safe reply, as JSON. |
-| `SupportWorkflowOptions` | interface | Options for `supportTriageWorkflow()`. |
 <!-- reference:end -->

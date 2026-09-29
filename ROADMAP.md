@@ -1141,31 +1141,39 @@ HNSW index (PGlite), and on Qdrant's REST API.
 
 ---
 
-## 21. 1.21.0: durable execution everywhere
+## 21. Shipped in 1.21.0 — durable execution everywhere
 
-Durability should not require drawing a graph, and a crash should cost a step, not a run.
+**Functional workflows.** `workflow()` on `nexus-ai-pro/graph/functional` makes an ordinary async
+function durable: each `step()` result is checkpointed, so a workflow that is resumed, continued, or
+recovered on another worker returns finished steps from its checkpoint and carries on from the first
+that did not finish. Steps run in parallel through `Promise.all`, bounded by `maxConcurrency`, with
+per-step retries and timeouts; `interrupt()` works as in a graph node; and the checkpoints are graph
+checkpoints, so every checkpointer, `traceGraph()`, and `graphAssistant()` work with them unchanged.
 
-**Functional workflows.** `workflow()` and `step()`, on `nexus-ai-pro/graph/functional`, make ordinary
-TypeScript control flow durable: each `step()` result is checkpointed, so a workflow that is
-interrupted, crashes, or is resumed on another worker replays completed steps from the checkpoint and
-continues from the first one that did not finish. Steps run in parallel with `Promise.all`,
-`interrupt()` works inside a workflow exactly as in a graph node, and the same checkpointers, stores,
-retries, timeouts, tracing, and events apply. A workflow is also an assistant the server can host.
+**Step-level recovery in the server.** A run whose worker dies continues from the last checkpoint that
+run wrote, for graph and workflow assistants, so only the step in flight runs again.
+`AssistantRunContext.attempt` and the optional `ServerAssistant.recover()` hook carry it.
 
-**Step-level recovery in the server.** A run whose worker dies resumes from its last checkpoint rather
-than starting again, for graph and workflow assistants. Only the step in flight re-runs, so the
-idempotency requirement shrinks from "the whole run" to "one step".
+**SQLite persistence.** `SqliteOperationStore` and `SqliteStore` on `nexus-ai-pro/sqlite`, over the
+database you open — `node:sqlite`, `better-sqlite3`, or libSQL — with no driver as a dependency.
+Graph and workflow checkpoints go through `OperationStoreCheckpointer` on the operation store.
 
-**SQLite persistence.** A checkpointer, a long-term store, and an operation store over SQLite,
-through an injected client (`node:sqlite`, `better-sqlite3`, or libSQL), on
-`nexus-ai-pro/sqlite/*`: durable single-node persistence with no server to run.
+**Diagrams as images.** `toSvg()` on `nexus-ai-pro/graph/visualize` draws a graph as a standalone SVG
+with no dependency; the layered layout moved from the studio into the core, so both draw the same one.
 
-**Diagrams as images.** `toSvg()` on `nexus-ai-pro/graph/visualize` draws a graph with the layout the
-studio already uses, with no dependency; any SVG rasterizer turns it into PNG.
+**Proof.** A workflow stopped between two steps finishes on a second worker without re-running the
+first, on the memory, SQLite, Postgres (PGlite), and Redis checkpointers; a server run killed mid-run
+resumes at the step it died on, for a graph and a workflow alike.
 
-**Proof.** A workflow killed between two steps finishes on a second worker without re-running the
-first; a server run killed mid-graph resumes at the node it died on; the same tests pass on the
-memory, Redis, Postgres, and SQLite checkpointers.
+### What did not land, and where it went
+
+- **No dedicated SQLite checkpointer class.** Checkpoints use `OperationStoreCheckpointer` over
+  `SqliteOperationStore`, as they do over Redis and Postgres, which covers the need with one fewer
+  contract.
+- **Redis is proven against a stand-in client**, not a live server; a live run joins the opt-in live
+  conformance suite in 1.22.0.
+- **Functional workflows and the SQLite adapters are experimental**, and leave that stage once they
+  have seen production use.
 
 ---
 

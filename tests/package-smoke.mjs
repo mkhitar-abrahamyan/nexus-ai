@@ -24,7 +24,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/providers/lmstudio', exports: ['LMStudioProvider'] },
   { specifier: 'nexus-ai-pro/providers/llamacpp', exports: ['LlamaCppProvider'] },
   { specifier: 'nexus-ai-pro/providers/type-guards', exports: ['isRecord', 'getString'] },
-  { specifier: 'nexus-ai-pro/security', exports: ['SecurityPipeline', 'NexusSecurityError'] },
+  {
+    specifier: 'nexus-ai-pro/security',
+    exports: ['SecurityPipeline', 'NexusSecurityError', 'guardrailPolicy', 'calibrateSemanticInjectionClassifier'],
+  },
   { specifier: 'nexus-ai-pro/optimizer', exports: ['TokenOptimizer', 'BudgetEnforcer'] },
   { specifier: 'nexus-ai-pro/context', exports: ['ContextWindowManager'] },
   { specifier: 'nexus-ai-pro/voice', exports: ['VoiceManager', 'VoiceProviderError', 'VoiceSession'] },
@@ -225,7 +228,7 @@ const imports = [
   { specifier: 'nexus-ai-pro/jobs/batch', exports: ['runBatch'] },
   { specifier: 'nexus-ai-pro/jobs/queue', exports: ['JobQueue'] },
   { specifier: 'nexus-ai-pro/jobs/durable-adapters', exports: ['RedisQueueAdapter', 'BullMQQueueAdapter'] },
-  { specifier: 'nexus-ai-pro/workflows', exports: ['summarizeVerifyFormat', 'ragAnswer'] },
+  { specifier: 'nexus-ai-pro/workflows', exports: ['summarizeVerifyFormat', 'ragAnswer', 'supportTriageWorkflow'] },
 ];
 
 for (const item of imports) {

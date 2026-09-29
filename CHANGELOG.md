@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-09-29
+
 Durable execution everywhere. Durability no longer requires drawing a graph, and a crash costs a
 step rather than a run.
 
@@ -35,6 +37,14 @@ step rather than a run.
   workflow's return value is the run's output.
 - `nexus-ai-pro-studio` requires nexus-ai-pro 1.21 or newer, and re-exports `layoutGraph()` from the
   core visualizer.
+
+### Fixed
+
+- `guardrailPolicy()`, `GUARDRAIL_POLICIES`, `calibrateSemanticInjectionClassifier()`, and
+  `SEMANTIC_INJECTION_CALIBRATION_SET` are exported from `nexus-ai-pro/security`, and the four domain
+  workflows such as `supportTriageWorkflow()` from `nexus-ai-pro/workflows`, as their guides already
+  showed. They were reachable only from the package root. A new docs check fails when a guide's
+  example imports a name from an entry point that does not export it.
 
 ## [1.20.0] - 2026-09-28
 
@@ -1075,7 +1085,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.21.0...HEAD
+[1.21.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.17.0...v1.18.0
