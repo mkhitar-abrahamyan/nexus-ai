@@ -167,6 +167,37 @@ An `ExperimentStore` saves experiments, gets one by id, and lists them newest fi
 or name. `MemoryExperimentStore` keeps them in memory and `FileExperimentStore` as one file each;
 `readExperiment()` reads a file, returning `undefined` for anything that is not an experiment.
 
+## Caching
+
+An experiment re-run after a small change should pay only for what changed. With a `cache`,
+`evaluate()` stores each example's output and reuses it the next time the example's inputs, its
+repetition, and the target's `fingerprint` are all unchanged; the evaluators always run again, so
+correcting an expected answer or adding an evaluator re-scores stored outputs for free. Failures are
+never stored, so a flaky example is retried. A cached result is marked `cached` and keeps the latency
+and cost it had, and the experiment's `cache` field counts hits and misses.
+
+The fingerprint names whatever decides the target's output — a model, a prompt version, settings —
+and `fingerprintOf()` builds one from any settings object. A cache without a fingerprint is refused,
+so a changed target can never reuse another's outputs. `evaluatePrompt()` and `evaluateContext()`
+fingerprint the prompt or bundle version themselves.
+
+```ts
+import { evaluate, FileEvaluationCache, fingerprintOf } from 'nexus-ai-pro/evaluate';
+
+const cache = new FileEvaluationCache('.eval-cache');
+const fingerprint = await fingerprintOf({ model: 'gpt-5.4-mini', prompt: answer.version, temperature: 0 });
+const experiment = await evaluate(target, dataset, evaluators, { cache, fingerprint, store });
+console.log(experiment.cache); // { hits: 48, misses: 2 }
+```
+
+An `EvaluationCache` stores and returns a `CachedOutput` — the output, its latency and cost, and when
+it was produced — by key. `MemoryEvaluationCache` keeps them in process, least recently used dropped
+first beyond `MemoryEvaluationCacheOptions.maxEntries`, and copies them in and out so an evaluator
+cannot change what a later experiment reuses. `FileEvaluationCache` keeps one JSON file per key in a
+directory, which a CI job keeps between runs by caching the directory. `evaluationCacheKey()` is the
+key: a SHA-256 over the fingerprint, the example's id and inputs, and the repetition — not the
+expected output.
+
 ## Comparisons in detail
 
 `compareExperiments()` takes `CompareOptions`: the metrics where `lowerIsBetter`, such as latency or
@@ -315,6 +346,7 @@ specific entry point that provides it.
 | --- | --- | --- |
 | `AnnotationQueue` | class | Work waiting for a person. |
 | `AnnotationQueueOptions` | interface | Configuration for an annotation queue. |
+| `CachedOutput` | interface | A target's output kept for reuse, with what producing it took. |
 | `compareExperiments` | function | Compares two experiments and says whether the change is real. |
 | `CompareOptions` | interface | Options for `compareExperiments()`. |
 | `completed` | function | The example either produced an output or it did not. |
@@ -330,6 +362,8 @@ specific entry point that provides it.
 | `evaluate` | function | Runs a target over a dataset and scores it. |
 | `evaluateOnline` | function | Scores production runs after the fact. |
 | `EvaluateOptions` | interface | Options for `evaluate()`. |
+| `EvaluationCache` | interface | Where `evaluate()` keeps target outputs between experiments. |
+| `evaluationCacheKey` | function | The cache key of one example run: a SHA-256 over the target's fingerprint, the example's id and inputs, and the repetition. |
 | `EvaluationContext` | interface | What an evaluator receives for one example. |
 | `EvaluationScore` | interface | What an evaluator says about one output. |
 | `EvaluationTarget` | type | Turns one example into an output. |
@@ -341,10 +375,14 @@ specific entry point that provides it.
 | `ExperimentComparison` | interface | What changed between a baseline experiment and a candidate. |
 | `ExperimentStore` | interface | Where experiments are kept, for later comparison. |
 | `FileDatasetStore` | class | Datasets as JSON files in a directory, one file per version. |
+| `FileEvaluationCache` | class | Target outputs as JSON files in a directory, one per key, so a CI job keeps them between runs by caching the directory. |
 | `FileExperimentStore` | class | Experiments as JSON files in a directory, one file per experiment. |
+| `fingerprintOf` | function | A fingerprint for whatever decides a target's output — a model name, a prompt version, a temperature, a context bundle version — as `f` and 16 hex digits of a SHA-256 over its canonical JSON, so the same settings always give the same fingerprint, whatever the key order. |
 | `formatComparison` | function | A comparison as text, for a pull-request comment or a CI log. |
 | `FromTracesOptions` | interface | Options for `datasetFromTraces()`. |
 | `MemoryDatasetStore` | class | Datasets in memory, keyed by name and version. |
+| `MemoryEvaluationCache` | class | Target outputs in process memory, least recently used dropped first. |
+| `MemoryEvaluationCacheOptions` | interface | Options for a `MemoryEvaluationCache`. |
 | `MemoryExperimentStore` | class | Experiments in memory, newest first. |
 | `MetricComparison` | interface | How one metric moved between two experiments. |
 | `MetricSummary` | interface | Distribution of one metric across an experiment. |

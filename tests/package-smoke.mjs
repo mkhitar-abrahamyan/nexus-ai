@@ -223,6 +223,11 @@ const imports = [
   { specifier: 'nexus-ai-pro/rag', exports: ['ingestDocuments', 'ingestText', 'MemoryVectorStore'] },
   { specifier: 'nexus-ai-pro/rag/qdrant', exports: ['QdrantVectorStore', 'QdrantError'] },
   { specifier: 'nexus-ai-pro/rag/redis', exports: ['RedisVectorStore'] },
+  {
+    specifier: 'nexus-ai-pro/context-hub',
+    exports: ['ContextHub', 'contextExperimentGate', 'bindTools', 'evaluateContext'],
+  },
+  { specifier: 'nexus-ai-pro/insights', exports: ['findIssues', 'detectRegressions', 'proposeFix', 'ProposalInbox'] },
   { specifier: 'nexus-ai-pro/rag/pinecone', exports: ['PineconeVectorStore', 'PineconeError'] },
   { specifier: 'nexus-ai-pro/rag/weaviate', exports: ['WeaviateVectorStore', 'WeaviateError'] },
   { specifier: 'nexus-ai-pro/rag/chroma', exports: ['ChromaVectorStore', 'ChromaError'] },

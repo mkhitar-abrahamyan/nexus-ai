@@ -48,6 +48,15 @@ export {
   type ReviewQuestion,
 } from './review.js';
 export { evaluate, type EvaluateOptions, type EvaluationTarget, stats, summarize } from './run.js';
+export {
+  type CachedOutput,
+  type EvaluationCache,
+  evaluationCacheKey,
+  FileEvaluationCache,
+  fingerprintOf,
+  MemoryEvaluationCache,
+  type MemoryEvaluationCacheOptions,
+} from './cache.js';
 export type {
   Dataset,
   DatasetExample,

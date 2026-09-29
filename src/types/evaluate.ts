@@ -112,6 +112,11 @@ export interface ExampleResult {
   latencyMs: number;
   /** What it cost, when known. */
   cost?: number;
+  /**
+   * True when the output came from the evaluation cache rather than a run of the target. Its latency
+   * and cost are the ones recorded when it was produced.
+   */
+  cached?: boolean;
   /** Every score evaluators gave it. */
   scores: EvaluationScore[];
 }
@@ -158,6 +163,8 @@ export interface Experiment {
   summary: EvaluationScore[];
   /** Application data, such as the model or prompt version under test. */
   metadata?: Record<string, unknown>;
+  /** Example runs answered from the evaluation cache, and runs of the target, when a cache was used. */
+  cache?: { hits: number; misses: number };
 }
 
 /** Where experiments are kept, for later comparison. */

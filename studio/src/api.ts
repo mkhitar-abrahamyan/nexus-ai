@@ -1,7 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { compareExperiments, formatComparison } from 'nexus-ai-pro/evaluate';
+import { formatContextDiff } from 'nexus-ai-pro/context-hub';
 import { toMermaid } from 'nexus-ai-pro/graph/visualize';
+import { detectRegressions, findIssues } from 'nexus-ai-pro/insights';
 import { compareTraces, formatTree, type Run, type RunQuery } from 'nexus-ai-pro/tracing';
+import { csrfToken, hasRole, type StudioRequestInfo, type StudioRole, type StudioUser } from './auth.js';
+import { commentId, MemoryStudioJournal } from './journal.js';
 import { layoutGraph } from './layout.js';
 import {
   createToken,
@@ -23,8 +27,11 @@ import type {
 
 /** The studio: one request handler, and the token it accepts. */
 export interface Studio {
-  /** Answers one request: the page, its script and styles, and the JSON API behind them. */
-  handle(request: Request): Promise<Response>;
+  /**
+   * Answers one request: the page, its script and styles, and the JSON API behind them. `info` carries
+   * what the server knows beyond the request, such as the address a trusted proxy connects from.
+   */
+  handle(request: Request, info?: StudioRequestInfo): Promise<Response>;
   /** The access token. The URL to open is `http://127.0.0.1:<port>/?token=<token>`. */
   readonly token: string;
 }
@@ -45,7 +52,7 @@ export class StudioError extends Error {
   }
 }
 
-type Context = { request: Request; url: URL; params: Record<string, string> };
+type Context = { request: Request; url: URL; params: Record<string, string>; user: StudioUser };
 type Handler = (context: Context) => Promise<unknown>;
 
 const UI_FILES: Record<string, string> = {
@@ -77,20 +84,39 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   const token = options.token ?? createToken();
   const actor = options.actor ?? 'studio';
   const now = options.now ?? (() => new Date());
+  const secret = options.secret ?? createToken();
+  const journal = new MemoryStudioJournal();
+  const audit = options.audit ?? journal;
+  const comments = options.comments ?? journal;
+  // On its single token the studio has one user, who may do everything: the local default.
+  const tokenUser: StudioUser = { id: actor, role: 'admin' };
   const uiDirectory = new URL('./ui/', import.meta.url);
   const uiCache = new Map<string, string>();
-  const routes: Array<{ method: string; parts: string[]; handler: Handler }> = [];
-  const route = (method: string, path: string, handler: Handler) =>
-    routes.push({ method, parts: path.split('/').filter(Boolean), handler });
+  const routes: Array<{ method: string; parts: string[]; handler: Handler; role: StudioRole; action: string }> = [];
+  // Reads need `viewer`; every change names the role it needs and the action the audit log records.
+  const route = (method: string, path: string, handler: Handler, access: { role?: StudioRole; action?: string } = {}) =>
+    routes.push({
+      method,
+      parts: path.split('/').filter(Boolean),
+      handler,
+      role: access.role ?? 'viewer',
+      action: access.action ?? `${method.toLowerCase()} ${path}`,
+    });
 
   // ── Session ──────────────────────────────────────────────────────
   // The page's own script reads the token here to send it on changes. The session cookie is HTTP-only
   // and same-site, so another site can neither send it nor read this response.
-  route('GET', '/api/session', async () => ({ token, actor }));
+  route('GET', '/api/session', async ({ user }) => ({
+    token: options.auth ? csrfToken(secret, user) : token,
+    actor: user.id,
+    user,
+  }));
 
   // ── Overview ─────────────────────────────────────────────────────
-  route('GET', '/api/overview', async () => ({
-    actor,
+  route('GET', '/api/overview', async ({ user }) => ({
+    actor: user.id,
+    user,
+    accounts: Boolean(options.auth),
     sources: {
       traces: Boolean(sources.traces),
       graphs: Object.keys(sources.graphs ?? {}),
@@ -108,6 +134,10 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       costs: Boolean(sources.traces),
       operations: typeof sources.operations?.list === 'function',
       assets: Boolean(sources.assets),
+      contexts: Boolean(sources.contexts),
+      proposals: Boolean(sources.proposals),
+      issues: Boolean(sources.traces),
+      audit: hasRole(user, 'admin'),
     },
   }));
 
@@ -133,23 +163,28 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     if (!right) throw notFound('Trace', required(url, 'right'));
     return { comparison: compareTraces(left, right) };
   });
-  route('POST', '/api/runs/:runId/feedback', async ({ request, params }) => {
-    const store = need(sources.traces, 'traces');
-    if (!store.addFeedback) throw new StudioError('This trace store cannot record feedback', 'UNSUPPORTED', 409);
-    const body = await readJson<{ key?: string; score?: number; comment?: string }>(request);
-    if (!body.key || typeof body.score !== 'number') throw badRequest('Feedback needs a "key" and a numeric "score"');
-    await store.addFeedback(
-      params.runId as string,
-      {
-        key: body.key,
-        score: body.score,
-        ...(body.comment ? { comment: body.comment } : {}),
-        source: actor,
-        createdAt: now().toISOString(),
-      } as never,
-    );
-    return { ok: true };
-  });
+  route(
+    'POST',
+    '/api/runs/:runId/feedback',
+    async ({ request, params, user }) => {
+      const store = need(sources.traces, 'traces');
+      if (!store.addFeedback) throw new StudioError('This trace store cannot record feedback', 'UNSUPPORTED', 409);
+      const body = await readJson<{ key?: string; score?: number; comment?: string }>(request);
+      if (!body.key || typeof body.score !== 'number') throw badRequest('Feedback needs a "key" and a numeric "score"');
+      await store.addFeedback(
+        params.runId as string,
+        {
+          key: body.key,
+          score: body.score,
+          ...(body.comment ? { comment: body.comment } : {}),
+          source: user.id,
+          createdAt: now().toISOString(),
+        } as never,
+      );
+      return { ok: true };
+    },
+    { role: 'reviewer', action: 'run.feedback' },
+  );
 
   // ── Threads ──────────────────────────────────────────────────────
   route('GET', '/api/graphs', async () => ({
@@ -193,36 +228,51 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     if (!checkpoint) throw notFound('Step', `${params.threadId}@${params.step}`);
     return { checkpoint };
   });
-  route('POST', '/api/graphs/:graph/threads/:threadId/fork', async ({ request, params }) => {
-    const { graph } = graphNamed(params.graph as string);
-    if (!graph.fork) throw new StudioError('This graph cannot fork threads', 'UNSUPPORTED', 409);
-    const body = await readJson<{ step?: number; threadId?: string }>(request);
-    return { threadId: await graph.fork(params.threadId as string, body) };
-  });
-  route('POST', '/api/graphs/:graph/threads/:threadId/state', async ({ request, params }) => {
-    const { graph } = graphNamed(params.graph as string);
-    if (!graph.updateState) throw new StudioError('This graph cannot edit state', 'UNSUPPORTED', 409);
-    const body = await readJson<{ values?: Record<string, unknown>; asNode?: string }>(request);
-    if (!body.values || typeof body.values !== 'object') throw badRequest('An edit needs "values"');
-    return {
-      checkpoint: await graph.updateState(
-        params.threadId as string,
-        body.values,
-        body.asNode ? { asNode: body.asNode } : {},
-      ),
-    };
-  });
-  route('POST', '/api/graphs/:graph/threads/:threadId/resume', async ({ request, params }) => {
-    const { graph } = graphNamed(params.graph as string);
-    const body = await readJson<{ value?: unknown; answers?: Record<string, unknown> }>(request);
-    if (body.answers) {
-      if (!graph.resumeInterruptsWith)
-        throw new StudioError('This graph cannot answer interrupts by id', 'UNSUPPORTED', 409);
-      return { result: await graph.resumeInterruptsWith(params.threadId as string, body.answers) };
-    }
-    if (!graph.resumeWith) throw new StudioError('This graph cannot be resumed', 'UNSUPPORTED', 409);
-    return { result: await graph.resumeWith(params.threadId as string, body.value) };
-  });
+  route(
+    'POST',
+    '/api/graphs/:graph/threads/:threadId/fork',
+    async ({ request, params }) => {
+      const { graph } = graphNamed(params.graph as string);
+      if (!graph.fork) throw new StudioError('This graph cannot fork threads', 'UNSUPPORTED', 409);
+      const body = await readJson<{ step?: number; threadId?: string }>(request);
+      return { threadId: await graph.fork(params.threadId as string, body) };
+    },
+    { role: 'editor', action: 'thread.fork' },
+  );
+  route(
+    'POST',
+    '/api/graphs/:graph/threads/:threadId/state',
+    async ({ request, params }) => {
+      const { graph } = graphNamed(params.graph as string);
+      if (!graph.updateState) throw new StudioError('This graph cannot edit state', 'UNSUPPORTED', 409);
+      const body = await readJson<{ values?: Record<string, unknown>; asNode?: string }>(request);
+      if (!body.values || typeof body.values !== 'object') throw badRequest('An edit needs "values"');
+      return {
+        checkpoint: await graph.updateState(
+          params.threadId as string,
+          body.values,
+          body.asNode ? { asNode: body.asNode } : {},
+        ),
+      };
+    },
+    { role: 'editor', action: 'thread.edit' },
+  );
+  route(
+    'POST',
+    '/api/graphs/:graph/threads/:threadId/resume',
+    async ({ request, params }) => {
+      const { graph } = graphNamed(params.graph as string);
+      const body = await readJson<{ value?: unknown; answers?: Record<string, unknown> }>(request);
+      if (body.answers) {
+        if (!graph.resumeInterruptsWith)
+          throw new StudioError('This graph cannot answer interrupts by id', 'UNSUPPORTED', 409);
+        return { result: await graph.resumeInterruptsWith(params.threadId as string, body.answers) };
+      }
+      if (!graph.resumeWith) throw new StudioError('This graph cannot be resumed', 'UNSUPPORTED', 409);
+      return { result: await graph.resumeWith(params.threadId as string, body.value) };
+    },
+    { role: 'reviewer', action: 'thread.resume' },
+  );
 
   // ── Inbox ────────────────────────────────────────────────────────
   route('GET', '/api/inbox', async () => {
@@ -247,30 +297,41 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       queue,
       items: [...source.list('pending'), ...source.list('claimed')],
     }));
-    return { interrupts, reviews };
+    const proposals = sources.proposals ? await sources.proposals.list('pending') : [];
+    return { interrupts, reviews, proposals };
   });
-  route('POST', '/api/reviews/:queue/claim', async ({ request, params }) => {
-    const queue = reviewNamed(params.queue as string);
-    const body = await readJson<{ reviewer?: string }>(request);
-    const item = queue.claim(body.reviewer ?? actor);
-    return { item: item ?? null };
-  });
-  route('POST', '/api/reviews/:queue/items/:itemId', async ({ request, params }) => {
-    const queue = reviewNamed(params.queue as string);
-    const body = await readJson<{
-      reviewer?: string;
-      scores?: Array<{ key: string; score: number; comment?: string }>;
-      note?: string;
-    }>(request);
-    if (!Array.isArray(body.scores) || body.scores.length === 0) throw badRequest('A review needs "scores"');
-    return {
-      item: queue.submit(params.itemId as string, {
-        reviewer: body.reviewer ?? actor,
-        scores: body.scores,
-        ...(body.note ? { note: body.note } : {}),
-      }),
-    };
-  });
+  route(
+    'POST',
+    '/api/reviews/:queue/claim',
+    async ({ request, params, user }) => {
+      const queue = reviewNamed(params.queue as string);
+      const body = await readJson<{ reviewer?: string }>(request);
+      const item = queue.claim(reviewerOf(user, body.reviewer));
+      return { item: item ?? null };
+    },
+    { role: 'reviewer', action: 'review.claim' },
+  );
+  route(
+    'POST',
+    '/api/reviews/:queue/items/:itemId',
+    async ({ request, params, user }) => {
+      const queue = reviewNamed(params.queue as string);
+      const body = await readJson<{
+        reviewer?: string;
+        scores?: Array<{ key: string; score: number; comment?: string }>;
+        note?: string;
+      }>(request);
+      if (!Array.isArray(body.scores) || body.scores.length === 0) throw badRequest('A review needs "scores"');
+      return {
+        item: queue.submit(params.itemId as string, {
+          reviewer: reviewerOf(user, body.reviewer),
+          scores: body.scores,
+          ...(body.note ? { note: body.note } : {}),
+        }),
+      };
+    },
+    { role: 'reviewer', action: 'review.submit' },
+  );
 
   // ── Datasets and experiments ─────────────────────────────────────
   route('GET', '/api/datasets', async () => ({ datasets: await need(sources.datasets, 'datasets').list() }));
@@ -342,46 +403,233 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       required(url, 'to'),
     ),
   }));
-  route('POST', '/api/prompts/:name/promote', async ({ request, params }) => {
-    const body = await readJson<{ to?: string; from?: string; version?: string; force?: boolean; note?: string }>(
-      request,
+  route(
+    'POST',
+    '/api/prompts/:name/promote',
+    async ({ request, params, user }) => {
+      const body = await readJson<{ to?: string; from?: string; version?: string; force?: boolean; note?: string }>(
+        request,
+      );
+      if (!body.to) throw badRequest('A promotion needs "to"');
+      return {
+        result: await need(sources.prompts, 'prompts').promote(params.name as string, {
+          to: body.to,
+          ...(body.from ? { from: body.from } : {}),
+          ...(body.version ? { version: body.version } : {}),
+          ...(body.force ? { force: true } : {}),
+          ...(body.note ? { note: body.note } : {}),
+          by: user.id,
+        }),
+      };
+    },
+    { role: 'admin', action: 'prompt.promote' },
+  );
+  route(
+    'POST',
+    '/api/prompts/:name/rollback',
+    async ({ request, params, user }) => {
+      const body = await readJson<{ label?: string; note?: string }>(request);
+      if (!body.label) throw badRequest('A rollback needs "label"');
+      return {
+        label: await need(sources.prompts, 'prompts').rollback(params.name as string, body.label, {
+          by: user.id,
+          ...(body.note ? { note: body.note } : {}),
+        }),
+      };
+    },
+    { role: 'admin', action: 'prompt.rollback' },
+  );
+  route(
+    'POST',
+    '/api/prompts/:name/playground',
+    async ({ request, params }) => {
+      const registry = need(sources.prompts, 'prompts');
+      const body = await readJson<{ ref?: string; variables?: Record<string, unknown>; model?: string; run?: boolean }>(
+        request,
+      );
+      const rendered = await registry.render(params.name as string, body.variables ?? {}, {
+        ...(body.ref ? { ref: body.ref } : {}),
+        ...(body.model ? { overrides: { model: body.model } } : {}),
+      });
+      if (body.run === false || !sources.client?.complete) return { request: rendered, response: null };
+      const started = Date.now();
+      const response = await sources.client.complete(rendered);
+      return { request: rendered, response, latencyMs: Date.now() - started };
+    },
+    { role: 'editor', action: 'prompt.playground' },
+  );
+
+  // ── Context bundles ──────────────────────────────────────────────
+  route('GET', '/api/contexts', async () => {
+    const hub = need(sources.contexts, 'contexts');
+    const names = await hub.names();
+    return { contexts: await Promise.all(names.map(async (name) => ({ name, labels: await hub.labels(name) }))) };
+  });
+  route('GET', '/api/contexts/:name', async ({ params }) => {
+    const hub = need(sources.contexts, 'contexts');
+    const name = params.name as string;
+    const [versions, labels, history] = await Promise.all([
+      hub.versions(name, { limit: 50 }),
+      hub.labels(name),
+      hub.history(name, { limit: 100 }),
+    ]);
+    return { name, versions, labels, history };
+  });
+  route('GET', '/api/contexts/:name/diff', async ({ params, url }) => {
+    const diff = await need(sources.contexts, 'contexts').diff(
+      params.name as string,
+      required(url, 'from'),
+      required(url, 'to'),
     );
-    if (!body.to) throw badRequest('A promotion needs "to"');
-    return {
-      result: await need(sources.prompts, 'prompts').promote(params.name as string, {
-        to: body.to,
-        ...(body.from ? { from: body.from } : {}),
-        ...(body.version ? { version: body.version } : {}),
-        ...(body.force ? { force: true } : {}),
-        ...(body.note ? { note: body.note } : {}),
-        by: actor,
+    return { diff, text: formatContextDiff(diff) };
+  });
+  route(
+    'POST',
+    '/api/contexts/:name/promote',
+    async ({ request, params, user }) => {
+      const body = await readJson<{ to?: string; from?: string; version?: string; force?: boolean; note?: string }>(
+        request,
+      );
+      if (!body.to) throw badRequest('A promotion needs "to"');
+      return {
+        result: await need(sources.contexts, 'contexts').promote(params.name as string, {
+          to: body.to,
+          ...(body.from ? { from: body.from } : {}),
+          ...(body.version ? { version: body.version } : {}),
+          ...(body.force ? { force: true } : {}),
+          ...(body.note ? { note: body.note } : {}),
+          by: user.id,
+        }),
+      };
+    },
+    { role: 'admin', action: 'context.promote' },
+  );
+  route(
+    'POST',
+    '/api/contexts/:name/rollback',
+    async ({ request, params, user }) => {
+      const body = await readJson<{ label?: string; note?: string }>(request);
+      if (!body.label) throw badRequest('A rollback needs "label"');
+      return {
+        label: await need(sources.contexts, 'contexts').rollback(params.name as string, body.label, {
+          by: user.id,
+          ...(body.note ? { note: body.note } : {}),
+        }),
+      };
+    },
+    { role: 'admin', action: 'context.rollback' },
+  );
+
+  // ── Proposals ────────────────────────────────────────────────────
+  route('GET', '/api/proposals', async ({ url }) => {
+    const status = (url.searchParams.get('status') ?? 'pending') as 'pending' | 'all';
+    return { proposals: await need(sources.proposals, 'proposals').list(status) };
+  });
+  route('GET', '/api/proposals/:id', async ({ params }) => {
+    const proposal = await need(sources.proposals, 'proposals').get(params.id as string);
+    if (!proposal) throw notFound('Proposal', params.id as string);
+    return { proposal };
+  });
+  route(
+    'POST',
+    '/api/proposals/:id/promote',
+    async ({ request, params, user }) => {
+      const body = await readJson<{ note?: string }>(request);
+      return {
+        proposal: await decision(() =>
+          need(sources.proposals, 'proposals').promote(params.id as string, {
+            by: user.id,
+            ...(body.note ? { note: body.note } : {}),
+          }),
+        ),
+      };
+    },
+    { role: 'admin', action: 'proposal.promote' },
+  );
+  route(
+    'POST',
+    '/api/proposals/:id/reject',
+    async ({ request, params, user }) => {
+      const body = await readJson<{ note?: string }>(request);
+      return {
+        proposal: await decision(() =>
+          need(sources.proposals, 'proposals').reject(params.id as string, {
+            by: user.id,
+            ...(body.note ? { note: body.note } : {}),
+          }),
+        ),
+      };
+    },
+    { role: 'editor', action: 'proposal.reject' },
+  );
+
+  // ── Issues ───────────────────────────────────────────────────────
+  route('GET', '/api/issues', async ({ url }) => {
+    const store = need(sources.traces, 'traces');
+    const hours = intParam(url, 'hours') ?? 24;
+    const end = now();
+    const since = new Date(end.getTime() - hours * 3_600_000).toISOString();
+    const [issues, regressions] = await Promise.all([
+      findIssues({
+        store,
+        since,
+        now: () => end,
+        ...(options.insights?.slowMs === undefined ? {} : { slowMs: options.insights.slowMs }),
       }),
+      detectRegressions({
+        store,
+        current: { since },
+        baseline: { since: new Date(end.getTime() - 8 * hours * 3_600_000).toISOString(), until: since },
+      }),
+    ]);
+    return {
+      hours,
+      issues: issues.map(({ cluster, ...issue }) => ({
+        ...issue,
+        cluster: { ...cluster, runs: cluster.runs.slice(0, 5).map(summarizeRun) },
+      })),
+      regressions,
     };
   });
-  route('POST', '/api/prompts/:name/rollback', async ({ request, params }) => {
-    const body = await readJson<{ label?: string; note?: string }>(request);
-    if (!body.label) throw badRequest('A rollback needs "label"');
-    return {
-      label: await need(sources.prompts, 'prompts').rollback(params.name as string, body.label, {
-        by: actor,
-        ...(body.note ? { note: body.note } : {}),
+
+  // ── Comments and audit ───────────────────────────────────────────
+  route('GET', '/api/comments', async ({ url }) => ({
+    comments: await comments.listComments(subjectOf(required(url, 'subject'))),
+  }));
+  route(
+    'POST',
+    '/api/comments',
+    async ({ request, user }) => {
+      const body = await readJson<{ subject?: string; body?: string }>(request);
+      const text = typeof body.body === 'string' ? body.body.trim() : '';
+      if (!text) throw badRequest('A comment needs a "body"');
+      if (text.length > 10_000) throw badRequest('A comment is at most 10,000 characters');
+      const comment = {
+        id: commentId(),
+        subject: subjectOf(body.subject ?? ''),
+        body: text,
+        author: user.id,
+        ...(user.name ? { authorName: user.name } : {}),
+        at: now().toISOString(),
+      };
+      await comments.addComment(comment);
+      return { comment };
+    },
+    { role: 'reviewer', action: 'comment.add' },
+  );
+  route(
+    'GET',
+    '/api/audit',
+    async ({ url }) => ({
+      entries: await audit.list({
+        ...(url.searchParams.get('user') ? { user: url.searchParams.get('user') as string } : {}),
+        ...(url.searchParams.get('action') ? { action: url.searchParams.get('action') as string } : {}),
+        ...(url.searchParams.get('since') ? { since: url.searchParams.get('since') as string } : {}),
+        limit: intParam(url, 'limit') ?? 200,
       }),
-    };
-  });
-  route('POST', '/api/prompts/:name/playground', async ({ request, params }) => {
-    const registry = need(sources.prompts, 'prompts');
-    const body = await readJson<{ ref?: string; variables?: Record<string, unknown>; model?: string; run?: boolean }>(
-      request,
-    );
-    const rendered = await registry.render(params.name as string, body.variables ?? {}, {
-      ...(body.ref ? { ref: body.ref } : {}),
-      ...(body.model ? { overrides: { model: body.model } } : {}),
-    });
-    if (body.run === false || !sources.client?.complete) return { request: rendered, response: null };
-    const started = Date.now();
-    const response = await sources.client.complete(rendered);
-    return { request: rendered, response, latencyMs: Date.now() - started };
-  });
+    }),
+    { role: 'admin', action: 'audit.read' },
+  );
 
   // ── Costs ────────────────────────────────────────────────────────
   route('GET', '/api/costs', async ({ url }) => costReport(intParam(url, 'days') ?? 7));
@@ -418,6 +666,21 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   });
 
   // ── Helpers ──────────────────────────────────────────────────────
+  /** With accounts, a person reviews as themselves; on the single token, the body may name a reviewer. */
+  function reviewerOf(user: StudioUser, named: string | undefined): string {
+    return options.auth ? user.id : (named ?? user.id);
+  }
+  /** A decision on a proposal that is not pending, or does not exist, is a conflict or a 404, not a crash. */
+  async function decision<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof RangeError && /no proposal/.test(message)) throw new StudioError(message, 'NOT_FOUND', 404);
+      if (error instanceof RangeError && /not pending/.test(message)) throw new StudioError(message, 'CONFLICT', 409);
+      throw error;
+    }
+  }
   function graphSource(raw: StudioGraphSource | StudioGraphLike): StudioGraphSource {
     return 'graph' in raw && typeof (raw as StudioGraphSource).graph?.describe === 'function'
       ? (raw as StudioGraphSource)
@@ -494,31 +757,93 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     return new Response(body, { headers: { 'content-type': CONTENT_TYPES[extension] as string, ...SECURITY_HEADERS } });
   }
 
-  async function handle(request: Request): Promise<Response> {
+  async function identify(request: Request, url: URL, info: StudioRequestInfo) {
+    const presented = tokenOf(request, url);
+    if (options.auth) return { user: await options.auth(request, info), presented };
+    return { user: tokensMatch(token, presented.token) ? tokenUser : undefined, presented };
+  }
+
+  /**
+   * Whether a change carries proof it came from the studio's own page or a script, not a page on
+   * another site. On the single token, the token must travel in a header; with accounts, the header
+   * must carry the person's page token, or the request must bring its own `Authorization`.
+   */
+  function sameOrigin(request: Request, presented: ReturnType<typeof tokenOf>, user: StudioUser): boolean {
+    if (!options.auth) return presented.via === 'header';
+    if (request.headers.get('authorization')) return true;
+    return tokensMatch(csrfToken(secret, user), request.headers.get(TOKEN_HEADER));
+  }
+
+  async function record(
+    user: StudioUser,
+    action: string,
+    request: Request,
+    url: URL,
+    outcome: 'ok' | 'denied' | 'failed',
+    status: number,
+    message?: string,
+  ): Promise<void> {
+    try {
+      await audit.append({
+        at: now().toISOString(),
+        user: user.id,
+        role: user.role,
+        action,
+        method: request.method,
+        path: url.pathname,
+        outcome,
+        status,
+        ...(message ? { message } : {}),
+      });
+    } catch (error) {
+      // The action has happened; a failing audit store must not report it as failed.
+      console.error('The studio could not write its audit log:', error);
+    }
+  }
+
+  async function handle(request: Request, info: StudioRequestInfo = {}): Promise<Response> {
     const url = new URL(request.url);
     if (!hostAllowed(request.headers.get('host') ?? url.host, options.allowedHosts)) {
       return text('This host is not allowed. Open the studio at 127.0.0.1 or localhost.', 403);
     }
 
-    const presented = tokenOf(request, url);
-    const valid = tokensMatch(token, presented.token);
+    const { user, presented } = await identify(request, url, info);
+    const secure = url.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
 
     if (url.pathname in UI_FILES) {
-      if (!valid) return text('Open the link the studio printed when it started: it carries the access token.', 401);
-      // The token arrives once, in the URL; it is moved into a cookie and taken out of the address bar.
-      if (presented.via === 'query') {
+      if (!user) {
+        return text(
+          options.auth
+            ? 'Sign in first: open the studio through your sign-in proxy, or with your personal link.'
+            : 'Open the link the studio printed when it started: it carries the access token.',
+          401,
+        );
+      }
+      // A token arrives once, in the URL; it is moved into a cookie and taken out of the address bar.
+      if (presented.via === 'query' && presented.token) {
         return new Response(null, {
           status: 303,
-          headers: { location: url.pathname, 'set-cookie': sessionCookie(token), ...SECURITY_HEADERS },
+          headers: {
+            location: url.pathname,
+            'set-cookie': sessionCookie(presented.token, secure),
+            ...SECURITY_HEADERS,
+          },
         });
       }
       return serveUi(url.pathname);
     }
 
     if (!url.pathname.startsWith('/api/')) return json({ error: { code: 'NOT_FOUND', message: 'Not found' } }, 404);
-    if (!valid) return json({ error: { code: 'UNAUTHORIZED', message: 'A valid studio token is required' } }, 401);
-    // A change must carry the token in a header, which a page on another site cannot set.
-    if (request.method !== 'GET' && presented.via !== 'header') {
+    if (!user) {
+      return json(
+        {
+          error: { code: 'UNAUTHORIZED', message: options.auth ? 'Sign in first' : 'A valid studio token is required' },
+        },
+        401,
+      );
+    }
+    const change = request.method !== 'GET';
+    if (change && !sameOrigin(request, presented, user)) {
       return json({ error: { code: 'FORBIDDEN', message: `Changes need the ${TOKEN_HEADER} header` } }, 403);
     }
 
@@ -539,10 +864,29 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
         methodMismatch = true;
         continue;
       }
+      if (!hasRole(user, candidate.role)) {
+        const message = `This needs the ${candidate.role} role; ${user.id} is a ${user.role}`;
+        await record(user, candidate.action, request, url, 'denied', 403, message);
+        return json({ error: { code: 'FORBIDDEN_ROLE', message } }, 403);
+      }
       try {
-        return json(await candidate.handler({ request, url, params }));
+        const response = json(await candidate.handler({ request, url, params, user }));
+        if (change) await record(user, candidate.action, request, url, 'ok', 200);
+        return response;
       } catch (error) {
-        return errorResponse(error);
+        const response = errorResponse(error);
+        if (change) {
+          await record(
+            user,
+            candidate.action,
+            request,
+            url,
+            'failed',
+            response.status,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        return response;
       }
     }
     return methodMismatch
@@ -610,6 +954,16 @@ function queryFrom(url: URL): RunQuery {
   return query;
 }
 
+/** A comment's subject, checked: a known kind and an id, such as `run:abc` or `review:triage:item-3`. */
+function subjectOf(subject: string): string {
+  if (!/^(run|review|proposal|thread|experiment|prompt|context):\S{1,300}$/.test(subject)) {
+    throw badRequest(
+      'A comment subject is run:, review:, proposal:, thread:, experiment:, prompt:, or context:, and an id',
+    );
+  }
+  return subject;
+}
+
 function need<T>(source: T | undefined, name: string): T {
   if (!source) throw notConfigured(name);
   return source;
@@ -672,7 +1026,12 @@ function errorResponse(error: unknown): Response {
   if (record?.code === 'PROMPT_PROMOTION_REFUSED' || record?.name === 'PromptPromotionError') {
     return json({ error: { code: 'PROMOTION_REFUSED', message, detail: record.results } }, 409);
   }
-  if (record?.code === 'PROMPT_CONFLICT') return json({ error: { code: 'CONFLICT', message } }, 409);
+  if (record?.code === 'CONTEXT_PROMOTION_REFUSED' || record?.name === 'ContextPromotionError') {
+    return json({ error: { code: 'PROMOTION_REFUSED', message, detail: record.results } }, 409);
+  }
+  if (record?.code === 'PROMPT_CONFLICT' || record?.code === 'CONTEXT_CONFLICT') {
+    return json({ error: { code: 'CONFLICT', message } }, 409);
+  }
   if (record?.code === 'PROMPT_NOT_FOUND' || record?.name?.endsWith('NotFoundError')) {
     return json({ error: { code: 'NOT_FOUND', message } }, 404);
   }

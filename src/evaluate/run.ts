@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { type EvaluationCache, evaluationCacheKey } from './cache.js';
 import type {
   Dataset,
   DatasetExample,
@@ -50,6 +51,18 @@ export interface EvaluateOptions {
   cost?: (output: unknown, example: DatasetExample) => number | undefined;
   /** Called after each example finishes, for progress reporting. */
   onResult?: (result: ExampleResult) => void;
+  /**
+   * Reuses target outputs across experiments: an example whose inputs, repetition, and target
+   * `fingerprint` are unchanged is scored again from the stored output instead of being run, so a
+   * comparison re-runs only what changed. Evaluators always run. Failures are never stored.
+   */
+  cache?: EvaluationCache;
+  /**
+   * Identifies what decides the target's output — a model, a prompt version, settings — so a changed
+   * target never reuses another's outputs. Required with `cache`; `fingerprintOf()` builds one from
+   * any settings object.
+   */
+  fingerprint?: string;
   /** Replaces the system clock, for tests. */
   now?: () => Date;
 }
@@ -69,6 +82,9 @@ export async function evaluate<I = unknown, O = unknown>(
   options: EvaluateOptions = {},
 ): Promise<Experiment> {
   if (dataset.examples.length === 0) throw new RangeError(`Dataset "${dataset.name}" has no examples`);
+  if (options.cache && !options.fingerprint) {
+    throw new RangeError('An evaluation cache needs a fingerprint, so a changed target never reuses old outputs');
+  }
   options.signal?.throwIfAborted();
 
   const now = options.now ?? (() => new Date());
@@ -114,6 +130,14 @@ export async function evaluate<I = unknown, O = unknown>(
     metrics: summarize(results),
     summary,
     ...(options.metadata ? { metadata: options.metadata } : {}),
+    ...(options.cache
+      ? {
+          cache: {
+            hits: results.filter((result) => result.cached).length,
+            misses: results.filter((result) => !result.cached).length,
+          },
+        }
+      : {}),
   };
 
   await options.store?.save(experiment);
@@ -139,28 +163,44 @@ async function evaluateOne<I, O>(
   const started = Date.now();
   let output: unknown;
   let error: { name: string; message: string } | undefined;
+  const key =
+    options.cache && options.fingerprint
+      ? await evaluationCacheKey(options.fingerprint, example as DatasetExample, run)
+      : undefined;
+  const hit = key ? await options.cache?.get(key) : undefined;
 
-  try {
-    const call = Promise.resolve(
-      target(example.inputs, { example, run, ...(options.signal ? { signal: options.signal } : {}) }),
-    );
-    output = options.timeoutMs === undefined ? await call : await withTimeout(call, options.timeoutMs, example.id);
-  } catch (caught) {
-    error =
-      caught instanceof Error
-        ? { name: caught.name, message: caught.message }
-        : { name: 'Error', message: String(caught) };
+  if (hit) output = hit.output;
+  else {
+    try {
+      const call = Promise.resolve(
+        target(example.inputs, { example, run, ...(options.signal ? { signal: options.signal } : {}) }),
+      );
+      output = options.timeoutMs === undefined ? await call : await withTimeout(call, options.timeoutMs, example.id);
+    } catch (caught) {
+      error =
+        caught instanceof Error
+          ? { name: caught.name, message: caught.message }
+          : { name: 'Error', message: String(caught) };
+    }
   }
 
-  const cost = error ? undefined : (options.cost ?? defaultCost)(output, example as DatasetExample);
+  const cost = hit ? hit.cost : error ? undefined : (options.cost ?? defaultCost)(output, example as DatasetExample);
   const context: EvaluationContext<I, O> = {
     example,
     output,
     ...(error ? { error } : {}),
-    latencyMs: Date.now() - started,
+    latencyMs: hit ? hit.latencyMs : Date.now() - started,
     ...(Number.isFinite(cost) ? { cost } : {}),
     run,
   };
+  if (key && !hit && !error) {
+    await options.cache?.set(key, {
+      output,
+      latencyMs: context.latencyMs,
+      ...(context.cost === undefined ? {} : { cost: context.cost }),
+      cachedAt: new Date().toISOString(),
+    });
+  }
 
   const scores: EvaluationScore[] = [];
   for (const evaluator of evaluators) {
@@ -185,6 +225,7 @@ async function evaluateOne<I, O>(
     ...(error ? { error } : {}),
     latencyMs: context.latencyMs,
     ...(context.cost === undefined ? {} : { cost: context.cost }),
+    ...(hit ? { cached: true } : {}),
     scores,
   };
 }

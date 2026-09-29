@@ -7,10 +7,14 @@
  * knowing which is which.
  */
 import type { CompletionRequest } from 'nexus-ai-pro';
+import type { ContextHub } from 'nexus-ai-pro/context-hub';
 import type { DatasetStore, Experiment, ExperimentStore } from 'nexus-ai-pro/evaluate';
+import type { ProposalInbox } from 'nexus-ai-pro/insights';
 import type { OperationStore } from 'nexus-ai-pro/operations';
 import type { PromptRegistry } from 'nexus-ai-pro/prompts/registry';
 import type { Run, RunQuery, TraceStore } from 'nexus-ai-pro/tracing';
+import type { StudioAuthenticator } from './auth.js';
+import type { StudioAuditLog, StudioCommentStore } from './journal.js';
 
 /** The part of a compiled graph the threads view uses. A compiled graph satisfies it as it is. */
 export interface StudioGraphLike {
@@ -105,6 +109,15 @@ export type StudioPromptRegistry = Pick<
   'names' | 'versions' | 'labels' | 'history' | 'diff' | 'promote' | 'rollback' | 'render'
 >;
 
+/** The part of a context hub the bundles view uses. `ContextHub` satisfies it. */
+export type StudioContextHub = Pick<
+  ContextHub,
+  'names' | 'versions' | 'labels' | 'history' | 'diff' | 'promote' | 'rollback'
+>;
+
+/** The part of a proposal inbox the inbox uses. `ProposalInbox` from `nexus-ai-pro/insights` satisfies it. */
+export type StudioProposalInbox = Pick<ProposalInbox, 'list' | 'get' | 'promote' | 'reject'>;
+
 /**
  * A client, for the playground and the health view. `NexusAI` satisfies it; each member is optional,
  * and the studio shows only what the client can report.
@@ -165,6 +178,10 @@ export interface StudioSources {
   experiments?: ExperimentStore;
   /** The prompt registry, for versions, diffs, promotion, and the playground. */
   prompts?: StudioPromptRegistry;
+  /** The context hub, for bundle versions, diffs, promotion, and rollback. */
+  contexts?: StudioContextHub;
+  /** Proposed fixes waiting for a person, shown in the inbox. */
+  proposals?: StudioProposalInbox;
   /** A client, for the playground and the health view. */
   client?: StudioClient;
   /** Shared circuit state, for the health view on a deployment with several workers. */
@@ -186,8 +203,30 @@ export interface StudioOptions {
   token?: string;
   /** Host names the studio answers to, besides `localhost`, `127.0.0.1`, and `[::1]`. */
   allowedHosts?: readonly string[];
-  /** Who actions taken in the studio are recorded as, such as a promotion's `by`. Defaults to `studio`. */
+  /**
+   * Who actions are recorded as when the studio runs on its single token, such as a promotion's `by`.
+   * Defaults to `studio`. With `auth`, actions are recorded under each person's id instead.
+   */
   actor?: string;
+  /**
+   * Accounts: decides who each request is from, with a role. Without it the studio accepts its single
+   * token, and whoever holds it is an admin — the local default.
+   */
+  auth?: StudioAuthenticator;
+  /** Where every change, and every refused attempt, is recorded. Defaults to memory. */
+  audit?: StudioAuditLog;
+  /** Where comments on runs, review items, proposals, and threads are kept. Defaults to memory. */
+  comments?: StudioCommentStore;
+  /**
+   * Signs the per-user tokens pages send with changes. Defaults to a random one per process; give
+   * several replicas the same one so a page stays valid across them.
+   */
+  secret?: string;
+  /** How the issues view looks for problems in traces. */
+  insights?: {
+    /** Runs at least this slow, in milliseconds, are reported as slow issues. */
+    slowMs?: number;
+  };
   /** Replaces the system clock, for tests. */
   now?: () => Date;
 }

@@ -105,7 +105,9 @@ const experiment = await evaluatePrompt(version, dataset, [contains(['refund'])]
 });
 ```
 
-`EvaluatePromptOptions` accepts everything `evaluate()` does, plus `variables` to map inputs to template variables and `render` options such as a model override, which is how one prompt is compared across models. The evaluation runtime is loaded only when `evaluatePrompt()` runs.
+`EvaluatePromptOptions` accepts everything `evaluate()` does, plus `variables` to map inputs to template variables and `render` options such as a model override, which is how one prompt is compared across models. With an evaluation `cache` and no `fingerprint`, the prompt version and render options are the fingerprint, so re-evaluating an unchanged version re-scores its stored outputs; pass your own when the client or model changes. The evaluation runtime is loaded only when `evaluatePrompt()` runs.
+
+To version a prompt together with the instructions, tools, and skills around it, use the [context hub](./context-hub.md): a bundle pins prompt versions from this registry and is promoted the same way.
 
 ## Comparing versions
 

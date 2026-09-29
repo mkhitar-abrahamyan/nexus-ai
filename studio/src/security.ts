@@ -18,22 +18,36 @@ export function tokensMatch(expected: string, provided: string | null | undefine
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** The token a request carries, in the header, the session cookie, or the `token` query parameter. */
+/**
+ * The token a request carries: in the studio header or an `Authorization: Bearer` header, the session
+ * cookie, or the `token` query parameter.
+ */
 export function tokenOf(
   request: Request,
   url: URL,
 ): { token: string | undefined; via: 'header' | 'cookie' | 'query' | undefined } {
+  return tokensOf(request, url)[0] ?? { token: undefined, via: undefined };
+}
+
+/**
+ * Every token a request carries, in the order `tokenOf()` prefers them. With accounts, a page sends its
+ * page token in the header and its personal token in the cookie, so both are looked at.
+ */
+export function tokensOf(request: Request, url: URL): Array<{ token: string; via: 'header' | 'cookie' | 'query' }> {
+  const found: Array<{ token: string; via: 'header' | 'cookie' | 'query' }> = [];
   const header = request.headers.get(TOKEN_HEADER);
-  if (header) return { token: header, via: 'header' };
+  if (header) found.push({ token: header, via: 'header' });
+  const bearer = /^Bearer\s+(\S+)$/i.exec(request.headers.get('authorization') ?? '');
+  if (bearer) found.push({ token: bearer[1] as string, via: 'header' });
   const cookie = request.headers
     .get('cookie')
     ?.split(';')
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${SESSION_COOKIE}=`));
-  if (cookie) return { token: decodeURIComponent(cookie.slice(SESSION_COOKIE.length + 1)), via: 'cookie' };
+  if (cookie) found.push({ token: decodeURIComponent(cookie.slice(SESSION_COOKIE.length + 1)), via: 'cookie' });
   const query = url.searchParams.get('token');
-  if (query) return { token: query, via: 'query' };
-  return { token: undefined, via: undefined };
+  if (query) found.push({ token: query, via: 'query' });
+  return found;
 }
 
 /**
@@ -49,7 +63,10 @@ export function hostAllowed(host: string | null, allowed: readonly string[] = []
   return ['localhost', '127.0.0.1', '[::1]', ...allowed].includes(name ?? '');
 }
 
-/** The session cookie for a token: HTTP-only and same-site, so neither a script nor another site reads it. */
-export function sessionCookie(token: string): string {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/`;
+/**
+ * The session cookie for a token: HTTP-only and same-site, so neither a script nor another site reads
+ * it, and `Secure` when the studio is reached over HTTPS, so it never travels in the clear.
+ */
+export function sessionCookie(token: string, secure = false): string {
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/${secure ? '; Secure' : ''}`;
 }

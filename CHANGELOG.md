@@ -4,6 +4,36 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+The team engineering platform. The studio becomes something a team shares, and it starts finding
+problems on its own.
+
+### Added
+
+- **A shared studio.** Accounts through an authenticator — personal links, identity headers from a
+  signing-in proxy, or bearer tokens verified by your function, such as OIDC — with four roles
+  (viewer, reviewer, editor, admin), an audit log of every change and every refused attempt, comments
+  on runs, review items, proposals, threads, and bundles, per-person page tokens for changes, and
+  `Secure` cookies behind HTTPS. Local, token-only use stays the default. The CLI gains `--users` and
+  `--journal`, and a config module may export `options`.
+- **The context hub** on `nexus-ai-pro/context-hub`: prompts, instructions, tool sets, skills, and
+  settings versioned together as bundles, committed by content, labelled, promoted through evaluation
+  gates, diffed, rolled back, and exported with their prompts to move between projects. Bundles live in
+  any prompt store. The studio shows them.
+- **Insights** on `nexus-ai-pro/insights`: failing and slow runs clustered by error, trajectory, or
+  meaning; regressions between two time windows; and, opt-in, a proposed fix — a candidate prompt or
+  bundle version — evaluated against the dataset before it waits in the studio's inbox for a person
+  to promote, with an optional pull request through an injected client.
+- **Evaluation caching**: `evaluate()` reuses a target's outputs when the example and the target's
+  fingerprint are unchanged, so a comparison re-runs only what changed; evaluators always run again.
+  `MemoryEvaluationCache`, `FileEvaluationCache`, and `fingerprintOf()` on `nexus-ai-pro/evaluate`;
+  `evaluatePrompt()` fingerprints the prompt version itself.
+
+### Changed
+
+- `nexus-ai-pro-studio` requires nexus-ai-pro 1.23 or newer.
+- The studio's development type paths map each entry point to the file it publishes, so studio tests
+  exercise what the package ships.
+
 ## [1.22.0] - 2026-09-29
 
 Retrieval and integration breadth. Getting documents in, finding the right ones, and reaching the

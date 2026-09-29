@@ -288,6 +288,8 @@ const expectedSubpaths = [
   './store',
   './store/redis',
   './mcp',
+  './context-hub',
+  './insights',
   './mcp/registry',
   './tracing',
   './evaluate',

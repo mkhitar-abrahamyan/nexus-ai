@@ -12,6 +12,23 @@
     "baseUrl": ".",
     "paths": {
       "nexus-ai-pro": ["../src/index.ts"],
+      "nexus-ai-pro/core": ["../src/core/nexus.ts"],
+      "nexus-ai-pro/streaming": ["../src/core/streaming.ts"],
+      "nexus-ai-pro/config": ["../src/core/config-builder.ts"],
+      "nexus-ai-pro/providers": ["../src/providers/base.ts"],
+      "nexus-ai-pro/voice/openai": ["../src/voice/providers/openai.ts"],
+      "nexus-ai-pro/prompts/registry": ["../src/prompts/registry-entry.ts"],
+      "nexus-ai-pro/images/stores": ["../src/images/asset-stores.ts"],
+      "nexus-ai-pro/realtime/openai-webrtc": ["../src/realtime/openai-webrtc.transport.ts"],
+      "nexus-ai-pro/realtime/openai-websocket": ["../src/realtime/openai-websocket.transport.ts"],
+      "nexus-ai-pro/realtime/mock": ["../src/realtime/mock.transport.ts"],
+      "nexus-ai-pro/telephony/twilio": ["../src/telephony/providers/twilio.ts"],
+      "nexus-ai-pro/cache": ["../src/cache/adapters.ts"],
+      "nexus-ai-pro/models": ["../src/models/registry.ts"],
+      "nexus-ai-pro/capabilities": ["../src/capabilities/negotiate.ts"],
+      "nexus-ai-pro/rag": ["../src/rag/ingestion.ts"],
+      "nexus-ai-pro/jobs": ["../src/jobs/queue.ts"],
+      "nexus-ai-pro/workflows": ["../src/workflow/chains.ts"],
       "nexus-ai-pro/*": ["../src/*/index.ts", "../src/*.ts"]
     }
   },

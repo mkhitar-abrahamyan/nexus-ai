@@ -1,3 +1,4 @@
+import { fingerprintOf } from '../evaluate/cache.js';
 import type { EvaluateOptions } from '../evaluate/run.js';
 import type { Dataset, DatasetExample, Evaluator, Experiment } from '../types/evaluate.js';
 import type { CompletionRequest } from '../types/messages.js';
@@ -21,7 +22,9 @@ export interface EvaluatePromptOptions extends EvaluateOptions {
  *
  * The experiment records the prompt's name and content version in `metadata.prompt`, which is what
  * `experimentGate()` looks for, so an experiment run here is what unlocks the promotion of the exact
- * version it ran. A prompt defined in code gets the same version it would get when committed.
+ * version it ran. A prompt defined in code gets the same version it would get when committed. With a
+ * `cache` and no `fingerprint`, the fingerprint is the prompt version and the render options, so an
+ * unchanged version re-scores its stored outputs; pass your own when the client or model changes.
  */
 export async function evaluatePrompt<I = unknown, O = unknown>(
   prompt: PromptVersion | PromptDefinition | { definition: PromptDefinition },
@@ -59,6 +62,9 @@ export async function evaluatePrompt<I = unknown, O = unknown>(
     {
       name: `${definition.name}@${version}`,
       ...rest,
+      ...(rest.cache && !rest.fingerprint
+        ? { fingerprint: await fingerprintOf({ prompt: reference, render: render ?? null }) }
+        : {}),
       metadata: { ...rest.metadata, prompt: reference },
     },
   );

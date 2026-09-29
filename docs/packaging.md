@@ -96,13 +96,15 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/providers/cohere` | 44 KB | 8% | none |
 | `nexus-ai-pro/batch/mock` | 41 KB | 7% | none |
 | `nexus-ai-pro/operations` | 40 KB | 7% | none |
-| `nexus-ai-pro/prompts/registry` | 34 KB | 6% | none |
-| `nexus-ai-pro/evaluate` | 33 KB | 6% | none |
+| `nexus-ai-pro/evaluate` | 37 KB | 6% | none |
+| `nexus-ai-pro/prompts/registry` | 37 KB | 6% | none |
+| `nexus-ai-pro/context-hub` | 32 KB | 6% | none |
 | `nexus-ai-pro/models` | 32 KB | 6% | none |
 | `nexus-ai-pro/sqlite` | 30 KB | 5% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 5% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 5% | none |
 | `nexus-ai-pro/evals` | 26 KB | 5% | none |
+| `nexus-ai-pro/insights` | 25 KB | 4% | none |
 | `nexus-ai-pro/graph/functional` | 24 KB | 4% | none |
 | `nexus-ai-pro/tracing` | 23 KB | 4% | none |
 | `nexus-ai-pro/loaders/web` | 23 KB | 4% | none |

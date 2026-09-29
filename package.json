@@ -580,6 +580,16 @@
         "default": "./dist-cjs/evaluate/index.js"
       }
     },
+    "./insights": {
+      "import": {
+        "types": "./dist/insights/index.d.ts",
+        "default": "./dist/insights/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/insights/index.d.ts",
+        "default": "./dist-cjs/insights/index.js"
+      }
+    },
     "./postgres": {
       "import": {
         "types": "./dist/postgres/index.d.ts",
@@ -668,6 +678,16 @@
       "require": {
         "types": "./dist-cjs/prompts/index.d.ts",
         "default": "./dist-cjs/prompts/index.js"
+      }
+    },
+    "./context-hub": {
+      "import": {
+        "types": "./dist/context-hub/index.d.ts",
+        "default": "./dist/context-hub/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/context-hub/index.d.ts",
+        "default": "./dist-cjs/context-hub/index.js"
       }
     },
     "./prompts/client": {
@@ -1758,6 +1778,12 @@
       ],
       "mcp/registry": [
         "dist-cjs/mcp/registry.d.ts"
+      ],
+      "context-hub": [
+        "dist-cjs/context-hub/index.d.ts"
+      ],
+      "insights": [
+        "dist-cjs/insights/index.d.ts"
       ]
     }
   }

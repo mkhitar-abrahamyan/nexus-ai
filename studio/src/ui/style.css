@@ -58,6 +58,23 @@ body {
   flex-wrap: wrap;
 }
 
+.who {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--muted, #666);
+  white-space: nowrap;
+}
+
+.comments {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border, #ddd);
+  padding-top: 0.5rem;
+}
+
+.comment {
+  margin: 0.35rem 0;
+}
+
 .brand {
   font-weight: 600;
 }

@@ -32,8 +32,13 @@ function promptOf(experiment: Experiment): PromptReference | undefined {
   return prompt && typeof prompt === 'object' ? prompt : undefined;
 }
 
+/**
+ * The newest experiment whose metadata names a subject's version, under the metadata key the subject
+ * records: `prompt` for prompts, `context` for context bundles.
+ */
 async function newestFor(
   options: ExperimentGateOptions,
+  subject: (experiment: Experiment) => { name?: string; version?: string } | undefined,
   name: string,
   version: string,
 ): Promise<Experiment | undefined> {
@@ -43,9 +48,64 @@ async function newestFor(
     limit: options.limit ?? 50,
   });
   return experiments.find((experiment) => {
-    const prompt = promptOf(experiment);
-    return prompt?.name === name && prompt.version === version;
+    const found = subject(experiment);
+    return found?.name === name && found.version === version;
   });
+}
+
+/**
+ * The verdict of an experiment gate, for anything versioned whose experiments name it in metadata.
+ * Shared by the prompt and context-bundle gates, so both judge a promotion the same way.
+ */
+export async function experimentVerdict(
+  options: ExperimentGateOptions,
+  subject: (experiment: Experiment) => { name?: string; version?: string } | undefined,
+  name: string,
+  version: string,
+  currentVersion: string | undefined,
+): Promise<GateResult> {
+  const gate = options.name ?? 'experiment';
+  const candidate = await newestFor(options, subject, name, version);
+  if (!candidate) {
+    return {
+      gate,
+      ok: false,
+      reason: `no ${options.experiment ? `"${options.experiment}" ` : ''}experiment for ${version}`,
+    };
+  }
+  if (candidate.errors > (options.maxErrors ?? 0)) {
+    return { gate, ok: false, reason: `${candidate.errors} examples failed in ${candidate.id}` };
+  }
+  for (const [key, minimum] of Object.entries(options.thresholds ?? {})) {
+    const metric = candidate.metrics.find((item) => item.key === key);
+    if (!metric) return { gate, ok: false, reason: `${candidate.id} has no "${key}" metric` };
+    if (metric.mean < minimum) {
+      return { gate, ok: false, reason: `${key} is ${metric.mean.toFixed(3)}, below ${minimum}` };
+    }
+  }
+  if (options.noRegression && currentVersion) {
+    const baseline = await newestFor(options, subject, name, currentVersion);
+    if (!baseline) {
+      return { gate, ok: false, reason: `no experiment for the current version ${currentVersion}` };
+    }
+    const { compareExperiments } = await import('../evaluate/compare.js');
+    const comparison = compareExperiments(
+      baseline,
+      candidate,
+      options.noRegression === true ? {} : options.noRegression,
+    );
+    if (comparison.regressed) {
+      const worse = comparison.metrics.filter((metric) => metric.verdict === 'worse').map((metric) => metric.key);
+      return {
+        gate,
+        ok: false,
+        reason: `regressed against ${baseline.id}${worse.length ? `: ${worse.join(', ')}` : ''}${
+          comparison.newErrors.length ? `, new failures ${comparison.newErrors.join(', ')}` : ''
+        }`,
+      };
+    }
+  }
+  return { gate, ok: true, reason: `passed ${candidate.id}` };
 }
 
 /**
@@ -56,50 +116,8 @@ async function newestFor(
  * candidate must not be worse, beyond noise, than the version it would replace.
  */
 export function experimentGate(options: ExperimentGateOptions): PromotionGate {
-  const gate = options.name ?? 'experiment';
-  return async (context: PromotionContext): Promise<GateResult> => {
-    const candidate = await newestFor(options, context.name, context.version.version);
-    if (!candidate) {
-      return {
-        gate,
-        ok: false,
-        reason: `no ${options.experiment ? `"${options.experiment}" ` : ''}experiment for ${context.version.version}`,
-      };
-    }
-    if (candidate.errors > (options.maxErrors ?? 0)) {
-      return { gate, ok: false, reason: `${candidate.errors} examples failed in ${candidate.id}` };
-    }
-    for (const [key, minimum] of Object.entries(options.thresholds ?? {})) {
-      const metric = candidate.metrics.find((item) => item.key === key);
-      if (!metric) return { gate, ok: false, reason: `${candidate.id} has no "${key}" metric` };
-      if (metric.mean < minimum) {
-        return { gate, ok: false, reason: `${key} is ${metric.mean.toFixed(3)}, below ${minimum}` };
-      }
-    }
-    if (options.noRegression && context.current) {
-      const baseline = await newestFor(options, context.name, context.current.version);
-      if (!baseline) {
-        return { gate, ok: false, reason: `no experiment for the current version ${context.current.version}` };
-      }
-      const { compareExperiments } = await import('../evaluate/compare.js');
-      const comparison = compareExperiments(
-        baseline,
-        candidate,
-        options.noRegression === true ? {} : options.noRegression,
-      );
-      if (comparison.regressed) {
-        const worse = comparison.metrics.filter((metric) => metric.verdict === 'worse').map((metric) => metric.key);
-        return {
-          gate,
-          ok: false,
-          reason: `regressed against ${baseline.id}${worse.length ? `: ${worse.join(', ')}` : ''}${
-            comparison.newErrors.length ? `, new failures ${comparison.newErrors.join(', ')}` : ''
-          }`,
-        };
-      }
-    }
-    return { gate, ok: true, reason: `passed ${candidate.id}` };
-  };
+  return (context: PromotionContext): Promise<GateResult> =>
+    experimentVerdict(options, promptOf, context.name, context.version.version, context.current?.version);
 }
 
 /**

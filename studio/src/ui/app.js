@@ -3,7 +3,8 @@
 
 const view = document.getElementById('view');
 const nav = document.getElementById('nav');
-let session = { token: '', actor: 'studio' };
+const who = document.getElementById('who');
+let session = { token: '', actor: 'studio', user: { id: 'studio', role: 'admin' } };
 let overview = { sources: {} };
 
 // ── Small helpers ───────────────────────────────────────────────────
@@ -135,17 +136,82 @@ function go(hash) {
   location.hash = hash;
 }
 
+const ROLES = ['viewer', 'reviewer', 'editor', 'admin'];
+
+/** Whether the signed-in person's role includes another. The server decides; this only hides what it would refuse. */
+function can(role) {
+  return ROLES.indexOf(session.user?.role ?? 'viewer') >= ROLES.indexOf(role);
+}
+
+/** The comments on a subject, and a form to add one for anyone who may. */
+function commentsPanel(subject) {
+  const list = h('div');
+  const output = h('div');
+  const body = h('textarea', { placeholder: 'Add a comment' });
+  const load = async () => {
+    try {
+      const { comments } = await api(`/api/comments?subject=${encodeURIComponent(subject)}`);
+      list.replaceChildren(
+        comments.length === 0
+          ? h('p', { class: 'muted' }, 'No comments yet.')
+          : comments.map((comment) =>
+              h(
+                'p',
+                { class: 'comment' },
+                h('b', {}, comment.authorName ?? comment.author),
+                h('span', { class: 'muted' }, ` · ${when(comment.at)}`),
+                h('br'),
+                comment.body,
+              ),
+            ),
+      );
+    } catch (error) {
+      list.replaceChildren(notice(error.message, 'error'));
+    }
+  };
+  void load();
+  return h(
+    'div',
+    { class: 'comments' },
+    h('h2', {}, 'Comments'),
+    list,
+    can('reviewer')
+      ? h(
+          'form',
+          {
+            onsubmit: action(output, async () => {
+              await post('/api/comments', { subject, body: body.value });
+              body.value = '';
+              await load();
+            }),
+          },
+          body,
+          h('button', {}, 'Comment'),
+        )
+      : '',
+    output,
+  );
+}
+
 // ── Navigation ──────────────────────────────────────────────────────
 
 const VIEWS = [
   { id: 'traces', label: 'Traces', show: (s) => s.traces, render: renderTraces },
   { id: 'threads', label: 'Threads', show: (s) => s.graphs?.length, render: renderThreads },
-  { id: 'inbox', label: 'Inbox', show: (s) => s.graphs?.length || s.reviews?.length, render: renderInbox },
+  {
+    id: 'inbox',
+    label: 'Inbox',
+    show: (s) => s.graphs?.length || s.reviews?.length || s.proposals,
+    render: renderInbox,
+  },
+  { id: 'issues', label: 'Issues', show: (s) => s.issues, render: renderIssues },
   { id: 'experiments', label: 'Experiments', show: (s) => s.experiments || s.datasets, render: renderExperiments },
   { id: 'prompts', label: 'Prompts', show: (s) => s.prompts, render: renderPrompts },
+  { id: 'contexts', label: 'Bundles', show: (s) => s.contexts, render: renderContexts },
   { id: 'costs', label: 'Costs', show: (s) => s.costs, render: renderCosts },
   { id: 'health', label: 'Health', show: (s) => s.health, render: renderHealth },
   { id: 'operations', label: 'Operations', show: (s) => s.operations || s.assets, render: renderOperations },
+  { id: 'audit', label: 'Audit', show: (s) => s.audit, render: renderAudit },
 ];
 
 function available() {
@@ -282,6 +348,7 @@ async function renderTrace(traceId) {
         h('button', { class: 'primary' }, 'Record'),
       ),
       output,
+      commentsPanel(`run:${run.id}`),
     );
   };
 
@@ -608,10 +675,16 @@ async function renderThread(graphName, threadId, step) {
 // ── Inbox ───────────────────────────────────────────────────────────
 
 async function renderInbox() {
-  const { interrupts, reviews } = await api('/api/inbox');
-  const waiting = reviews.reduce((total, queue) => total + queue.items.length, interrupts.length);
+  const { interrupts, reviews, proposals = [] } = await api('/api/inbox');
+  const waiting = reviews.reduce((total, queue) => total + queue.items.length, interrupts.length + proposals.length);
   view.replaceChildren(
     h('h1', {}, `Inbox (${waiting})`),
+    overview.sources.proposals
+      ? [
+          h('h2', {}, 'Proposed fixes'),
+          proposals.length === 0 ? h('p', { class: 'muted' }, 'No fix is waiting.') : proposals.map(proposalCard),
+        ]
+      : '',
     h('h2', {}, 'Threads waiting for an answer'),
     interrupts.length === 0 ? h('p', { class: 'muted' }, 'No thread is waiting.') : '',
     interrupts.map((entry) => {
@@ -658,6 +731,48 @@ async function renderInbox() {
         queue.items.map((item) => reviewCard(queue.queue, item)),
       ),
     ),
+  );
+}
+
+function proposalCard(proposal) {
+  const output = h('div');
+  const note = h('input', { placeholder: 'note' });
+  const decide = (decision) =>
+    action(output, () =>
+      post(`/api/proposals/${encodeURIComponent(proposal.id)}/${decision}`, { note: note.value || undefined }),
+    );
+  return h(
+    'div',
+    { class: 'card' },
+    h('p', {}, badge(proposal.verdict), ' ', h('b', {}, `${proposal.kind} ${proposal.name}`), ` → ${proposal.label}`),
+    h('p', {}, proposal.issue),
+    proposal.rationale ? h('p', { class: 'muted' }, proposal.rationale) : '',
+    table(
+      [
+        { label: 'Metric', value: (m) => m.key },
+        { label: 'Current', value: (m) => m.baseline.toFixed(3), num: true },
+        { label: 'Proposed', value: (m) => m.candidate.toFixed(3), num: true },
+        { label: 'Verdict', value: (m) => badge(m.verdict) },
+      ],
+      proposal.metrics,
+    ),
+    h(
+      'p',
+      { class: 'muted' },
+      `${proposal.baseline.version} → ${proposal.candidate.version}`,
+      proposal.pullRequest ? [' · ', h('a', { href: proposal.pullRequest.url }, 'pull request')] : '',
+    ),
+    can('editor')
+      ? h(
+          'div',
+          { class: 'toolbar' },
+          note,
+          can('admin') ? h('button', { class: 'primary', onclick: decide('promote') }, 'Promote') : '',
+          h('button', { onclick: decide('reject') }, 'Reject'),
+        )
+      : '',
+    output,
+    commentsPanel(`proposal:${proposal.id}`),
   );
 }
 
@@ -710,6 +825,7 @@ function reviewCard(queue, item) {
       h('button', { class: 'primary' }, 'Submit review'),
     ),
     output,
+    commentsPanel(`review:${queue}:${item.id}`),
   );
 }
 
@@ -1058,6 +1174,208 @@ function renderPromptDiff(diff) {
   return h('pre', {}, lines);
 }
 
+// ── Bundles ─────────────────────────────────────────────────────────
+
+async function renderContexts([name]) {
+  if (name) return renderContext(name);
+  const { contexts } = await api('/api/contexts');
+  view.replaceChildren(
+    h('h1', {}, 'Context bundles'),
+    table(
+      [
+        { label: 'Bundle', value: (c) => c.name },
+        { label: 'Labels', value: (c) => c.labels.map((label) => `${label.label} → ${label.version}`).join(' · ') },
+      ],
+      contexts,
+      (c) => go(`#/contexts/${encodeURIComponent(c.name)}`),
+    ),
+  );
+}
+
+async function renderContext(name) {
+  const base = `/api/contexts/${encodeURIComponent(name)}`;
+  const { versions, labels, history } = await api(base);
+  const refs = [...labels.map((label) => label.label), ...versions.map((version) => version.version)];
+  const options = () => refs.map((ref) => h('option', { value: ref }, ref));
+  const diffFrom = h('select', {}, options());
+  const diffTo = h('select', {}, options());
+  if (versions[1]) diffFrom.value = versions[1].version;
+  if (versions[0]) diffTo.value = versions[0].version;
+  const diffOutput = h('div');
+  const promoteFrom = h('select', {}, options());
+  const promoteTo = h('input', { placeholder: 'to label, such as production', required: true });
+  const promoteForce = h('input', { type: 'checkbox' });
+  const promoteOutput = h('div');
+  const rollbackLabel = h(
+    'select',
+    {},
+    labels.map((label) => h('option', { value: label.label }, label.label)),
+  );
+  const rollbackOutput = h('div');
+  view.replaceChildren(
+    h('p', {}, h('a', { href: '#/contexts' }, '← Bundles')),
+    h('h1', {}, name),
+    h('h2', {}, 'Labels'),
+    table(
+      [
+        { label: 'Label', value: (l) => l.label },
+        { label: 'Version', value: (l) => l.version },
+        { label: 'Moved', value: (l) => `${when(l.updatedAt)}${l.by ? ` by ${l.by}` : ''}` },
+      ],
+      labels,
+    ),
+    h('h2', {}, 'Versions'),
+    table(
+      [
+        { label: 'Version', value: (v) => v.version },
+        { label: 'Committed', value: (v) => when(v.createdAt) },
+        { label: 'By', value: (v) => v.author ?? '' },
+        { label: 'Message', value: (v) => v.message ?? '' },
+        {
+          label: 'Contents',
+          value: (v) =>
+            [
+              `${Object.keys(v.prompts ?? {}).length} prompts`,
+              `${Object.keys(v.instructions ?? {}).length} instructions`,
+              `${(v.tools ?? []).length} tools`,
+              `${Object.keys(v.skills ?? {}).length} skills`,
+            ].join(' · '),
+        },
+      ],
+      versions,
+    ),
+    h('h2', {}, 'Compare versions'),
+    h(
+      'form',
+      {
+        class: 'inline',
+        onsubmit: async (event) => {
+          event.preventDefault();
+          try {
+            const { text } = await api(
+              `${base}/diff?from=${encodeURIComponent(diffFrom.value)}&to=${encodeURIComponent(diffTo.value)}`,
+            );
+            diffOutput.replaceChildren(h('pre', {}, text));
+          } catch (error) {
+            diffOutput.replaceChildren(notice(error.message, 'error'));
+          }
+        },
+      },
+      h('label', {}, 'From', diffFrom),
+      h('label', {}, 'To', diffTo),
+      h('button', { class: 'primary' }, 'Diff'),
+    ),
+    diffOutput,
+    can('admin')
+      ? [
+          h('h2', {}, 'Promote'),
+          h(
+            'form',
+            {
+              class: 'inline',
+              onsubmit: action(promoteOutput, () =>
+                post(`${base}/promote`, {
+                  to: promoteTo.value,
+                  ...(versions.some((v) => v.version === promoteFrom.value)
+                    ? { version: promoteFrom.value }
+                    : { from: promoteFrom.value }),
+                  force: promoteForce.checked,
+                }),
+              ),
+            },
+            h('label', {}, 'From', promoteFrom),
+            h('label', {}, 'To', promoteTo),
+            h('label', {}, 'Force past gates', promoteForce),
+            h('button', { class: 'primary' }, 'Promote'),
+          ),
+          promoteOutput,
+          labels.length
+            ? [
+                h('h2', {}, 'Roll back'),
+                h(
+                  'form',
+                  {
+                    class: 'inline',
+                    onsubmit: action(rollbackOutput, () => post(`${base}/rollback`, { label: rollbackLabel.value })),
+                  },
+                  rollbackLabel,
+                  h('button', {}, 'Roll back'),
+                ),
+                rollbackOutput,
+              ]
+            : '',
+        ]
+      : '',
+    h('h2', {}, 'History'),
+    table(
+      [
+        { label: 'When', value: (e) => when(e.at) },
+        { label: 'Action', value: (e) => e.action },
+        { label: 'Label', value: (e) => e.label ?? '' },
+        { label: 'Version', value: (e) => e.version ?? '' },
+        { label: 'By', value: (e) => e.by ?? '' },
+        { label: 'Note', value: (e) => e.note ?? '' },
+      ],
+      history,
+    ),
+    commentsPanel(`context:${name}`),
+  );
+}
+
+// ── Issues ──────────────────────────────────────────────────────────
+
+async function renderIssues([hours = '24']) {
+  const { issues, regressions } = await api(`/api/issues?hours=${encodeURIComponent(hours)}`);
+  view.replaceChildren(
+    h('h1', {}, 'Issues'),
+    h(
+      'div',
+      { class: 'toolbar' },
+      ['24', '72', '168'].map((value) =>
+        h('a', { href: `#/issues/${value}`, class: value === hours ? 'active' : '' }, `last ${value} h`),
+      ),
+    ),
+    h('h2', {}, 'Regressions'),
+    regressions.length === 0 ? h('p', { class: 'muted' }, 'Nothing got worse than the week before.') : '',
+    regressions.map((regression) => notice(regression.summary, 'error')),
+    h('h2', {}, `Problems in the last ${hours} hours`),
+    table(
+      [
+        { label: 'Kind', value: (issue) => badge(issue.kind) },
+        { label: 'Runs', value: (issue) => issue.cluster.count, num: true },
+        { label: 'Share', value: (issue) => `${(issue.rate * 100).toFixed(1)}%`, num: true },
+        { label: 'What', value: (issue) => issue.summary },
+        { label: 'Last seen', value: (issue) => when(issue.cluster.lastSeen) },
+      ],
+      issues,
+      (issue) => {
+        const run = issue.cluster.runs[0];
+        if (run) go(`#/traces/${encodeURIComponent(run.traceId)}`);
+      },
+    ),
+  );
+}
+
+// ── Audit ───────────────────────────────────────────────────────────
+
+async function renderAudit() {
+  const { entries } = await api('/api/audit?limit=500');
+  view.replaceChildren(
+    h('h1', {}, 'Audit log'),
+    table(
+      [
+        { label: 'When', value: (e) => when(e.at) },
+        { label: 'Who', value: (e) => `${e.user} (${e.role})` },
+        { label: 'Action', value: (e) => e.action },
+        { label: 'Outcome', value: (e) => badge(e.outcome) },
+        { label: 'Path', value: (e) => e.path },
+        { label: 'Detail', value: (e) => e.message ?? '' },
+      ],
+      entries,
+    ),
+  );
+}
+
 // ── Costs ───────────────────────────────────────────────────────────
 
 async function renderCosts([days = '7']) {
@@ -1273,6 +1591,7 @@ async function start() {
   try {
     session = await api('/api/session');
     overview = await api('/api/overview');
+    if (overview.accounts) who.textContent = `${session.user.name ?? session.user.id} · ${session.user.role}`;
   } catch (error) {
     view.replaceChildren(
       h('h1', {}, 'Nexus studio'),

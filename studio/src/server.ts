@@ -2,14 +2,16 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createStudio, type Studio } from './api.js';
 import type { StudioOptions, StudioSources } from './types.js';
 
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
 /** Options for `startStudio()`. */
 export interface StartStudioOptions extends StudioOptions {
   /** Port to listen on. Defaults to 4747; `0` picks a free one. */
   port?: number;
   /**
    * Interface to bind. Defaults to `127.0.0.1`, so nothing else on the network can reach it. Binding
-   * anything wider leaves the token as the only protection, and the host must also be listed in
-   * `allowedHosts`.
+   * anything wider needs the host name in `allowedHosts`, and should come with `auth`: without it the
+   * single token is the only protection, and the studio warns at start.
    */
   host?: string;
 }
@@ -32,6 +34,12 @@ export interface RunningStudio {
 export async function startStudio(sources: StudioSources, options: StartStudioOptions = {}): Promise<RunningStudio> {
   const studio = createStudio(sources, options);
   const host = options.host ?? '127.0.0.1';
+  if (!LOOPBACK.has(host) && !options.auth) {
+    process.emitWarning(
+      `The studio is listening on ${host} with one shared token. Give it an auth option so each person signs in with a role.`,
+      { code: 'NEXUS_STUDIO_SHARED_TOKEN' },
+    );
+  }
   const server = createServer((request, response) => {
     void serve(studio, request, response);
   });
@@ -70,6 +78,7 @@ async function serve(studio: Studio, request: IncomingMessage, response: ServerR
         headers,
         ...(body && request.method !== 'GET' && request.method !== 'HEAD' ? { body } : {}),
       }),
+      { ...(request.socket.remoteAddress ? { remoteAddress: request.socket.remoteAddress } : {}) },
     );
     const out: Record<string, string> = {};
     result.headers.forEach((value, key) => {
