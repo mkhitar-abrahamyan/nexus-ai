@@ -1215,29 +1215,43 @@ vector-only misses most, and `compareExperiments()` over a dataset stored on dis
 
 ---
 
-## 23. 1.23.0: the team engineering platform
+## 23. Shipped in 1.23.0 — the team engineering platform
 
-The studio becomes something a team shares, and it starts finding problems on its own.
+**A shared studio.** Accounts through an authenticator — personal links, identity headers from a
+signing-in proxy, or bearer tokens verified by an injected function such as OIDC — with four roles
+(viewer, reviewer, editor, admin), an audit log of every change and every refused attempt, comments on
+runs, review items, proposals, threads, and bundles, per-person page tokens for changes, and `Secure`
+cookies behind HTTPS. Local, token-only use stays the default; binding beyond loopback without
+accounts warns.
 
-**A shared studio.** Accounts through an authentication hook — OIDC, or identity headers from a
-reverse proxy — with roles (viewer, reviewer, editor, admin), an audit log of every action, comments
-on runs and review items, and safe binding beyond the loopback interface. Local, token-only use stays
-the default.
+**A context hub.** `nexus-ai-pro/context-hub`: prompts, instructions, tool sets, skills, and settings
+versioned together as bundles, committed by content, labelled, promoted through evaluation gates,
+diffed, rolled back, and exported with their prompts. Bundles live in any prompt store, so files,
+Redis, and Postgres all serve them.
 
-**A context hub.** The prompt registry grows into versioned context bundles: prompts, instructions,
-tool sets, and skills versioned together, promoted through the same evaluation gates, diffed, rolled
-back, and exported to files so bundles move between projects and repositories.
+**Insights.** `nexus-ai-pro/insights`: failing and slow runs clustered by error, trajectory, or
+meaning; regressions between time windows; and, opt-in, a proposed fix evaluated against the dataset
+before it waits in the studio's inbox for a person, with an optional pull request through an injected
+client.
 
-**Insights.** Failing and slow runs clustered by error, trajectory, and meaning; regressions detected
-across time windows; and, opt-in, a proposed fix — a candidate prompt or context version — evaluated
-against the dataset before a person is asked to promote it, with an optional pull request through an
-injected client.
+**Evaluation caching.** `evaluate()` reuses a target's outputs when the example and the target's
+fingerprint are unchanged; `evaluatePrompt()` and `evaluateContext()` fingerprint the version
+themselves.
 
-**Evaluation caching.** Target outputs reused across experiments when the example and the target's
-fingerprint are unchanged, so a comparison re-runs only what changed.
+**Proof.** Two people with different roles share one studio over HTTP; a seeded rise in failures is
+detected, clustered, and answered with a proposed fix that is evaluated, commented on by the reviewer,
+refused to them, and promoted by the admin through the production gate, with every step audited.
 
-**Proof.** Two users with different roles share one studio; a seeded regression is detected, clustered,
-and answered with a proposed fix that is evaluated and shown in the inbox for promotion.
+**Documentation.** Every guide was rewritten for readability: purpose and an example first, options
+in tables, and short sentences, with every export still explained.
+
+### What did not land, and where it went
+
+- **The studio runs no sign-in flow of its own.** People in a browser sign in through a proxy in
+  front of it, or with a personal link; bearer tokens serve scripts.
+- **Proposed fixes rewrite prompts and bundle instructions**, not tools or code. A fix that needs a
+  code change goes through the optional pull request.
+- **The new studio views are covered by API tests**, not browser tests.
 
 ---
 

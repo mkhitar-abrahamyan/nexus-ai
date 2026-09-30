@@ -456,7 +456,7 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
 
-## Team platform stage (Unreleased)
+## Team platform stage (1.23.0)
 
 The context hub (`nexus-ai-pro/context-hub`), insights (`nexus-ai-pro/insights`), and the studio's
 accounts are experimental in production readiness. Their contracts follow the 1.x rules.

@@ -217,11 +217,11 @@ Shipped so far:
 - vector stores behind one contract, and deprecation warnings at run time;
 - durable functional workflows, step-level recovery in the server, SQLite persistence, and diagrams
   as images;
-- document loaders, five more vector stores, hybrid retrieval with reranking, and an MCP registry.
+- document loaders, five more vector stores, hybrid retrieval with reranking, and an MCP registry;
+- a shared studio with accounts, roles, an audit log, and comments; a context hub; insights with
+  evaluated fix proposals; and evaluation caching.
 
-Next: the team engineering platform — a shared studio with accounts and roles, a context hub,
-insights with evaluated fix proposals, and evaluation caching — then self-managed deployment at
-scale, before 2.0.0 consolidates. The image family leaves experimental once recorded live
+Next: self-managed deployment at scale, before 2.0.0 consolidates. The image family leaves experimental once recorded live
 conformance passes on all three backends.
 
 ## Before Production

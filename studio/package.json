@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro-studio",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "description": "A studio for nexus-ai-pro: traces, threads, approvals, experiments, prompts, context bundles, issues, and proposed fixes, run locally or shared by a team with roles and an audit log, with no hosted service.",
   "type": "module",
   "bin": {

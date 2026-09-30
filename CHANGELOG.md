@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-09-30
+
 The team engineering platform. The studio becomes something a team shares, and it starts finding
 problems on its own.
 
@@ -30,6 +32,8 @@ problems on its own.
 
 ### Changed
 
+- The guides are rewritten for readability: each says what its feature is for before its options,
+  options and fields are in tables, and long sentences are split. Every export is still explained.
 - `nexus-ai-pro-studio` requires nexus-ai-pro 1.23 or newer.
 - The studio's development type paths map each entry point to the file it publishes, so studio tests
   exercise what the package ships.
@@ -1148,7 +1152,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.22.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.23.0...HEAD
+[1.23.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.22.0...v1.23.0
 [1.22.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.19.0...v1.20.0
