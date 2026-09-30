@@ -8,9 +8,9 @@
  *   curl -X POST localhost:8080/threads/<id>/runs -d '{"input":{"messages":["hello"]}}' -H 'content-type: application/json'
  *   curl -N localhost:8080/runs/<runId>/events
  *
- * With `REDIS_URL` set it scales horizontally: point a second replica at the same Redis and it
- * serves the same threads, finishes a run whose replica died, and streams events either replica
- * recorded. `deploy/compose.yaml` runs exactly that.
+ * Everything here is in memory, which suits one process. To scale out, give every replica the same
+ * Redis-backed stores; `deploy/app/server.mjs` does that from `REDIS_URL`, with API and worker roles,
+ * and `deploy/compose.yaml`, `deploy/kubernetes`, and `deploy/helm` run it.
  */
 import { createServer } from 'node:http';
 import { appendList, lastValue } from '../src/graph/channels.js';

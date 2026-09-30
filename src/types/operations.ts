@@ -204,6 +204,39 @@ export interface OperationStore<TResult = unknown> {
   ): Promise<OperationRecord<TResult> | undefined> | OperationRecord<TResult> | undefined;
   /** Every record, for inspection and tests. */
   list?(): Promise<Array<OperationRecord<TResult>>> | Array<OperationRecord<TResult>>;
+  /**
+   * Queued records that no worker holds, oldest first, for a worker with free capacity to claim.
+   * Without it, `OperationRunner.claimQueued()` falls back to filtering `list()`.
+   */
+  listQueued?(
+    limit: number,
+    filter?: OperationStoreFilter,
+  ): Promise<Array<OperationRecord<TResult>>> | Array<OperationRecord<TResult>>;
+  /**
+   * Counts records by status, for queue metrics and autoscaling. `now` decides which leases have
+   * lapsed. Without it, `operationStats()` falls back to counting `list()`.
+   */
+  stats?(now: string, filter?: OperationStoreFilter): Promise<OperationStoreStats> | OperationStoreStats;
+}
+
+/** Narrows the records `listQueued()` and `stats()` look at. */
+export interface OperationStoreFilter {
+  /** Only records whose `kind` starts with this, such as `assistant:` for the agent server's runs. */
+  kindPrefix?: string;
+}
+
+/** What an operation store holds, counted: the numbers a queue dashboard and an autoscaler read. */
+export interface OperationStoreStats {
+  /**
+   * Unfinished records per status: queued, running, retrying, and cancelling. Finished records are not
+   * counted, which keeps the count cheap on a table that keeps its history. A status with no records
+   * may be missing.
+   */
+  byStatus: Partial<Record<OperationStatus, number>>;
+  /** ISO-8601 creation time of the oldest queued record, when one is waiting. */
+  oldestQueuedAt?: string;
+  /** Records still marked running whose lease has lapsed: work a stopped worker left behind. */
+  lapsedLeases: number;
 }
 
 /**
@@ -299,6 +332,9 @@ export interface OperationSubmitOptions {
   /** Cancels the operation when aborted. */
   signal?: AbortSignal;
 }
+
+/** Options for `OperationRunner.enqueue()`: a submission that no executor runs yet. */
+export type OperationEnqueueOptions = Omit<OperationSubmitOptions, 'signal'>;
 
 /** What an executor receives. */
 export interface OperationContext {

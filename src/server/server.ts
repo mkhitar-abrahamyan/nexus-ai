@@ -1,9 +1,12 @@
 import type {
   CronRecord,
+  DeploymentChange,
   Principal,
   RunEvent,
   RunRecord,
+  ScalingSnapshot,
   ServerAssistant,
+  ServerDeployments,
   ServerStateStore,
   ThreadBusyPolicy,
   ThreadRecord,
@@ -11,7 +14,8 @@ import type {
 import { CronScheduler, type CronSchedulerOptions } from './cron.js';
 import { BadRequestError, ForbiddenError, NotFoundError, ServerError, UnauthorizedError } from './errors.js';
 import { errorResponse, formatSse, json, readJson, Routes, SSE_HEADERS } from './http.js';
-import { RunManager, type RunManagerOptions } from './runs.js';
+import { gauge } from './metrics.js';
+import { type DrainResult, RunManager, type RunManagerOptions } from './runs.js';
 
 /** Options for `createAgentServer()`. */
 export interface AgentServerOptions extends Omit<RunManagerOptions, 'assistants'> {
@@ -26,8 +30,24 @@ export interface AgentServerOptions extends Omit<RunManagerOptions, 'assistants'
   authenticate?: (request: Request) => Promise<Principal | Response | undefined> | Principal | Response | undefined;
   /** Serves requests without authentication when no hook is configured. Defaults to true. */
   allowAnonymous?: boolean;
-  /** Scopes a principal must carry, by route group. */
-  scopes?: { read?: string; write?: string };
+  /**
+   * Scopes a principal must carry, by route group. The deployment and replica routes always need
+   * `admin`, which defaults to a scope named `admin`, whenever an `authenticate` hook is set.
+   */
+  scopes?: { read?: string; write?: string; admin?: string };
+  /**
+   * Serves `GET /metrics` in Prometheus text and `GET /scaling` as JSON, for dashboards and
+   * autoscalers. On by default, behind `authenticate` like any read; `{ public: true }` answers them
+   * without it, for a scraper inside the cluster. `false` turns both off.
+   */
+  metrics?: boolean | { public?: boolean };
+  /**
+   * The deployments registry, which adds the `/deployments` and `/replicas` routes and heartbeats
+   * this replica. See `Deployments` in `nexus-ai-pro/server/deployments`.
+   */
+  deployments?: ServerDeployments;
+  /** What this replica reports about itself besides its runs, such as its host or image tag. */
+  replicaMetadata?: Record<string, unknown>;
   /** Schedules runs. Cron jobs given here exist from startup; the API can add more. */
   cron?: CronSchedulerOptions & { jobs?: ReadonlyArray<Omit<CronRecord, 'id' | 'createdAt'> & { id?: string }> };
   /** How often a live event stream sends a comment to keep the connection open, in milliseconds. Defaults to 15 seconds. */
@@ -42,10 +62,21 @@ export interface AgentServer {
   readonly runs: RunManager;
   /** The cron scheduler, when one is configured. */
   readonly cron?: CronScheduler;
-  /** Starts the scheduler and re-claims runs abandoned by a crashed worker. */
+  /**
+   * Starts the scheduler, re-claims runs abandoned by a crashed worker, starts the worker loop when
+   * there is a queue, and starts heartbeating when there is a deployments registry.
+   */
   start(): Promise<void>;
-  /** Stops the scheduler. Runs in flight are left to finish. */
+  /** Stops the scheduler, the worker loop, and the heartbeat. Runs in flight are left to finish. */
   stop(): Promise<void>;
+  /**
+   * Prepares this replica to shut down: `GET /health` answers `503` so the load balancer stops
+   * sending, new work goes to the queue, and runs in flight finish or, after `timeoutMs`, are handed
+   * to another worker. Call it on `SIGTERM`, then `stop()`.
+   */
+  drain(options?: { timeoutMs?: number }): Promise<DrainResult>;
+  /** The numbers an autoscaler reads, as `GET /scaling` reports them. */
+  scaling(): Promise<ScalingSnapshot>;
 }
 
 type Handler = (context: {
@@ -84,12 +115,65 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
       })
     : undefined;
 
-  const routes = new Routes<{ handler: Handler; scope: 'read' | 'write' }>();
-  const read = (method: string, path: string, handler: Handler) => routes.add(method, path, { handler, scope: 'read' });
-  const write = (method: string, path: string, handler: Handler) =>
-    routes.add(method, path, { handler, scope: 'write' });
+  type Scope = 'public' | 'read' | 'write' | 'admin';
+  const routes = new Routes<{ handler: Handler; scope: Scope }>();
+  const route = (scope: Scope) => (method: string, path: string, handler: Handler) =>
+    routes.add(method, path, { handler, scope });
+  const open = route('public');
+  const read = route('read');
+  const write = route('write');
+  const admin = route('admin');
 
-  read('GET', '/health', async () => json({ status: 'ok', worker: runs.workerId }));
+  // Answered without authentication: a load balancer's or Kubernetes' probe carries no credentials.
+  open('GET', '/health', async () =>
+    runs.isDraining
+      ? json({ status: 'draining', worker: runs.workerId }, 503)
+      : json({ status: 'ok', worker: runs.workerId }),
+  );
+
+  if (options.metrics !== false) {
+    const observe = typeof options.metrics === 'object' && options.metrics.public ? open : read;
+    observe('GET', '/metrics', async () => {
+      const text = await runs.prometheus(async (lines) => {
+        if (!options.deployments) return;
+        const replicas = await options.deployments.replicas();
+        gauge(lines, 'nexus_server_replicas', 'Replicas whose heartbeat is fresh.', replicas.length);
+        gauge(
+          lines,
+          'nexus_server_replicas_draining',
+          'Replicas that are draining.',
+          replicas.filter((replica) => replica.draining).length,
+        );
+      });
+      return new Response(text, { headers: { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' } });
+    });
+    observe('GET', '/scaling', async () => json(await runs.scaling(options.replicaMetadata)));
+  }
+
+  read('GET', '/usage', async ({ principal }) => {
+    if (!options.tenants?.usage)
+      throw new BadRequestError('Tenant limits are not enabled on this server', 'TENANTS_DISABLED');
+    return json(await options.tenants.usage(principal?.tenantId));
+  });
+
+  if (options.deployments) {
+    const deployments = options.deployments;
+    admin('GET', '/deployments', async () => json({ deployments: await deployments.list() }));
+    admin('GET', '/deployments/:assistant', async ({ params }) => {
+      const deployment = await deployments.get(params.assistant as string);
+      if (!deployment) throw new NotFoundError('Deployment', params.assistant as string);
+      // Each revision's runs since the split last changed: the window a canary guard judges.
+      const stats = await deployments.stats?.(deployment.assistant, { since: deployment.history[0]?.at });
+      return json(stats ? { ...deployment, stats } : deployment);
+    });
+    admin('POST', '/deployments/:assistant', async ({ request, params, principal }) => {
+      const change = await readJson<DeploymentChange>(request);
+      runs.assistant(params.assistant as string);
+      return json(await deployments.change(params.assistant as string, change, principal?.userId));
+    });
+    admin('GET', '/replicas', async () => json({ replicas: await deployments.replicas() }));
+  }
+
   read('GET', '/assistants', async () =>
     json({
       assistants: Object.entries(runs.assistants).map(([id, assistant]) => ({
@@ -100,6 +184,7 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
           state: typeof assistant.state === 'function',
           rollback: typeof assistant.restore === 'function',
         },
+        ...(assistant.revisions ? { revisions: assistant.revisions } : {}),
       })),
     }),
   );
@@ -145,6 +230,7 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
       idempotencyKey: body.idempotencyKey,
       metadata: body.metadata,
       onBusy: body.onBusy,
+      revision: body.revision,
     });
     return body.stream || url.searchParams.get('stream') === 'true' ? streamRun(run.id) : json(run, 202);
   });
@@ -158,6 +244,7 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
       principal,
       idempotencyKey: body.idempotencyKey,
       metadata: body.metadata,
+      revision: body.revision,
     });
     return body.stream || url.searchParams.get('stream') === 'true' ? streamRun(run.id) : json(run, 202);
   });
@@ -269,8 +356,11 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
         return json({ error: { code: 'METHOD_NOT_ALLOWED', message: `${request.method} is not allowed here` } }, 405);
       }
 
+      const scope = match.handler.scope;
       let principal: Principal | undefined;
-      if (options.authenticate) {
+      if (scope === 'public') {
+        // Nothing to authenticate.
+      } else if (options.authenticate) {
         const result = await options.authenticate(request);
         if (result instanceof Response) return result;
         if (!result) throw new UnauthorizedError();
@@ -279,7 +369,16 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
         throw new UnauthorizedError('This server requires an authenticate hook');
       }
 
-      const required = options.scopes?.[match.handler.scope];
+      // Deployments change what every tenant is served, so they need their own scope once callers are
+      // authenticated; an anonymous development server serves them as it serves everything else.
+      const required =
+        scope === 'public'
+          ? undefined
+          : scope === 'admin'
+            ? options.authenticate
+              ? (options.scopes?.admin ?? 'admin')
+              : undefined
+            : options.scopes?.[scope];
       if (required && !principal?.scopes?.includes(required)) throw new ForbiddenError(required);
 
       return await match.handler.handler({ request, params: match.params, principal, url });
@@ -296,10 +395,19 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
       await runs.recover().catch(() => undefined);
       for (const job of options.cron?.jobs ?? []) await scheduler?.add(job);
       scheduler?.start();
+      runs.startWorking();
+      await options.deployments?.attach(() => runs.replica(options.replicaMetadata));
     },
     async stop() {
       scheduler?.stop();
+      runs.stopWorking();
+      await options.deployments?.detach();
     },
+    async drain(drainOptions = {}) {
+      scheduler?.stop();
+      return runs.drain(drainOptions);
+    },
+    scaling: () => runs.scaling(options.replicaMetadata),
   };
 }
 
@@ -311,6 +419,7 @@ interface RunBody {
   idempotencyKey?: string;
   metadata?: Record<string, unknown>;
   onBusy?: ThreadBusyPolicy;
+  revision?: string;
 }
 
 function numberParam(url: URL, name: string): number | undefined {

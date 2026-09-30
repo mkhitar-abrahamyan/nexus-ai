@@ -98,6 +98,18 @@ export class LocalOperationHandle<TResult> implements OperationHandle<TResult> {
     return true;
   }
 
+  /**
+   * Aborts the executor's signal with `reason` without cancelling the operation.
+   *
+   * Used by `OperationRunner.release()`: the work stops here and continues on another worker, so the
+   * handle must not report a cancellation that never happened. Returns false once it has finished.
+   */
+  abort(reason: unknown): boolean {
+    if (isTerminalOperationStatus(this.currentStatus) || this.controller.signal.aborted) return false;
+    this.controller.abort(reason);
+    return true;
+  }
+
   /** Every event, past and future, until the operation finishes. */
   events(): AsyncIterable<OperationEvent<TResult>> {
     return this.iterateEvents();

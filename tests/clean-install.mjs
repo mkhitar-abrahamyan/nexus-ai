@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,14 +50,16 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // retrievers, and the MCP registry — sixteen subpaths, each dependency-free and never loaded by the root.
 // Raised again in 1.23.0 for the context hub, insights, and evaluation caching: two subpaths and a
 // module of the evaluation family, never loaded by the root.
-const MAX_PACKED_BYTES = 840_000;
-const MAX_UNPACKED_BYTES = 5_250_000;
+// Raised again in 1.24.0 for deployment at scale: the deployments and tenancy subpaths, the server's
+// worker queue, draining, and metrics, and `nexus deploy`. The deploy/ templates are not shipped.
+const MAX_PACKED_BYTES = 870_000;
+const MAX_UNPACKED_BYTES = 5_450_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Most of
 // the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the
 // README size table reports third-party install cost per entry point. Raised with the unpacked ceiling
-// in 1.21.0, 1.22.0, and 1.23.0; slimming the root and making the validators optional in 2.0 is what
-// brings it down.
-const MAX_INSTALLED_BYTES = 12_700_000;
+// in 1.21.0, 1.22.0, 1.23.0, and 1.24.0; slimming the root and making the validators optional in 2.0 is
+// what brings it down.
+const MAX_INSTALLED_BYTES = 13_000_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
@@ -220,6 +223,7 @@ for (const [specifier, exportNames] of imports) {
     installedBytes < MAX_INSTALLED_BYTES,
     `a production install should stay below ${MAX_INSTALLED_BYTES} bytes of node_modules, received ${installedBytes}`,
   );
+  await runDeployTemplate(consumerDir);
   console.log(
     `Clean production install smoke test passed. Installed size: ${(installedBytes / 1024 / 1024).toFixed(1)} MB of node_modules, of which ${(packed.unpackedSize / 1024 / 1024).toFixed(1)} MB is this package.`,
   );
@@ -231,4 +235,89 @@ for (const [specifier, exportNames] of imports) {
   if (!keepTempDir) {
     rmSync(tempRoot, { recursive: true, force: true });
   }
+}
+
+/**
+ * Runs deploy/app/server.mjs — the template the Dockerfile, Compose file, and Helm chart all start —
+ * against the installed tarball: it must come up, run a job, move traffic to another revision through
+ * the deployments API, report metrics, and, where signals exist, drain and exit cleanly on SIGTERM.
+ */
+async function runDeployTemplate(directory) {
+  for (const file of ['server.mjs', 'assistants.mjs']) {
+    copyFileSync(path.join(repoRoot, 'deploy', 'app', file), path.join(directory, file));
+  }
+  const port = await freePort();
+  const child = spawn(process.execPath, ['server.mjs'], {
+    cwd: directory,
+    env: { ...process.env, PORT: String(port), ROLE: 'all', REDIS_URL: '', DRAIN_TIMEOUT_MS: '2000' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', (chunk) => {
+    output += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    output += chunk;
+  });
+  const exited = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
+  const base = `http://127.0.0.1:${port}`;
+  const send = (method, route, body) =>
+    fetch(`${base}${route}`, {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),
+    });
+  const runOnce = async () => {
+    const accepted = await (await send('POST', '/runs', { assistant: 'support', input: { question: 'hi' } })).json();
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const run = await (await send('GET', `/runs/${accepted.id}`)).json();
+      if (run.status === 'succeeded') return run;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error(`run ${accepted.id} did not finish`);
+  };
+
+  try {
+    let healthy = false;
+    for (let attempt = 0; attempt < 100 && !healthy; attempt += 1) {
+      healthy = await send('GET', '/health').then(
+        (response) => response.ok,
+        () => false,
+      );
+      if (!healthy) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(healthy, `the template server should report healthy:\n${output}`);
+
+    const first = await runOnce();
+    assert.match(first.output.answer, /^v1:/);
+    assert.equal(first.revision.id, '2026-09-01');
+    const promoted = await send('POST', '/deployments/support', { action: 'promote', revision: '2026-09-30' });
+    assert.equal(promoted.status, 200);
+    const second = await runOnce();
+    assert.match(second.output.answer, /^v2:/, 'a promotion reaches the next run without a restart');
+
+    const metrics = await (await send('GET', '/metrics')).text();
+    assert.match(metrics, /^nexus_server_queue_load /m);
+    const scaling = await (await send('GET', '/scaling')).json();
+    assert.equal(scaling.replica.capacity, 4);
+
+    if (process.platform !== 'win32') {
+      child.kill('SIGTERM');
+      assert.equal(await exited, 0, `the template should drain and exit cleanly:\n${output}`);
+      assert.match(output, /drained: /);
+    }
+  } finally {
+    if (child.exitCode === null) child.kill();
+    await exited;
+  }
+}
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
 }

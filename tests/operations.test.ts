@@ -8,6 +8,7 @@ import {
 import {
   OperationCancelledError,
   OperationLeaseLostError,
+  OperationReleasedError,
   OperationSerializationError,
   OperationTransitionError,
 } from '../src/operations/errors.js';
@@ -20,7 +21,7 @@ import {
   isClaimable,
   isSettled,
 } from '../src/operations/state-machine.js';
-import { MemoryOperationStore, assertSerializableRecord } from '../src/operations/store.js';
+import { MemoryOperationStore, assertSerializableRecord, operationStats } from '../src/operations/store.js';
 import {
   OPERATION_WEBHOOK_SIGNATURE_HEADER,
   deliverOperationWebhook,
@@ -28,6 +29,7 @@ import {
   verifyOperationWebhook,
 } from '../src/operations/webhooks.js';
 import type { OperationEvent, OperationRecord, OperationStatus, OperationStore } from '../src/types/operations.js';
+import { queueContract } from './operation-queue-contract.js';
 
 /**
  * An executor that stays busy until it is aborted.
@@ -888,4 +890,111 @@ test('a workflow that crashed continues through the Redis operation store, witho
   for await (const event of build().continue('order-13')) output = (event as { output?: unknown }).output ?? output;
   assert.equal(output, 'shipped');
   assert.deepEqual(charges, ['charge']);
+});
+
+// ── Queued work, claimed by any worker ─────────────────────────────
+
+test('an enqueued operation waits for a worker, and each is claimed by exactly one', async () => {
+  const store = new MemoryOperationStore<string>();
+  const api = new OperationRunner<string>({ store, owner: 'api' });
+  const accepted = [];
+  for (let index = 0; index < 5; index += 1) accepted.push(await api.enqueue({ kind: 'job', metadata: { index } }));
+  assert.equal(
+    (await api.enqueue({ idempotencyKey: 'once', kind: 'job' })).id,
+    (await api.enqueue({ idempotencyKey: 'once' })).id,
+  );
+  await store.delete(store.list().find((item) => item.idempotencyKey === 'once')?.id ?? '');
+  assert.equal((await operationStats(store)).byStatus.queued, 5);
+
+  const ran: Array<{ worker: string; id: string }> = [];
+  const worker = (owner: string) => {
+    const runner = new OperationRunner<string>({ store, owner });
+    return (limit: number) =>
+      runner.claimQueued(async (context) => {
+        ran.push({ worker: owner, id: context.operationId });
+        return `${owner}:${context.metadata?.index}`;
+      }, limit);
+  };
+  const [first, second] = [worker('w1'), worker('w2')];
+  // Both workers poll at once; the compare-and-set on each record decides who runs it.
+  const claimed = [...(await Promise.all([first(3), second(3)]))].flat();
+  await Promise.all(claimed.map((handle) => handle.result()));
+  const rest = await first(5);
+  await Promise.all(rest.map((handle) => handle.result()));
+
+  assert.equal(ran.length, 5, 'every operation ran');
+  assert.equal(new Set(ran.map((item) => item.id)).size, 5, 'none ran twice');
+  assert.equal((await operationStats(store)).byStatus.queued, undefined);
+  for (const record of accepted) assert.equal(store.read(record.id)?.status, 'succeeded');
+});
+
+test('a claimed operation is never taken from a worker whose lease is live', async () => {
+  const store = new MemoryOperationStore<string>();
+  const holder = new OperationRunner<string>({ store, owner: 'holder' });
+  const other = new OperationRunner<string>({ store, owner: 'other' });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const handle = await holder.submit(async () => {
+    await gate;
+    return 'mine';
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(await other.claimQueued(async () => 'stolen', 5), []);
+  assert.deepEqual(await other.recover(async () => 'stolen', 5), []);
+  release();
+  assert.equal(await handle.result(), 'mine');
+});
+
+test('a released operation goes back to the queue and another worker continues it', async () => {
+  const store = new MemoryOperationStore<string>();
+  const delivered: string[] = [];
+  const draining = new OperationRunner<string>({
+    store,
+    owner: 'draining',
+    webhook: {
+      url: 'https://hooks.test/ops',
+      secret: 's',
+      events: ['failed', 'succeeded'],
+      fetch: async (_url, init) => {
+        delivered.push(JSON.parse(String(init?.body)).type);
+        return new Response(null, { status: 204 });
+      },
+    },
+  });
+  const attempts: number[] = [];
+  const handle = await draining.submit(
+    (context) =>
+      new Promise<string>((_resolve, reject) => {
+        attempts.push(context.attempt);
+        context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true });
+      }),
+    { kind: 'job' },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(draining.executing, [handle.id]);
+
+  assert.equal(draining.release(handle.id), true);
+  await assert.rejects(handle.result(), OperationReleasedError);
+  assert.equal(draining.release(handle.id), false, 'nothing left to release');
+  const queued = await store.read(handle.id);
+  assert.equal(queued?.status, 'queued');
+  assert.equal(queued?.attempt, 2, 'the next worker sees a later attempt, so it continues rather than starts over');
+  assert.equal(queued?.maxAttempts, 2, 'the hand-off does not use up the retry budget');
+  assert.equal(queued?.lease, undefined);
+
+  const next = new OperationRunner<string>({ store, owner: 'next' });
+  const [continued] = await next.claimQueued(async (context) => {
+    attempts.push(context.attempt);
+    return 'finished';
+  });
+  assert.equal(await continued?.result(), 'finished');
+  assert.deepEqual(attempts, [1, 2]);
+  assert.equal(delivered.includes('failed'), false, 'a hand-off is not reported as a failure');
+});
+
+test('the Redis operation store lists queued work and counts it for autoscaling', async () => {
+  await queueContract('redis', new RedisOperationStore<string>(fakeRedis().client));
+  await queueContract('memory', new MemoryOperationStore<string>());
 });

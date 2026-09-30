@@ -39,6 +39,8 @@ export interface ThreadRecord {
   updatedAt: string;
   /** The run in flight, when there is one. */
   activeRunId?: string;
+  /** The revision its last run used, which its next run keeps while that revision takes traffic. */
+  revision?: string;
   /** Application data supplied when it was created. */
   metadata?: Record<string, unknown>;
 }
@@ -67,6 +69,189 @@ export interface RunRecord {
   interrupt?: unknown;
   /** Application data supplied when it was submitted. */
   metadata?: Record<string, unknown>;
+  /** The revision that served it, and the traffic split it was chosen under. */
+  revision?: RunRevision;
+  /** ISO-8601 time a worker first started it. The wait before this is time spent queued. */
+  startedAt?: string;
+  /** ISO-8601 time it finished. */
+  finishedAt?: string;
+  /** Milliseconds from the first start to the finish, across every attempt. */
+  durationMs?: number;
+  /** US dollars the assistant recorded through `recordCost()`, across every attempt. */
+  cost?: number;
+  /** The worker that ran its latest attempt. */
+  worker?: string;
+  /** Its latest attempt, starting at 1. */
+  attempt?: number;
+}
+
+/** Why a run got the revision it did. */
+export type RevisionReason = 'split' | 'thread' | 'requested';
+
+/** Which revision of an assistant served a run, and under what traffic split. */
+export interface RunRevision {
+  /** The revision's id, such as `2026-09-30`. */
+  id: string;
+  /** The share of new traffic the revision had when it was chosen, from 0 to 1. */
+  weight: number;
+  /** The deployment's version when it was chosen. It goes up every time the split changes. */
+  deployment: number;
+  /**
+   * Why this revision: the traffic split chose it, the thread stayed on the revision it started on,
+   * or the request named it.
+   */
+  reason: RevisionReason;
+}
+
+/** What an assistant's `route()` is asked when a run starts. */
+export interface RevisionRequest {
+  /** The run being started. Stateless runs are split on it. */
+  runId: string;
+  /** The run's thread, when it has one. Runs on a thread are split on it, so a thread stays put. */
+  threadId?: string;
+  /** The revision the thread's last run used. */
+  threadRevision?: string;
+  /** A revision the request named, instead of leaving the choice to the split. */
+  requested?: string;
+  /** Who asked. */
+  principal?: Principal;
+}
+
+/** The revision `route()` chose: where it came from, and its code. */
+export interface RevisionChoice extends RunRevision {
+  /** The revision's assistant, which runs this request. */
+  assistant: ServerAssistant;
+}
+
+/**
+ * Enforces per-tenant limits at the server: how many runs a tenant may have in flight, how many it may
+ * start in a window, and how much it may spend.
+ *
+ * `tenantLimits()` from `nexus-ai-pro/server/tenancy` is the implementation. The server calls `admit()`
+ * once, when it accepts a run, and `release()` once the run ends, on whichever worker ran it.
+ */
+export interface TenantGate {
+  /** Admits a run, or throws a `TenantLimitError` that the server answers with `429`. */
+  admit(run: { runId: string; assistant: string; principal?: Principal }): Promise<void> | void;
+  /** Frees what the run held. Called once it finishes, fails, or is cancelled; calling it twice is harmless. */
+  release(run: { runId: string; tenantId?: string }): Promise<void> | void;
+  /**
+   * Adds what a run spent to its tenant's budget. Resolves `false` to stop the run, when the budget is
+   * spent and the limits say an overrun stops runs in flight.
+   */
+  spend(run: { runId: string; tenantId?: string }, usd: number): Promise<boolean> | boolean;
+  /** A tenant's limits and what it has used, for `GET /usage`. */
+  usage?(tenantId?: string): Promise<unknown> | unknown;
+}
+
+/** One server replica, as it reports itself in heartbeats and on `GET /scaling`. */
+export interface ReplicaReport {
+  /** The worker id it writes into leases. */
+  id: string;
+  /** ISO-8601 time it started. */
+  startedAt: string;
+  /** ISO-8601 time of this report. */
+  heartbeatAt: string;
+  /** Runs it is executing now. */
+  inFlight: number;
+  /** Runs it executes at once, when it has a cap. */
+  capacity?: number;
+  /** Whether it claims queued runs. An API replica in front of a worker pool does not. */
+  claims: boolean;
+  /** Whether it is draining: finishing or handing off its runs before it stops. */
+  draining: boolean;
+  /** The assistants it serves, each with the revisions it has, empty for an assistant without revisions. */
+  assistants: Record<string, readonly string[]>;
+  /** What the deployment added, such as the host, the image tag, or the zone. */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * The numbers an autoscaler reads, from `GET /scaling`.
+ *
+ * `queued`, `running`, and `load` are counted across the whole deployment, so every replica reports
+ * the same value. Scale workers on `load` divided by each worker's `capacity`.
+ */
+export interface ScalingSnapshot {
+  /** Runs waiting for a worker. */
+  queued: number;
+  /** Runs executing, or waiting to retry, on any worker. */
+  running: number;
+  /** `queued` plus `running`: the work an autoscaler sizes the worker pool for. */
+  load: number;
+  /** Seconds the oldest queued run has waited, or 0. */
+  oldestQueuedSeconds: number;
+  /** Running runs whose lease lapsed: work a stopped worker left, until a live one takes it over. */
+  lapsedLeases: number;
+  /** The replica that answered. */
+  replica: ReplicaReport;
+}
+
+/** How traffic for one assistant is split between its revisions. */
+export interface DeploymentRecord {
+  /** The assistant. */
+  assistant: string;
+  /** Goes up by one with every change, and is recorded on every run. */
+  version: number;
+  /** The revision that takes whatever traffic no canary does. */
+  live: string;
+  /** Share of new runs per revision, from 0 to 1, summing to 1. */
+  traffic: Record<string, number>;
+  /** ISO-8601 time the current canary began, when one is taking traffic. */
+  canarySince?: string;
+  /** ISO-8601 time of the last change. */
+  updatedAt: string;
+  /** Who made the last change. */
+  updatedBy?: string;
+  /** Changes, newest first, up to the last 50. */
+  history: DeploymentChangeRecord[];
+}
+
+/** A change to a deployment. */
+export type DeploymentChange =
+  | { action: 'split'; traffic: Record<string, number>; reason?: string }
+  | { action: 'canary'; revision: string; weight: number; reason?: string }
+  | { action: 'promote'; revision: string; reason?: string }
+  | { action: 'rollback'; to?: string; reason?: string };
+
+/** One entry in a deployment's history. */
+export interface DeploymentChangeRecord {
+  /** The version the change produced. */
+  version: number;
+  /** ISO-8601 time of the change. */
+  at: string;
+  /** What was done. */
+  action: DeploymentChange['action'];
+  /** The live revision after it. */
+  live: string;
+  /** The split after it. */
+  traffic: Record<string, number>;
+  /** Who did it: a person, or `guard` when a canary guard acted. */
+  by?: string;
+  /** Why, such as the regression that triggered a rollback. */
+  reason?: string;
+}
+
+/**
+ * What the server needs from a deployments registry: its routes read and change deployments, and
+ * `start()` hands it a report of this replica to heartbeat. `Deployments` from
+ * `nexus-ai-pro/server/deployments` is the implementation.
+ */
+export interface ServerDeployments {
+  /** Every deployment. */
+  list(): Promise<DeploymentRecord[]> | DeploymentRecord[];
+  /** One assistant's deployment, when it has one. */
+  get(assistant: string): Promise<DeploymentRecord | undefined> | DeploymentRecord | undefined;
+  /** Applies a change and returns the deployment after it. */
+  change(assistant: string, change: DeploymentChange, by?: string): Promise<DeploymentRecord>;
+  /** The replicas whose heartbeats are fresh. */
+  replicas(): Promise<ReplicaReport[]> | ReplicaReport[];
+  /** What each revision's runs did since a time, for `GET /deployments/:assistant`. */
+  stats?(assistant: string, options?: { since?: string }): Promise<unknown[]> | unknown[];
+  /** Starts heartbeating this replica's report. */
+  attach(report: () => ReplicaReport): Promise<void> | void;
+  /** Stops heartbeating, and removes this replica's report. */
+  detach(): Promise<void> | void;
 }
 
 /** One event of a run, as the event log stores it and the event stream sends it. */
@@ -130,6 +315,13 @@ export interface AssistantRunContext {
   metadata?: Record<string, unknown>;
   /** Which attempt this is, starting at 1. Above 1 when a worker recovers the run after a crash or retries it. */
   attempt?: number;
+  /** The revision serving the run, when the assistant has revisions. */
+  revision?: string;
+  /**
+   * Records US dollars the run spent, such as a model call's cost. The amount is added to the run's
+   * `cost` and to its tenant's budget; a budget that stops runs in flight cancels this one.
+   */
+  recordCost(usd: number): Promise<void>;
 }
 
 /**
@@ -162,6 +354,15 @@ export interface ServerAssistant {
     threadId: string,
     context: AssistantRunContext,
   ): Promise<AsyncIterable<unknown> | undefined> | AsyncIterable<unknown> | undefined;
+  /**
+   * Chooses the revision that serves a run. An assistant from `Deployments.assistant()` has it; an
+   * assistant without it is one revision, and runs as it is.
+   */
+  route?(request: RevisionRequest): Promise<RevisionChoice | undefined> | RevisionChoice | undefined;
+  /** One revision's assistant, so a recovered run and a thread's state use the revision that ran. */
+  revision?(id: string): ServerAssistant | undefined;
+  /** The revisions this assistant has, for the assistants endpoint and replica reports. */
+  readonly revisions?: readonly string[];
 }
 
 /** A scheduled run of an assistant. */

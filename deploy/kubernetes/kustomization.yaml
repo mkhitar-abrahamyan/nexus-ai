@@ -1,0 +1,15 @@
+# kubectl apply -k deploy/kubernetes
+#
+# Applies the API tier, the worker pool, KEDA autoscaling, and a demo Redis. Create the Secret from
+# secret.example.yaml first. Swap keda.yaml for hpa.yaml to autoscale through Prometheus Adapter, and
+# drop redis.yaml when REDIS_URL points at your own Redis.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - redis.yaml
+  - api.yaml
+  - worker.yaml
+  - keda.yaml
+images:
+  - name: ghcr.io/your-org/agent-server
+    newTag: 1.0.0

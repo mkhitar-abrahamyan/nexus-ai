@@ -253,6 +253,14 @@ import {
   type RunRecord as ServerRunRecord,
 } from 'nexus-ai-pro/server';
 import { createRemoteGraph, type RemoteRunResult } from 'nexus-ai-pro/server/remote';
+import {
+  Deployments,
+  watchCanaries,
+  type CanaryDecision,
+  type DeploymentRecord,
+  type RevisionStats,
+} from 'nexus-ai-pro/server/deployments';
+import { RedisTenantUsage, tenantLimits, type TenantUsage } from 'nexus-ai-pro/server/tenancy';
 import { PromptClient } from 'nexus-ai-pro/prompts/client';
 import { PromptRegistry, experimentGate, servedByGate, evaluatePrompt, formatPromptDiff } from 'nexus-ai-pro/prompts/registry';
 import { FilePromptStore } from 'nexus-ai-pro/prompts/file';
@@ -589,6 +597,27 @@ const remoteAgent = createRemoteGraph({ url: 'https://agents.internal', assistan
 const remoteResult: Promise<RemoteRunResult> = remoteAgent.invoke({ topic: 'batteries' });
 const agentRuns: Promise<ServerRunRecord[]> = agents.runs.runs(undefined, { limit: 5 });
 void [agentListener, remoteResult, agentRuns, remoteAgent.asNode(), serverStateFromStore];
+const deployments = new Deployments({ heartbeatMs: 5_000 });
+const tenants = tenantLimits({
+  default: { maxActiveRuns: 5, rate: { runs: 60, windowMs: 60_000 }, budget: { usd: 10, period: 'day' } },
+  usage: new RedisTenantUsage({ eval: async () => 1 }),
+});
+const revisioned: AgentServer = createAgentServer({
+  assistants: {
+    demo: deployments.assistant('demo', { v1: graphAssistant(demoGraph), v2: graphAssistant(demoGraph) }, { live: 'v1' }),
+  },
+  deployments,
+  tenants,
+  queue: { concurrency: 4, claim: true, pollMs: 500 },
+  metrics: { public: true },
+  scopes: { admin: 'deploy' },
+});
+const canaried: Promise<DeploymentRecord> = deployments.canary('demo', 'v2', 0.1, { by: 'ci' });
+const revisionStats: Promise<RevisionStats[]> = deployments.stats('demo');
+const guard = watchCanaries({ deployments, steps: [0.25, 0.5], onDecision: (decision: CanaryDecision) => void decision });
+const tenantUsage: Promise<TenantUsage> = tenants.usage('acme');
+const drained: Promise<{ finished: string[]; released: string[] }> = revisioned.drain({ timeoutMs: 1_000 });
+void [canaried, revisionStats, guard.stop(), tenantUsage, drained, revisioned.scaling()];
 const fanOutGraph = createGraph({ channels: { log: appendList<string>(), turns: counter() } })
   .addNode('plan', () => ({ turns: 1 }))
   .addNode('each', (ctx) => ({ log: [String(ctx.input)], turns: ctx.attempt }), nodeRetry)

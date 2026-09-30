@@ -3,9 +3,15 @@
 <!-- covers: ./agent -->
 <!-- sources: src/agent src/connectors -->
 
-Tool-calling agents from `nexus-ai-pro/agent`. `createAgent()` builds an agent on the graph runtime, with checkpoints, approvals for sensitive tools, and middleware around model and tool calls; `AgentLoop` is the minimal loop for when none of that is needed.
+Tool-calling agents, from `nexus-ai-pro/agent`. There are two:
 
-## Tools and Agents
+- `createAgent()` builds an agent on the graph runtime. It has checkpoints, approvals for sensitive
+  tools, and middleware around model and tool calls.
+- `AgentLoop` is the minimal loop, for when none of that is needed.
+
+## A first tool
+
+A tool is a name, a description, a JSON Schema for its arguments, and a function:
 
 ```ts
 import { NexusAI, tool } from 'nexus-ai-pro';
@@ -27,18 +33,18 @@ const result = await ai.agent({
 
 ## Agents
 
-An agent is a graph, so everything above applies to it: checkpoints, human approval, parallel work,
-forks, events, and a diagram.
+An agent is a graph. So it gets what a graph has: checkpoints, human approval, parallel work, forks,
+events, and a diagram.
 
 ```ts
 import { createAgent, agentInput, tool } from 'nexus-ai-pro/agent';
 
 const agent = createAgent({
-  client: ai,                      // anything with complete(); NexusAI qualifies
+  client: ai,                        // anything with complete(); NexusAI qualifies
   systemPrompt: 'You are a support engineer.',
   tools: [refundTool, emailTool],
   interruptOn: { send_email: true }, // this one waits for a human
-  store,                             // long-term memory, below
+  store,                             // long-term memory
   checkpointer,                      // survives a restart
 });
 
@@ -47,12 +53,12 @@ run.state.answer;      // the final text
 run.state.stopReason;  // 'completed' | 'max_iterations'
 ```
 
-**Tool calls run in parallel.** Each call the model requests becomes its own task, bounded by
-`toolConcurrency`, so three lookups take as long as the slowest one.
+**Tool calls run in parallel.** Each call the model asks for becomes its own task, up to
+`toolConcurrency` at once. So three lookups take as long as the slowest one.
 
-**Approval is an interrupt, not a callback.** A tool listed in `interruptOn` pauses the run and
-checkpoints it. The answer can approve, refuse with a reason the model sees, or approve with
-corrected arguments:
+**Approval is an interrupt, not a callback.** A tool listed in `interruptOn` pauses the run and saves
+a checkpoint. The answer approves, refuses with a reason the model sees, or approves with corrected
+arguments:
 
 ```ts
 if (run.status === 'awaiting_input') {
@@ -62,21 +68,24 @@ if (run.status === 'awaiting_input') {
 
 Because it is a checkpoint, the approval can arrive days later, from another process.
 
-**Middleware** wraps the parts worth controlling: `beforeModel` adjusts the request, `afterModel`
-inspects or replaces the response, and `wrapToolCall` surrounds each tool call for logging, timing,
-or policy. `AgentLoop` remains for the simple case that needs none of this.
+## Middleware
 
-## Middleware that ships
+`AgentMiddleware` wraps the parts of a run worth controlling. It has three hooks, each optional,
+applied in order:
 
-`AgentMiddleware` is the hook contract — `beforeModel`, `afterModel`, and `wrapToolCall`, each
-optional, applied in order. Three implementations ship, and each is an ordinary middleware you can
-read and copy:
+| Hook | What it can do |
+| --- | --- |
+| `beforeModel` | Adjust the request. |
+| `afterModel` | Inspect or replace the response. |
+| `wrapToolCall` | Surround each tool call, for logging, timing, or policy. |
+
+Three middleware ship. Each is ordinary middleware you can read and copy:
 
 | Middleware | What it does |
 | --- | --- |
-| `limitToolCalls()` | Caps how often a tool may be called in one run, so a loop cannot bill forever |
-| `redactMessages()` | Removes matching text from requests, and optionally from responses, before it reaches a provider or a log. `RedactOptions` sets the patterns, the replacement, and whether output is redacted too |
-| `summarizeHistory()` | Replaces the older half of a long transcript with a summary, so a long thread stays inside the context window. `SummarizeOptions` sets how many messages are kept verbatim, when summarizing starts, and the `summarize` function that writes it |
+| `limitToolCalls()` | Caps how often a tool may be called in one run, so a loop cannot bill forever. |
+| `redactMessages()` | Removes matching text before it reaches a provider or a log. `RedactOptions` sets the patterns, the replacement, and whether responses are redacted too. |
+| `summarizeHistory()` | Replaces the older half of a long transcript with a summary, so a long thread fits the context window. `SummarizeOptions` sets how many messages stay verbatim, when summarizing starts, and the `summarize` function. |
 
 ```ts
 import { createAgent, limitToolCalls, redactMessages, summarizeHistory } from 'nexus-ai-pro/agent';
@@ -94,9 +103,9 @@ const agent = createAgent({
 
 ## An agent as a tool
 
-`agentAsTool()` turns an agent into a `ToolDefinition`, so one agent can call another: a supervisor
-hands a question to a specialist and gets its answer back as a tool result, without either knowing
-about the other's tools or state.
+`agentAsTool()` turns an agent into a `ToolDefinition`, so one agent can call another. A supervisor
+hands a question to a specialist and gets the answer back as a tool result. Neither knows the other's
+tools or state.
 
 ```ts
 const researcher = createAgent({ client: ai, tools: [searchTool], name: 'researcher' });
@@ -108,31 +117,33 @@ const supervisor = createAgent({
 
 ## Running tools yourself
 
-`ToolExecutor` runs tool calls by name outside an agent — in a custom loop, or in a server route that
-executes what a model asked for. It reports a failure as a `ToolExecutionResult` with `ok: false`
-rather than throwing, so one bad call does not end a run, and an unknown tool name is reported the
-same way.
+`ToolExecutor` runs tool calls by name, outside an agent: in a custom loop, or in a server route that
+runs what a model asked for. A failure comes back as a `ToolExecutionResult` with `ok: false`, not a
+thrown error, so one bad call does not end a run. An unknown tool name is reported the same way.
 
 ## Tools that reach the web
 
-`nexus-ai-pro/connectors` ships two tools built on `tool()`:
+`nexus-ai-pro/connectors` ships two tools, built on `tool()`:
 
-- `createFetchUrlTool()` reads text from a URL, refusing private and link-local addresses, following
-  a bounded number of redirects, truncating a long response, and timing out. `WebConnectorOptions`
-  carries those limits along with the SSRF policy.
+- `createFetchUrlTool()` reads text from a URL. It refuses private and link-local addresses, follows
+  a bounded number of redirects, truncates a long response, and times out. `WebConnectorOptions` sets
+  those limits and the SSRF policy.
 - `createSearchTool()` wraps a search function you supply, so the search provider stays yours.
 
 ## The pieces, by name
 
-`createAgent()` takes `CreateAgentOptions` and returns an `AgentGraph`: a compiled graph over
-`AgentChannels`, whose state is `AgentState` — the transcript, the iterations used, the final
-answer, and an `AgentStopReason`. `agentInput()` wraps a question into that state.
-`AgentApprovalPolicy` decides which tools pause, and the answer a human gives is an
-`AgentApproval`: allow, refuse with a reason the model sees, or allow with corrected arguments.
-Around each call, `AgentToolCall` is what the model asked for and `AgentToolResult` what came back,
-while `AgentModelClient` is the one-method client contract the agent needs.
+| Name | What it is |
+| --- | --- |
+| `CreateAgentOptions` | What `createAgent()` takes. |
+| `AgentGraph` | What it returns: a compiled graph over `AgentChannels`. |
+| `AgentState` | The graph's state: the transcript, the iterations used, the final answer, and an `AgentStopReason`. |
+| `agentInput()` | Wraps a question into that state. |
+| `AgentApprovalPolicy` | Decides which tools pause for a person. |
+| `AgentApproval` | A person's answer: allow, refuse with a reason the model sees, or allow with corrected arguments. |
+| `AgentToolCall`, `AgentToolResult` | What the model asked for, and what came back. |
+| `AgentModelClient` | The one-method client contract the agent needs. |
 
-The simpler loop is `AgentLoop`, configured with `AgentConfig` and driven by an
+The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven by an
 `AgentLoopModelClient`. It returns an `AgentResult`: the answer, the model calls made, and every
 `AgentStep` along the way. It has no checkpoints and no approvals, which is the point of it.
 

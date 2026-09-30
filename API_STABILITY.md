@@ -437,8 +437,9 @@ from the root.
   `ThreadRecord`, and `RunEvent` follow the 1.x rules. A minor release may add routes and fields.
 - Event ids are per run and strictly increasing, which is what `Last-Event-ID` depends on. A client
   that reconnects with an id never receives it again.
-- The server is not a security boundary on its own: authentication, authorization beyond tenancy and
-  scopes, and rate limiting are the application's, through the hooks.
+- The server is not a security boundary on its own: authentication, and authorization beyond tenancy
+  and scopes, are the application's, through the hooks. Per-tenant limits are opt-in, through
+  `tenants`.
 - Recovery repeats the step a run died in for graphs and workflows served by `graphAssistant()`, and
   the whole run for any other assistant, so the repeated part should be idempotent or the run left at a
   single attempt.
@@ -455,6 +456,20 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
   stores themselves rather than on the studio's routes.
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
+
+## Deployment stage (Unreleased)
+
+Deployments (`nexus-ai-pro/server/deployments`), tenant limits (`nexus-ai-pro/server/tenancy`), and the
+server's worker queue are experimental in production readiness. Their contracts follow the 1.x rules.
+
+- `bucket()` is stable across 1.x, so a thread keeps its place in a traffic split through an upgrade.
+- The stored `DeploymentRecord` and `ReplicaReport` shapes may gain fields but not lose them, so
+  replicas on different minor releases share one store.
+- The metric names on `/metrics` and the fields of `/scaling` follow the 1.x rules; a minor release may
+  add metrics and fields. Autoscaler configurations that read them keep working.
+- `drain()` hands off only runs it could not finish; a hand-off never counts against the retry budget.
+- The files under `deploy/` are templates in the repository, not part of the package, and may change in
+  any release.
 
 ## Team platform stage (1.23.0)
 

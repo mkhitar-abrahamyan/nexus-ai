@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "nexus-ai-pro/*": ["src/*/index.ts", "src/*.ts"]
+    }
+  },
+  "files": ["deploy/app/server.mjs", "deploy/app/assistants.mjs"]
+}

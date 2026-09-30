@@ -1,6 +1,11 @@
 export { OperationRunner } from './runner.js';
 export { LocalOperationHandle, describeOperationError, type LocalOperationHandleOptions } from './handle.js';
-export { MemoryOperationStore, assertSerializableRecord, type MemoryOperationStoreOptions } from './store.js';
+export {
+  MemoryOperationStore,
+  assertSerializableRecord,
+  type MemoryOperationStoreOptions,
+  operationStats,
+} from './store.js';
 export {
   BullMQOperationDispatcher,
   RedisOperationStore,
@@ -32,6 +37,7 @@ export {
   OperationExpiredError,
   OperationLeaseLostError,
   OperationNotFoundError,
+  OperationReleasedError,
   OperationSerializationError,
   OperationTransitionError,
 } from './errors.js';
@@ -40,6 +46,7 @@ export type {
   DurableOperationHandle,
   OperationContext,
   OperationDispatcher,
+  OperationEnqueueOptions,
   OperationErrorDescriptor,
   OperationEvent,
   OperationEventBase,
@@ -53,6 +60,8 @@ export type {
   OperationRunnerConfig,
   OperationStatus,
   OperationStore,
+  OperationStoreFilter,
+  OperationStoreStats,
   OperationSubmitOptions,
   OperationWebhookConfig,
 } from '../types/operations.js';

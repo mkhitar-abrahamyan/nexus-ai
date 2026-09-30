@@ -3,6 +3,8 @@ import { compareExperiments, formatComparison } from 'nexus-ai-pro/evaluate';
 import { formatContextDiff } from 'nexus-ai-pro/context-hub';
 import { toMermaid } from 'nexus-ai-pro/graph/visualize';
 import { detectRegressions, findIssues } from 'nexus-ai-pro/insights';
+import { operationStats } from 'nexus-ai-pro/operations';
+import type { DeploymentChange } from 'nexus-ai-pro/server';
 import { compareTraces, formatTree, type Run, type RunQuery } from 'nexus-ai-pro/tracing';
 import { csrfToken, hasRole, type StudioRequestInfo, type StudioRole, type StudioUser } from './auth.js';
 import { commentId, MemoryStudioJournal } from './journal.js';
@@ -136,6 +138,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       assets: Boolean(sources.assets),
       contexts: Boolean(sources.contexts),
       proposals: Boolean(sources.proposals),
+      deployments: Boolean(sources.deployments),
       issues: Boolean(sources.traces),
       audit: hasRole(user, 'admin'),
     },
@@ -659,6 +662,36 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     for (const record of records) counts[String(record.status)] = (counts[String(record.status)] ?? 0) + 1;
     return { operations: records.map(({ result: _result, ...rest }) => rest), counts };
   });
+  // ── Deployments ──────────────────────────────────────────────────
+  route('GET', '/api/deployments', async () => {
+    const deployments = need(sources.deployments, 'deployments');
+    const records = await deployments.list();
+    return {
+      deployments: await Promise.all(
+        records.map(async (deployment) => ({
+          ...deployment,
+          // The same window a canary guard judges: the runs since the split last changed.
+          stats: await deployments.stats(deployment.assistant, { since: deployment.history[0]?.at }),
+        })),
+      ),
+      replicas: await deployments.replicas(),
+      queue: sources.operations ? await operationStats(sources.operations, { kindPrefix: 'assistant:' }) : null,
+      tenants: sources.tenants ? await sources.tenants.report() : null,
+    };
+  });
+  route(
+    'POST',
+    '/api/deployments/:assistant',
+    async ({ request, params, user }) => {
+      const change = await readJson<DeploymentChange & { expectedVersion?: number }>(request);
+      if (!change.action) throw badRequest('A change needs an "action": split, canary, promote, or rollback');
+      return {
+        deployment: await need(sources.deployments, 'deployments').change(params.assistant as string, change, user.id),
+      };
+    },
+    { role: 'admin', action: 'deployment.change' },
+  );
+
   route('GET', '/api/assets', async () => {
     const store = sources.assets;
     if (!store) throw notConfigured('assets');
@@ -1036,6 +1069,12 @@ function errorResponse(error: unknown): Response {
     return json({ error: { code: 'NOT_FOUND', message } }, 404);
   }
   if (record?.name === 'GraphNotInterruptedError') return json({ error: { code: 'NOT_INTERRUPTED', message } }, 409);
+  // The agent server's errors carry their own status: a stale deployment version is a 409, an unknown
+  // revision a 400.
+  const status = (error as { status?: unknown } | undefined)?.status;
+  if (typeof status === 'number' && status >= 400 && status < 500 && typeof record?.code === 'string') {
+    return json({ error: { code: record.code, message } }, status);
+  }
   return json({ error: { code: 'INTERNAL', message } }, 500);
 }
 

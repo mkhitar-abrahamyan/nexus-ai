@@ -1,0 +1,34 @@
+# Scales the worker pool on the queue, with KEDA (https://keda.sh). KEDA reads GET /scaling from the
+# API Service and sizes the pool so each worker has `targetValue` runs: queued plus running, divided by
+# each worker's CONCURRENCY. No Prometheus is needed. Use hpa.yaml instead if you run Prometheus Adapter.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: agent-server-worker
+spec:
+  scaleTargetRef:
+    name: agent-server-worker
+  minReplicaCount: 1
+  maxReplicaCount: 20
+  pollingInterval: 15
+  cooldownPeriod: 120
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        # Scale up at once; scale down slowly, so a brief lull does not drain workers mid-burst.
+        scaleUp:
+          stabilizationWindowSeconds: 0
+        scaleDown:
+          stabilizationWindowSeconds: 120
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+  triggers:
+    - type: metrics-api
+      metricType: AverageValue
+      metadata:
+        url: http://agent-server-api/scaling
+        valueLocation: load
+        # Keep in step with CONCURRENCY in worker.yaml.
+        targetValue: "4"

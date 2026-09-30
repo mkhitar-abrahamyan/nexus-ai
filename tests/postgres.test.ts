@@ -30,6 +30,7 @@ import { END } from '../src/types/graph.js';
 import type { OperationRecord, OperationStore } from '../src/types/operations.js';
 import type { Store } from '../src/types/store.js';
 import type { Run, TraceStore } from '../src/types/tracing.js';
+import { queueContract } from './operation-queue-contract.js';
 
 // PGlite is PostgreSQL compiled to WebAssembly: real SQL semantics, jsonb, and pgvector, in process,
 // with no server — so these tests run in every CI job rather than only where a database exists.
@@ -112,6 +113,12 @@ test('the Postgres operation store keeps the operation store contract', async ()
       name,
     );
   }
+});
+
+test('the Postgres operation store lists queued work and counts it for autoscaling', async () => {
+  const store = new PostgresOperationStore<string>(client, { table: table('queue') });
+  await store.migrate();
+  await queueContract('postgres', store);
 });
 
 test('Postgres enforces unique idempotency keys, which closes the race between two workers', async () => {

@@ -2,72 +2,90 @@
 
 <!-- covers: ./store ./store/redis -->
 
-Long-term memory from `nexus-ai-pro/store`: namespaced key-value items that outlive a run or a thread, with optional semantic search through an embedding function you inject. `MemoryStore` keeps them in process; `RedisStore`, on `nexus-ai-pro/store/redis`, shares them between processes; the Postgres and SQLite adapters are in the [Postgres](./postgres.md) and [SQLite](./sqlite.md) guides.
-
-## Long-term Memory
-
-A checkpoint remembers one conversation. A store remembers across them:
+A checkpoint remembers one conversation. A store remembers across them. `nexus-ai-pro/store` keeps
+namespaced items that outlive a run or a thread, with optional semantic search through an embedding
+function you inject.
 
 ```ts
 import { MemoryStore } from 'nexus-ai-pro/store';
 
-const store = new MemoryStore({ index: { embed, fields: ['text'] } });   // embed is yours
+const store = new MemoryStore({ index: { embed, fields: ['text'] } }); // embed is yours
 await store.put(['tenant-7', 'users', 'alice'], 'tone', { text: 'prefers brief answers' });
 
 // In any node or tool, in any thread, later:
 const memories = await context.store.search(['tenant-7', 'users', 'alice'], { query: 'how do they like answers?' });
 ```
 
-Namespaces are tuples, so `['tenant-7', 'users', 'alice']` is both a place to put something and a
-prefix to search. Items can expire with `ttlMs`, be filtered by field, and be ranked semantically by
-any embedding function you inject — the store never imports the embeddings runtime, and without an
-index a query falls back to matching text. `RedisStore` from `nexus-ai-pro/store/redis` carries the
-same contract across processes through a client-like interface, so no Redis package is a dependency
-here. `PostgresStore` from `nexus-ai-pro/postgres/store` does the same in Postgres, and ranks in the
-database with pgvector when `vectorDimensions` is set. `SqliteStore` from `nexus-ai-pro/sqlite/store`
-keeps the same contract in one SQLite file.
+A namespace is a tuple, so `['tenant-7', 'users', 'alice']` is both a place to put something and a
+prefix to search. Items can expire with `ttlMs`, and can be filtered by field.
+
+| Store | Where | Guide |
+| --- | --- | --- |
+| `MemoryStore` | This process. | Here. |
+| `RedisStore` | Redis, shared between processes. From `nexus-ai-pro/store/redis`. | Here. |
+| `PostgresStore` | Postgres, ranking in the database with pgvector. | [Postgres](./postgres.md) |
+| `SqliteStore` | One SQLite file. | [SQLite](./sqlite.md) |
+
+The store never imports the embeddings runtime. Without an index, a query matches text instead.
 
 ## The contract
 
-`Store` is five methods, and every adapter implements all of them. Each may answer synchronously or
-with a promise, so the in-memory store costs no microtask on a read:
+`Store` is five methods, and every adapter has all of them. Each may answer synchronously or with a
+promise, so a read from the in-memory store costs no microtask.
 
-- `put()` stores a value under a namespace and key, replacing any item already there and keeping its
-  original creation time.
-- `get()` reads one, or returns `undefined` when it does not exist or has expired.
-- `delete()` removes one.
-- `search()` returns the items under a namespace prefix, newest first, or ranked by similarity when a
-  query is given.
-- `listNamespaces()` lists the namespaces under a prefix, for browsing what an agent remembered.
+| Method | What it does |
+| --- | --- |
+| `put()` | Stores a value under a namespace and key. It replaces any item there, keeping its creation time. |
+| `get()` | Reads one item, or returns `undefined` when it does not exist or has expired. |
+| `delete()` | Removes one item. |
+| `search()` | Returns the items under a namespace prefix, newest first, or ranked by similarity to a query. |
+| `listNamespaces()` | Lists the namespaces under a prefix, for browsing what an agent remembered. |
 
-A `StoreNamespace` is a tuple of strings. A `StoreItem` carries its namespace and key, the value, when
-it was created and last written, when it expires, and — on semantic search results — its `score`.
+A `StoreNamespace` is a tuple of strings. A `StoreItem` carries:
 
-`StorePutOptions` sets a lifetime with `ttlMs`, and which fields of the value to embed with `index`:
-dot paths into the value, the store's configured fields by default, or `false` to store the item
-without indexing it. `StoreSearchOptions` takes a natural-language `query`, a `filter` of exact
-matches on dot-path fields, and `limit` (20 by default) and `offset` for paging.
+- its namespace and key, and the value;
+- when it was created and last written, and when it expires;
+- on semantic search results, its `score`.
+
+`StorePutOptions` has two fields:
+
+- `ttlMs` sets a lifetime.
+- `index` names the fields of the value to embed, as dot paths. It defaults to the store's configured
+  fields; `false` stores the item without indexing it.
+
+`StoreSearchOptions` has four:
+
+- `query`, a natural-language question;
+- `filter`, exact matches on dot-path fields;
+- `limit`, 20 by default, and `offset`, for paging.
 
 ## Semantic search
 
-`StoreIndexOptions` turns search on: an `embed` function that turns a batch of texts into vectors,
-and the `fields` to embed, every string field in the value by default. Items are embedded when they
-are written, and a query is embedded when it is searched, then ranked with `cosine()` — cosine
-similarity, from -1 to 1, which is exported for adapters of your own. Pass the embeddings family as
-the `embed` function to inherit its routing, batching, and caching. Without an index, a query is a
-case-insensitive text match over the stored values: useful, and not semantic.
+`StoreIndexOptions` turns search on:
+
+- `embed` turns a batch of texts into vectors. Pass the embeddings family's function to inherit its
+  routing, batching, and caching.
+- `fields` names what to embed. By default, every string field in the value.
+
+Items are embedded when they are written. A query is embedded when it is searched, then ranked with
+`cosine()`: cosine similarity, from -1 to 1. It is exported for adapters of your own.
+
+Without an index, a query is a case-insensitive text match over the stored values. That is useful,
+but not semantic.
 
 ## The adapters
 
-`MemoryStoreOptions` gives the in-memory store its `index`, `maxItems` — 10,000 by default, after
-which the least recently written item is dropped, so a store that only grows cannot leak — and a
-`now` clock for tests. `size()` counts the items it holds.
+`MemoryStoreOptions` has three fields:
 
-`RedisStore` takes a `RedisStoreLikeClient` — `get`, `set` with `PX` expiry, `del`, `sadd`, `srem`,
-and `smembers`, which `ioredis` and `node-redis` both provide — and `RedisStoreOptions` with a key
-`prefix` (`nexus:store` by default, so one Redis can hold several stores), an `index`, and a clock.
-Expiry is Redis's own TTL, and each namespace keeps a set of its keys, so a prefix search never scans
-the keyspace.
+| Field | Default | What it does |
+| --- | --- | --- |
+| `index` | none | Semantic search, as above. |
+| `maxItems` | 10,000 | Past this, the least recently written item is dropped, so a store that only grows cannot leak. |
+| `now` | the clock | Replaces the clock, for tests. |
+
+`size()` counts the items it holds.
+
+`RedisStore` takes a `RedisStoreLikeClient` and `RedisStoreOptions`:
 
 ```ts
 import Redis from 'ioredis';
@@ -76,16 +94,26 @@ import { RedisStore } from 'nexus-ai-pro/store/redis';
 const store = new RedisStore(new Redis(process.env.REDIS_URL!), { prefix: 'support:memory', index: { embed } });
 ```
 
-Hand a store to a graph with `compile({ store })`, and nodes reach it as `context.store`. Hand it to
-an agent with `createAgent({ store })`, and its tools and middleware receive it as `store`.
+The client needs six commands: `get`, `set` with `PX` expiry, `del`, `sadd`, `srem`, and `smembers`.
+An `ioredis` client has them as it is; wrap another client in those six. `RedisStoreOptions` sets a key
+`prefix` (`nexus:store` by default, so one Redis can hold several stores), an `index`, and a clock.
+
+Expiry is Redis's own TTL. Each namespace keeps a set of its keys, so a prefix search never scans the
+keyspace.
+
+## Using a store
+
+- In a graph: `compile({ store })`, and nodes reach it as `context.store`.
+- In an agent: `createAgent({ store })`, and its tools and middleware receive it as `store`.
 
 ## Limitations
 
-- Semantic search ranks in the process for the memory, Redis, and SQLite stores: every item under
-  the prefix is read and scored. Keep namespaces focused, or use `PostgresStore` with pgvector, which ranks in
-  the database.
-- The Redis, Postgres, and SQLite stores keep values as JSON, so a value must survive `JSON.stringify()`. The
-  memory store holds the object itself, so mutating it after `put()` changes what is stored.
+- The memory, Redis, and SQLite stores rank semantic search in the process. Every item under the
+  prefix is read and scored, so keep namespaces focused. `PostgresStore` with pgvector ranks in the
+  database.
+- The Redis, Postgres, and SQLite stores keep values as JSON, so a value must survive
+  `JSON.stringify()`. The memory store holds the object itself, so changing it after `put()` changes
+  what is stored.
 
 <!-- reference:start -->
 ## Reference

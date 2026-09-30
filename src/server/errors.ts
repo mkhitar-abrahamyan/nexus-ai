@@ -1,5 +1,8 @@
 /** Base class for server errors. Each carries the HTTP status the server answers with. */
 export class ServerError extends Error {
+  /** Seconds a client should wait before trying again, sent as `Retry-After` when set. */
+  retryAfterSeconds?: number;
+
   constructor(
     message: string,
     /** Stable code, such as `THREAD_BUSY`, sent in the error body. */
@@ -59,6 +62,35 @@ export class ThreadBusyError extends ServerError {
     this.name = 'ThreadBusyError';
   }
 }
+
+/** Which per-tenant limit refused a run. */
+export type TenantLimit = 'concurrency' | 'rate' | 'budget';
+
+/**
+ * Raised when a run would take a tenant past one of its limits. The server answers `429`, with a
+ * code per limit — `TENANT_CONCURRENCY`, `TENANT_RATE_LIMITED`, or `TENANT_BUDGET` — and a
+ * `Retry-After` header when the wait is known.
+ */
+export class TenantLimitError extends ServerError {
+  constructor(
+    /** The limit that refused the run. */
+    public readonly limit: TenantLimit,
+    /** The tenant, when the principal has one. */
+    public readonly tenantId: string | undefined,
+    message: string,
+    retryAfterSeconds?: number,
+  ) {
+    super(message, TENANT_LIMIT_CODES[limit], 429);
+    this.name = 'TenantLimitError';
+    if (retryAfterSeconds !== undefined) this.retryAfterSeconds = Math.max(0, Math.ceil(retryAfterSeconds));
+  }
+}
+
+const TENANT_LIMIT_CODES: Record<TenantLimit, string> = {
+  concurrency: 'TENANT_CONCURRENCY',
+  rate: 'TENANT_RATE_LIMITED',
+  budget: 'TENANT_BUDGET',
+};
 
 /** Raised when an assistant cannot do what a request needs, such as resuming or rolling back. */
 export class AssistantCapabilityError extends ServerError {

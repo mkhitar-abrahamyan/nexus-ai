@@ -59,7 +59,9 @@ export function json(value: unknown, status = 200, headers: Record<string, strin
 /** The error response for any thrown value: a `ServerError` keeps its status, anything else is a 500. */
 export function errorResponse(error: unknown): Response {
   if (error instanceof ServerError) {
-    return json({ error: { code: error.code, message: error.message } }, error.status);
+    const headers: Record<string, string> =
+      error.retryAfterSeconds === undefined ? {} : { 'retry-after': String(error.retryAfterSeconds) };
+    return json({ error: { code: error.code, message: error.message } }, error.status, headers);
   }
   const message = error instanceof Error ? error.message : String(error);
   return json({ error: { code: 'INTERNAL', message } }, 500);

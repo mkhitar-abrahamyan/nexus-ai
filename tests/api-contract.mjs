@@ -303,6 +303,8 @@ const expectedSubpaths = [
   './postgres/prompts',
   './server',
   './server/remote',
+  './server/deployments',
+  './server/tenancy',
   './prompts',
   './prompts/client',
   './prompts/registry',

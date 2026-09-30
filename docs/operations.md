@@ -132,14 +132,19 @@ executor to stop but cannot promise it stopped in time.
 | `webhook`, `onWebhookError` | — | Notifications, and where delivery failures are reported. |
 | id generator, clock | — | For tests. |
 
-The runner has four methods:
+The runner's methods:
 
 | Method | What it does |
 | --- | --- |
-| `submit()` | Starts an operation. Takes an `OperationExecutor` and `OperationSubmitOptions`. |
+| `submit()` | Starts an operation here. Takes an `OperationExecutor` and `OperationSubmitOptions`. |
+| `enqueue()` | Records an operation as queued without running it, for any worker to claim. |
+| `claimQueued()` | Claims queued operations no worker holds, oldest first, and runs them here. |
+| `release()` | Hands an operation this runner is executing back to the queue. |
 | `read()` | Returns the stored record. |
 | `cancel()` | Cancels by id, from any worker. |
 | `recover()` | Resumes operations whose lease lapsed. Call it on each worker at startup. |
+
+`executing` lists the ids this runner is running now.
 
 `OperationSubmitOptions` can set an id, a `kind` such as `image.generate`, an `idempotencyKey`,
 `maxAttempts` and `timeoutMs` for this operation, an `expiresAt`, trace headers, metadata, and a signal.
@@ -161,6 +166,33 @@ what is present rather than assuming a percentage.
 `LocalOperationHandle` is the in-process handle the runner builds on, for a family that needs a handle
 without a store. `LocalOperationHandleOptions` sets its clock, the error a cancellation rejects with,
 and an event listener.
+
+## Queued work and hand-offs
+
+`submit()` runs an operation on the worker that accepted it. A pool of workers works the other way:
+one process accepts work, and whichever worker is free runs it.
+
+```ts
+// The process that accepts work.
+const record = await runner.enqueue({ kind: 'report.build', metadata: { reportId } });
+
+// Each worker, whenever it has room.
+const handles = await runner.claimQueued(buildReport, freeSlots, { kindPrefix: 'report.' });
+```
+
+`enqueue()` takes `OperationEnqueueOptions`, which are the submit options without a signal. It
+resolves to the stored record, or to the existing one when the idempotency key matches.
+`claimQueued()` claims up to `limit` operations, oldest first. Each claim is a compare-and-set, so
+two workers polling the same store never run the same operation. It returns the handles it claimed.
+
+`release()` is for a worker that is shutting down. It aborts the executor's signal with an
+`OperationReleasedError`, and puts the record back in the queue as its next attempt. The hand-off
+adds one to the attempt budget, so it does not use up a retry. An executor that sees that reason on
+its signal should stop without recording a failure. No `failed` webhook is sent. The agent server's
+`drain()` is built on it.
+
+A worker never takes over a live lease another worker holds. Only lapsed leases are recovery's to
+take.
 
 ## Events
 
@@ -198,6 +230,16 @@ An `OperationStore` needs three methods: `create()`, `read()`, and `update()`. `
 compare-and-set: it returns `false` when another worker changed the record first. Optional methods add
 `delete()`, `claimExpired()` for recovery, `findByIdempotencyKey()`, and `list()`.
 
+Two more optional methods serve queues and autoscalers:
+
+- `listQueued(limit, filter)` returns queued records no worker holds, oldest first.
+- `stats(now, filter)` returns an `OperationStoreStats`: unfinished records per status, the oldest
+  queued record's time, and running records whose lease has lapsed.
+
+An `OperationStoreFilter` narrows both by `kindPrefix`, such as `assistant:` for the agent server's
+runs. `operationStats()` calls `stats()`, or counts `list()` for a store without it. Every store
+here has both methods. Postgres and SQLite answer each with one indexed query; Redis reads every record.
+
 | Store | Notes |
 | --- | --- |
 | `MemoryOperationStore` | The default. Evicts the oldest settled records beyond `MemoryOperationStoreOptions.maxRecords` (1,000). |
@@ -219,6 +261,7 @@ Every operation error extends `OperationError` and has a stable code.
 | `OperationExpiredError` | `result()` of an expired operation. | — |
 | `OperationConflictError` | A compare-and-set lost to another worker. | Reload the record; do not retry the write. |
 | `OperationLeaseLostError` | Another worker took over the operation. | Stop working on it. |
+| `OperationReleasedError` | The signal's reason when a worker released the operation. | Stop without recording a failure; another worker continues it. |
 | `OperationDuplicateError` | A store refused a second record with the same idempotency key. | The runner attaches to the existing operation. |
 | `OperationNotFoundError` | No record has that id. | — |
 | `OperationTransitionError` | The lifecycle forbids the move. | A bug in a runner or store. |
@@ -318,6 +361,7 @@ specific entry point that provides it.
 | `OperationContext` | interface | What an executor receives. |
 | `OperationDispatcher` | interface | Hands an accepted operation to a worker process. |
 | `OperationDuplicateError` | class | Raised by a store that enforces unique idempotency keys when a second record claims one. |
+| `OperationEnqueueOptions` | type | Options for `OperationRunner.enqueue()`: a submission that no executor runs yet. |
 | `OperationError` | class | Base class for durable-operation errors, each with a stable `code`. |
 | `OperationErrorDescriptor` | interface | A failure, in a form that survives serialization into a store or a webhook. |
 | `OperationEvent` | type | Everything an operation reports, as a discriminated union on `type`. |
@@ -331,12 +375,16 @@ specific entry point that provides it.
 | `OperationNotFoundError` | class | Raised when an operation id is not in the store. |
 | `OperationProgress` | interface | How far along a running operation is. |
 | `OperationRecord` | interface | The persistable state of one operation. |
+| `OperationReleasedError` | class | The reason a released operation's signal is aborted with. |
 | `OperationRetryConfig` | interface | How an operation's failed attempts are retried. |
 | `OperationRunner` | class | Runs operations against a durable store. |
 | `OperationRunnerConfig` | interface | Configuration for `OperationRunner`: where records live, how work is dispatched, and how failures are retried. |
 | `OperationSerializationError` | class | Raised when a result carrying raw bytes is about to be persisted. |
+| `operationStats` | function | Counts what an operation store holds: records by status, the oldest queued one, and running records whose lease has lapsed. |
 | `OperationStatus` | type | The operation lifecycle shared by every long-running family. |
 | `OperationStore` | interface | Durable storage for operation records. |
+| `OperationStoreFilter` | interface | Narrows the records `listQueued()` and `stats()` look at. |
+| `OperationStoreStats` | interface | What an operation store holds, counted: the numbers a queue dashboard and an autoscaler read. |
 | `OperationSubmitOptions` | interface | Options for one submitted operation. |
 | `OperationTransitionError` | class | Raised when a transition would leave the lifecycle in an impossible state. |
 | `OperationWebhookConfig` | interface | Sends signed operation events to a URL. |

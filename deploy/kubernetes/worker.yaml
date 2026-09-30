@@ -1,0 +1,88 @@
+# The worker pool: claims queued runs, CONCURRENCY at a time. keda.yaml (or hpa.yaml) scales it on
+# the queue. On scale-down a worker drains: it stops claiming, lets runs finish for DRAIN_TIMEOUT_MS,
+# and hands the rest back to the queue, so terminationGracePeriodSeconds must be longer than that.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-server-worker
+  labels:
+    app.kubernetes.io/name: agent-server
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-server
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-server
+        app.kubernetes.io/component: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        # The node user in the image; a numeric id is what lets the kubelet verify it is not root.
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: server
+          image: ghcr.io/your-org/agent-server:1.0.0
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ROLE
+              value: worker
+            - name: PORT
+              value: "8080"
+            # Keep in step with targetValue in keda.yaml: the autoscaler sizes the pool by it.
+            - name: CONCURRENCY
+              value: "4"
+            - name: DRAIN_TIMEOUT_MS
+              value: "25000"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agent-server
+                  key: redis-url
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 15
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agent-server-worker
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-server
+      app.kubernetes.io/component: worker

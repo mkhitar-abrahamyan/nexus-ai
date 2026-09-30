@@ -62,6 +62,7 @@ Every source is optional. The studio shows a view for each one it is given, and 
 | Experiments | `experiments`, `datasets` | List experiments and datasets; compare two experiments with per-metric intervals and a verdict |
 | Prompts | `prompts`, `client` | Versions, labels, and history; diff two versions; promote through the registry's gates; roll back; render and run a version in the playground |
 | Bundles | `contexts` | Context bundle versions, labels, and history; diff two versions; promote through the hub's gates; roll back |
+| Deployments | `deployments`, `operations`, `tenants` | Each assistant's traffic split and history; each revision's runs, error rate, and latency since the last change; replicas and their health; the queue; tenant usage. Admins start a canary, promote, and roll back |
 | Audit | accounts | Every change, and every refused attempt, with who and when — for admins |
 | Costs | `traces`, `budgets` | Cost per day and per model, the most expensive runs, and each budget with what it has spent |
 | Health | `client`, `circuits` | Provider health scores, circuit states — local and shared across workers — metrics, and cache statistics |
@@ -89,7 +90,13 @@ it as they are:
 - `circuits` is a shared circuit store, as `StudioCircuitStore`, for a deployment whose workers
   share circuit state.
 - `operations` is an operation store that can list, as `StudioOperationStore`. Graph checkpoint
-  records that live in the same store are left out of the queue.
+  records that live in the same store are left out of the queue. A store with `stats()` also gives
+  the deployments view its queue numbers.
+- `deployments` is a `Deployments` registry from `nexus-ai-pro/server/deployments`, as
+  `StudioDeployments`. Build it on the agent server's state store, with no assistants: the studio
+  reads and changes what the servers record, and every change is checked against the version shown.
+- `tenants` is the limiter from `tenantLimits()`, as `StudioTenants`, whose `report()` fills the
+  tenant table.
 - `assets` is an asset store, as `StudioAssetStore`: its `snapshot()` totals, and a listing when it
   has one.
 - `budgets` is a list of `StudioBudget` values: a name, a limit in US dollars, a period of a day, a

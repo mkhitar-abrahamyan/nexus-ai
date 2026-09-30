@@ -670,6 +670,26 @@
         "default": "./dist-cjs/server/remote.js"
       }
     },
+    "./server/deployments": {
+      "import": {
+        "types": "./dist/server/deployments.d.ts",
+        "default": "./dist/server/deployments.js"
+      },
+      "require": {
+        "types": "./dist-cjs/server/deployments.d.ts",
+        "default": "./dist-cjs/server/deployments.js"
+      }
+    },
+    "./server/tenancy": {
+      "import": {
+        "types": "./dist/server/tenancy.d.ts",
+        "default": "./dist/server/tenancy.js"
+      },
+      "require": {
+        "types": "./dist-cjs/server/tenancy.d.ts",
+        "default": "./dist-cjs/server/tenancy.js"
+      }
+    },
     "./prompts": {
       "import": {
         "types": "./dist/prompts/index.d.ts",
@@ -1273,7 +1293,7 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
-    "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
+    "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit && tsc -p tsconfig.deploy.json",
     "typecheck:examples:browser": "tsc -p tsconfig.examples.browser.json --noEmit",
     "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:conformance:images && npm run size:check && npm run docs:check && npm run docs:guides && npm run test:studio && npm run test:smoke && npm run test:api && npm run test:types",
     "test:unit": "node --import tsx --test tests/unit.ts tests/*.test.ts",
@@ -1406,7 +1426,8 @@
     "ollama": "^0.5.6",
     "openai": "^4.52.0",
     "tsx": "^4.16.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "yaml": "^2.9.1"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -1624,6 +1645,12 @@
       ],
       "server/remote": [
         "dist-cjs/server/remote.d.ts"
+      ],
+      "server/deployments": [
+        "dist-cjs/server/deployments.d.ts"
+      ],
+      "server/tenancy": [
+        "dist-cjs/server/tenancy.d.ts"
       ],
       "prompts": [
         "dist-cjs/prompts/index.d.ts"

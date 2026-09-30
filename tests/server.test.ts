@@ -321,12 +321,15 @@ test('requests are authenticated, scoped, and isolated by tenant', async () => {
   assert.equal((await call(app, 'POST', '/threads', { assistant: 'counter' }, auth('token-r'))).status, 403);
 
   const anonymous = server({ allowAnonymous: false });
-  assert.equal((await call(anonymous, 'GET', '/health')).status, 401);
+  assert.equal((await call(anonymous, 'GET', '/assistants')).status, 401);
+  // A probe carries no credentials, so health is answered without them.
+  assert.equal((await call(anonymous, 'GET', '/health')).status, 200);
+  assert.equal((await call(app, 'GET', '/health')).status, 200);
 });
 
 test('an authenticate hook can answer the request itself', async () => {
   const app = server({ authenticate: () => new Response('go away', { status: 418 }) });
-  assert.equal((await call(app, 'GET', '/health')).status, 418);
+  assert.equal((await call(app, 'GET', '/assistants')).status, 418);
 });
 
 // ── Cron ───────────────────────────────────────────────────────────

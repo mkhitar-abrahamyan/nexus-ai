@@ -3,57 +3,57 @@
 <!-- covers: ./rag ./rag/qdrant -->
 <!-- sources: src/hallucination src/rag -->
 
-Making an answer follow from evidence, and catching it when it does not. Ingestion splits documents
-into chunks, a vector store retrieves them, `withRagContext()` puts them in front of the model with
-citation rules, and the verification helpers check what came back. Every export here is reached from
-the root import except ingestion, which is on `nexus-ai-pro/rag`.
+Grounding makes an answer follow from evidence, and catches it when it does not. Four steps:
 
-## RAG and Grounded Answers
+1. **Ingest.** Split documents into chunks.
+2. **Retrieve.** A vector store finds the chunks that match a question.
+3. **Answer.** `withRagContext()` puts them in front of the model, with rules for citing them.
+4. **Check.** The verification helpers test what came back.
+
+Every export here comes from the root import, except ingestion, which is on `nexus-ai-pro/rag`.
 
 ```ts
 import { MemoryVectorStore, withRagContext } from 'nexus-ai-pro';
 
 const store = new MemoryVectorStore();
-await store.add([
-  { id: 'doc-1', content: 'NexusAI supports RAG context with citations.', source: 'docs' },
-]);
+await store.add([{ id: 'doc-1', content: 'NexusAI supports RAG context with citations.', source: 'docs' }]);
 
 const chunks = await store.search('How does NexusAI ground answers?', { topK: 3 });
 
 const response = await ai.completeVerified(
-  withRagContext({
-    model: 'auto',
-    messages: [{ role: 'user', content: 'How does NexusAI ground answers?' }],
-  }, {
-    chunks,
-    requireCitations: true,
-  }),
-  {
-    context: chunks.map((chunk) => chunk.content),
-    minSupportRatio: 0.85,
-  },
+  withRagContext(
+    { model: 'auto', messages: [{ role: 'user', content: 'How does NexusAI ground answers?' }] },
+    { chunks, requireCitations: true },
+  ),
+  { context: chunks.map((chunk) => chunk.content), minSupportRatio: 0.85 },
 );
 ```
 
 ## Ingesting documents
 
-`ingestDocuments()` and `ingestText()` split text into overlapping chunks, optionally at Markdown
-headings, and return `RagChunk` values ready for a vector store, with an `IngestionResult` saying how
-much was read. Each `DocumentSource` is a text with an optional id, source, and metadata, all carried
-onto its chunks. `IngestionOptions` sets the split: `chunkSize` (1,200 characters by default),
-`overlap` (150), and `splitOnMarkdownHeadings`, which keeps every chunk inside one section.
+`ingestDocuments()` and `ingestText()` split text into overlapping chunks. They return `RagChunk` values
+ready for a vector store, and an `IngestionResult` that says how much was read.
 
-To read files, directories, web pages, sitemaps, CSV, JSON, PDF, and Git repositories into
-`DocumentSource` values, use the [loaders](./loaders.md); `loadIntoStore()` streams them through
-this split into one or more stores.
+Each `DocumentSource` is a text, with an optional id, source, and metadata. All of them are carried
+onto its chunks. `IngestionOptions` sets the split:
 
-`ingestFilesAfterScan()` goes one step earlier: it scans uploaded files for unsafe content first,
-extracts their text, and then chunks them, skipping what it cannot read. It throws when the scan
-finds anything high or critical, before any file is read. `FileIngestionOptions` adds the scan
-settings and the extractors to try, in order, to the split options; text files need no extractor.
-`FileIngestionResult` adds how many files were scanned and, for each skipped file, its name and why.
-`createPdfExtractor()` and `createOcrExtractor()` wrap your own PDF or OCR function as a
-`FileTextExtractor`, so the library carries no parsing dependency of its own.
+| Option | Default | What it does |
+| --- | --- | --- |
+| `chunkSize` | 1,200 characters | How long a chunk may be. |
+| `overlap` | 150 | How much consecutive chunks share. |
+| `splitOnMarkdownHeadings` | off | Keeps every chunk inside one section. |
+
+To read files, directories, web pages, sitemaps, CSV, JSON, PDF, and Git repositories, use the
+[loaders](./loaders.md). `loadIntoStore()` streams what they read through this split into one or more
+stores.
+
+### Scanning uploads first
+
+`ingestFilesAfterScan()` goes one step earlier, for files people upload:
+
+1. It scans the files for unsafe content. Anything high or critical throws, before any file is read.
+2. It extracts each file's text, and skips what it cannot read.
+3. It chunks the text.
 
 ```ts
 import { ingestFilesAfterScan, createPdfExtractor } from 'nexus-ai-pro';
@@ -65,30 +65,54 @@ const { chunks, skippedFiles } = await ingestFilesAfterScan(uploads, {
 });
 ```
 
+`FileIngestionOptions` adds the scan settings, and the extractors to try in order, to the split
+options. Text files need no extractor. `FileIngestionResult` adds how many files were scanned and, for
+each skipped file, its name and why.
+
+`createPdfExtractor()` and `createOcrExtractor()` wrap your own PDF or OCR function as a
+`FileTextExtractor`. So the library carries no parsing dependency of its own.
+
 ## Retrieval
 
-Retrieval stores implement one contract, `VectorStore`: `add()` stores chunks — replacing any whose
-id already exists, so re-ingesting a document never duplicates its passages — `search()` finds the
-chunks closest to a text, `searchVector()` to a vector computed elsewhere, and `delete()` removes
-chunks by id. `VectorSearchOptions` sets `topK` (5 by default), `minScore` (0), and a `filter` of
-exact matches on top-level metadata fields, such as `{ tenant: 'acme' }`; `matchesMetadata()` is that
-test on its own. A `VectorDocument` is a chunk with an optional precomputed embedding, and a
-`VectorSearchResult` is a chunk with its cosine similarity.
+Every retrieval store implements one contract, `VectorStore`:
 
-These stores implement it, and pass the same contract tests; Redis, Pinecone, Weaviate, and Chroma are
-in the [retrieval guide](./retrieval.md), with hybrid search, reranking, and the other retrievers:
+| Method | What it does |
+| --- | --- |
+| `add()` | Stores chunks. A chunk whose id exists is replaced, so re-ingesting a document never duplicates it. |
+| `search()` | Finds the chunks closest to a text. |
+| `searchVector()` | Finds the chunks closest to a vector computed elsewhere. |
+| `delete()` | Removes chunks by id. |
+
+`VectorSearchOptions` sets `topK` (5 by default) and `minScore` (0). Its `filter` matches top-level
+metadata fields exactly, such as `{ tenant: 'acme' }`; `matchesMetadata()` is that test on its own.
+
+A `VectorDocument` is a chunk with an optional precomputed embedding. A `VectorSearchResult` is a chunk
+with its cosine similarity.
+
+These stores implement it, and pass the same contract tests:
 
 | Store | Entry point | Where the vectors live |
 | --- | --- | --- |
-| `MemoryVectorStore` | `nexus-ai-pro/rag` | In process. Development, tests, and a few thousand chunks. |
+| `MemoryVectorStore` | `nexus-ai-pro/rag` | In process. For development, tests, and a few thousand chunks. |
 | `PostgresVectorStore` | `nexus-ai-pro/postgres/vectors` | Postgres with pgvector, ranked in the database. See the [Postgres guide](./postgres.md). |
 | `QdrantVectorStore` | `nexus-ai-pro/rag/qdrant` | A Qdrant collection, through its REST API. |
 | `SqliteVectorStore` | `nexus-ai-pro/sqlite/vectors` | A SQLite file, optionally ranked by sqlite-vec. See the [SQLite guide](./sqlite.md). |
 
-Each takes any `EmbeddingProvider` — `toEmbeddingFunction()` adapts the embeddings family, so
-retrieval inherits routing, batching, and caching — and falls back to `createHashEmbeddings()`,
-deterministic hashed term vectors that need no provider and suit tests rather than production.
+Redis, Pinecone, Weaviate, and Chroma are in the [retrieval guide](./retrieval.md), with hybrid search,
+reranking, and the other retrievers.
+
+### Embeddings
+
+Each store takes any `EmbeddingProvider`:
+
+- `toEmbeddingFunction()` adapts the embeddings family, so retrieval inherits its routing, batching,
+  and caching.
+- Without one, a store falls back to `createHashEmbeddings()`: hashed term vectors that are
+  deterministic and need no provider. They suit tests, not production.
+
 `cosineSimilarity()` and `normalizeVector()` are the arithmetic underneath.
+
+### Qdrant
 
 ```ts
 import { ingestDocuments } from 'nexus-ai-pro/rag';
@@ -108,55 +132,71 @@ const chunks = await store.search(question, { topK: 5, filter: { tenant: 'acme' 
 const answer = await ai.complete(withRagContext({ model: 'auto', messages: [{ role: 'user', content: question }] }, { chunks }));
 ```
 
-`QdrantVectorStore` needs no Qdrant client: it speaks HTTP through `fetch` and hashes ids with Web
-Crypto, so it runs on edge runtimes too. `QdrantVectorStoreOptions` takes the `url`, the
-`collection`, the `dimensions`, an `apiKey`, the `embed` function, and a `fetch`, extra `headers`,
-and a `timeoutMs` (30 seconds). `migrate()` creates the collection with cosine distance unless it
-exists, and indexes the metadata fields you filter on — a list as keywords, or a map naming each
-field's type. Qdrant point ids must be UUIDs, so each chunk id maps to a stable UUID and the original
-id travels in the payload. A failed request raises `QdrantError` with the status and Qdrant's
-response body.
+`QdrantVectorStore` needs no Qdrant client. It speaks HTTP through `fetch` and hashes ids with Web
+Crypto, so it runs on edge runtimes too. `QdrantVectorStoreOptions` takes the `url`, the `collection`,
+the `dimensions`, an `apiKey`, the `embed` function, a `fetch`, extra `headers`, and a `timeoutMs`
+(30 seconds).
+
+`migrate()` creates the collection with cosine distance unless it exists. It also indexes the metadata
+fields you filter on: a list as keywords, or a map naming each field's type.
+
+Qdrant point ids must be UUIDs, so each chunk id maps to a stable UUID, and the original id travels in
+the payload. A failed request raises `QdrantError`, with the status and Qdrant's response body.
 
 ## Answering from context
 
-`withRagContext()` turns a request into a grounded one: the chunks become a system message, the model
-is told to answer only from them and to cite them by id, and sampling defaults low. `RagOptions`
-controls the citation style, how many chunks are included, and what the model should say when the
-context does not answer the question. `extractCitations()` reads the citations back out of an answer
-and `validateCitations()` checks that each one names a chunk that was actually supplied.
+`withRagContext()` turns a request into a grounded one:
 
-`withKnowledgeGraphContext()` does the same for relationships rather than passages: it ranks a
-`KnowledgeGraph` of `KnowledgeGraphNode` and `KnowledgeGraphEdge` values against the question,
-states the best ones as facts, and tells the model not to infer relationships the graph does not
+- the chunks become a system message;
+- the model is told to answer only from them, and to cite them by id;
+- sampling defaults low.
+
+`RagOptions` sets the citation style, how many chunks are included, and what the model should say when
+the context does not answer the question. `extractCitations()` reads the citations back out of an
+answer. `validateCitations()` checks that each one names a chunk that was actually supplied.
+
+### From a knowledge graph
+
+`withKnowledgeGraphContext()` does the same for relationships instead of passages. It ranks a
+`KnowledgeGraph` of `KnowledgeGraphNode` and `KnowledgeGraphEdge` values against the question, and
+states the best ones as facts. It tells the model not to infer relationships the graph does not
 contain. `selectGraphFacts()` is the ranking on its own, and `KnowledgeGraphOptions` configures it.
 
-`withFactualDefaults()` is the lighter option when there is no retrieval at all: it asks for
-conservative answers, sets an explicit "I do not know" fallback, and keeps sampling low, with
-`FactualOptions` for the wording and worked examples. `asJsonOnly()` does the same for JSON-only
-output.
+### With no retrieval
+
+`withFactualDefaults()` is lighter, for when there is no retrieval at all. It asks for conservative
+answers, sets an explicit "I do not know" fallback, and keeps sampling low. `FactualOptions` sets the
+wording and worked examples. `asJsonOnly()` does the same for JSON-only output.
 
 ## Checking the answer
 
-`verifyAgainstContext()` splits an answer into claims with `extractFacts()` and checks each one
-against the context, returning a `VerificationReport` of `VerificationFact` values and the share
-supported. The default check is `lexicalEntailment()`, term overlap that needs no model; supply an
-`NliVerifier` for a real entailment model. `completeVerified()` runs the whole loop — complete,
-verify, and ask once for a revision when claims are unsupported — and attaches the report to the
-response's `meta.verification`. `VerificationOptions` sets the minimum share supported and the
-fallback answer, and `VerificationClient` is the small client contract it needs.
+| Function | What it does |
+| --- | --- |
+| `verifyAgainstContext()` | Splits an answer into claims and checks each against the context. |
+| `completeVerified()` | Completes, verifies, and asks once for a revision when claims are unsupported. |
+| `completeWithSelfConsistency()` | Samples several answers and returns the one the others agree with most. |
 
-`completeWithSelfConsistency()` attacks the same problem from the other side: it samples several
-answers and returns the one the others agree with most, through `selectMostConsistent()` and
-`textSimilarity()`, or a judge you supply in `SelfConsistencyOptions`. It survives failed samples as
-long as one succeeds, and `ConsistencyClient` is again the minimal client contract.
+`verifyAgainstContext()` splits the answer with `extractFacts()`. It returns a `VerificationReport` of
+`VerificationFact` values, and the share that is supported. The default check is
+`lexicalEntailment()`: term overlap, with no model. For a real entailment model, supply an
+`NliVerifier`.
+
+`completeVerified()` runs that whole loop, and attaches the report to the response's
+`meta.verification`. `VerificationOptions` sets the minimum share supported and the fallback answer.
+`VerificationClient` is the small client contract it needs.
+
+`completeWithSelfConsistency()` attacks the problem from the other side. It picks the most consistent
+answer with `selectMostConsistent()` and `textSimilarity()`, or with a judge you supply in
+`SelfConsistencyOptions`. It survives failed samples as long as one succeeds. `ConsistencyClient` is
+its minimal client contract.
 
 ## Limitations
 
-- Default hash embeddings suit tests and demos, not strong semantic search. Register a real
-  embedding provider for production retrieval.
-- NLI verification is an interface, not a model: the bundled check is lexical, so bring a specialized
+- The default hash embeddings suit tests and demos, not real semantic search. Use a real embedding
+  provider for production retrieval.
+- NLI verification is an interface, not a model. The bundled check is lexical, so bring a specialized
   verifier when you need high-confidence entailment.
-- `MemoryVectorStore` is process-local. Use a real vector database, or the long-term store with an
+- `MemoryVectorStore` lives in one process. Use a real vector database, or the long-term store with an
   index, for anything shared or persistent.
 
 <!-- reference:start -->

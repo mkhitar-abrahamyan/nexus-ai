@@ -1,0 +1,69 @@
+{{- $fullname := include "agent-server.fullname" . -}}
+{{- if eq .Values.autoscaling.mode "keda" }}
+# KEDA reads GET /scaling from the API Service and sizes the pool so each worker has
+# worker.concurrency runs: queued plus running, divided by each worker's capacity.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $fullname }}-worker
+  labels:
+    {{- include "agent-server.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ $fullname }}-worker
+  minReplicaCount: {{ .Values.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.autoscaling.maxReplicas }}
+  pollingInterval: {{ .Values.autoscaling.pollingInterval }}
+  cooldownPeriod: {{ .Values.autoscaling.cooldownPeriod }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+        scaleDown:
+          stabilizationWindowSeconds: {{ .Values.autoscaling.scaleDownStabilizationSeconds }}
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+  triggers:
+    - type: metrics-api
+      metricType: AverageValue
+      metadata:
+        url: "http://{{ $fullname }}-api.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/scaling"
+        valueLocation: load
+        targetValue: {{ .Values.worker.concurrency | quote }}
+{{- else if eq .Values.autoscaling.mode "hpa" }}
+# Reads nexus_server_queue_load through Prometheus Adapter. Every replica reports the same value, so
+# the adapter's rule must aggregate with max(nexus_server_queue_load), not sum.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullname }}-worker
+  labels:
+    {{- include "agent-server.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $fullname }}-worker
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.autoscaling.scaleDownStabilizationSeconds }}
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: nexus_server_queue_load
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.worker.concurrency | quote }}
+{{- else if ne .Values.autoscaling.mode "none" }}
+{{- fail "autoscaling.mode must be keda, hpa, or none" }}
+{{- end }}

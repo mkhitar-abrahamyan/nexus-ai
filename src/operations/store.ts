@@ -1,8 +1,15 @@
-import type { OperationRecord, OperationStore } from '../types/operations.js';
+import type {
+  OperationRecord,
+  OperationStore,
+  OperationStoreFilter,
+  OperationStoreStats,
+} from '../types/operations.js';
 import { isTerminalOperationStatus } from '../types/operations.js';
 import { assertSerializableRecord } from './serialization.js';
+import { countRecords, isUnheldQueued, matchesFilter } from './stats.js';
 
 export { assertSerializableRecord };
+export { operationStats } from './stats.js';
 
 /** Options for the in-memory operation store. */
 export interface MemoryOperationStoreOptions {
@@ -83,6 +90,24 @@ export class MemoryOperationStore<TResult = unknown> implements OperationStore<T
   /** Every record. */
   list(): Array<OperationRecord<TResult>> {
     return [...this.records.values()].map(clone);
+  }
+
+  /** Queued records no worker holds, oldest first. */
+  listQueued(limit: number, filter?: OperationStoreFilter): Array<OperationRecord<TResult>> {
+    const now = new Date().toISOString();
+    const queued: Array<OperationRecord<TResult>> = [];
+    for (const record of this.records.values()) {
+      if (isUnheldQueued(record, now) && matchesFilter(record, filter)) queued.push(record);
+    }
+    return queued
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
+      .slice(0, limit)
+      .map(clone);
+  }
+
+  /** Counts records by status, without copying any. */
+  stats(now: string, filter?: OperationStoreFilter): OperationStoreStats {
+    return countRecords(this.records.values(), now, filter);
   }
 
   /** Removes every record. */

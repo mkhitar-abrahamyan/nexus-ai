@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createDataset } from '../src/evaluate/datasets.js';
 import { evaluate } from '../src/evaluate/run.js';
+import { functionAssistant } from '../src/server/assistant.js';
+import { Deployments } from '../src/server/deployments.js';
+import { toNodeListener } from '../src/server/node.js';
+import { createAgentServer } from '../src/server/server.js';
 import { JsonlTraceStore } from '../src/tracing/stores.js';
 import type { Experiment } from '../src/types/evaluate.js';
 
@@ -247,4 +253,90 @@ export const cases = [
     assert.match(result.stdout, /FAIL wrong/);
     assert.match(nexus(['help']).stdout, /nexus eval gate/);
   });
+});
+
+/** Runs the CLI without blocking, so a server in this process can answer it. */
+function nexusAsync(args: string[], env: Record<string, string> = {}) {
+  return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+    const child = spawn(process.execPath, ['--import', 'tsx', path.resolve('src/cli.ts'), ...args], {
+      env: { ...process.env, NO_COLOR: '1', ...env },
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+test('nexus deploy moves traffic on a running server, and shows what each revision did', async () => {
+  const deployments = new Deployments();
+  const app = createAgentServer({
+    assistants: {
+      support: deployments.assistant(
+        'support',
+        { v1: functionAssistant(() => 'v1'), v2: functionAssistant(() => 'v2') },
+        { live: 'v1' },
+      ),
+    },
+    deployments,
+    authenticate: (request) =>
+      request.headers.get('authorization') === 'Bearer ship-it' ? { userId: 'ci', scopes: ['admin'] } : undefined,
+  });
+  await app.start();
+  const listener = createServer(toNodeListener(app));
+  await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(listener.address() as AddressInfo).port}`;
+  try {
+    const canary = await nexusAsync(
+      ['deploy', 'canary', 'support', 'v2', '25', '--url', url, '--reason', 'new image'],
+      {
+        NEXUS_SERVER_TOKEN: 'ship-it',
+      },
+    );
+    assert.equal(canary.status, 0, canary.stderr);
+    assert.match(canary.stdout, /support: version 1, live v1, v2 25%, v1 75%/);
+
+    const status = await nexusAsync(['deploy', 'status', 'support', '--url', url, '--token', 'ship-it', '--json']);
+    assert.equal(status.status, 0, status.stderr);
+    const deployment = JSON.parse(status.stdout) as {
+      history: Array<{ by: string; reason: string }>;
+      stats: unknown[];
+    };
+    assert.equal(deployment.history[0]?.by, 'ci');
+    assert.equal(deployment.history[0]?.reason, 'new image');
+    assert.ok(Array.isArray(deployment.stats), 'the status carries each revision’s runs');
+
+    const stale = await nexusAsync([
+      'deploy',
+      'promote',
+      'support',
+      'v2',
+      '--url',
+      url,
+      '--token',
+      'ship-it',
+      '--version',
+      '0',
+    ]);
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /409 DEPLOYMENT_CONFLICT/);
+    const rolledBack = await nexusAsync(['deploy', 'rollback', 'support', '--url', url, '--token', 'ship-it']);
+    assert.match(rolledBack.stdout, /live v1, v1 100%/);
+    const listed = await nexusAsync(['deploy', 'status', '--url', url, '--token', 'ship-it']);
+    assert.match(listed.stdout, /support\s+v1\s+v1 100%\s+2/);
+
+    const denied = await nexusAsync(['deploy', 'status', '--url', url]);
+    assert.equal(denied.status, 1);
+    assert.match(denied.stderr, /401 UNAUTHORIZED/);
+    assert.equal((await nexusAsync(['deploy', 'status'])).status, 2, 'no server named is a usage error');
+    assert.equal((await nexusAsync(['deploy', 'canary', 'support', 'v2', '250', '--url', url])).status, 2);
+  } finally {
+    listener.close();
+    await app.stop();
+  }
 });

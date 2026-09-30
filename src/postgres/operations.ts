@@ -1,6 +1,12 @@
 import { OperationDuplicateError } from '../operations/errors.js';
 import { assertSerializableRecord } from '../operations/serialization.js';
-import type { OperationRecord, OperationStore } from '../types/operations.js';
+import type {
+  OperationRecord,
+  OperationStatus,
+  OperationStore,
+  OperationStoreFilter,
+  OperationStoreStats,
+} from '../types/operations.js';
 import { TERMINAL_OPERATION_STATUSES } from '../types/operations.js';
 import {
   fromJson,
@@ -159,6 +165,44 @@ export class PostgresOperationStore<TResult = unknown> implements OperationStore
     return rows.map((row) => fromJson<OperationRecord<TResult>>((row as { doc: unknown }).doc));
   }
 
+  /** Queued records no worker holds, oldest first, in one indexed query. */
+  async listQueued(limit: number, filter?: OperationStoreFilter): Promise<Array<OperationRecord<TResult>>> {
+    const params: unknown[] = [new Date().toISOString(), limit];
+    let kind = '';
+    if (filter?.kindPrefix) {
+      params.push(filter.kindPrefix);
+      kind = ' AND substr(kind, 1, char_length($3)) = $3';
+    }
+    const { rows } = await this.client.query(
+      `SELECT doc::text AS doc FROM ${this.table}
+       WHERE status = 'queued' AND (lease_expires_at IS NULL OR lease_expires_at <= $1)${kind}
+       ORDER BY created_at, id
+       LIMIT $2`,
+      params,
+    );
+    return rows.map((row) => fromJson<OperationRecord<TResult>>((row as { doc: unknown }).doc));
+  }
+
+  /** Counts unfinished records by status in one grouped query. */
+  async stats(now: string, filter?: OperationStoreFilter): Promise<OperationStoreStats> {
+    const params: unknown[] = [now];
+    let kind = '';
+    if (filter?.kindPrefix) {
+      params.push(filter.kindPrefix);
+      kind = ' AND substr(kind, 1, char_length($2)) = $2';
+    }
+    const { rows } = await this.client.query(
+      `SELECT status, count(*)::int AS count,
+         min(created_at) FILTER (WHERE status = 'queued') AS oldest,
+         count(*) FILTER (WHERE status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= $1))::int AS lapsed
+       FROM ${this.table}
+       WHERE status NOT IN (${TERMINAL})${kind}
+       GROUP BY status`,
+      params,
+    );
+    return statsFromRows(rows as StatsRow[]);
+  }
+
   /**
    * Deletes finished records last updated before a cutoff, returning how many went. The in-memory
    * store evicts on its own; a table needs a retention job to call this.
@@ -184,4 +228,25 @@ export class PostgresOperationStore<TResult = unknown> implements OperationStore
       JSON.stringify(record),
     ];
   }
+}
+
+/** One row of the grouped stats query. */
+interface StatsRow {
+  status: OperationStatus;
+  count: number | string;
+  oldest: string | null;
+  lapsed: number | string;
+}
+
+/** Folds the grouped stats query into the store-neutral shape. */
+function statsFromRows(rows: readonly StatsRow[]): OperationStoreStats {
+  const byStatus: Partial<Record<OperationStatus, number>> = {};
+  let oldestQueuedAt: string | undefined;
+  let lapsedLeases = 0;
+  for (const row of rows) {
+    byStatus[row.status] = Number(row.count);
+    if (row.oldest && (!oldestQueuedAt || row.oldest < oldestQueuedAt)) oldestQueuedAt = row.oldest;
+    lapsedLeases += Number(row.lapsed);
+  }
+  return { byStatus, ...(oldestQueuedAt ? { oldestQueuedAt } : {}), lapsedLeases };
 }

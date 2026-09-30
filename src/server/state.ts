@@ -1,5 +1,8 @@
 import type { ServerStateStore } from '../types/server.js';
 
+/** Where run records live in the state store, for anything that reads them besides the run manager. */
+export const RUNS_NAMESPACE: readonly string[] = ['nexus', 'server', 'runs'];
+
 /** Threads, runs, and cron jobs in process memory. The default, and enough for one replica. */
 export class MemoryServerStore implements ServerStateStore {
   private readonly items = new Map<string, Map<string, { value: unknown; at: number }>>();

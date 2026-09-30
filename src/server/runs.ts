@@ -1,20 +1,39 @@
+import { OperationReleasedError } from '../operations/errors.js';
 import { OperationRunner } from '../operations/runner.js';
-import type { OperationContext, OperationRunnerConfig } from '../types/operations.js';
+import { operationStats } from '../operations/stats.js';
+import { MemoryOperationStore } from '../operations/store.js';
+import type {
+  DurableOperationHandle,
+  OperationContext,
+  OperationRunnerConfig,
+  OperationStore,
+} from '../types/operations.js';
 import type {
   AssistantRunContext,
   Principal,
+  ReplicaReport,
   RunEvent,
   RunEventLog,
   RunRecord,
+  RunRevision,
   RunStatus,
+  ScalingSnapshot,
   ServerAssistant,
   ServerStateStore,
+  TenantGate,
   ThreadBusyPolicy,
   ThreadRecord,
 } from '../types/server.js';
-import { AssistantCapabilityError, BadRequestError, NotFoundError, ThreadBusyError } from './errors.js';
+import {
+  AssistantCapabilityError,
+  BadRequestError,
+  NotFoundError,
+  TenantLimitError,
+  ThreadBusyError,
+} from './errors.js';
 import { MemoryRunEventLog } from './events.js';
-import { MemoryServerStore } from './state.js';
+import { gauge, ServerMetrics } from './metrics.js';
+import { MemoryServerStore, RUNS_NAMESPACE } from './state.js';
 
 /** What a run needs to start. */
 export interface StartRunOptions {
@@ -34,6 +53,27 @@ export interface StartRunOptions {
   metadata?: Record<string, unknown>;
   /** What to do when the thread is already running something. Defaults to the server's policy. */
   onBusy?: ThreadBusyPolicy;
+  /** Runs this revision of the assistant, instead of letting the traffic split choose. */
+  revision?: string;
+}
+
+/**
+ * Runs in a queue that any replica's workers claim, instead of on the replica that accepted them.
+ *
+ * With a queue, a replica runs at most `concurrency` runs at once. It starts a new run itself while
+ * it has room, and leaves the rest queued in the operation store for whichever worker frees up
+ * first. That queue is what an autoscaler watches: `GET /scaling` and `GET /metrics` report it.
+ */
+export interface RunQueueOptions {
+  /** Runs this replica executes at once. Defaults to 10. */
+  concurrency?: number;
+  /**
+   * Whether this replica claims queued runs. `false` makes it an API replica that only accepts them,
+   * in front of a separate pool of workers. Defaults to true.
+   */
+  claim?: boolean;
+  /** How often an idle worker looks for queued runs, in milliseconds. Defaults to 1 second. */
+  pollMs?: number;
 }
 
 /** Options for the run manager. */
@@ -46,6 +86,15 @@ export interface RunManagerOptions {
   events?: RunEventLog;
   /** Configures the operation runner underneath: store, dispatcher, retries, leases, webhooks. */
   operations?: OperationRunnerConfig<unknown>;
+  /** Runs in a shared queue with a per-replica cap. Without it, a run executes where it was accepted. */
+  queue?: RunQueueOptions;
+  /**
+   * How often this replica takes over runs whose worker stopped, in milliseconds. Defaults to 30
+   * seconds with a queue. Without a queue it is off unless set, and only `start()` recovers.
+   */
+  recoverEveryMs?: number;
+  /** Per-tenant limits, enforced when a run is accepted. See `tenantLimits()` in `nexus-ai-pro/server/tenancy`. */
+  tenants?: TenantGate;
   /** What to do when a thread is already running something. Defaults to `reject`. */
   onBusy?: ThreadBusyPolicy;
   /** How long a run may take before it expires, in milliseconds. */
@@ -58,8 +107,52 @@ export interface RunManagerOptions {
   now?: () => Date;
 }
 
+/** What `drain()` did with the runs this replica was executing. */
+export interface DrainResult {
+  /** Runs that finished before the timeout. */
+  finished: string[];
+  /** Runs handed back to the queue for another worker, because the timeout passed first. */
+  released: string[];
+}
+
+/** Everything one execution needs, whether it starts here, is claimed from the queue, or is recovered. */
+interface RunPlan {
+  assistantId: string;
+  assistant: ServerAssistant;
+  threadId?: string;
+  input?: unknown;
+  resume?: unknown;
+  principal?: Principal;
+  metadata?: Record<string, unknown>;
+  revision?: RunRevision;
+}
+
+/** What a run's submission carries, so any worker can run it. */
+interface Submission {
+  assistant: string;
+  threadId?: string;
+  tenantId?: string;
+  principal?: Principal;
+  input?: unknown;
+  resume?: unknown;
+  revision?: string;
+}
+
 const THREADS = ['nexus', 'server', 'threads'];
-const RUNS = ['nexus', 'server', 'runs'];
+const RUNS = RUNS_NAMESPACE as string[];
+const KIND_PREFIX = 'assistant:';
+const DEFAULT_CONCURRENCY = 10;
+const DEFAULT_POLL_MS = 1_000;
+const DEFAULT_RECOVER_MS = 30_000;
+
+const METRIC_HELP: Record<string, string> = {
+  nexus_server_runs_started_total: 'Runs this replica started executing, per assistant and revision.',
+  nexus_server_runs_finished_total: 'Runs that finished on this replica, per assistant, revision, and status.',
+  nexus_server_run_duration_seconds: 'Time from a run first starting to finishing, per assistant and revision.',
+  nexus_server_queue_wait_seconds: 'Time a run waited between being accepted and first starting.',
+  nexus_server_runs_handed_off_total: 'Runs this replica handed back to the queue while draining.',
+  nexus_server_tenant_refusals_total: 'Runs refused by a per-tenant limit, per limit.',
+};
 
 /**
  * Runs assistants, records threads and runs, and keeps the event log a client streams from.
@@ -67,21 +160,36 @@ const RUNS = ['nexus', 'server', 'runs'];
  * Every run is a durable operation, so a run that outlives the request that started it, a worker
  * that dies mid-run, a duplicate submission, and a cancellation from another replica are all handled
  * by the operation runner rather than by anything here. What this adds is the thread: which run owns
- * it, what happens when a second arrives, and where the events go.
+ * it, what happens when a second arrives, and where the events go. With a `queue`, it also decides
+ * where a run executes: here while there is room, otherwise on the next free worker.
  */
 export class RunManager {
   private readonly runner: OperationRunner<unknown>;
+  private readonly store: OperationStore<unknown>;
   /** Handles of runs this worker is executing, so a cancellation aborts them at once. */
   private readonly local = new Map<string, { cancel(reason?: string): boolean }>();
+  /** Runs holding one of this replica's execution slots. */
+  private readonly slots = new Set<string>();
   private readonly state: ServerStateStore;
   private readonly events: RunEventLog;
   private readonly now: () => Date;
+  private readonly startedAt: string;
+  /** This replica's run counters and latency histograms, rendered by `GET /metrics`. */
+  readonly metrics = new ServerMetrics();
+  private claiming = 0;
+  private draining = false;
+  private working = false;
+  private ticking = false;
+  private timer?: ReturnType<typeof setTimeout>;
+  private lastRecovery = 0;
 
   constructor(private readonly options: RunManagerOptions) {
-    this.runner = new OperationRunner<unknown>(options.operations ?? {});
+    this.store = options.operations?.store ?? new MemoryOperationStore<unknown>();
+    this.runner = new OperationRunner<unknown>({ ...options.operations, store: this.store });
     this.state = options.state ?? new MemoryServerStore();
     this.events = options.events ?? new MemoryRunEventLog();
     this.now = options.now ?? (() => new Date());
+    this.startedAt = this.now().toISOString();
   }
 
   /** The event log, which the event-stream route reads. */
@@ -97,6 +205,21 @@ export class RunManager {
   /** The assistants that can be run. */
   get assistants(): Record<string, ServerAssistant> {
     return this.options.assistants;
+  }
+
+  /** Runs this replica is executing now. */
+  get inFlight(): number {
+    return this.slots.size;
+  }
+
+  /** Runs this replica executes at once, when it runs a queue. */
+  get capacity(): number | undefined {
+    return this.options.queue ? (this.options.queue.concurrency ?? DEFAULT_CONCURRENCY) : undefined;
+  }
+
+  /** Whether this replica is draining, which `GET /health` reports so a load balancer stops sending. */
+  get isDraining(): boolean {
+    return this.draining;
   }
 
   /** Looks an assistant up, or refuses the request. */
@@ -149,10 +272,10 @@ export class RunManager {
     await this.state.delete(THREADS, threadId);
   }
 
-  /** The assistant's state for a thread, when the assistant reports one. */
+  /** The assistant's state for a thread, from the revision the thread last ran on. */
   async threadState(threadId: string, principal?: Principal): Promise<unknown> {
     const thread = await this.thread(threadId, principal);
-    const assistant = this.assistant(thread.assistant);
+    const assistant = this.revisionOf(thread.assistant, thread.revision);
     if (!assistant.state) throw new AssistantCapabilityError(thread.assistant, 'thread state');
     return assistant.state(threadId);
   }
@@ -178,66 +301,57 @@ export class RunManager {
    * Accepts a run and starts it in the background.
    *
    * Returns as soon as the run is recorded, so the caller can stream its events or hand back its id.
-   * A thread already running something is handled by the busy policy before anything is submitted.
+   * A thread already running something is handled by the busy policy before anything is submitted,
+   * the assistant's traffic split picks the revision, and the tenant's limits admit the run or refuse
+   * it with a `TenantLimitError`.
    */
   async start(options: StartRunOptions): Promise<RunRecord> {
-    const assistant = this.assistant(options.assistant);
+    const base = this.assistant(options.assistant);
     let thread: ThreadRecord | undefined;
 
     if (options.threadId) {
       thread = await this.thread(options.threadId, options.principal);
       thread = await this.settleBusyThread(thread, options);
     }
+
+    const runId = `run-${randomId()}`;
+    let assistant = base;
+    let revision: RunRevision | undefined;
+    if (base.route) {
+      const choice = await base.route({
+        runId,
+        threadId: thread?.id,
+        threadRevision: thread?.revision,
+        requested: options.revision,
+        principal: options.principal,
+      });
+      if (choice) {
+        const { assistant: chosen, ...chosenRevision } = choice;
+        assistant = chosen;
+        revision = chosenRevision;
+      }
+    } else if (options.revision !== undefined) {
+      throw new BadRequestError(`Assistant "${options.assistant}" has no revisions`, 'UNKNOWN_REVISION');
+    }
     if (options.resume !== undefined && !assistant.resume) {
       throw new AssistantCapabilityError(options.assistant, 'resuming an interrupt');
     }
 
-    const at = this.now().toISOString();
-    // Recorded before the run starts, so the rollback policy has a step to put the thread back to.
-    const startedAtStep = thread && assistant.step ? await assistant.step(thread.id) : undefined;
-
-    // The record is written before the work is submitted: the executor starts immediately, and its
-    // first status update must find the run rather than create a stub without an assistant — which is
-    // also what a recovering worker reads to know what to run.
-    const runId = `run-${randomId()}`;
-    const run: RunRecord = {
-      id: runId,
-      assistant: options.assistant,
-      threadId: options.threadId,
-      tenantId: options.principal?.tenantId,
-      status: 'queued',
-      createdAt: at,
-      updatedAt: at,
-      metadata: startedAtStep === undefined ? options.metadata : { ...options.metadata, startedAtStep },
-    };
-    await this.state.put(RUNS, runId, run);
-
-    const handle = await this.runner.submit((context) => this.execute(assistant, options, context), {
-      id: runId,
-      kind: `assistant:${options.assistant}`,
-      idempotencyKey: options.idempotencyKey,
-      // The submission carries what a recovering worker needs to run it again.
-      metadata: {
-        assistant: options.assistant,
-        threadId: options.threadId,
-        tenantId: options.principal?.tenantId,
-        input: options.input,
-        resume: options.resume,
-      },
-      ...(this.options.runTimeoutMs === undefined
-        ? {}
-        : { expiresAt: new Date(this.now().getTime() + this.options.runTimeoutMs).toISOString() }),
-    });
-
-    if (handle.id !== runId) {
-      // An idempotency key matched a run that already exists, so this one was never started.
-      await this.state.delete(RUNS, runId);
-      return (await this.state.get<RunRecord>(RUNS, handle.id)) ?? run;
+    try {
+      await this.options.tenants?.admit({ runId, assistant: options.assistant, principal: options.principal });
+    } catch (error) {
+      if (error instanceof TenantLimitError) {
+        this.metrics.count('nexus_server_tenant_refusals_total', { limit: error.limit });
+      }
+      throw error;
     }
 
-    this.local.set(handle.id, handle);
-    if (thread) await this.state.put(THREADS, thread.id, { ...thread, activeRunId: runId, updatedAt: at });
-    return (await this.state.get<RunRecord>(RUNS, runId)) ?? run;
+    try {
+      return await this.accept(runId, options, assistant, thread, revision);
+    } catch (error) {
+      await this.releaseTenant(runId, options.principal?.tenantId);
+      throw error;
+    }
   }
 
   /** Cancels a run, including one another replica is executing. */
@@ -247,7 +361,14 @@ export class RunManager {
     // which observe it through their heartbeat.
     this.local.get(runId)?.cancel(reason);
     await this.runner.cancel(runId, reason).catch((error: unknown) => this.report(error, { runId }));
-    return this.settle(run.id, 'cancelled', { error: { message: reason ?? 'Cancelled', code: 'CANCELLED' } });
+    const wasFinished = isFinished(run.status);
+    const settled = await this.settle(run.id, 'cancelled', {
+      error: { message: reason ?? 'Cancelled', code: 'CANCELLED' },
+      finishedAt: this.now().toISOString(),
+    });
+    if (!wasFinished) this.countFinished(settled);
+    await this.releaseTenant(runId, run.tenantId);
+    return settled;
   }
 
   /**
@@ -255,59 +376,298 @@ export class RunManager {
    * crash. The operation runner decides what is claimable; this only supplies the executor.
    */
   async recover(limit = 10): Promise<string[]> {
-    const handles = await this.runner.recover(async (context) => {
-      const record = await this.state.get<RunRecord>(RUNS, context.operationId);
-      if (!record) throw new NotFoundError('Run', context.operationId);
-      const assistant = this.assistant(record.assistant);
-      const submitted = (await this.runner.read(context.operationId))?.metadata as
-        | { input?: unknown; resume?: unknown }
-        | undefined;
-      return this.execute(
-        assistant,
-        {
-          assistant: record.assistant,
-          threadId: record.threadId,
-          input: submitted?.input,
-          resume: submitted?.resume,
-          metadata: record.metadata,
-        },
-        context,
-      );
-    }, limit);
+    const handles = await this.runner.recover((context) => this.executeStored(context), limit);
+    for (const handle of handles) this.track(handle);
     return handles.map((handle) => handle.id);
+  }
+
+  /**
+   * Claims queued runs up to this replica's free capacity and starts them. The worker loop calls it;
+   * a test or a custom scheduler can call it directly. Resolves to the ids it claimed.
+   */
+  async claim(): Promise<string[]> {
+    const room = this.freeSlots();
+    const free = Number.isFinite(room) ? room : 10;
+    if (free <= 0 || this.draining) return [];
+    this.claiming += free;
+    try {
+      const handles = await this.runner.claimQueued((context) => this.executeStored(context), free, {
+        kindPrefix: KIND_PREFIX,
+      });
+      for (const handle of handles) this.track(handle);
+      return handles.map((handle) => handle.id);
+    } finally {
+      this.claiming -= free;
+    }
+  }
+
+  /**
+   * Starts the worker loop: claiming queued runs while there is room, and taking over runs whose
+   * worker stopped. Does nothing without a queue or `recoverEveryMs`. `stopWorking()` ends it.
+   */
+  startWorking(): void {
+    if (this.working || (!this.options.queue && this.options.recoverEveryMs === undefined)) return;
+    this.working = true;
+    this.lastRecovery = Date.now();
+    this.schedule(0);
+  }
+
+  /** Stops the worker loop. Runs in flight carry on. */
+  stopWorking(): void {
+    this.working = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
+  /**
+   * Stops taking new work and waits for the runs in flight, before this replica shuts down.
+   *
+   * New runs accepted here go to the queue instead of starting, and the worker loop stops claiming.
+   * Runs still going when `timeoutMs` passes are handed back to the queue for another worker to
+   * continue, so a scale-down neither waits for a long run nor loses it. Without a queue nothing can
+   * claim a hand-off, so they are left to their leases, which another replica's recovery takes over.
+   */
+  async drain(options: { timeoutMs?: number } = {}): Promise<DrainResult> {
+    this.draining = true;
+    this.stopWorking();
+    const running = [...this.slots];
+    const deadline = Date.now() + (options.timeoutMs ?? 25_000);
+    // These waits hold the process open on purpose: a drain must finish before the process may exit.
+    while (this.slots.size > 0 && Date.now() < deadline) await pause(Math.min(50, deadline - Date.now()));
+
+    const released: string[] = [];
+    if (this.options.queue) {
+      for (const id of [...this.slots]) {
+        if (this.runner.release(id)) released.push(id);
+      }
+      const settle = Date.now() + 5_000;
+      while (this.slots.size > 0 && Date.now() < settle) await pause(10);
+    }
+    if (released.length > 0) this.metrics.count('nexus_server_runs_handed_off_total', {}, released.length);
+    return { finished: running.filter((id) => !released.includes(id) && !this.slots.has(id)), released };
+  }
+
+  /** This replica, as it reports itself to heartbeats and the scaling endpoint. */
+  replica(metadata?: Record<string, unknown>): ReplicaReport {
+    const assistants: Record<string, readonly string[]> = {};
+    for (const [id, assistant] of Object.entries(this.options.assistants)) assistants[id] = assistant.revisions ?? [];
+    return {
+      id: this.workerId,
+      startedAt: this.startedAt,
+      heartbeatAt: this.now().toISOString(),
+      inFlight: this.slots.size,
+      ...(this.capacity === undefined ? {} : { capacity: this.capacity }),
+      claims: this.options.queue ? this.options.queue.claim !== false : true,
+      draining: this.draining,
+      assistants,
+      ...(metadata ? { metadata } : {}),
+    };
+  }
+
+  /** The queue as the operation store counts it, across every replica, with this replica's report. */
+  async scaling(metadata?: Record<string, unknown>): Promise<ScalingSnapshot> {
+    const now = this.now();
+    const stats = await operationStats(this.store, { kindPrefix: KIND_PREFIX, now });
+    const queued = stats.byStatus.queued ?? 0;
+    const running = (stats.byStatus.running ?? 0) + (stats.byStatus.retrying ?? 0) + (stats.byStatus.cancelling ?? 0);
+    return {
+      queued,
+      running,
+      load: queued + running,
+      oldestQueuedSeconds: stats.oldestQueuedAt
+        ? Math.max(0, (now.getTime() - Date.parse(stats.oldestQueuedAt)) / 1000)
+        : 0,
+      lapsedLeases: stats.lapsedLeases,
+      replica: this.replica(metadata),
+    };
+  }
+
+  /** Every metric in Prometheus text: the deployment-wide queue, this replica, and its run counters. */
+  async prometheus(extra: (lines: string[]) => void | Promise<void> = () => undefined): Promise<string> {
+    const snapshot = await this.scaling();
+    const lines: string[] = [];
+    // Deployment-wide gauges read the same on every replica: aggregate them with max(), not sum().
+    gauge(lines, 'nexus_server_runs_queued', 'Runs waiting for a worker, across the deployment.', snapshot.queued);
+    gauge(lines, 'nexus_server_runs_running', 'Runs executing or retrying, across the deployment.', snapshot.running);
+    gauge(lines, 'nexus_server_queue_load', 'Queued plus running runs, across the deployment.', snapshot.load);
+    gauge(
+      lines,
+      'nexus_server_queue_oldest_seconds',
+      'Seconds the oldest queued run has waited.',
+      snapshot.oldestQueuedSeconds,
+    );
+    gauge(lines, 'nexus_server_leases_lapsed', 'Running runs whose lease lapsed.', snapshot.lapsedLeases);
+    gauge(lines, 'nexus_server_worker_in_flight', 'Runs this replica is executing.', snapshot.replica.inFlight);
+    if (snapshot.replica.capacity !== undefined) {
+      gauge(lines, 'nexus_server_worker_capacity', 'Runs this replica executes at once.', snapshot.replica.capacity);
+    }
+    gauge(lines, 'nexus_server_worker_draining', 'Whether this replica is draining.', this.draining ? 1 : 0);
+    this.metrics.render(lines, METRIC_HELP);
+    await extra(lines);
+    return `${lines.join('\n')}\n`;
   }
 
   // ── Execution ────────────────────────────────────────────────────
 
-  private async execute(
-    assistant: ServerAssistant,
+  /** Records a run and submits it: to run here while there is room, or to the queue otherwise. */
+  private async accept(
+    runId: string,
     options: StartRunOptions,
-    context: OperationContext,
-  ): Promise<unknown> {
-    const runId = context.operationId;
-    const runContext: AssistantRunContext = {
-      runId,
+    assistant: ServerAssistant,
+    thread: ThreadRecord | undefined,
+    revision: RunRevision | undefined,
+  ): Promise<RunRecord> {
+    const at = this.now().toISOString();
+    // Recorded before the run starts, so the rollback policy has a step to put the thread back to.
+    const startedAtStep = thread && assistant.step ? await assistant.step(thread.id) : undefined;
+
+    // The record is written before the work is submitted: the executor starts immediately, and its
+    // first status update must find the run rather than create a stub without an assistant — which is
+    // also what a recovering worker reads to know what to run.
+    const run: RunRecord = {
+      id: runId,
+      assistant: options.assistant,
       threadId: options.threadId,
-      signal: context.signal,
+      tenantId: options.principal?.tenantId,
+      status: 'queued',
+      createdAt: at,
+      updatedAt: at,
+      metadata: startedAtStep === undefined ? options.metadata : { ...options.metadata, startedAtStep },
+      ...(revision ? { revision } : {}),
+    };
+    await this.state.put(RUNS, runId, run);
+
+    const submission: Submission = {
+      assistant: options.assistant,
+      threadId: options.threadId,
+      tenantId: options.principal?.tenantId,
       principal: options.principal,
-      metadata: options.metadata,
-      attempt: context.attempt,
+      input: options.input,
+      resume: options.resume,
+      revision: revision?.id,
+    };
+    const submit = {
+      id: runId,
+      kind: `${KIND_PREFIX}${options.assistant}`,
+      idempotencyKey: options.idempotencyKey,
+      // The submission carries what any worker needs to run it.
+      metadata: submission as unknown as Record<string, unknown>,
+      ...(this.options.runTimeoutMs === undefined
+        ? {}
+        : { expiresAt: new Date(this.now().getTime() + this.options.runTimeoutMs).toISOString() }),
     };
 
+    let acceptedId: string;
+    if (this.runsHere()) {
+      this.slots.add(runId);
+      const plan: RunPlan = {
+        assistantId: options.assistant,
+        assistant,
+        threadId: options.threadId,
+        input: options.input,
+        resume: options.resume,
+        principal: options.principal,
+        metadata: options.metadata,
+        revision,
+      };
+      const handle = await this.runner.submit((context) => this.execute(plan, context), submit);
+      if (handle.id === runId) this.track(handle);
+      else this.freeSlot(runId);
+      acceptedId = handle.id;
+    } else {
+      acceptedId = (await this.runner.enqueue(submit)).id;
+    }
+
+    if (acceptedId !== runId) {
+      // An idempotency key matched a run that already exists, so this one was never started.
+      await this.state.delete(RUNS, runId);
+      await this.releaseTenant(runId, options.principal?.tenantId);
+      return (await this.state.get<RunRecord>(RUNS, acceptedId)) ?? run;
+    }
+
+    if (thread) {
+      await this.state.put(THREADS, thread.id, {
+        ...thread,
+        activeRunId: runId,
+        updatedAt: at,
+        ...(revision ? { revision: revision.id } : {}),
+      });
+    }
+    return (await this.state.get<RunRecord>(RUNS, runId)) ?? run;
+  }
+
+  /** Runs a run from what its record and submission say: a claimed queued run, or a recovered one. */
+  private async executeStored(context: OperationContext): Promise<unknown> {
+    const record = await this.state.get<RunRecord>(RUNS, context.operationId);
+    if (!record) throw new NotFoundError('Run', context.operationId);
+    const submitted = (context.metadata ?? (await this.runner.read(context.operationId))?.metadata) as
+      | Submission
+      | undefined;
+    return this.execute(
+      {
+        assistantId: record.assistant,
+        assistant: this.revisionOf(record.assistant, record.revision?.id ?? submitted?.revision),
+        threadId: record.threadId,
+        input: submitted?.input,
+        resume: submitted?.resume,
+        principal: submitted?.principal ?? (record.tenantId ? { tenantId: record.tenantId } : undefined),
+        metadata: record.metadata,
+        revision: record.revision,
+      },
+      context,
+    );
+  }
+
+  private async execute(plan: RunPlan, context: OperationContext): Promise<unknown> {
+    const runId = context.operationId;
+    let cost = 0;
+    const runContext: AssistantRunContext = {
+      runId,
+      threadId: plan.threadId,
+      signal: context.signal,
+      principal: plan.principal,
+      metadata: plan.metadata,
+      attempt: context.attempt,
+      ...(plan.revision ? { revision: plan.revision.id } : {}),
+      recordCost: async (usd: number) => {
+        if (!Number.isFinite(usd) || usd <= 0) return;
+        cost += usd;
+        const within = await this.options.tenants?.spend({ runId, tenantId: plan.principal?.tenantId }, usd);
+        if (within === false) {
+          await this.cancel(runId, plan.principal, 'The tenant budget is spent').catch((error: unknown) =>
+            this.report(error, { runId }),
+          );
+        }
+      },
+    };
+
+    const labels = { assistant: plan.assistantId, revision: plan.revision?.id ?? '' };
     await this.record(runId, 'status', { status: 'running' });
-    await this.settle(runId, 'running');
+    const started = await this.settle(runId, 'running', {
+      startedAt: this.now().toISOString(),
+      worker: this.workerId,
+      attempt: context.attempt,
+    });
+    this.metrics.count('nexus_server_runs_started_total', labels);
+    if (context.attempt === 1 && started.startedAt) {
+      this.metrics.observe(
+        'nexus_server_queue_wait_seconds',
+        { assistant: plan.assistantId },
+        Math.max(0, (Date.parse(started.startedAt) - Date.parse(started.createdAt)) / 1000),
+      );
+    }
 
     // A later attempt continues from the run's own last checkpoint when the assistant can, so only the
     // step in flight when the worker died runs again.
     const recovered =
-      context.attempt > 1 && options.threadId && assistant.recover
-        ? await assistant.recover(options.threadId, runContext)
+      context.attempt > 1 && plan.threadId && plan.assistant.recover
+        ? await plan.assistant.recover(plan.threadId, runContext)
         : undefined;
     const stream =
       recovered ??
-      (options.resume !== undefined && assistant.resume
-        ? assistant.resume(options.threadId as string, options.resume, runContext)
-        : assistant.stream(options.input, runContext));
+      (plan.resume !== undefined && plan.assistant.resume
+        ? plan.assistant.resume(plan.threadId as string, plan.resume, runContext)
+        : plan.assistant.stream(plan.input, runContext));
 
     let last: unknown;
     try {
@@ -317,26 +677,105 @@ export class RunManager {
         context.report({ message: typeOf(event) });
       }
     } catch (error) {
+      if (context.signal.aborted && context.signal.reason instanceof OperationReleasedError) {
+        // A hand-off, not a failure: the thread stays with this run, and another worker continues it.
+        await this.record(runId, 'status', { status: 'queued', reason: 'handed to another worker' });
+        await this.settle(runId, 'queued', { addCost: cost });
+        throw error;
+      }
       await this.record(runId, 'error', { message: error instanceof Error ? error.message : String(error) });
-      this.local.delete(runId);
-      await this.settle(runId, 'failed', {
+      const failed = await this.settle(runId, 'failed', {
         error: {
           message: error instanceof Error ? error.message : String(error),
           name: error instanceof Error ? error.name : undefined,
         },
+        finishedAt: this.now().toISOString(),
+        addCost: cost,
       });
-      await this.releaseThread(options.threadId, runId);
+      if (failed.status === 'failed') this.countFinished(failed);
+      await this.releaseThread(plan.threadId, runId);
+      await this.releaseTenant(runId, plan.principal?.tenantId);
       throw error;
     }
 
-    this.local.delete(runId);
     const interrupt = interruptOf(last);
     const status: RunStatus = interrupt ? 'awaiting_input' : 'succeeded';
     const output = outputOf(last);
     await this.record(runId, 'status', { status, output, interrupt });
-    await this.settle(runId, status, { output, interrupt });
-    await this.releaseThread(options.threadId, runId);
+    const settled = await this.settle(runId, status, {
+      output,
+      interrupt,
+      finishedAt: this.now().toISOString(),
+      addCost: cost,
+    });
+    if (settled.status === status) this.countFinished(settled);
+    await this.releaseThread(plan.threadId, runId);
+    await this.releaseTenant(runId, plan.principal?.tenantId);
     return output;
+  }
+
+  /** The assistant for one revision, or the assistant itself when it has none by that id. */
+  private revisionOf(assistantId: string, revision: string | undefined): ServerAssistant {
+    const base = this.assistant(assistantId);
+    return (revision !== undefined && base.revision?.(revision)) || base;
+  }
+
+  /** Whether a new run starts on this replica rather than waiting in the queue. */
+  private runsHere(): boolean {
+    const queue = this.options.queue;
+    if (!queue) return true;
+    return queue.claim !== false && !this.draining && this.freeSlots() > 0;
+  }
+
+  private freeSlots(): number {
+    const capacity = this.capacity;
+    return capacity === undefined ? Number.POSITIVE_INFINITY : capacity - this.slots.size - this.claiming;
+  }
+
+  /** Keeps a run's handle while it executes here, and frees its slot when it settles. */
+  private track(handle: DurableOperationHandle<unknown>): void {
+    this.slots.add(handle.id);
+    this.local.set(handle.id, handle);
+    const done = (): void => {
+      this.local.delete(handle.id);
+      this.freeSlot(handle.id);
+    };
+    void handle.result().then(done, done);
+  }
+
+  private freeSlot(runId: string): void {
+    if (!this.slots.delete(runId)) return;
+    // A freed slot is room for the next queued run, so look now rather than at the next poll.
+    if (this.working && this.options.queue && !this.draining) this.schedule(0);
+  }
+
+  private schedule(delayMs: number): void {
+    if (!this.working) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.tick(), delayMs);
+  }
+
+  private async tick(): Promise<void> {
+    this.timer = undefined;
+    if (!this.working || this.ticking) return;
+    this.ticking = true;
+    let claimed = 0;
+    try {
+      const recoverEvery = this.options.recoverEveryMs ?? (this.options.queue ? DEFAULT_RECOVER_MS : undefined);
+      if (recoverEvery !== undefined && Date.now() - this.lastRecovery >= recoverEvery) {
+        this.lastRecovery = Date.now();
+        const room = this.freeSlots();
+        if (room > 0) claimed += (await this.recover(Number.isFinite(room) ? room : 10)).length;
+      }
+      if (this.options.queue && this.options.queue.claim !== false) claimed += (await this.claim()).length;
+    } catch (error) {
+      this.report(error, {});
+    } finally {
+      this.ticking = false;
+    }
+    // Keep claiming while the queue gives work and there is room; otherwise wait for the next poll.
+    const pollMs = this.options.queue?.pollMs ?? DEFAULT_POLL_MS;
+    this.schedule(claimed > 0 && this.freeSlots() > 0 ? 0 : Math.min(pollMs, this.options.recoverEveryMs ?? pollMs));
   }
 
   /** Applies the busy policy, returning the thread once it is free to run something new. */
@@ -364,7 +803,7 @@ export class RunManager {
       // `interrupt` and `rollback` both stop the run in flight; `rollback` also puts the thread back.
       await this.cancel(activeId, options.principal, `superseded by a new run (${policy})`);
       if (policy === 'rollback') {
-        const assistant = this.assistant(current.assistant);
+        const assistant = this.revisionOf(current.assistant, active.revision?.id);
         if (!assistant.restore) throw new AssistantCapabilityError(current.assistant, 'rolling a thread back');
         const step = (active.metadata as { startedAtStep?: number } | undefined)?.startedAtStep;
         if (step !== undefined) await assistant.restore(current.id, step);
@@ -395,6 +834,23 @@ export class RunManager {
     await this.state.put(THREADS, threadId, { ...thread, activeRunId: undefined, updatedAt: this.now().toISOString() });
   }
 
+  private async releaseTenant(runId: string, tenantId: string | undefined): Promise<void> {
+    if (!this.options.tenants) return;
+    try {
+      await this.options.tenants.release({ runId, tenantId });
+    } catch (error) {
+      this.report(error, { runId });
+    }
+  }
+
+  private countFinished(run: RunRecord): void {
+    const labels = { assistant: run.assistant, revision: run.revision?.id ?? '' };
+    this.metrics.count('nexus_server_runs_finished_total', { ...labels, status: run.status });
+    if (run.durationMs !== undefined) {
+      this.metrics.observe('nexus_server_run_duration_seconds', labels, run.durationMs / 1000);
+    }
+  }
+
   private async record(runId: string, type: string, data: unknown): Promise<RunEvent | undefined> {
     try {
       return await this.events.append(runId, { type, at: this.now().toISOString(), data });
@@ -408,18 +864,27 @@ export class RunManager {
   private async settle(
     runId: string,
     status: RunStatus,
-    fields: Partial<Pick<RunRecord, 'output' | 'error' | 'interrupt'>> = {},
+    fields: Partial<
+      Pick<RunRecord, 'output' | 'error' | 'interrupt' | 'startedAt' | 'finishedAt' | 'worker' | 'attempt'>
+    > & { addCost?: number } = {},
   ): Promise<RunRecord> {
     const current = await this.state.get<RunRecord>(RUNS, runId);
     // A cancelled run stays cancelled: its executor may still be unwinding, and the outcome a client
     // already saw must not change underneath it. A failed one may still be recovered and re-run.
     if (current?.status === 'cancelled' && status !== 'cancelled') return current;
+    const { addCost, ...rest } = fields;
     const next: RunRecord = {
       ...(current ?? { id: runId, assistant: 'unknown', status, createdAt: this.now().toISOString() }),
-      ...fields,
+      ...rest,
       status,
       updatedAt: this.now().toISOString(),
     } as RunRecord;
+    // The first start is the one that counts: a retry or a hand-off does not reset the clock.
+    if (current?.startedAt) next.startedAt = current.startedAt;
+    if (addCost) next.cost = (current?.cost ?? 0) + addCost;
+    if (next.finishedAt && next.startedAt) {
+      next.durationMs = Math.max(0, Date.parse(next.finishedAt) - Date.parse(next.startedAt));
+    }
     await this.state.put(RUNS, runId, next);
     return next;
   }
@@ -462,9 +927,13 @@ function randomId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
+    const timer = setTimeout(resolve, Math.max(0, ms));
     if (typeof timer === 'object') timer.unref?.();
   });
 }

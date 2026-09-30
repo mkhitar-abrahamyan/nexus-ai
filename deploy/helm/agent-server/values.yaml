@@ -1,0 +1,101 @@
+# The image built from deploy/app, with your assistants in it.
+image:
+  repository: ghcr.io/your-org/agent-server
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Where replicas share threads, runs, events, the queue, deployments, and tenant limits.
+redis:
+  # Runs a single Redis in the release, for trying it out. Turn it off and set url or existingSecret
+  # for a managed or replicated Redis.
+  deploy: true
+  # Used when deploy is false and existingSecret is empty.
+  url: ""
+  # A Secret holding the URL, under secretKey.
+  existingSecret: ""
+  secretKey: redis-url
+  storage: 1Gi
+
+# A shared bearer token for every request, from an existing Secret. Leave empty to serve without
+# authentication, which suits a private cluster only. Replace the hook in server.mjs for real identity.
+auth:
+  existingSecret: ""
+  tokenKey: server-token
+
+# The tier that accepts runs, serves reads and streams, and runs the canary guard.
+api:
+  replicas: 2
+  # Watches canaries and rolls back regressions; steps such as "0.25,0.5" promote the ones that hold up.
+  canaryGuard: true
+  canarySteps: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  env: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# The pool that claims queued runs. Autoscaled on the queue unless autoscaling.mode is none.
+worker:
+  replicas: 1
+  # Runs each worker executes at once. The autoscaler sizes the pool by it.
+  concurrency: 4
+  # How long a draining worker lets runs finish before handing them to another worker.
+  drainTimeoutMs: 25000
+  # Must be longer than drainTimeoutMs.
+  terminationGracePeriodSeconds: 45
+  resources:
+    requests:
+      cpu: 500m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  env: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# keda: reads GET /scaling through KEDA's metrics-api scaler, with no Prometheus needed.
+# hpa: a HorizontalPodAutoscaler on nexus_server_queue_load from Prometheus Adapter.
+# none: a fixed worker.replicas.
+autoscaling:
+  mode: keda
+  minReplicas: 1
+  maxReplicas: 20
+  pollingInterval: 15
+  cooldownPeriod: 120
+  scaleDownStabilizationSeconds: 120
+
+# Limits every tenant is held to; leave empty for none. Set per-tenant limits in server.mjs.
+tenants:
+  maxActiveRuns: ""
+  runsPerMinute: ""
+  dailyBudgetUsd: ""
+
+metrics:
+  # Answers /metrics and /scaling without credentials, for scrapers and KEDA inside the cluster.
+  # The ingress below never routes them.
+  public: true
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  host: agents.example.com
+  annotations: {}
+  tls: []
+
+podDisruptionBudget:
+  enabled: true

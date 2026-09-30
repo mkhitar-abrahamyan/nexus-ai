@@ -1,6 +1,13 @@
 import { OperationDuplicateError } from '../operations/errors.js';
 import { assertSerializableRecord } from '../operations/serialization.js';
-import { TERMINAL_OPERATION_STATUSES, type OperationRecord, type OperationStore } from '../types/operations.js';
+import {
+  TERMINAL_OPERATION_STATUSES,
+  type OperationRecord,
+  type OperationStatus,
+  type OperationStore,
+  type OperationStoreFilter,
+  type OperationStoreStats,
+} from '../types/operations.js';
 import {
   isSqliteUniqueViolation,
   quoteSqliteTable,
@@ -154,6 +161,52 @@ export class SqliteOperationStore<TResult = unknown> implements OperationStore<T
   /** Every record, oldest first. */
   async list(): Promise<Array<OperationRecord<TResult>>> {
     return this.many(`SELECT doc FROM ${this.table} ORDER BY created_at, id`, []);
+  }
+
+  /** Queued records no worker holds, oldest first, in one indexed query. */
+  async listQueued(limit: number, filter?: OperationStoreFilter): Promise<Array<OperationRecord<TResult>>> {
+    const params: Array<string | number> = [new Date().toISOString()];
+    let kind = '';
+    if (filter?.kindPrefix) {
+      params.push(filter.kindPrefix, filter.kindPrefix);
+      kind = ' AND substr(kind, 1, length(?)) = ?';
+    }
+    params.push(limit);
+    return this.many(
+      `SELECT doc FROM ${this.table}
+       WHERE status = 'queued' AND (lease_expires_at IS NULL OR lease_expires_at <= ?)${kind}
+       ORDER BY created_at, id
+       LIMIT ?`,
+      params,
+    );
+  }
+
+  /** Counts unfinished records by status in one grouped query. */
+  async stats(now: string, filter?: OperationStoreFilter): Promise<OperationStoreStats> {
+    const params: Array<string | number> = [now];
+    let kind = '';
+    if (filter?.kindPrefix) {
+      params.push(filter.kindPrefix, filter.kindPrefix);
+      kind = ' AND substr(kind, 1, length(?)) = ?';
+    }
+    const rows = (await this.client.all(
+      `SELECT status, count(*) AS count,
+         min(CASE WHEN status = 'queued' THEN created_at END) AS oldest,
+         sum(CASE WHEN status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= ?) THEN 1 ELSE 0 END) AS lapsed
+       FROM ${this.table}
+       WHERE status NOT IN (${TERMINAL})${kind}
+       GROUP BY status`,
+      params,
+    )) as Array<{ status: OperationStatus; count: number; oldest: string | null; lapsed: number }>;
+    const byStatus: Partial<Record<OperationStatus, number>> = {};
+    let oldestQueuedAt: string | undefined;
+    let lapsedLeases = 0;
+    for (const row of rows) {
+      byStatus[row.status] = Number(row.count);
+      if (row.oldest && (!oldestQueuedAt || row.oldest < oldestQueuedAt)) oldestQueuedAt = row.oldest;
+      lapsedLeases += Number(row.lapsed);
+    }
+    return { byStatus, ...(oldestQueuedAt ? { oldestQueuedAt } : {}), lapsedLeases };
   }
 
   /** Deletes finished records last updated before a cutoff, returning how many went. */

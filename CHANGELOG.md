@@ -4,6 +4,62 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Deployment at scale, self-managed. Running assistants as a service without a hosted platform:
+revisions and canaries, a worker pool that scales on its queue, and limits per tenant.
+
+### Added
+
+- **Revisions and canaries** on `nexus-ai-pro/server/deployments`. `Deployments.assistant()` serves
+  several revisions of an assistant from one image; the traffic split is recorded in the server's
+  state store and changed with `canary()`, `split()`, `promote()`, and `rollback()`, each kept in a
+  history with who and why, and guarded by an expected version. New threads and stateless runs are
+  split by a stable hash, a thread keeps its revision while that revision takes traffic, and every
+  run records its revision, share, reason, and the deployment version.
+- **A canary guard**: `watchCanaries()` compares each canary with the live revision over the same
+  window, rolls it back when its error rate, latency, or cost regressed, and moves one that holds up
+  through its `steps` to promotion. `compareRuns()` on `nexus-ai-pro/insights` is the comparison,
+  lifted out of `detectRegressions()`.
+- **A worker queue** in the agent server: with `queue`, a replica runs at most `concurrency` runs and
+  leaves the rest queued for the next free worker; `claim: false` makes an API replica. Replicas take
+  over lapsed runs every `recoverEveryMs`. `drain()` answers `/health` with `503`, stops claiming, and
+  hands runs still going after its timeout to another worker without using a retry.
+- **Scaling signals**: `GET /scaling` as JSON and `GET /metrics` in Prometheus text — queued and running
+  runs across the deployment, their load, the oldest wait, lapsed leases, each replica's capacity, and
+  run counts and latency per revision. `metrics: { public: true }` serves them to in-cluster scrapers.
+- **Kubernetes and Helm**: `deploy/app` is one image run as an API, a worker, or both, configured from
+  the environment; `deploy/kubernetes` has the manifests with a KEDA `ScaledObject` and an HPA
+  alternative; `deploy/helm/agent-server` is the chart. The clean-install test runs the template against
+  the packed package.
+- **Tenant limits** on `nexus-ai-pro/server/tenancy`: `tenantLimits()` holds each tenant to its active
+  runs, its runs per window, and its spending per period, answered with `429` and `Retry-After`.
+  `MemoryTenantUsage`, and `RedisTenantUsage` with atomic scripts so replicas share one set of limits.
+  Assistants record spending with `context.recordCost()`; `GET /usage` reports it.
+- **Replica health**: with `deployments`, each replica heartbeats its runs, capacity, drain state, and
+  revisions, readable from `GET /replicas`.
+- **A deployments view** in the studio: traffic splits and history, each revision's runs, error rate,
+  and latency since the last change, replicas, the queue, and tenant usage, with canary, promote, and
+  rollback for admins.
+- **`nexus deploy`**: `status`, `canary`, `promote`, and `rollback` against a running server, for the
+  pipeline that rolls out an image.
+- Operation queues: `OperationRunner.enqueue()`, `claimQueued()`, and `release()`; `listQueued()` and
+  `stats()` on every operation store, and `operationStats()`.
+- Run records gain `revision`, `startedAt`, `finishedAt`, `durationMs`, `cost`, `worker`, and `attempt`.
+
+### Changed
+
+- `GET /health` is answered without authentication, so a load balancer's or Kubernetes' probe reaches
+  it.
+- A worker never takes over an operation whose lease another worker still holds.
+- `RedisStoreLikeClient` declares `set()` with its expiry and `del()` with one key, the shapes an
+  `ioredis` client satisfies as it is.
+- The last nine guides are rewritten for readability.
+- `nexus-ai-pro-studio` requires nexus-ai-pro 1.24 or newer.
+
+### Fixed
+
+- The deployment templates run. The Dockerfile started a file the build never produced, and the
+  example server ignored `REDIS_URL`, so its replicas shared nothing.
+
 ## [1.23.0] - 2026-09-30
 
 The team engineering platform. The studio becomes something a team shares, and it starts finding

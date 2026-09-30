@@ -25,23 +25,32 @@ await server.start();
 createServer(toNodeListener(server)).listen(8080);
 ```
 
-`createAgentServer()` returns an `AgentServer`: `handle(request)` answers one `Request`, and `runs`
-and `cron` expose the pieces behind it. `start()` re-claims runs abandoned by a crashed worker and
-starts the scheduler; `stop()` stops the scheduler and leaves runs in flight to finish.
+`createAgentServer()` returns an `AgentServer`:
+
+| Member | What it does |
+| --- | --- |
+| `handle(request)` | Answers one `Request`. This is the whole HTTP surface. |
+| `runs`, `cron` | The run manager and the scheduler behind it. |
+| `start()` | Re-claims runs a crashed worker left, starts the scheduler and the worker loop, and starts heartbeating. |
+| `stop()` | Stops all of that. Runs in flight finish. |
+| `drain()` | Prepares the replica to shut down. See [Workers and the queue](#workers-and-the-queue). |
+| `scaling()` | The numbers an autoscaler reads, as `GET /scaling` reports them. |
 
 `AgentServerOptions` takes:
 
 - the `assistants`, by id;
 - everything the run manager takes: the state store, the event log, the operation runner's settings,
-  the busy policy, and the timeouts;
+  the `queue`, `recoverEveryMs`, the `tenants` limits, the busy policy, and the timeouts;
 - the HTTP settings: `basePath`, `authenticate`, `allowAnonymous`, `scopes`, `cron` with the jobs that
-  exist from startup, and `heartbeatMs` for live streams.
+  exist from startup, and `heartbeatMs` for live streams;
+- `metrics`, which controls `GET /metrics` and `GET /scaling`;
+- `deployments` and `replicaMetadata`, for revisions and replica reports.
 
 ## The HTTP surface
 
 | Route | What it does |
 | --- | --- |
-| `GET /health` | Readiness, and which worker answered |
+| `GET /health` | Readiness, and which worker answered. Answered without credentials; `503` while draining |
 | `GET /assistants`, `GET /assistants/:id` | What this server serves, and what each one supports |
 | `POST /threads`, `GET /threads`, `GET /threads/:id`, `DELETE /threads/:id` | Conversations |
 | `GET /threads/:id/state` | The assistant's state for a thread |
@@ -51,9 +60,15 @@ starts the scheduler; `stop()` stops the scheduler and leaves runs in flight to 
 | `POST /runs/:id/cancel` | Cancel, including a run another replica is executing |
 | `GET /runs/:id/events` | The event stream, resumable with `Last-Event-ID` |
 | `POST /crons`, `GET /crons`, `DELETE /crons/:id` | Scheduled runs |
+| `GET /metrics`, `GET /scaling` | The queue and this replica, as Prometheus text and as JSON |
+| `GET /usage` | The caller's tenant usage, when `tenants` is set |
+| `/deployments`, `/replicas` | Revisions, traffic splits, and replicas, when `deployments` is set |
 
 Mount them under a prefix with `basePath`. A run is accepted with `202` and a `RunRecord`; add
-`"stream": true` (or `?stream=true`) to start it and stream it in one request instead.
+`"stream": true` (or `?stream=true`) to start it and stream it in one request instead. Add
+`"revision"` to run one revision of an assistant that has several.
+
+The last three rows are covered in the [deployments guide](./deployments.md).
 
 ## Assistants
 
@@ -71,7 +86,20 @@ Two helpers build assistants:
 - `functionAssistant()` serves a plain function, which may return a value or yield events.
 
 An assistant receives an `AssistantRunContext`: the run id, the thread, an abort signal, the principal,
-and the run's metadata.
+the run's metadata, the attempt, and the revision serving it. Its `recordCost(usd)` records what the
+run spent, such as a model call's cost:
+
+```ts
+const answer = await ai.complete(request);
+await context.recordCost(answer.meta.cost?.amount ?? 0);
+```
+
+The amount is added to the run's `cost` and to its tenant's budget. A budget that stops runs in flight
+cancels the run there.
+
+An assistant can also have revisions. Its optional `route()` picks the revision for each run, and
+`revision()` returns one revision's assistant. `Deployments.assistant()` builds both; see the
+[deployments guide](./deployments.md).
 
 ## Runs are durable operations
 
@@ -91,6 +119,49 @@ it, and `RunRecord` and `RunStatus` are what it reports.
 - **Cancellation.** `POST /runs/:id/cancel` aborts a local run at once and is observed by another
   replica through its heartbeat. A cancelled run stays cancelled even if its executor finishes later.
 - **Timeouts.** `runTimeoutMs` expires a run that runs too long.
+
+A `RunRecord` also records how the run went:
+
+| Field | What it holds |
+| --- | --- |
+| `revision` | The revision that served it, its share of traffic, and why it was chosen. |
+| `startedAt`, `finishedAt` | When a worker first started it, and when it finished. |
+| `durationMs` | Time from the first start to the finish, across every attempt. |
+| `cost` | US dollars recorded through `recordCost()`, across every attempt. |
+| `worker`, `attempt` | The worker that ran its latest attempt, and which attempt that was. |
+
+## Workers and the queue
+
+By default, a run executes on the replica that accepted it. `queue` turns the replicas into a worker
+pool instead. `RunQueueOptions` has three fields:
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `concurrency` | 10 | Runs this replica executes at once. |
+| `claim` | true | Whether this replica claims queued runs. `false` makes an API replica that only accepts them. |
+| `pollMs` | 1 s | How often an idle worker looks for queued runs. |
+
+A replica with room starts a new run itself. Otherwise the run waits in the operation store, and the
+next free worker claims it. With a queue, each replica also takes over runs whose worker stopped, every
+`recoverEveryMs` (30 seconds by default). Without a queue, set `recoverEveryMs` to get the same.
+
+`GET /scaling` returns a `ScalingSnapshot`: queued and running runs across the deployment, their sum
+as `load`, the oldest queued run's wait, lapsed leases, and the answering replica's
+`ReplicaReport`. `GET /metrics` reports the same as Prometheus text, plus run counts and latency per
+revision. Both need a read scope unless `metrics: { public: true }`; `metrics: false` turns them off.
+
+`drain({ timeoutMs })` gets a replica ready to stop. `/health` answers `503`, the replica stops
+claiming, and new runs it accepts are queued. Runs in flight get `timeoutMs` (25 seconds by default)
+to finish. With a queue, the rest are handed back for another worker to continue. The `DrainResult`
+lists the runs that finished and the runs that were handed off. Call it on `SIGTERM`:
+
+```ts
+process.on('SIGTERM', async () => {
+  await server.drain();
+  await server.stop();
+  process.exit(0);
+});
+```
 
 ## A busy thread
 
@@ -138,14 +209,26 @@ it.
 `authenticate` turns a request into a `Principal`: a tenant, a user, and scopes. Returning nothing
 refuses the request as unauthenticated; returning a `Response` answers it directly, which is how a
 challenge or a redirect is returned. `allowAnonymous: false` refuses everything when no hook is
-configured, and `scopes` names the scope a read or a write route requires.
+configured. `GET /health` is always answered, because a probe carries no credentials.
+
+`scopes` names the scope each group of routes requires:
+
+| Scope | Routes |
+| --- | --- |
+| `read` | Reads, streams, `/usage`, and — unless public — `/metrics` and `/scaling`. |
+| `write` | Creating threads, runs, and cron jobs, and cancelling runs. |
+| `admin` | `/deployments` and `/replicas`. Defaults to a scope named `admin` whenever `authenticate` is set. |
+
+`tenants` enforces per-tenant limits on active runs, rate, and budget. Its contract is `TenantGate`,
+and `tenantLimits()` builds one. See the [deployments guide](./deployments.md#tenants).
 
 Every thread, run, and cron job records its tenant, and a request only ever sees its own tenant's
 resources. Another tenant's thread is a `404`, not a `403`, so the server does not even confirm it
 exists.
 
 Errors extend `ServerError` and have a stable code: `BadRequestError`, `UnauthorizedError`,
-`ForbiddenError`, `NotFoundError`, `ThreadBusyError`, and `AssistantCapabilityError`.
+`ForbiddenError`, `NotFoundError`, `ThreadBusyError`, `AssistantCapabilityError`, and
+`TenantLimitError`. An error with a `retryAfterSeconds` is answered with a `Retry-After` header.
 
 ## Where state lives
 
@@ -186,9 +269,15 @@ const app = express();
 app.use('/agents', toNodeListener(server, { origin: 'https://agents.example.com' }));
 ```
 
-`deploy/Dockerfile` and `deploy/compose.yaml` in the repository run two replicas behind Redis and an
-nginx gateway configured not to buffer event streams, which is the deployment the durability claims
-above are about.
+The repository's `deploy/` folder has a server configured from the environment, and everything to
+run it. `deploy/app` is one image that runs as an API, a worker, or both, shared through Redis.
+`deploy/compose.yaml` runs API replicas, a worker pool, Redis, and an nginx gateway that leaves event
+streams unbuffered. `deploy/kubernetes` and `deploy/helm` run the same on Kubernetes, with the worker
+pool autoscaled on the queue. The [deployments guide](./deployments.md#kubernetes-and-helm) explains
+them.
+
+`ServerDeployments` is the contract the server needs from a deployments registry. `Deployments` from
+`nexus-ai-pro/server/deployments` implements it.
 
 ## Calling a server
 
@@ -216,7 +305,8 @@ const graph = createGraph({ channels })
 - Recovery repeats the step a run died in — for graphs and workflows — or the whole run, for any
   other assistant. The repeated part should be idempotent — the run id makes a good key — or the run
   should be left at one attempt.
-- The `enqueue` policy waits in the request that is queued, so a queued run holds a connection.
+- The `enqueue` busy policy waits in the request that is queued, so a queued run holds a connection.
+  The worker `queue` does not: a run waiting for a worker holds nothing.
 - Cron resolution is one minute, and schedules are UTC.
 - Authentication is a hook, not an implementation: there is no bundled token format, user store, or
   session handling.
@@ -240,6 +330,7 @@ specific entry point that provides it.
 | `CronRecord` | interface | A scheduled run of an assistant. |
 | `CronScheduler` | class | Fires scheduled runs. |
 | `CronSchedulerOptions` | interface | Options for the cron scheduler. |
+| `DrainResult` | interface | What `drain()` did with the runs this replica was executing. |
 | `DueCronJob` | interface | A cron job that is due, with the slot it is due for. |
 | `ForbiddenError` | class | Raised when a principal is known but not allowed to do this. |
 | `fromStore` | function | Server state on top of a long-term store, so threads and runs live wherever memory already does. |
@@ -263,9 +354,12 @@ specific entry point that provides it.
 | `RunEventLog` | interface | Where run events are kept so a disconnected client can catch up. |
 | `RunManager` | class | Runs assistants, records threads and runs, and keeps the event log a client streams from. |
 | `RunManagerOptions` | interface | Options for the run manager. |
+| `RunQueueOptions` | interface | Runs in a queue that any replica's workers claim, instead of on the replica that accepted them. |
 | `RunRecord` | interface | A run of an assistant, whether or not it belongs to a thread. |
 | `RunStatus` | type | Where a run stands, as the server reports it. |
+| `ScalingSnapshot` | interface | The numbers an autoscaler reads, from `GET /scaling`. |
 | `ServerAssistant` | interface | Anything the server can run: a compiled graph, an agent, or a function. |
+| `ServerDeployments` | interface | What the server needs from a deployments registry: its routes read and change deployments, and `start()` hands it a report of this replica to heartbeat. |
 | `ServerError` | class | Base class for server errors. |
 | `ServerStateStore` | interface | Where threads and runs are recorded. |
 | `StartRunOptions` | interface | What a run needs to start. |

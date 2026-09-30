@@ -13,6 +13,7 @@ import { MemoryStore } from '../src/store/memory.js';
 import { END } from '../src/types/graph.js';
 import type { OperationRecord, OperationStore } from '../src/types/operations.js';
 import type { Store } from '../src/types/store.js';
+import { queueContract } from './operation-queue-contract.js';
 
 const database = () => new DatabaseSync(':memory:');
 
@@ -71,6 +72,12 @@ test('the SQLite operation store keeps the operation store contract', async () =
       name,
     );
   }
+});
+
+test('the SQLite operation store lists queued work and counts it for autoscaling', async () => {
+  const store = new SqliteOperationStore<string>(database());
+  await store.migrate();
+  await queueContract('sqlite', store);
 });
 
 test('SQLite enforces unique idempotency keys, and prunes finished records', async () => {

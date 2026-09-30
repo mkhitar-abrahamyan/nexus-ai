@@ -100,6 +100,7 @@ export {
   OperationExpiredError,
   OperationLeaseLostError,
   OperationNotFoundError,
+  OperationReleasedError,
   OperationSerializationError,
   OperationTransitionError,
 } from './operations/errors.js';
@@ -658,6 +659,8 @@ export type {
   OperationRetryConfig,
   OperationRunnerConfig,
   OperationStore,
+  OperationStoreFilter,
+  OperationStoreStats,
   OperationSubmitOptions,
   OperationWebhookConfig,
 } from './types/operations.js';

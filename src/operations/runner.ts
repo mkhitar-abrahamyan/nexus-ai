@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type {
   DurableOperationHandle,
   OperationContext,
+  OperationEnqueueOptions,
   OperationEvent,
   OperationExecutor,
   OperationProgress,
@@ -9,6 +10,7 @@ import type {
   OperationRetryConfig,
   OperationRunnerConfig,
   OperationStore,
+  OperationStoreFilter,
   OperationSubmitOptions,
 } from '../types/operations.js';
 import { isTerminalOperationStatus } from '../types/operations.js';
@@ -18,9 +20,11 @@ import {
   OperationExpiredError,
   OperationLeaseLostError,
   OperationNotFoundError,
+  OperationReleasedError,
 } from './errors.js';
 import { LocalOperationHandle, describeOperationError } from './handle.js';
 import { assertTransition, isClaimable } from './state-machine.js';
+import { isUnheldQueued, matchesFilter } from './stats.js';
 import { MemoryOperationStore } from './store.js';
 import { deliverOperationWebhook } from './webhooks.js';
 
@@ -48,6 +52,10 @@ export class OperationRunner<TResult = unknown> {
   private readonly heartbeatMs: number;
   private readonly now: () => Date;
   private operationCounter = 0;
+  /** Handles of operations this runner is executing, so `release()` can reach them. */
+  private readonly active = new Map<string, LocalOperationHandle<TResult>>();
+  /** Operations being handed back to the queue, which the execution loop settles as a release. */
+  private readonly releasing = new Set<string>();
 
   constructor(private readonly config: OperationRunnerConfig<TResult> = {}) {
     this.store = config.store ?? new MemoryOperationStore<TResult>();
@@ -73,9 +81,83 @@ export class OperationRunner<TResult = unknown> {
     executor: OperationExecutor<TResult>,
     options: OperationSubmitOptions = {},
   ): Promise<DurableOperationHandle<TResult>> {
+    const { record, existing } = await this.createRecord(options);
+    if (existing) return this.attachToRecord(record);
+    return this.startHandle(record, executor, options.signal);
+  }
+
+  /**
+   * Accepts an operation without running it, for a worker to claim.
+   *
+   * The record is stored as queued, and `claimQueued()` on any runner that shares the store runs it.
+   * That is how an API replica accepts work that a separate pool of workers executes. Resolves to
+   * the stored record, or to the one an `idempotencyKey` already names; read it again, or follow it
+   * with `submit()` under the same key, to see how it ends.
+   */
+  async enqueue(options: OperationEnqueueOptions = {}): Promise<OperationRecord<TResult>> {
+    return (await this.createRecord(options)).record;
+  }
+
+  /**
+   * Claims up to `limit` queued operations that no worker holds, oldest first, and runs them here.
+   *
+   * Each claim is a compare-and-set on the record, so several workers polling one store never run
+   * the same operation twice. Returns the handles of what this runner claimed; an empty list means the
+   * queue had nothing for it.
+   */
+  async claimQueued(
+    executor: OperationExecutor<TResult>,
+    limit = 1,
+    filter?: OperationStoreFilter,
+  ): Promise<Array<DurableOperationHandle<TResult>>> {
+    if (limit <= 0) return [];
+    const nowIso = this.now().toISOString();
+    const candidates = this.store.listQueued
+      ? await this.store.listQueued(limit, filter)
+      : queuedFromList((await this.store.list?.()) ?? [], nowIso, limit, filter);
+    const claimed: Array<DurableOperationHandle<TResult>> = [];
+
+    for (const record of candidates) {
+      if (claimed.length >= limit) break;
+      if (record.expiresAt && record.expiresAt <= nowIso) {
+        await this.settleExpired(record);
+        continue;
+      }
+      const running = await this.claim(record);
+      if (running) claimed.push(await this.startHandle(running, executor, undefined, true));
+    }
+    return claimed;
+  }
+
+  /**
+   * Hands an operation this runner is executing back to the queue, for another worker to continue.
+   *
+   * The executor's signal is aborted with an `OperationReleasedError`, and the record returns to
+   * `queued` as a new attempt that does not count against `maxAttempts`. A draining worker gives its
+   * work away this way rather than failing it. Returns false when this runner is not executing the
+   * operation.
+   */
+  release(id: string): boolean {
+    const handle = this.active.get(id);
+    if (!handle) return false;
+    this.releasing.add(id);
+    if (handle.abort(new OperationReleasedError(id, this.owner))) return true;
+    this.releasing.delete(id);
+    return false;
+  }
+
+  /** Ids of the operations this runner is executing now, including any waiting to retry. */
+  get executing(): string[] {
+    return [...this.active.keys()];
+  }
+
+  /** Stores a new record, or finds the one an idempotency key already names. */
+  private async createRecord(
+    options: OperationSubmitOptions,
+  ): Promise<{ record: OperationRecord<TResult>; existing: boolean }> {
     if (options.idempotencyKey && this.store.findByIdempotencyKey) {
       const existing = await this.store.findByIdempotencyKey(options.idempotencyKey);
-      if (existing) return this.attachToRecord(existing);
+      if (existing) return { record: existing, existing: true };
     }
 
     const id = options.id?.trim() || this.createOperationId();
@@ -100,13 +182,12 @@ export class OperationRunner<TResult = unknown> {
       // Another worker created the operation between the lookup above and this write; replay it.
       if (error instanceof OperationDuplicateError && options.idempotencyKey && this.store.findByIdempotencyKey) {
         const winner = await this.store.findByIdempotencyKey(options.idempotencyKey);
-        if (winner) return this.attachToRecord(winner);
+        if (winner) return { record: winner, existing: true };
       }
       throw error;
     }
     await this.config.dispatcher?.dispatch(record as OperationRecord<unknown>);
-
-    return this.startHandle(record, executor, options.signal);
+    return { record, existing: false };
   }
 
   /** Reads the persisted record, without starting anything. */
@@ -186,13 +267,21 @@ export class OperationRunner<TResult = unknown> {
     record: OperationRecord<TResult>,
     executor: OperationExecutor<TResult>,
     externalSignal?: AbortSignal,
+    claimed = false,
   ): Promise<DurableOperationHandle<TResult>> {
     const handle = new LocalOperationHandle<TResult>(record.id, {
       now: this.now,
       onEvent: (event) => {
+        // A release is a hand-off to another worker, so receivers must not hear of a failure.
+        if (event.type === 'failed' && event.error.name === 'OperationReleasedError') return;
         void this.emitWebhook(event);
       },
     });
+    this.active.set(record.id, handle);
+    const forget = (): void => {
+      if (this.active.get(record.id) === handle) this.active.delete(record.id);
+    };
+    void handle.result().then(forget, forget);
 
     if (externalSignal) {
       const onAbort = (): void => void handle.cancel(abortReason(externalSignal));
@@ -204,7 +293,7 @@ export class OperationRunner<TResult = unknown> {
       );
     }
 
-    void this.execute(record, executor, handle);
+    void this.execute(record, executor, handle, claimed);
     return this.decorate(handle);
   }
 
@@ -212,15 +301,22 @@ export class OperationRunner<TResult = unknown> {
     initial: OperationRecord<TResult>,
     executor: OperationExecutor<TResult>,
     handle: LocalOperationHandle<TResult>,
+    preclaimed = false,
   ): Promise<void> {
     let record = initial;
+    let alreadyClaimed = preclaimed;
     const retry = this.config.retry ?? {};
     const deadline = this.config.timeoutMs === undefined ? undefined : Date.now() + this.config.timeoutMs;
 
     while (true) {
       if (handle.status() === 'cancelled') return;
+      if (this.releasing.has(record.id)) {
+        await this.persistReleased(record, handle);
+        return;
+      }
 
-      const claimed = await this.claim(record);
+      const claimed = alreadyClaimed ? record : await this.claim(record);
+      alreadyClaimed = false;
       if (!claimed) {
         // Another worker owns it. The local handle stops here rather than racing.
         handle.settleFailure(new OperationLeaseLostError(record.id, record.lease?.owner ?? 'unknown'));
@@ -248,6 +344,12 @@ export class OperationRunner<TResult = unknown> {
         await this.persistCancelled(record);
         return;
       }
+      // An executor that finished anyway keeps its result: re-queueing it would run the work twice.
+      if (!outcome.ok && this.releasing.has(record.id)) {
+        await this.persistReleased(record, handle);
+        return;
+      }
+      this.releasing.delete(record.id);
 
       if (outcome.ok) {
         await this.persistSuccess(record, outcome.value);
@@ -292,6 +394,15 @@ export class OperationRunner<TResult = unknown> {
     const current = (await this.store.read(record.id)) ?? record;
     if (isTerminalOperationStatus(current.status)) return undefined;
     if (!isClaimable(current.status) && current.status !== 'running') return undefined;
+    // A live lease held by another worker is never taken over here; lapsed ones are recovery's job.
+    if (
+      current.status === 'running' &&
+      current.lease &&
+      current.lease.owner !== this.owner &&
+      current.lease.expiresAt > this.now().toISOString()
+    ) {
+      return undefined;
+    }
 
     const running = this.advance(current, 'running');
     running.startedAt = running.startedAt ?? running.updatedAt;
@@ -404,6 +515,33 @@ export class OperationRunner<TResult = unknown> {
     if (cancelled.status === 'cancelled') cancelled.completedAt = cancelled.updatedAt;
     const written = await this.store.update(cancelled, current.sequence);
     if (written && cancelled.status === 'cancelling') await this.persistCancelled(cancelled);
+  }
+
+  /**
+   * Puts a released operation back in the queue and settles the local handle.
+   *
+   * A running record becomes a new attempt, with one more allowed, so the worker that claims it
+   * knows to continue from where this one stopped and the hand-off costs nothing from the retry
+   * budget.
+   */
+  private async persistReleased(
+    record: OperationRecord<TResult>,
+    handle: LocalOperationHandle<TResult>,
+  ): Promise<void> {
+    this.releasing.delete(record.id);
+    let current = (await this.store.read(record.id)) ?? record;
+    if (current.status === 'running') {
+      const retrying = this.advance(current, 'retrying');
+      retrying.lease = undefined;
+      retrying.attempt = current.attempt + 1;
+      retrying.maxAttempts = current.maxAttempts + 1;
+      if (await this.store.update(retrying, current.sequence)) current = retrying;
+    }
+    if (current.status === 'retrying') {
+      const queued = this.advance(current, 'queued');
+      await this.store.update(queued, current.sequence);
+    }
+    handle.settleFailure(new OperationReleasedError(record.id, this.owner));
   }
 
   private async settleDeadLetter(record: OperationRecord<TResult>, error: unknown, deadLettered = true): Promise<void> {
@@ -526,6 +664,19 @@ export class OperationRunner<TResult = unknown> {
     this.operationCounter += 1;
     return `op-${Date.now().toString(36)}-${this.operationCounter}-${randomBytes(3).toString('hex')}`;
   }
+}
+
+/** `listQueued()` for a store that can only list everything. */
+function queuedFromList<TResult>(
+  records: ReadonlyArray<OperationRecord<TResult>>,
+  now: string,
+  limit: number,
+  filter?: OperationStoreFilter,
+): Array<OperationRecord<TResult>> {
+  return records
+    .filter((record) => isUnheldQueued(record, now) && matchesFilter(record, filter))
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
+    .slice(0, limit);
 }
 
 function isRetryable(error: unknown, retry: OperationRetryConfig): boolean {

@@ -2,32 +2,95 @@
 
 <!-- covers:  -->
 
-The `nexus` command ships with the package. It is a thin layer over the library — scanning files, listing models, running and gating evaluations, reading traces, and printing the Postgres schema — and no library entry point imports it.
+The package installs a `nexus` command. It is a thin layer over the library, for the terminal and for
+CI scripts. No library entry point imports it.
 
-## CLI
+```bash
+nexus scan src --json
+nexus eval run eval.mjs --out candidate.json --baseline baseline.json --fail-on-regression
+nexus traces list --store runs.jsonl --status error --since 2026-09-20T00:00:00Z
+nexus deploy canary support 2026-09-30 10 --url https://agents.internal
+```
 
-The package installs a `nexus` command:
+## The commands
+
+| Command | What it does |
+| --- | --- |
+| `nexus scan` | Checks files for secrets, PII, and prompt-injection patterns. |
+| `nexus models` | Lists the bundled model registry. |
+| `nexus optimize` | Previews token optimization for a request or a prompt file. |
+| `nexus eval` | Runs JSON or JS eval cases. |
+| `nexus eval run`, `compare`, `gate` | Run an evaluation module to an experiment file, compare two, and fail a build only on a regression beyond noise. |
+| `nexus traces list`, `show`, `export` | Read a JSONL trace file, or any trace store a module exports. |
+| `nexus db sql` | Prints the Postgres schema for the adapters you use. |
+| `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
+
+`nexus help` prints every flag.
+
+## Scanning, models, and optimization
 
 ```bash
 nexus scan src --json
 nexus models --provider deepseek
 nexus optimize prompt.txt --model gpt-5.4-mini --max-input-tokens 4000
+```
+
+`nexus scan` exits 1 when it finds something, unless you pass `--no-fail`. It never prints a matched
+value unless you ask with `--reveal-values`, in an interactive terminal.
+
+## Evaluation
+
+```bash
 nexus eval examples/cli-eval.json
 nexus eval run eval.mjs --out candidate.json --baseline baseline.json --fail-on-regression
+nexus eval gate baseline.json candidate.json
+```
+
+- An eval file exports `{ cases, client }` or `{ cases, config }`. JSON cases may use `expected`,
+  `contains`, and a `match` of `includes`, `exact`, or `regex`.
+- A module for `eval run` exports `{ target, dataset, evaluators }`, and optionally a summary and options.
+- `eval gate` exits 1 when a metric got worse beyond noise, a new failure appeared, or the datasets
+  differ.
+
+## Traces and the database
+
+```bash
 nexus traces list --store runs.jsonl --status error --since 2026-09-20T00:00:00Z
+nexus traces show trace-123 --store store.mjs
 nexus db sql --adapters operations,traces | psql "$DATABASE_URL"
 ```
 
-CLI commands are intentionally thin wrappers around library modules:
+`--store` takes a JSONL file, or a module that exports a trace store as `{ store }`, such as a
+Postgres store over your own pool. `nexus db sql` prints the schema rather than applying it, so it
+needs no database driver and goes through your own migration tooling.
 
-- `nexus scan` checks files for secrets, PII, and prompt-injection patterns.
-- `nexus models` lists the bundled model registry.
-- `nexus eval` runs JSON or JS eval cases. `nexus eval run`, `compare`, and `gate` run an evaluation
-  module to an experiment file and fail a build only on a regression beyond noise.
-- `nexus traces list`, `show`, and `export` read a JSONL trace file, or any trace store a module
-  exports — a Postgres store over your own pool, for instance.
-- `nexus db sql` prints the Postgres schema for the adapters you use, for your own migration tooling.
-- `nexus optimize` previews token optimization for a request or prompt file.
+## Deployments
 
-Every command takes `--json`. A usage mistake exits with 2 and a failed check with 1, so a CI script
-can tell them apart. The newer commands load their code on demand, so `nexus scan` starts no slower.
+`nexus deploy` talks to a running [agent server](./server.md). A pipeline uses it to move traffic
+onto a new revision after it rolls out the image:
+
+```bash
+export NEXUS_SERVER_URL=https://agents.internal NEXUS_SERVER_TOKEN=…
+nexus deploy canary support 2026-09-30 10 --reason "build 412"
+nexus deploy status support
+nexus deploy promote support 2026-09-30
+nexus deploy rollback support
+```
+
+| Command | What it does |
+| --- | --- |
+| `deploy status [assistant]` | Every deployment, or one with its revisions' runs and its history. |
+| `deploy canary <assistant> <revision> <percent>` | Gives a revision that share of new traffic. |
+| `deploy promote <assistant> <revision>` | Makes a revision live, with all the traffic. |
+| `deploy rollback <assistant> [--to revision]` | Pulls the canary, or undoes the last promotion. |
+
+`--url` and `--token` override the environment variables. `--reason` is recorded in the history.
+`--version` refuses the change when someone moved the deployment first. The server's admin scope
+guards every one of these. See the [deployments guide](./deployments.md) for what they do.
+
+## Exit codes
+
+Every command takes `--json`. A usage mistake exits 2, and a failed check or a refused request exits
+1, so a CI script can tell them apart. The newer commands load their code on demand, so `nexus scan`
+starts no slower.
+

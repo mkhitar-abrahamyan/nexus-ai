@@ -1,12 +1,12 @@
-# Two replicas of the agent server behind one Redis, which is what makes them one server:
-# threads and runs are shared state, a run whose replica dies is finished by the other, and an event
-# stream reconnects to whichever replica answers.
+# An API tier and a worker pool behind one Redis, which is what makes them one server: threads, runs,
+# events, and the queue are shared, a run whose worker dies is finished by another, and an event
+# stream reconnects to whichever API replica answers.
 #
-#   docker compose -f deploy/compose.yaml up --build --scale server=2
+#   docker compose -f deploy/compose.yaml up --build --scale worker=3
 #
-# Then kill a replica mid-run (`docker compose kill --signal SIGKILL server`) and watch the run
-# finish anyway: the lease lapses, the surviving replica claims it, and the client's event stream
-# resumes from the last id it saw.
+# Then kill a worker mid-run (`docker compose -f deploy/compose.yaml kill --signal SIGKILL worker`) and
+# watch the run finish anyway: its lease lapses and another worker takes it over. Stop one gracefully
+# (`docker compose stop worker`) and it drains instead, handing its runs to the others at once.
 services:
   redis:
     image: redis:7-alpine
@@ -19,15 +19,13 @@ services:
       timeout: 3s
       retries: 10
 
-  server:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+  # Accepts runs and queues them; serves reads, event streams, and deployments.
+  api:
+    build: ./app
     environment:
-      # Read by the server module to build its Redis-backed stores.
+      ROLE: api
       REDIS_URL: redis://redis:6379
-      NODE_ENV: production
-      PORT: 8080
+      CANARY_GUARD: "true"
     depends_on:
       redis:
         condition: service_healthy
@@ -35,9 +33,25 @@ services:
       - "8080"
     deploy:
       replicas: 2
+    stop_grace_period: 30s
     restart: unless-stopped
 
-  # One address in front of both replicas, so a client reconnecting can land on either.
+  # Claims queued runs, CONCURRENCY at a time. Scale this one with the queue.
+  worker:
+    build: ./app
+    environment:
+      ROLE: worker
+      REDIS_URL: redis://redis:6379
+      CONCURRENCY: "4"
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  # One address in front of the API replicas, so a client reconnecting can land on either.
   gateway:
     image: nginx:alpine
     ports:
@@ -45,7 +59,7 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - server
+      - api
 
 volumes:
   redis-data:

@@ -1,0 +1,58 @@
+{{- $fullname := include "agent-server.fullname" . -}}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+# Scrapes every replica, API and worker alike, through the Prometheus Operator.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "agent-server.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+---
+# Routes the public API. /metrics and /scaling are answered without credentials for the cluster, so
+# the ingress sends only the API routes the clients use.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "agent-server.labels" . | nindent 4 }}
+  annotations:
+    # Event streams must not be buffered or timed out.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          {{- range list "/threads" "/runs" "/assistants" "/crons" "/usage" "/deployments" "/replicas" "/health" }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port:
+                  name: http
+          {{- end }}
+{{- end }}

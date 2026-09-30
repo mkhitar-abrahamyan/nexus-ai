@@ -370,3 +370,30 @@ svg.meter rect.fill.over {
 .diff-del {
   color: var(--bad);
 }
+
+/* A traffic split: the live revision in the accent colour, canaries beside it. */
+.split {
+  display: flex;
+  min-width: 12rem;
+  height: 1.4rem;
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 0.75rem;
+  line-height: 1.4rem;
+}
+.split span {
+  flex-basis: 0;
+  min-width: 2.5rem;
+  padding: 0 0.4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.split .live {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+.split .canary {
+  background: var(--warn, #d08700);
+  color: #fff;
+}

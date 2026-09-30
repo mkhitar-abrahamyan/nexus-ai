@@ -2,20 +2,29 @@
 
 <!-- covers: ./prompts ./prompts/client ./prompts/registry ./prompts/file ./prompts/redis -->
 
-Prompts that ship like code: templates whose variables are typed from their text, versions derived from their content, labels such as `staging` and `production` that move only when their gates agree, and a serving client that keeps answering through a registry outage. The family is split by what a process does, so each pays only for its part:
+Prompts that ship like code:
+
+- **Templates** whose variables are typed from their text.
+- **Versions** derived from their content.
+- **Labels**, such as `staging` and `production`, that move only when their gates agree.
+- **A serving client** that keeps answering through a registry outage.
+
+The family is split by what a process does, so each process pays only for its part:
 
 | Entry point | For | Size |
 | --- | --- | --- |
-| `nexus-ai-pro/prompts` | defining and rendering prompts | smallest |
-| `nexus-ai-pro/prompts/client` | serving prompts by label in an application | small |
-| `nexus-ai-pro/prompts/registry` | committing, promoting, comparing, and evaluating, in CI and admin scripts | larger |
-| `nexus-ai-pro/prompts/file`, `/prompts/redis`, `nexus-ai-pro/postgres/prompts` | where versions and labels live | each on its own |
+| `nexus-ai-pro/prompts` | Defining and rendering prompts. | Smallest. |
+| `nexus-ai-pro/prompts/client` | Serving prompts by label in an application. | Small. |
+| `nexus-ai-pro/prompts/registry` | Committing, promoting, comparing, and evaluating, in CI and admin scripts. | Larger. |
+| `nexus-ai-pro/prompts/file`, `/prompts/redis`, `nexus-ai-pro/postgres/prompts` | Where versions and labels live. | Each on its own. |
 
-None of them imports a third-party package, and `/prompts` and `/prompts/client` compile and run without Node's APIs.
+None of them imports a third-party package. `/prompts` and `/prompts/client` run without Node's APIs.
 
 ## Templates
 
-`definePrompt()` compiles a prompt once. Its variables are read from the template text, so `render()` is type-checked: a variable without a default is required, and a misspelled one is an error at compile time rather than a blank in production.
+`definePrompt()` compiles a prompt once. Its variables are read from the template text, so `render()`
+is type-checked. A variable without a default is required, and a misspelled one is a compile-time
+error, not a blank in production.
 
 ```ts
 import { definePrompt } from 'nexus-ai-pro/prompts';
@@ -36,21 +45,42 @@ const request = summarize.render({ kind: 'incident reports', ticket: { body: tex
 const response = await ai.complete(request);
 ```
 
-- `{{name}}` and `{{name.path}}` insert values; objects render as JSON. `{{> partial}}` includes a named fragment, and partials may include partials. An unknown partial, a cycle, or a malformed tag fails when the prompt is defined, not when it is first rendered.
-- A `placeholder` message inserts whole messages, such as the conversation so far. It is required unless `optional` is set.
-- `config` holds any completion field — model, temperature, output format, tools — and is versioned with the prompt. `overrides` in the render options replace it for one call, and `model` supplies a model when neither names one.
-- A missing variable throws `PromptRenderError` naming every missing variable. `missing: 'empty'` renders it as an empty string and `missing: 'keep'` leaves the tag in place.
-- The rendered request records `metadata.prompt`: the name, and the version, label, and A/B arm when it came from a registry. `TemplateVariables` gives the variable names of any template string, and `PromptInput` the render input of a prompt.
+| Syntax | What it does |
+| --- | --- |
+| `{{name}}`, `{{name.path}}` | Inserts a value. Objects render as JSON. |
+| `{{> partial}}` | Includes a named fragment. Partials may include partials. |
+| `{ placeholder: 'history' }` | Inserts whole messages, such as the conversation so far. Required unless `optional` is set. |
 
-`compilePrompt()` and `renderCompiled()` are the two halves of `render()`, for code that manages its own compiled cache. There is no escape syntax: to render a literal `{{`, pass it in through a variable.
+An unknown partial, a cycle, or a malformed tag fails when the prompt is defined, not when it is first
+rendered. There is no escape syntax: to render a literal `{{`, pass it in through a variable.
+
+- `config` holds any completion field: model, temperature, output format, tools. It is versioned with
+  the prompt. `overrides` in the render options replace it for one call, and `model` supplies a model
+  when neither names one.
+- A missing variable throws `PromptRenderError`, naming every missing variable. `missing: 'empty'`
+  renders it as an empty string, and `missing: 'keep'` leaves the tag in place.
+- The rendered request records `metadata.prompt`: the name, and, from a registry, the version, label,
+  and A/B arm.
+- `TemplateVariables` gives the variable names of any template string. `PromptInput` gives a prompt's
+  render input.
+
+`compilePrompt()` and `renderCompiled()` are the two halves of `render()`, for code that manages its
+own compiled cache.
 
 ## Versions
 
-A version is derived from content: `promptVersion()` hashes the name, messages, partials, configuration, and defaults, over a canonical encoding (`canonicalJson()`) so that key order never changes it. Metadata is not part of it. The same prompt has the same version in a test, in CI, and in production, and `prompt.version()` gives the version a registry will assign before anything is committed. Hashing uses Web Crypto, so the value is identical in Node, a browser, and an edge runtime.
+A version is derived from content. `promptVersion()` hashes the name, messages, partials,
+configuration, and defaults. It hashes a canonical encoding, `canonicalJson()`, so key order never
+changes it. Metadata is not part of it.
+
+So the same prompt has the same version in a test, in CI, and in production. `prompt.version()` gives
+the version a registry will assign, before anything is committed. Hashing uses Web Crypto, so the value
+is the same in Node, a browser, and an edge runtime.
 
 ## The registry
 
-`PromptRegistry`, from `nexus-ai-pro/prompts/registry`, stores versions and moves labels. It keeps no state of its own beyond a compiled cache, so any number of processes can share one store.
+`PromptRegistry`, from `nexus-ai-pro/prompts/registry`, stores versions and moves labels. It keeps no
+state beyond a compiled cache, so any number of processes can share one store.
 
 ```ts
 import { PromptRegistry, experimentGate, servedByGate } from 'nexus-ai-pro/prompts/registry';
@@ -70,29 +100,68 @@ const version = await registry.commit(summarize, { message: 'Tighter tone', auth
 await registry.promote('summarize', { from: 'staging', to: 'production', by: 'ada' });
 ```
 
-- `commit()` stores a definition under its content version. Committing unchanged content returns the existing version and records nothing, so a deploy can commit every prompt unconditionally.
-- `get()` reads by version, by label, or `latest`; `resolve()` and `render()` do the same for serving, choosing an A/B arm by key.
-- `label()` points a label at a version without gates, and `unlabel()` removes it. `promote()` moves a label only after every gate registered for the destination allows it, and throws `PromptPromotionError` with each gate's verdict otherwise; `force: true` promotes anyway and records which gates were overridden. `promote()` returns a `PromotionResult`, with `changed: false` when the label already served the version.
-- `rollback()` moves a label back to where it pointed before its last change.
-- `split()` shares a label's traffic between versions, for an A/B test. The first arm is the control, and `chooseVariant()` gives each key the same arm every time.
-- Every change is recorded: `history()` lists them newest first, optionally for one label, and `versions()`, `labels()`, and `names()` list the rest.
-- Labels are written with compare-and-set: when another process moved a label in the meantime, the change is refused with `PromptConflictError` instead of overwriting it.
-- `onChange` is called after each change, and `webhooks` post changes — by default `promote`, `rollback`, and `split` — signed like operation webhooks. `deliverPromptWebhook()` sends one, and a receiver checks it with `verifyPromptWebhook()`. A failing receiver is reported to `onWebhookError` and never fails the change.
+| Method | What it does |
+| --- | --- |
+| `commit()` | Stores a definition under its content version. Unchanged content returns the existing version and records nothing, so a deploy can commit every prompt. |
+| `get()` | Reads by version, by label, or `latest`. |
+| `resolve()`, `render()` | The same, for serving. They choose an A/B arm by key. |
+| `label()`, `unlabel()` | Point a label at a version without gates, or remove it. |
+| `promote()` | Moves a label once every gate for the destination allows it. |
+| `rollback()` | Moves a label back to where it pointed before its last change. |
+| `split()` | Shares a label's traffic between versions, for an A/B test. The first arm is the control. |
+| `history()` | Every change, newest first, optionally for one label. |
+| `versions()`, `labels()`, `names()` | List the rest. |
 
-Errors share `PromptError` and a stable `code`: `PromptDefinitionError`, `PromptRenderError`, `PromptNotFoundError`, `PromptConflictError`, and `PromptPromotionError`, whose `results` list each `GateResult`.
+A refused promotion throws `PromptPromotionError`, with each gate's verdict. `force: true` promotes
+anyway and records which gates were overridden. `promote()` returns a `PromotionResult`, with
+`changed: false` when the label already served the version.
+
+`chooseVariant()` gives each key the same A/B arm every time.
+
+Labels are written with compare-and-set. When another process moved a label in the meantime, the
+change is refused with `PromptConflictError`, not overwritten.
+
+### Hearing about changes
+
+- `onChange` is called after each change.
+- `webhooks` post changes — `promote`, `rollback`, and `split` by default — signed like operation
+  webhooks. `deliverPromptWebhook()` sends one, and a receiver checks it with `verifyPromptWebhook()`.
+- A failing receiver is reported to `onWebhookError`. It never fails the change.
+
+### Errors
+
+Every error extends `PromptError` and has a stable `code`:
+
+| Error | When |
+| --- | --- |
+| `PromptDefinitionError` | A definition is malformed. |
+| `PromptRenderError` | A variable is missing. |
+| `PromptNotFoundError` | No prompt, version, or label by that name. |
+| `PromptConflictError` | Another process moved the label first. |
+| `PromptPromotionError` | A gate refused. Its `results` list each `GateResult`. |
 
 ## Promotion gates
 
-A gate is a function of a `PromotionContext` — the version, the label it goes to, the version that label serves now, and the registry — that returns a `GateResult`. Two are bundled:
+A gate is a function of a `PromotionContext` that returns a `GateResult`. The context holds the
+version, the label it goes to, the version that label serves now, and the registry. Two gates are
+bundled:
 
-- `experimentGate()` requires a passing experiment for the exact version being promoted: one whose `metadata.prompt` names it, optionally with a given experiment name or dataset. `thresholds` sets a minimum mean per metric, `maxErrors` the examples that may fail outright, and `noRegression` compares with the newest experiment for the version being replaced and refuses a change that is worse beyond noise. `ExperimentGateOptions` lists them all.
-- `servedByGate()` requires the version to be what another label serves, such as staging before production.
+- `experimentGate()` requires a passing experiment for the exact version being promoted, one whose
+  `metadata.prompt` names it. `ExperimentGateOptions` can also require an experiment name or dataset.
+  `thresholds` sets a minimum mean per metric, and `maxErrors` the examples that may fail outright.
+  `noRegression` compares with the newest experiment for the version being replaced, and refuses a
+  change that is worse beyond noise.
+- `servedByGate()` requires the version to be what another label serves, such as staging before
+  production.
 
-Any function with the `PromotionGate` signature works as a gate: a human approval recorded elsewhere, a check on the model's price, or a freeze window.
+Any function with the `PromotionGate` signature works as a gate: a human approval recorded elsewhere,
+a check on the model's price, or a freeze window.
 
 ## Evaluating a version
 
-`evaluatePrompt()` is the headless playground. It renders a prompt for each example, runs it through a client, scores it with ordinary evaluators, and returns an experiment tagged with the prompt's name and version — the tag `experimentGate()` looks for.
+`evaluatePrompt()` is the headless playground. It renders a prompt for each example, runs it through a
+client, and scores it with ordinary evaluators. It returns an experiment tagged with the prompt's name
+and version: the tag `experimentGate()` looks for.
 
 ```ts
 import { evaluatePrompt } from 'nexus-ai-pro/prompts/registry';
@@ -105,13 +174,29 @@ const experiment = await evaluatePrompt(version, dataset, [contains(['refund'])]
 });
 ```
 
-`EvaluatePromptOptions` accepts everything `evaluate()` does, plus `variables` to map inputs to template variables and `render` options such as a model override, which is how one prompt is compared across models. With an evaluation `cache` and no `fingerprint`, the prompt version and render options are the fingerprint, so re-evaluating an unchanged version re-scores its stored outputs; pass your own when the client or model changes. The evaluation runtime is loaded only when `evaluatePrompt()` runs.
+`EvaluatePromptOptions` accepts everything `evaluate()` does, plus two fields:
 
-To version a prompt together with the instructions, tools, and skills around it, use the [context hub](./context-hub.md): a bundle pins prompt versions from this registry and is promoted the same way.
+- `variables` maps an example's inputs to template variables.
+- `render` passes render options, such as a model override. That is how one prompt is compared across
+  models.
+
+With an evaluation `cache` and no `fingerprint`, the prompt version and render options are the
+fingerprint. So re-evaluating an unchanged version re-scores its stored outputs. Pass your own
+fingerprint when the client or model changes. The evaluation runtime loads only when
+`evaluatePrompt()` runs.
+
+To version a prompt together with the instructions, tools, and skills around it, use the
+[context hub](./context-hub.md). A bundle pins prompt versions from this registry, and is promoted the
+same way.
 
 ## Comparing versions
 
-`diff()` on the registry, or `diffPrompts()` on two versions, compares messages line by line and partials, configuration, and defaults field by field. `formatPromptDiff()` renders the result for a terminal or a pull-request comment; `diffLines()` is the line diff underneath. A `PromptDiff` holds a `PromptMessageDiff` per message, with `PromptLineChange` lines, and a `PromptFieldChange` per changed field.
+`diff()` on the registry, or `diffPrompts()` on two versions, compares them. Messages are compared line
+by line; partials, configuration, and defaults field by field. `formatPromptDiff()` renders the result
+for a terminal or a pull-request comment, and `diffLines()` is the line diff underneath.
+
+A `PromptDiff` holds a `PromptMessageDiff` per message, made of `PromptLineChange` lines, and a
+`PromptFieldChange` per changed field.
 
 ## Serving
 
@@ -131,32 +216,62 @@ const prompts = new PromptClient({
 const request = await prompts.render('summarize', { kind: 'tickets', ticket }, { key: user.id });
 ```
 
-- A label is read from the source at most once per `ttlMs`. For `staleWhileRevalidateMs` after that, calls are answered from cache while the label refreshes in the background; concurrent refreshes share one request.
-- When the source is unreachable the last version seen keeps serving, however old, unless `serveStaleOnError` is off. A process that starts during an outage serves its `fallbacks`, the definitions bundled in code.
-- A split label picks its arm by `key`, so the same user sees the same version on every call.
-- `get()` returns a `ServedPrompt` saying which version was served and whether it came from cache, a stale cache, the source, or a fallback. `refresh()` rereads a label now and `clear()` forgets everything.
-- The source only needs `getLabel()` and `getVersion()`: any `PromptStore`, or a `PromptSource` of your own, such as an HTTP endpoint in front of the registry.
+How it stays fast and up:
+
+- A label is read from the source at most once per `ttlMs`.
+- For `staleWhileRevalidateMs` after that, calls are answered from cache while the label refreshes in
+  the background. Concurrent refreshes share one request.
+- When the source is unreachable, the last version seen keeps serving, however old, unless
+  `serveStaleOnError` is off.
+- A process that starts during an outage serves its `fallbacks`: the definitions bundled in code.
+- A split label picks its arm by `key`, so the same user sees the same version every time.
+
+`get()` returns a `ServedPrompt`. It says which version was served, and whether it came from cache, a
+stale cache, the source, or a fallback. `refresh()` rereads a label now, and `clear()` forgets
+everything.
+
+The source needs only `getLabel()` and `getVersion()`. Any `PromptStore` fits, or a `PromptSource` of
+your own, such as an HTTP endpoint in front of the registry.
 
 ## Stores
 
-A `PromptStore` holds versions, labels, and history. Versions are immutable and keyed by content, so saving one twice is harmless; labels are the only mutable state, and `setLabel()` compares before it writes.
+A `PromptStore` holds versions, labels, and history. Versions are immutable and keyed by content, so
+saving one twice is harmless. Labels are the only mutable state, and `setLabel()` compares before it
+writes.
 
 | Store | Entry point | Use it for |
 | --- | --- | --- |
-| `MemoryPromptStore` | `/prompts/registry` | tests, and prompts defined in code in one process |
-| `FilePromptStore` | `/prompts/file` | prompts in version control, one reviewable JSON file per version and label |
-| `RedisPromptStore` | `/prompts/redis` | sharing between processes; label compare-and-set is one Lua call when the client has `eval` |
-| `PostgresPromptStore` | `/postgres/prompts` | sharing between processes, with the schema from `promptStoreMigration()` |
+| `MemoryPromptStore` | `/prompts/registry` | Tests, and prompts defined in code in one process. |
+| `FilePromptStore` | `/prompts/file` | Prompts in version control: one reviewable JSON file per version and label. |
+| `RedisPromptStore` | `/prompts/redis` | Sharing between processes. Label compare-and-set is one Lua call when the client has `eval`. |
+| `PostgresPromptStore` | `/postgres/prompts` | Sharing between processes, with the schema from `promptStoreMigration()`. |
 
-`RedisPromptLikeClient` lists the Redis commands the adapter needs, in `ioredis` argument order, so no Redis client becomes a dependency. `MemoryPromptStoreOptions`, `RedisPromptStoreOptions`, and `PostgresPromptStoreOptions` configure history length, key prefixes, and table names.
+`RedisPromptLikeClient` lists the Redis commands the adapter needs, in `ioredis` argument order, so no
+Redis client becomes a dependency. `MemoryPromptStoreOptions`, `RedisPromptStoreOptions`, and
+`PostgresPromptStoreOptions` set the history length, key prefixes, and table names.
 
 ## Traces
 
-A model call wrapped with `traceModelClient()` from `nexus-ai-pro/tracing` records the rendered request's `metadata.prompt` on its run, so a trace answers which prompt version produced an output, and a trace query can filter on it.
+A model call wrapped with `traceModelClient()` from `nexus-ai-pro/tracing` records the rendered
+request's `metadata.prompt` on its run. So a trace answers which prompt version produced an output, and
+a trace query can filter on it.
 
 ## Types
 
-`PromptDefinition` is everything that defines a prompt, and `PromptVersion` a committed one with its version, variables, and provenance. Messages are `PromptMessage`: a `PromptMessageTemplate` or a `PromptMessagePlaceholder`, whose variable holds `PlaceholderMessages`. `PromptModelConfig` is the versioned request configuration, `RenderOptions` configures one render, and `RenderedPrompt` is the result, with its `PromptReference`. Labels are `PromptLabel`, split into `PromptVariant` arms, and history is a list of `PromptHistoryEntry` records with a `PromptHistoryAction`. `Prompt` and `PromptSpec` are what `definePrompt()` returns and takes, `CompiledPrompt` and `CompiledMessage` what `compilePrompt()` produces, and `ResolvedPrompt` what `resolve()` returns. `PromptRegistryOptions`, `PromptWebhookConfig`, and `PromptClientOptions` configure the registry and the client.
+| Type | What it is |
+| --- | --- |
+| `PromptDefinition` | Everything that defines a prompt. |
+| `PromptVersion` | A committed prompt, with its version, variables, and provenance. |
+| `PromptMessage` | A `PromptMessageTemplate`, or a `PromptMessagePlaceholder` whose variable holds `PlaceholderMessages`. |
+| `PromptModelConfig` | The versioned request configuration. |
+| `RenderOptions` | Configures one render. |
+| `RenderedPrompt`, `PromptReference` | The result of a render, and the reference it records. |
+| `PromptLabel`, `PromptVariant` | A label, and one arm of a split. |
+| `PromptHistoryEntry`, `PromptHistoryAction` | One recorded change, and what kind it was. |
+| `Prompt`, `PromptSpec` | What `definePrompt()` returns, and what it takes. |
+| `CompiledPrompt`, `CompiledMessage` | What `compilePrompt()` produces. |
+| `ResolvedPrompt` | What `resolve()` returns. |
+| `PromptRegistryOptions`, `PromptWebhookConfig`, `PromptClientOptions` | Configure the registry, its webhooks, and the client. |
 
 <!-- reference:start -->
 ## Reference

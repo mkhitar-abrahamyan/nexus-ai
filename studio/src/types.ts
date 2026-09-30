@@ -12,6 +12,8 @@ import type { DatasetStore, Experiment, ExperimentStore } from 'nexus-ai-pro/eva
 import type { ProposalInbox } from 'nexus-ai-pro/insights';
 import type { OperationStore } from 'nexus-ai-pro/operations';
 import type { PromptRegistry } from 'nexus-ai-pro/prompts/registry';
+import type { Deployments } from 'nexus-ai-pro/server/deployments';
+import type { TenantLimiter } from 'nexus-ai-pro/server/tenancy';
 import type { Run, RunQuery, TraceStore } from 'nexus-ai-pro/tracing';
 import type { StudioAuthenticator } from './auth.js';
 import type { StudioAuditLog, StudioCommentStore } from './journal.js';
@@ -135,8 +137,21 @@ export interface StudioClient {
   getCacheStats?(): unknown;
 }
 
-/** The part of an operation store the operations view uses. The view is hidden when the store cannot list. */
-export type StudioOperationStore = Pick<OperationStore<unknown>, 'list'>;
+/**
+ * The part of an operation store the operations view uses. The view is hidden when the store cannot
+ * list; `stats`, when the store has it, gives the deployments view its queue numbers in one query.
+ */
+export type StudioOperationStore = Pick<OperationStore<unknown>, 'list' | 'stats'>;
+
+/**
+ * The part of a deployments registry the deployments view uses. `Deployments` from
+ * `nexus-ai-pro/server/deployments`, built on the agent server's state store, satisfies it — no
+ * assistants needed, because the view reads and changes what the servers record.
+ */
+export type StudioDeployments = Pick<Deployments, 'list' | 'change' | 'replicas' | 'stats'>;
+
+/** The part of a tenant limiter the deployments view uses, to show each tenant's usage against its limits. */
+export type StudioTenants = Pick<TenantLimiter, 'report'>;
 
 /** The part of an asset store the assets view uses. */
 export interface StudioAssetStore {
@@ -192,6 +207,10 @@ export interface StudioSources {
   assets?: StudioAssetStore;
   /** Budgets shown against recorded cost. */
   budgets?: StudioBudget[];
+  /** The agent server's deployments: revisions, traffic splits, replica health, and canary results. */
+  deployments?: StudioDeployments;
+  /** Per-tenant limits, whose usage the deployments view shows. */
+  tenants?: StudioTenants;
 }
 
 /** Options for the studio server. */

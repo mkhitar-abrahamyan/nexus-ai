@@ -1,0 +1,36 @@
+# The alternative to keda.yaml: a HorizontalPodAutoscaler on an external metric from Prometheus
+# Adapter. Apply one or the other, not both. The adapter needs a rule that exposes the queue load;
+# every replica reports the same deployment-wide value, so aggregate with max, not sum:
+#
+#   externalRules:
+#     - seriesQuery: 'nexus_server_queue_load'
+#       metricsQuery: 'max(nexus_server_queue_load)'
+#       name:
+#         as: nexus_server_queue_load
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agent-server-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agent-server-worker
+  minReplicas: 1
+  maxReplicas: 20
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: nexus_server_queue_load
+        target:
+          type: AverageValue
+          # Keep in step with CONCURRENCY in worker.yaml.
+          averageValue: "4"

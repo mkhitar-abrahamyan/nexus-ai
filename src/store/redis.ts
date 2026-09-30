@@ -17,10 +17,14 @@ import { cosine, matches, textOf } from './helpers.js';
 export interface RedisStoreLikeClient {
   /** Reads a key. */
   get(key: string): Promise<string | null>;
-  /** Writes a key, with `PX` and a TTL in milliseconds when the item expires. */
-  set(key: string, value: string, mode?: string, ttl?: number): Promise<unknown>;
-  /** Deletes keys. */
-  del(key: string | string[]): Promise<unknown>;
+  /**
+   * Writes a key, with `PX` and a TTL in milliseconds when the item expires, and with the key and
+   * value alone when it does not. Declared with the expiry, which is the shape an `ioredis` client
+   * satisfies as it is.
+   */
+  set(key: string, value: string, mode: 'PX', ttl: number): Promise<unknown>;
+  /** Deletes a key. */
+  del(key: string): Promise<unknown>;
   /** Adds to a set. */
   sadd(key: string, member: string): Promise<unknown>;
   /** Removes from a set. */
@@ -83,7 +87,8 @@ export class RedisStore implements Store {
     };
 
     const serialized = JSON.stringify(record);
-    if (options.ttlMs === undefined) await this.client.set(id, serialized);
+    if (options.ttlMs === undefined)
+      await (this.client.set as (key: string, value: string) => Promise<unknown>)(id, serialized);
     else await this.client.set(id, serialized, 'PX', Math.max(1, Math.round(options.ttlMs)));
 
     await this.client.sadd(this.namespaceKey(namespace), key);

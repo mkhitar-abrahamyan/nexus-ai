@@ -1,0 +1,116 @@
+# The API tier: accepts runs and queues them, serves reads, event streams, and deployments, and runs
+# the canary guard. Scale it for request volume; the worker pool is scaled for the queue.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-server-api
+  labels:
+    app.kubernetes.io/name: agent-server
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-server
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-server
+        app.kubernetes.io/component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        # The node user in the image; a numeric id is what lets the kubelet verify it is not root.
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: server
+          image: ghcr.io/your-org/agent-server:1.0.0
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ROLE
+              value: api
+            - name: PORT
+              value: "8080"
+            - name: CANARY_GUARD
+              value: "true"
+            - name: DRAIN_TIMEOUT_MS
+              value: "25000"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agent-server
+                  key: redis-url
+            - name: SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-server
+                  key: server-token
+                  optional: true
+          # Draining answers 503 here, which takes the pod out of the Service before it stops.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 1
+          # A TCP check, so a draining pod is not restarted for answering 503.
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 15
+            failureThreshold: 4
+          lifecycle:
+            # Give the endpoints a moment to drop the pod before SIGTERM starts the drain.
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-server-api
+  labels:
+    app.kubernetes.io/name: agent-server
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    app.kubernetes.io/name: agent-server
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agent-server-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-server
+      app.kubernetes.io/component: api

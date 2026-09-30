@@ -105,6 +105,25 @@ export class OperationLeaseLostError extends OperationError {
 }
 
 /**
+ * The reason a released operation's signal is aborted with.
+ *
+ * A release is a hand-off, not a failure: a draining worker gives the operation back to the queue so
+ * another worker continues it. An executor that sees this reason should stop without recording a
+ * failure.
+ */
+export class OperationReleasedError extends OperationError {
+  constructor(
+    /** The operation. */
+    public readonly operationId: string,
+    /** The worker that let it go. */
+    public readonly owner: string,
+  ) {
+    super(`Operation "${operationId}" was released by "${owner}" for another worker`, 'OPERATION_RELEASED');
+    this.name = 'OperationReleasedError';
+  }
+}
+
+/**
  * Raised by a store that enforces unique idempotency keys when a second record claims one.
  *
  * Two workers can both find no record for a key and both try to create one; a store that can say

@@ -1,0 +1,14 @@
+The agent server is starting: {{ .Values.api.replicas }} API replicas{{ if eq .Values.autoscaling.mode "none" }} and {{ .Values.worker.replicas }} workers{{ else }} and a worker pool autoscaled by {{ .Values.autoscaling.mode }} ({{ .Values.autoscaling.minReplicas }}–{{ .Values.autoscaling.maxReplicas }} workers, {{ .Values.worker.concurrency }} runs each){{ end }}.
+
+Reach it from your machine:
+
+  kubectl port-forward svc/{{ include "agent-server.fullname" . }}-api 8080:{{ .Values.service.port }}
+  curl localhost:8080/health
+  curl localhost:8080/scaling
+
+Start a canary on a tenth of the traffic, then watch the guard judge it:
+
+  curl -X POST localhost:8080/deployments/support \
+    -H 'content-type: application/json' \
+    -d '{"action":"canary","revision":"2026-09-30","weight":0.1}'
+  curl localhost:8080/deployments/support

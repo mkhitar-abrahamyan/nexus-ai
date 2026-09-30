@@ -1,0 +1,10 @@
+apiVersion: v2
+name: agent-server
+description: A self-hosted nexus-ai-pro agent server — an API tier and a worker pool that scales on its queue.
+type: application
+version: 0.1.0
+appVersion: "1.24.0"
+keywords:
+  - agents
+  - autoscaling
+  - keda

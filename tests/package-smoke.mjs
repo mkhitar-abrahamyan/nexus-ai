@@ -149,6 +149,8 @@ const imports = [
     ],
   },
   { specifier: 'nexus-ai-pro/server/remote', exports: ['createRemoteGraph'] },
+  { specifier: 'nexus-ai-pro/server/deployments', exports: ['Deployments', 'watchCanaries', 'bucket'] },
+  { specifier: 'nexus-ai-pro/server/tenancy', exports: ['tenantLimits', 'MemoryTenantUsage', 'RedisTenantUsage'] },
   {
     specifier: 'nexus-ai-pro/prompts',
     exports: ['definePrompt', 'promptVersion', 'compilePrompt', 'PromptRenderError'],

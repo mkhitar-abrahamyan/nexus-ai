@@ -209,6 +209,7 @@ const VIEWS = [
   { id: 'prompts', label: 'Prompts', show: (s) => s.prompts, render: renderPrompts },
   { id: 'contexts', label: 'Bundles', show: (s) => s.contexts, render: renderContexts },
   { id: 'costs', label: 'Costs', show: (s) => s.costs, render: renderCosts },
+  { id: 'deployments', label: 'Deployments', show: (s) => s.deployments, render: renderDeployments },
   { id: 'health', label: 'Health', show: (s) => s.health, render: renderHealth },
   { id: 'operations', label: 'Operations', show: (s) => s.operations || s.assets, render: renderOperations },
   { id: 'audit', label: 'Audit', show: (s) => s.audit, render: renderAudit },
@@ -1582,6 +1583,241 @@ async function renderOperations([status = '']) {
           assets.assets ? pretty(assets.assets) : '',
         ]
       : '',
+  );
+}
+
+// ── Deployments ─────────────────────────────────────────────────────
+
+/** A share from 0 to 1, as a whole percentage. */
+function share(value) {
+  return `${Math.round((value ?? 0) * 100)}%`;
+}
+
+/** How long ago an ISO time was, briefly. */
+function ago(value) {
+  const seconds = Math.max(0, (Date.now() - Date.parse(value)) / 1000);
+  if (seconds < 90) return `${Math.round(seconds)}s`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 3600)}h`;
+}
+
+/** A traffic split as a bar, the live revision last, with each share labelled. */
+function splitBar(deployment) {
+  const entries = Object.entries(deployment.traffic).sort(([a], [b]) =>
+    a === deployment.live ? 1 : b === deployment.live ? -1 : a.localeCompare(b),
+  );
+  return h(
+    'div',
+    { class: 'split', role: 'img', 'aria-label': entries.map(([id, weight]) => `${id} ${share(weight)}`).join(', ') },
+    entries.map(([id, weight]) =>
+      h(
+        'span',
+        {
+          class: id === deployment.live ? 'live' : 'canary',
+          style: `flex-grow: ${weight}`,
+          title: `${id}: ${share(weight)}`,
+        },
+        `${id} ${share(weight)}`,
+      ),
+    ),
+  );
+}
+
+async function renderDeployments([assistant]) {
+  const { deployments, replicas, queue, tenants } = await api('/api/deployments');
+  if (assistant) {
+    const deployment = deployments.find((item) => item.assistant === assistant);
+    if (!deployment) throw new Error(`No deployment for "${assistant}"`);
+    return renderDeployment(deployment, replicas);
+  }
+  view.replaceChildren(
+    h('h1', {}, 'Deployments'),
+    queue
+      ? h(
+          'p',
+          {},
+          h('span', { class: 'stat' }, h('b', {}, queue.byStatus.queued ?? 0), 'queued'),
+          h(
+            'span',
+            { class: 'stat' },
+            h('b', {}, (queue.byStatus.running ?? 0) + (queue.byStatus.retrying ?? 0)),
+            'running',
+          ),
+          h(
+            'span',
+            { class: 'stat' },
+            h('b', {}, queue.oldestQueuedAt ? ago(queue.oldestQueuedAt) : '—'),
+            'oldest wait',
+          ),
+          h('span', { class: 'stat' }, h('b', {}, queue.lapsedLeases), 'lapsed leases'),
+        )
+      : '',
+    deployments.length
+      ? table(
+          [
+            { label: 'Assistant', value: (d) => d.assistant },
+            { label: 'Live', value: (d) => d.live },
+            { label: 'Traffic', value: (d) => splitBar(d) },
+            { label: 'Version', num: true, value: (d) => d.version },
+            { label: 'Changed', value: (d) => (d.version ? when(d.updatedAt) : 'never') },
+          ],
+          deployments,
+          (d) => go(`#/deployments/${encodeURIComponent(d.assistant)}`),
+        )
+      : notice('No assistant has revisions yet. Serve one through Deployments.assistant() to deploy it here.'),
+    h('h2', {}, 'Replicas'),
+    replicas.length
+      ? table(
+          [
+            { label: 'Replica', value: (r) => r.metadata?.host ?? r.id },
+            { label: 'Role', value: (r) => r.metadata?.role ?? (r.claims ? 'worker' : 'api') },
+            { label: 'State', value: (r) => badge(r.draining ? 'draining' : 'healthy') },
+            {
+              label: 'In flight',
+              num: true,
+              value: (r) => (r.capacity === undefined ? r.inFlight : `${r.inFlight}/${r.capacity}`),
+            },
+            {
+              label: 'Revisions',
+              value: (r) =>
+                Object.entries(r.assistants)
+                  .map(([id, revisions]) => `${id}: ${revisions.join(', ') || '—'}`)
+                  .join(' · '),
+            },
+            { label: 'Heartbeat', value: (r) => `${ago(r.heartbeatAt)} ago` },
+            { label: 'Up since', value: (r) => when(r.startedAt) },
+          ],
+          replicas,
+        )
+      : notice('No replica has reported a heartbeat. A server reports itself when it is created with deployments.'),
+    tenants?.length
+      ? [
+          h('h2', {}, 'Tenants'),
+          table(
+            [
+              { label: 'Tenant', value: (t) => t.tenantId ?? '(none)' },
+              {
+                label: 'Active runs',
+                num: true,
+                value: (t) =>
+                  t.limits.maxActiveRuns === undefined ? t.activeRuns : `${t.activeRuns}/${t.limits.maxActiveRuns}`,
+              },
+              {
+                label: 'Rate',
+                value: (t) => (t.limits.rate ? `${t.limits.rate.runs} per ${t.limits.rate.windowMs / 1000}s` : '—'),
+              },
+              {
+                label: 'Spent',
+                num: true,
+                value: (t) =>
+                  t.limits.budget ? `${money(t.spend.usd)} of ${money(t.limits.budget.usd)}` : money(t.spend.usd),
+              },
+              { label: 'Resets', value: (t) => when(t.spend.resetsAt) },
+            ],
+            tenants,
+          ),
+        ]
+      : '',
+  );
+}
+
+function renderDeployment(deployment, replicas) {
+  const base = `/api/deployments/${encodeURIComponent(deployment.assistant)}`;
+  const known = new Set([
+    ...Object.keys(deployment.traffic),
+    ...deployment.stats.map((item) => item.revision).filter(Boolean),
+    ...replicas.flatMap((replica) => replica.assistants[deployment.assistant] ?? []),
+  ]);
+  const revisions = [...known].sort();
+  const revision = h(
+    'select',
+    {},
+    revisions.map((id) => h('option', { value: id, selected: id !== deployment.live }, id)),
+  );
+  const weight = h('input', { type: 'number', min: '1', max: '100', value: '10', size: '4' });
+  const reason = h('input', { type: 'text', placeholder: 'Why (recorded in the history)', size: '40' });
+  const output = h('div', {});
+  const change = (body) =>
+    action(output, async () => {
+      const result = await post(base, {
+        ...body,
+        expectedVersion: deployment.version,
+        ...(reason.value ? { reason: reason.value } : {}),
+      });
+      await route();
+      return result.deployment.traffic;
+    });
+
+  view.replaceChildren(
+    h('p', {}, h('a', { href: '#/deployments' }, '← Deployments')),
+    h('h1', {}, deployment.assistant),
+    h(
+      'p',
+      { class: 'muted' },
+      `Live: ${deployment.live} · version ${deployment.version}${deployment.canarySince ? ` · canary since ${when(deployment.canarySince)}` : ''}`,
+    ),
+    splitBar(deployment),
+    h('h2', {}, 'Revisions since the last change'),
+    deployment.stats.length
+      ? table(
+          [
+            { label: 'Revision', value: (r) => r.revision || '(none)' },
+            { label: 'Share', num: true, value: (r) => share(deployment.traffic[r.revision]) },
+            { label: 'Runs', num: true, value: (r) => r.runs },
+            { label: 'Failed', num: true, value: (r) => r.failed },
+            { label: 'Error rate', num: true, value: (r) => share(r.errorRate) },
+            { label: 'p50', num: true, value: (r) => (r.p50Ms === undefined ? '' : ms(r.p50Ms)) },
+            { label: 'p95', num: true, value: (r) => (r.p95Ms === undefined ? '' : ms(r.p95Ms)) },
+            { label: 'Mean cost', num: true, value: (r) => (r.meanCost === undefined ? '' : money(r.meanCost)) },
+          ],
+          deployment.stats,
+        )
+      : notice('No runs since the last change.'),
+    can('admin')
+      ? [
+          h('h2', {}, 'Change the split'),
+          h(
+            'form',
+            {
+              class: 'inline',
+              onsubmit: (event) =>
+                change({ action: 'canary', revision: revision.value, weight: Number(weight.value) / 100 })(event),
+            },
+            h('label', {}, 'Revision', revision),
+            h('label', {}, 'Share %', weight),
+            reason,
+            h('button', { class: 'primary' }, 'Canary'),
+            h(
+              'button',
+              { type: 'button', onclick: (event) => change({ action: 'promote', revision: revision.value })(event) },
+              'Promote',
+            ),
+            h('button', { type: 'button', onclick: (event) => change({ action: 'rollback' })(event) }, 'Roll back'),
+          ),
+          output,
+        ]
+      : '',
+    h('h2', {}, 'History'),
+    deployment.history.length
+      ? table(
+          [
+            { label: 'Version', num: true, value: (c) => c.version },
+            { label: 'When', value: (c) => when(c.at) },
+            { label: 'Action', value: (c) => badge(c.action) },
+            { label: 'Live', value: (c) => c.live },
+            {
+              label: 'Split',
+              value: (c) =>
+                Object.entries(c.traffic)
+                  .map(([id, w]) => `${id} ${share(w)}`)
+                  .join(' · '),
+            },
+            { label: 'By', value: (c) => c.by ?? '' },
+            { label: 'Why', value: (c) => c.reason ?? '' },
+          ],
+          deployment.history,
+        )
+      : notice('Nothing has changed since the servers started: the live revision takes all the traffic.'),
   );
 }
 

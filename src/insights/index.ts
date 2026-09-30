@@ -33,9 +33,12 @@ export {
   type PullRequestClient,
 } from './proposals.js';
 export {
+  type CompareRunsOptions,
+  compareRuns,
   type DetectRegressionsOptions,
   detectRegressions,
   type Regression,
   type RegressionMetric,
+  type RunSample,
   type TimeWindow,
 } from './regressions.js';

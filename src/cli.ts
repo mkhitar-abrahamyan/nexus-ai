@@ -77,6 +77,12 @@ async function main(): Promise<void> {
       await runDbCommand(subcommand, { positionals: args, flags: parsed.flags });
       return;
     }
+    case 'deploy': {
+      const [subcommand, ...args] = parsed.positionals;
+      const { runDeployCommand } = await import('./cli/deploy.js');
+      await runDeployCommand(subcommand, { positionals: args, flags: parsed.flags });
+      return;
+    }
     case 'optimize':
       await runOptimize(parsed);
       return;
@@ -439,12 +445,17 @@ Usage:
   nexus traces show <traceId> --store <runs.jsonl|store.mjs> [--json]
   nexus traces export --store <runs.jsonl|store.mjs> [--out runs.jsonl] [same filters as list]
   nexus db sql [--adapters operations,store,traces,evaluation,circuits,prompts] [--vector-dimensions 1536]
+  nexus deploy status [assistant] --url <server> [--token t] [--json]
+  nexus deploy canary <assistant> <revision> <percent> --url <server> [--reason r] [--version n]
+  nexus deploy promote <assistant> <revision> --url <server> [--reason r] [--version n]
+  nexus deploy rollback <assistant> [--to revision] --url <server> [--reason r] [--version n]
   nexus optimize [request.json|prompt.txt] [--model gpt-5-mini] [--max-input-tokens 4000] [--densify] [--json]
 
 Eval files can export { cases, client } or { cases, config }. JSON cases may use "expected", "contains", and "match": "includes" | "exact" | "regex".
 Evaluation modules for "eval run" export { target, dataset, evaluators, summary?, options? }.
 "eval gate" exits 1 when a metric got worse beyond noise, a new failure appeared, or the datasets differ.
-Trace store modules export any TraceStore as { store }, such as a PostgresTraceStore over the application's own pool.`);
+Trace store modules export any TraceStore as { store }, such as a PostgresTraceStore over the application's own pool.
+"deploy" reads NEXUS_SERVER_URL and NEXUS_SERVER_TOKEN when --url and --token are not given.`);
 }
 
 main().catch((error) => {

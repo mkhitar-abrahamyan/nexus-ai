@@ -23,7 +23,7 @@
     "node": ">=22"
   },
   "peerDependencies": {
-    "nexus-ai-pro": ">=1.23.0 <2"
+    "nexus-ai-pro": ">=1.24.0 <2"
   },
   "keywords": [
     "nexus-ai-pro",

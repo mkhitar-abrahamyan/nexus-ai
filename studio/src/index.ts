@@ -45,6 +45,7 @@ export type {
   StudioClient,
   StudioContextHub,
   StudioCostReport,
+  StudioDeployments,
   StudioGraphLike,
   StudioGraphSource,
   StudioInterrupt,
@@ -54,4 +55,5 @@ export type {
   StudioProposalInbox,
   StudioReviewQueue,
   StudioSources,
+  StudioTenants,
 } from './types.js';

@@ -2,7 +2,8 @@
 
 <!-- covers:  -->
 
-Every capability has its own entry point with a size budget that CI enforces, so an application pays for what it imports. This guide lists the entry points and what each one costs.
+Every capability has its own entry point, and CI holds each one to a size budget. So an application
+pays only for what it imports. This guide lists the entry points and what each one costs.
 
 ## Import Surface
 
@@ -47,33 +48,42 @@ import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { createTelephonyRealtimeBridge } from 'nexus-ai-pro/telephony/realtime-bridge';
 ```
 
-Provider SDKs are optional peer dependencies. The package ships ESM and CommonJS builds, supports Node.js 22+, and is marked with `sideEffects: false`. Only the entry points listed in the package export map are public; deep imports into `dist`, `dist-cjs`, or `src` are unsupported.
+| Fact | Detail |
+| --- | --- |
+| Provider SDKs | Optional peer dependencies. |
+| Module formats | ESM and CommonJS builds. |
+| Node.js | 22 or newer. |
+| Tree shaking | Marked `sideEffects: false`. |
+| Public surface | Only the entry points in the package's export map. Deep imports into `dist`, `dist-cjs`, or `src` are unsupported. |
 
 ### What each import actually costs
 
-Importing one piece loads one piece. The figures below are the transitive import graph of each entry
-point, generated from the build by `npm run size:check`, which fails CI when an entry point grows
-past its budget — so the numbers stay true rather than aspirational.
+Importing one piece loads one piece. The table below measures each entry point's whole import graph.
+`npm run size:check` generates it from the build, and fails CI when an entry point grows past its
+budget. So the numbers stay true.
 
-The last column is the part a file-size table usually hides: what an entry point forces you to
-install. Most of them force nothing at all — `/graph`, `/operations`, `/images/*`, `/batch`,
-`/embeddings` and the rest import no third-party package. The root import, `/core`, `/config`, and
-`/security` do, because JSON-schema and Zod validation live there. A production install of this
-package is about 11.3 MB of `node_modules`, of which about 4.2 MB is this package; the clean-install test holds
-that total to a ceiling too. `@types/node` accounts for a further 2.4 MB at install time but is types
-only, so it never appears in an import graph.
+The last column is what a size table usually hides: what an entry point forces you to install.
+
+- Most entry points force nothing. `/graph`, `/operations`, `/server`, `/images/*`, `/batch`,
+  `/embeddings`, and the rest import no third-party package.
+- The root import, `/core`, `/config`, and `/security` do, because JSON-schema and Zod validation
+  live there.
+
+A production install is about 12.1 MB of `node_modules`, of which about 5.1 MB is this package. The
+clean-install test holds that total to a ceiling too. `@types/node` adds 2.4 MB at install time, but
+it is types only, so it never appears in an import graph.
 
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 577 KB | 100% | +4.7 MB |
-| `nexus-ai-pro/config` | 453 KB | 79% | +4.7 MB |
-| `nexus-ai-pro/core` | 449 KB | 78% | +4.7 MB |
+| `nexus-ai-pro` | 584 KB | 100% | +4.7 MB |
+| `nexus-ai-pro/config` | 457 KB | 78% | +4.7 MB |
+| `nexus-ai-pro/core` | 453 KB | 78% | +4.7 MB |
 | `nexus-ai-pro/realtime` | 156 KB | 27% | none |
-| `nexus-ai-pro/batch` | 101 KB | 18% | none |
+| `nexus-ai-pro/server` | 109 KB | 19% | none |
+| `nexus-ai-pro/batch` | 108 KB | 18% | none |
 | `nexus-ai-pro/realtime/session` | 94 KB | 16% | none |
 | `nexus-ai-pro/embeddings` | 82 KB | 14% | none |
-| `nexus-ai-pro/server` | 81 KB | 14% | none |
 | `nexus-ai-pro/providers/groq` | 72 KB | 12% | none |
 | `nexus-ai-pro/providers/mistral` | 72 KB | 12% | none |
 | `nexus-ai-pro/providers/azure-openai` | 71 KB | 12% | none |
@@ -87,23 +97,24 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/providers/google` | 60 KB | 10% | none |
 | `nexus-ai-pro/images` | 59 KB | 10% | none |
 | `nexus-ai-pro/providers/ollama` | 54 KB | 9% | none |
+| `nexus-ai-pro/postgres` | 51 KB | 9% | none |
+| `nexus-ai-pro/security` | 49 KB | 8% | +3.4 MB |
 | `nexus-ai-pro/graph` | 49 KB | 8% | none |
-| `nexus-ai-pro/postgres` | 49 KB | 8% | none |
-| `nexus-ai-pro/security` | 46 KB | 8% | +3.4 MB |
+| `nexus-ai-pro/operations` | 47 KB | 8% | none |
 | `nexus-ai-pro/batch/openai` | 46 KB | 8% | none |
 | `nexus-ai-pro/batch/anthropic` | 46 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% | none |
 | `nexus-ai-pro/providers/cohere` | 44 KB | 8% | none |
 | `nexus-ai-pro/batch/mock` | 41 KB | 7% | none |
-| `nexus-ai-pro/operations` | 40 KB | 7% | none |
 | `nexus-ai-pro/evaluate` | 37 KB | 6% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 6% | none |
-| `nexus-ai-pro/context-hub` | 32 KB | 6% | none |
-| `nexus-ai-pro/models` | 32 KB | 6% | none |
-| `nexus-ai-pro/sqlite` | 30 KB | 5% | none |
+| `nexus-ai-pro/context-hub` | 32 KB | 5% | none |
+| `nexus-ai-pro/models` | 32 KB | 5% | none |
+| `nexus-ai-pro/sqlite` | 31 KB | 5% | none |
+| `nexus-ai-pro/server/deployments` | 29 KB | 5% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 5% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 5% | none |
-| `nexus-ai-pro/evals` | 26 KB | 5% | none |
+| `nexus-ai-pro/evals` | 26 KB | 4% | none |
 | `nexus-ai-pro/insights` | 25 KB | 4% | none |
 | `nexus-ai-pro/graph/functional` | 24 KB | 4% | none |
 | `nexus-ai-pro/tracing` | 23 KB | 4% | none |
@@ -127,14 +138,16 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/images/assets` | 14 KB | 2% | none |
 | `nexus-ai-pro/images/google` | 14 KB | 2% | none |
 | `nexus-ai-pro/context` | 13 KB | 2% | none |
+| `nexus-ai-pro/sqlite/operations` | 13 KB | 2% | none |
+| `nexus-ai-pro/postgres/operations` | 13 KB | 2% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 2% | none |
 | `nexus-ai-pro/sqlite/vectors` | 12 KB | 2% | none |
+| `nexus-ai-pro/server/tenancy` | 12 KB | 2% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 2% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 2% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 2% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 2% | none |
-| `nexus-ai-pro/sqlite/operations` | 11 KB | 2% | none |
-| `nexus-ai-pro/postgres/operations` | 11 KB | 2% | none |
+| `nexus-ai-pro/operations/adapters` | 11 KB | 2% | none |
 | `nexus-ai-pro/postgres/store` | 11 KB | 2% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 2% | none |
 | `nexus-ai-pro/rag/redis` | 11 KB | 2% | none |
@@ -147,7 +160,6 @@ only, so it never appears in an import graph.
 | `nexus-ai-pro/rag/chroma` | 10 KB | 2% | none |
 | `nexus-ai-pro/voice/openai` | 9 KB | 2% | none |
 | `nexus-ai-pro/images/moderation` | 9 KB | 2% | none |
-| `nexus-ai-pro/operations/adapters` | 9 KB | 2% | none |
 | `nexus-ai-pro/sqlite/store` | 9 KB | 2% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 2% | none |
 | `nexus-ai-pro/testing/record` | 9 KB | 2% | none |

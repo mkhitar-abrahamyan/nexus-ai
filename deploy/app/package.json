@@ -1,0 +1,16 @@
+{
+  "name": "nexus-agent-deployment",
+  "private": true,
+  "description": "A self-hosted agent server: one image that runs as an API, a worker, or both.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.1",
+    "nexus-ai-pro": "^1.24.0"
+  }
+}

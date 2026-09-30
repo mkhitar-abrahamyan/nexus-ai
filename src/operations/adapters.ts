@@ -1,6 +1,13 @@
-import type { OperationDispatcher, OperationRecord, OperationStore } from '../types/operations.js';
+import type {
+  OperationDispatcher,
+  OperationRecord,
+  OperationStore,
+  OperationStoreFilter,
+  OperationStoreStats,
+} from '../types/operations.js';
 import { isTerminalOperationStatus } from '../types/operations.js';
 import { assertSerializableRecord } from './serialization.js';
+import { countRecords, isUnheldQueued, matchesFilter } from './stats.js';
 
 /**
  * The Redis commands the operation store needs.
@@ -133,6 +140,20 @@ export class RedisOperationStore<TResult = unknown> implements OperationStore<TR
   async list(): Promise<Array<OperationRecord<TResult>>> {
     const values = await this.client.hvals(this.recordsKey());
     return values.map((value) => JSON.parse(value) as OperationRecord<TResult>);
+  }
+
+  /** Queued records no worker holds, oldest first. Reads every record, as `list()` does. */
+  async listQueued(limit: number, filter?: OperationStoreFilter): Promise<Array<OperationRecord<TResult>>> {
+    const now = new Date().toISOString();
+    return (await this.list())
+      .filter((record) => isUnheldQueued(record, now) && matchesFilter(record, filter))
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
+      .slice(0, limit);
+  }
+
+  /** Counts unfinished records by status. Reads every record, as `list()` does. */
+  async stats(now: string, filter?: OperationStoreFilter): Promise<OperationStoreStats> {
+    return countRecords(await this.list(), now, filter);
   }
 
   private recordsKey(): string {

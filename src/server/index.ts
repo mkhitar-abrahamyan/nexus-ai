@@ -20,6 +20,8 @@ export {
   ForbiddenError,
   NotFoundError,
   ServerError,
+  type TenantLimit,
+  TenantLimitError,
   ThreadBusyError,
   UnauthorizedError,
 } from './errors.js';
@@ -36,19 +38,36 @@ export {
   type NodeResponseLike,
   toNodeListener,
 } from './node.js';
-export { RunManager, type RunManagerOptions, type StartRunOptions } from './runs.js';
+export {
+  type DrainResult,
+  RunManager,
+  type RunManagerOptions,
+  type RunQueueOptions,
+  type StartRunOptions,
+} from './runs.js';
 export { type AgentServer, type AgentServerOptions, createAgentServer } from './server.js';
 export { fromStore, MemoryServerStore, type StoreLike } from './state.js';
 export type {
   AssistantRunContext,
   CronRecord,
+  DeploymentChange,
+  DeploymentChangeRecord,
+  DeploymentRecord,
   Principal,
+  ReplicaReport,
+  RevisionChoice,
+  RevisionReason,
+  RevisionRequest,
   RunEvent,
   RunEventLog,
   RunRecord,
+  RunRevision,
   RunStatus,
+  ScalingSnapshot,
   ServerAssistant,
+  ServerDeployments,
   ServerStateStore,
+  TenantGate,
   ThreadBusyPolicy,
   ThreadRecord,
 } from '../types/server.js';

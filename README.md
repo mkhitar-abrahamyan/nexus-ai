@@ -99,6 +99,8 @@ You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want f
   environment
 - version prompts, instructions, tools, and skills together, and promote them through evaluation gates
 - find failing and slow runs, detect regressions, and review evaluated fix proposals in a shared studio
+- serve assistants as revisions, with canaries that roll back on a regression, workers that scale on
+  the queue under Kubernetes, and per-tenant quotas, rate limits, and budgets
 - trip routing away from a failing provider, and share one rate-limit budget across workers
 - reach the providers' half-price asynchronous batch tier behind one operation handle
 - persist generated media to disk or S3 with tenant isolation, retention, and checksums
@@ -139,8 +141,9 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Realtime voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/realtime.md) | Browser and server realtime sessions with barge-in, tools, and exports |
 | [Telephony](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/telephony.md) | Calls, webhooks, phone numbers, and phone agents on realtime sessions |
 | [Testing](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/testing.md) | Recording and replaying provider traffic, and conformance suites |
-| [Studio](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md) | A local UI for traces, threads, approvals, experiments, prompts, costs, and health, as a separate package |
-| [Agent server](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md) | Self-hosted HTTP server for assistants: threads, durable runs, resumable streams, cron |
+| [Studio](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md) | A shared UI for traces, threads, approvals, experiments, prompts, deployments, costs, and health, as a separate package |
+| [Agent server](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md) | Self-hosted HTTP server for assistants: threads, durable runs, resumable streams, cron, a worker queue, and metrics |
+| [Deployments](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md) | Revisions and canaries with automatic rollback, autoscaling on Kubernetes and Helm, and per-tenant limits |
 | [Workflows](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md) | Ready-made chains and domain workflows |
 | [Command line](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) | The `nexus` command |
 | [Packaging and install weight](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md) | Every entry point and what it costs |
