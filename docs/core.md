@@ -3,7 +3,12 @@
 <!-- covers: . ./core ./config ./streaming ./capabilities ./context ./optimizer -->
 <!-- sources: src/core src/types src/pipeline src/optimizer src/next src/utils -->
 
-`NexusAI` is the client every other part plugs into: one request shape across providers, with context-window management, token optimization, cost checks, reasoning and prompt-caching controls, capability negotiation, and streaming. Import it from the root, or from `nexus-ai-pro/core` and `nexus-ai-pro/config` when you want the client without the rest of the root's re-exports.
+`NexusAI` is the client every other part plugs into. It gives you one request shape across providers,
+and handles what sits around each call: long conversations, token budgets, cost checks, reasoning and
+prompt-caching controls, options a model cannot honour, and streaming.
+
+Import it from the root, or from `nexus-ai-pro/core` and `nexus-ai-pro/config` to get the client
+without the rest of the root.
 
 ```ts
 import { createNexus } from 'nexus-ai-pro';
@@ -34,48 +39,79 @@ import { NexusAI, defineNexusConfig } from 'nexus-ai-pro';
 const ai = new NexusAI(defineNexusConfig({ providers: { openai: { apiKey } }, routing: { mode: 'auto' } }));
 ```
 
-`CreateNexusOptions` is the shorthand's input — a `CreateNexusProvider` name, its key, a base URL,
-the Azure endpoint and deployment, and a default model — and `normalizeCreateNexusConfig()` is the
-function that turns it into a `NexusAIConfig`, exported so you can inspect what the shorthand
-produced. `NexusConfigBuilder` is the builder's type, and `defineNexusConfig()` is an identity
-function that types a plain object, so a configuration in its own file is checked where it is
-written.
+The shorthand takes `CreateNexusOptions`: a `CreateNexusProvider` name, its key, a base URL, the
+Azure endpoint and deployment, and a default model. `normalizeCreateNexusConfig()` turns those into a
+full `NexusAIConfig`, so you can see what the shorthand produced. `NexusConfigBuilder` is the
+builder's type. `defineNexusConfig()` does nothing at run time; it types a plain object, so a
+configuration kept in its own file is checked where it is written.
 
-`NexusAIConfig` is the whole surface: `ProvidersConfig` with a typed entry per provider
-(`OpenAIProviderConfig`, `AnthropicProviderConfig`, `GoogleProviderConfig`, `AzureOpenAIProviderConfig`,
-`OllamaProviderConfig`, `GroqProviderConfig`, `MistralProviderConfig`, `CohereProviderConfig`,
-`DeepSeekProviderConfig`, `LMStudioProviderConfig`, `LlamaCppProviderConfig`, and
-`CustomProviderConfig` for your own), plus `RoutingConfig`, `RetryConfig`, `CacheConfig`,
-`SecurityConfig`, `RateLimitConfig`, `BudgetConfig`, `CostBudgetConfig`, `CapabilityConfig`,
-`TokenOptimizerConfig`, `ResponseFormatConfig`, `LoggerConfig`, `AuditLogConfig`, and
-`PipelineConfig`. Each is documented in the guide for its feature; the reference below links every
-name to its summary.
+### The configuration
 
-Routing is configured here and explained in the [providers guide](./providers.md): `RoutingConfig`
-names a `RoutingStrategy` — `cost`, `speed`, `quality`, or `privacy` — for the auto-router, an
-ordered list of `RoutingRule` values that send a matching request to a model, the models each
-strategy prefers as `RoutingModelPreference` entries (a model name, or a model with a weight), and a
-`FallbackConfig` that adds failover models, a first-attempt timeout, and rate-limit handling to every
-route, including a request that names its model. `LoggerConfig` receives each `LogEvent` — a
-`LogLevel` of `info`, `warn`, or `error`, a message, a timestamp, structured data, and the error when
-there is one — in a sink of your own, on the console, or both.
+`NexusAIConfig` is the whole surface. Each part is explained in the guide for its feature, and the
+reference below links every name to its summary.
+
+| Part | Type | Guide |
+| --- | --- | --- |
+| Providers | `ProvidersConfig` | [Providers](./providers.md) |
+| Routing | `RoutingConfig` | [Providers](./providers.md) |
+| Retries | `RetryConfig` | [Resilience](./resilience.md) |
+| Response cache | `CacheConfig` | [Caching](./caching.md) |
+| Guardrails | `SecurityConfig` | [Security](./security.md) |
+| Rate limits | `RateLimitConfig` | [Resilience](./resilience.md) |
+| Token and cost budgets | `BudgetConfig`, `CostBudgetConfig` | this guide |
+| Capability checks | `CapabilityConfig` | this guide |
+| Token optimization | `TokenOptimizerConfig` | this guide |
+| Structured output | `ResponseFormatConfig` | this guide |
+| Logging and audit | `LoggerConfig`, `AuditLogConfig` | below, and [Security](./security.md) |
+| Pipeline hooks | `PipelineConfig` | this guide |
+
+`ProvidersConfig` has one typed entry per provider: `OpenAIProviderConfig`, `AnthropicProviderConfig`,
+`GoogleProviderConfig`, `AzureOpenAIProviderConfig`, `OllamaProviderConfig`, `GroqProviderConfig`,
+`MistralProviderConfig`, `CohereProviderConfig`, `DeepSeekProviderConfig`, `LMStudioProviderConfig`,
+`LlamaCppProviderConfig`, and `CustomProviderConfig` for your own.
+
+`RoutingConfig` has four parts:
+
+- a `RoutingStrategy` for the auto-router: `cost`, `speed`, `quality`, or `privacy`;
+- an ordered list of `RoutingRule` values, each sending matching requests to a model;
+- the models each strategy prefers, as `RoutingModelPreference` entries (a name, or a name with a
+  weight);
+- a `FallbackConfig`, which adds failover models, a first-attempt timeout, and rate-limit handling to
+  every route — even a request that names its model.
+
+`LoggerConfig` receives each `LogEvent`: a `LogLevel` (`info`, `warn`, or `error`), a message, a
+timestamp, structured data, and the error when there is one. Send them to your own sink, the console,
+or both.
 
 ## A request and its response
 
-`CompletionRequest` is the request shape every provider takes: `model`, `messages`, and the settings
-a provider may honour — `temperature`, `maxTokens`, `topP`, `topK`, penalties, `seed`, `stop`,
-`timeoutMs`, `tools` with `ToolChoice`, `responseFormat`, `reasoning`, `cache`, `metadata`, and a
-`signal`. Each tool is a `ToolDefinition`: a name, a description written for the model, a JSON Schema
-for its arguments, an optional `execute` function for loops that run tools themselves, and an
-optional cache breakpoint. A `Message` has a `MessageRole` and either text or `ContentPart` values: `TextContent`,
-`ImageContent`, `AudioContent`, and `VideoContent`, with `BinaryBuffer` standing in for Node's
-`Buffer` where the types must also compile in a browser.
+`CompletionRequest` is the request every provider takes. It needs a `model` and `messages`; the rest
+is what a provider may honour:
 
-`NexusResponse` comes back with the text, the `ToolCall` values the model made, a `finishReason`, and
-`ResponseMeta`: which provider and model answered, the latency, `TokenUsage`, `ResponseCost`, whether
-it was a cache hit, the guardrails applied, and the `PipelineTrace` when tracing is on. `ToolCallResult`
-is what you send back after running a tool, and `NexusStream` and `StreamChunk` are the streaming
-equivalents.
+| Settings | Fields |
+| --- | --- |
+| Sampling | `temperature`, `topP`, `topK`, penalties, `seed`, `stop` |
+| Length and time | `maxTokens`, `timeoutMs`, `signal` |
+| Tools | `tools`, and a `ToolChoice` |
+| Output | `responseFormat`, `reasoning`, `cache` |
+| Application data | `metadata` |
+
+Each tool is a `ToolDefinition`: a name, a description written for the model, and a JSON Schema for
+its arguments. It can also carry an `execute` function, for loops that run tools themselves, and a
+cache breakpoint.
+
+A `Message` has a `MessageRole`, and either text or a list of `ContentPart` values: `TextContent`,
+`ImageContent`, `AudioContent`, or `VideoContent`. `BinaryBuffer` stands in for Node's `Buffer`, so the
+types also compile for a browser.
+
+`NexusResponse` comes back with:
+
+- the text, the `ToolCall` values the model made, and a `finishReason`;
+- `ResponseMeta`: which provider and model answered, the latency, `TokenUsage`, `ResponseCost`,
+  whether it was a cache hit, the guardrails applied, and the `PipelineTrace` when tracing is on.
+
+After running a tool, you send back a `ToolCallResult`. `NexusStream` and `StreamChunk` are the
+streaming equivalents.
 
 ```ts
 const response = await ai.complete({ model: 'auto', messages: [{ role: 'user', content: 'Hello' }] });
@@ -145,23 +181,35 @@ contextWindow: {
 
 The result is visible in `response.meta.contextWindow` and `ai.plan(...).contextWindow`.
 
-`ContextWindowConfig` is the whole setting: a `ContextWindowStrategy`, how many conversation
-messages to keep (`lastMessages`, 20 by default), the token ceiling (`maxInputTokens`), the tokens
-held back for a summary, and whether system messages always survive (they do by default).
-`ContextSummaryConfig` decides how cut messages are summarized. Its `ContextSummaryMode` is `local`
-for an extractive summary with no model call, `provider` to have a model write it through the client,
-or `custom` for your own `ContextSummarizer`. It also sets the summary's length (512 tokens by
-default), model, temperature, instructions, heading, and whether the summary is inserted as a system
-or a user message. A `provider` summary that fails falls back to a local one unless
-`fallbackToLocal` is `false`. A custom summarizer receives a `ContextSummaryInput`: the request, the
-messages to fold, those messages as one text, the token limit, the model, and the instructions.
+`ContextWindowConfig` is the whole setting:
+
+| Option | Default | What it sets |
+| --- | --- | --- |
+| `strategy` | — | A `ContextWindowStrategy`, from the list above. |
+| `lastMessages` | 20 | Conversation messages kept. |
+| `maxInputTokens` | — | The token ceiling. |
+| summary reserve | — | Tokens held back for the summary. |
+| keep system messages | on | System messages always survive. |
+| `summary` | — | A `ContextSummaryConfig`, below. |
+
+`ContextSummaryConfig` decides how cut messages are summarized. Its `ContextSummaryMode` is one of:
+
+- `local`: an extractive summary, with no model call;
+- `provider`: a model writes it, through the client. If that fails, it falls back to `local` unless
+  `fallbackToLocal` is `false`;
+- `custom`: your own `ContextSummarizer`, which receives a `ContextSummaryInput` — the request, the
+  messages to fold, those messages as one text, the token limit, the model, and the instructions.
+
+It also sets the summary's length (512 tokens), model, temperature, instructions, heading, and whether
+it goes in as a system or a user message.
 
 `ContextWindowManager` does the work, and you can use it on its own. `optimize()` trims a request,
-calling the summarizer from a `ContextWindowRuntime` when one is given, and `preview()` reports what
-trimming would do without calling it. Both return a `ContextWindowResult`: the trimmed request, the
-techniques applied, warnings such as a summary that fell back to local, and a `ContextWindowUsage`
-with the strategy `auto` resolved to, tokens and messages before and after, and how many messages
-were kept, summarized, or dropped.
+calling the summarizer from a `ContextWindowRuntime` when given one. `preview()` reports what trimming
+would do, without calling anything.
+
+Both return a `ContextWindowResult`: the trimmed request, the techniques applied, and warnings (such as
+a summary that fell back to local). Its `ContextWindowUsage` shows the strategy `auto` chose, tokens
+and messages before and after, and how many messages were kept, summarized, or dropped.
 
 ## Token optimization
 
@@ -214,11 +262,16 @@ console.log(plan.warnings);
 
 `plan()` does not call a provider. It estimates route, token use, context fit, cost, guardrail findings, and warnings, including any option the routed model cannot honor.
 
-The `NexusPlan` it returns has the model asked for and the provider and model it would use, the full
-routing decision with its fallbacks, what context-window trimming and token optimization would do,
-the estimated cost, the model's context window and whether the request fits it, whether the response
-cache could answer it, whether input guardrails would block it and what they found, and the
-guardrails that would apply.
+The `NexusPlan` it returns answers the questions you would ask before paying for a call:
+
+| Question | Field |
+| --- | --- |
+| Which provider and model would answer? | The model asked for, the one chosen, and the full routing decision with fallbacks. |
+| Will it fit? | The model's context window, and whether the request fits it. |
+| What would trimming do? | The context-window and token-optimization results. |
+| What will it cost? | The estimated cost. |
+| Could the cache answer it? | Whether the response cache has it. |
+| Would guardrails block it? | What the input checks found, and which guardrails would apply. |
 
 ## Reasoning
 
@@ -301,15 +354,18 @@ financial truth; override them with `models.registry`, or adjust cache rates wit
 `Tokenizer` estimates tokens without a provider — `estimateTextTokens()`, `estimateMessageTokens()`,
 and `estimateRequestTokens()` — which is what budgets, planning, and context-window trimming run on.
 
-Pricing is separate and explicit. `estimateCost()` prices a `CostEstimateInput` against the model
-registry and returns a `CostEstimate`; `priceUsage()` prices a `TokenUsage` that a provider actually
-reported, with `PriceUsageOptions`; `buildUsage()` and `buildMeta()` are what an adapter uses to turn
-raw provider counts into `TokenUsage` and `ResponseMeta`, with `UsageInput` and `BuildMetaOptions` as
-their inputs. `ensureUsageAndCost()` fills both in on a response from a custom provider that predates
-them, `costAmount()` reads the number back out, `formatCost()` renders it, and `DEFAULT_CURRENCY` and
-`DEFAULT_CACHE_PRICING` are the defaults behind it. `assertWithinCostBudget()` throws
-`CostBudgetError` when an estimate exceeds what you allow, which is how a request is stopped before
-it is sent rather than after it is billed.
+Pricing is separate and explicit:
+
+| Function | What it does |
+| --- | --- |
+| `estimateCost()` | Prices a `CostEstimateInput` against the model registry, returning a `CostEstimate`. |
+| `priceUsage()` | Prices a `TokenUsage` a provider actually reported, with `PriceUsageOptions`. |
+| `buildUsage()`, `buildMeta()` | Turn raw provider counts into `TokenUsage` and `ResponseMeta`, from `UsageInput` and `BuildMetaOptions`. For adapter authors. |
+| `ensureUsageAndCost()` | Fills both in on a response from an older custom provider. |
+| `costAmount()`, `formatCost()` | Read the number out, and render it. |
+| `assertWithinCostBudget()` | Throws `CostBudgetError` when an estimate exceeds what you allow, so a request is stopped before it is sent, not after it is billed. |
+
+`DEFAULT_CURRENCY` and `DEFAULT_CACHE_PRICING` are the defaults behind them.
 
 ## Capability negotiation
 
@@ -387,17 +443,26 @@ one text chunk and finishes, for tests and for answering from a cache in the str
 
 ## The request pipeline
 
-Every request runs through the same stages — security, context window, optimization, routing, the
-provider call, output checks, and caching — and `PipelineConfig` is where you step into them.
-`PipelineHooksConfig` maps a `PipelineHookName` to your own function; `PipelineMiddleware` and
-`PipelineStep` add a stage of your own; and `PipelineRunner` with `createPipelineContext()` runs the
-whole thing, which is what the client itself uses. Every hook receives the `PipelineContext`: the
-request as earlier stages rewrote it, the response once there is one, the routing decision, what
-context-window trimming and optimization did, the security findings and guardrails so far, the
-timings, and a `metadata` object hooks can share. A hook may return a new context, a replacement
-request, a replacement response, or nothing. Each stage is timed into a `PipelineTrace` of
-`PipelineTraceStep` values, named by `PipelineStepName`, and returned on `response.meta.pipeline`
-unless `includeTraceInResponse` is off.
+Every request runs through the same stages: security, context window, optimization, routing, the
+provider call, output checks, and caching. `PipelineConfig` is where you step into them.
+
+| Piece | Use it to |
+| --- | --- |
+| `PipelineHooksConfig` | Run your function at a stage, named by a `PipelineHookName`. |
+| `PipelineMiddleware`, `PipelineStep` | Add a stage of your own. |
+| `PipelineRunner`, `createPipelineContext()` | Run the whole pipeline yourself, as the client does. |
+
+Every hook receives the `PipelineContext`:
+
+- the request, as earlier stages rewrote it, and the response once there is one;
+- the routing decision, and what trimming and optimization did;
+- the security findings and guardrails so far;
+- the timings, and a `metadata` object hooks can share.
+
+A hook may return a new context, a replacement request, a replacement response, or nothing.
+
+Each stage is timed into a `PipelineTrace` of `PipelineTraceStep` values, named by `PipelineStepName`.
+It is returned on `response.meta.pipeline` unless `includeTraceInResponse` is off.
 
 ## Serving a request from a framework
 
@@ -429,11 +494,13 @@ For a full HTTP surface — threads, background runs, resumable streams — see 
 
 ## The registry, in passing
 
-`KNOWN_MODELS`, `MODEL_ALIAS_METADATA`, `REGISTRY_PROVENANCE`, `resolveProvider()`,
-`ModelCapabilities`, `ModelEndpoint`, `ModelStatus`, `Modality`, `AliasMetadata`, `AliasStage`,
-`ProviderCapabilities`, `PromptCachingCapability`, `CacheTtl`, and `CacheHint` are re-exported from
-the root for convenience. They belong to the model registry, and the
-[providers guide](./providers.md) explains them.
+The root also re-exports the model registry, for convenience. The [providers guide](./providers.md)
+explains it:
+
+- data: `KNOWN_MODELS`, `MODEL_ALIAS_METADATA`, `REGISTRY_PROVENANCE`;
+- lookup: `resolveProvider()`;
+- types: `ModelCapabilities`, `ModelEndpoint`, `ModelStatus`, `Modality`, `AliasMetadata`, `AliasStage`,
+  `ProviderCapabilities`, `PromptCachingCapability`, `CacheTtl`, and `CacheHint`.
 
 <!-- reference:start -->
 ## Reference

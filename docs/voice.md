@@ -177,26 +177,49 @@ provider events, use the [realtime guide](./realtime.md). Neither API replaces t
 
 ## Requests and responses
 
-`TranscriptionRequest` takes the audio as a `VoiceAudioInput` — a file path, a URL, bytes, base64
-text, or a readable stream, each with an optional file name and MIME type for providers that infer
-the format from them — plus the provider, model, language, a `prompt` that guides spelling and
-names, temperature, the provider's `responseFormat` (text, JSON, verbose JSON with timings, or
-subtitles), `timestampGranularities`, a signal, and metadata. `TranscriptionResponse` has the text,
-the provider and model, the language, the audio's duration, timed `TranscriptionSegment` and
-`TranscriptionWord` values when asked for, and the provider's raw response.
+`TranscriptionRequest` takes the audio as a `VoiceAudioInput`: a file path, a URL, bytes, base64
+text, or a readable stream. Each can carry a file name and MIME type, for providers that infer the
+format from them.
 
-`SpeechRequest` takes the text, the provider, model, and voice, a `VoiceAudioFormat` — `mp3`, `wav`,
-`opus`, `aac`, `flac`, `pcm`, `webm`, or `ogg` — the speaking rate, `instructions` for models that
-take direction on tone and pace, a signal, and metadata. `SpeechResponse` carries the audio as a
-`VoiceAudioOutput` (the bytes, their format, and MIME type), with the provider, model, and voice that
-produced it.
+| Field | What it sets |
+| --- | --- |
+| provider, model, language | Where and how it is transcribed. |
+| `prompt` | Guides spelling and names. |
+| temperature | Sampling. |
+| `responseFormat` | The provider's format: text, JSON, verbose JSON with timings, or subtitles. |
+| `timestampGranularities` | Asks for timings by segment, word, or both. |
+| signal, metadata | Cancellation, and application data. |
 
-`VoiceTurnRequest` is a whole turn for `ai.voice()`: audio or a ready `transcript`, the transcription
-settings, the `completion` that answers, `transcriptMessage`, and `speech` settings or `false` for
-text only. `VoiceTranscriptMessageConfig` decides how the transcript joins the completion: `append:
-false` leaves it out for a prompt that already has it, `role` makes it a user or a system message,
-and `template` places it with `{{transcript}}`. `VoiceTurnResponse` returns the transcription, the
-text answered, the completion's response, and the speech.
+`TranscriptionResponse` has the text, the provider and model, the language, and the audio's duration.
+When asked for, it also has timed `TranscriptionSegment` and `TranscriptionWord` values. The
+provider's raw response is included.
+
+`SpeechRequest` takes the text, and optionally:
+
+- the provider, model, and voice;
+- a `VoiceAudioFormat`: `mp3`, `wav`, `opus`, `aac`, `flac`, `pcm`, `webm`, or `ogg`;
+- the speaking rate, and `instructions` for models that take direction on tone and pace;
+- a signal, and metadata.
+
+`SpeechResponse` carries the audio as a `VoiceAudioOutput` — the bytes, their format, and MIME type —
+with the provider, model, and voice that produced it.
+
+`VoiceTurnRequest` is a whole turn for `ai.voice()`: listen, answer, and speak.
+
+| Field | What it sets |
+| --- | --- |
+| audio, or `transcript` | What the user said, as audio or as text already transcribed. |
+| transcription settings | How the audio is transcribed. |
+| `completion` | The request that answers. |
+| `transcriptMessage` | How the transcript joins that request. |
+| `speech` | Speech settings, or `false` for a text-only answer. |
+
+`VoiceTranscriptMessageConfig` is the `transcriptMessage` setting. `append: false` leaves the
+transcript out, for a prompt that already includes it. `role` makes it a user or system message, and
+`template` places it with `{{transcript}}`.
+
+`VoiceTurnResponse` returns the transcription, the text answered, the completion's response, and the
+speech.
 
 ## Providers and the manager
 
@@ -205,13 +228,19 @@ A `VoiceProvider` is `info` and two optional methods, `transcribe()` and `speak(
 implements. `VoiceConfig` is the client's `voice` option: the default transcription and speech
 providers and the providers by name.
 
-`VoiceManager` routes each request to the provider it names, the configured default, or the first
-that supports the operation. `registerProvider()`, `hasProvider()`, and `listProviders()` manage
-them; `transcribe()`, `speak()`, and `runTurn()` do the work, and `createSession()` starts a session.
-It is what the client uses, and it works on its own with any `VoiceCompletionClient`, anything with
-`complete()`. A provider that fails, a provider name that is not registered, or no provider for the
-operation at all raises `VoiceProviderError`, naming the provider and carrying the cause. A named
-provider that lacks the operation asked for raises `VoiceCapabilityError`.
+`VoiceManager` routes each request to the provider it names, else the configured default, else the
+first provider that supports the operation. The client uses it, and it also works alone with any
+`VoiceCompletionClient` — anything with `complete()`.
+
+| Methods | What they do |
+| --- | --- |
+| `registerProvider()`, `hasProvider()`, `listProviders()` | Manage providers. |
+| `transcribe()`, `speak()`, `runTurn()` | Do the work. |
+| `createSession()` | Starts a session. |
+
+Two errors cover failures. `VoiceProviderError` means a provider failed, the named provider is not
+registered, or no provider supports the operation; it names the provider and carries the cause.
+`VoiceCapabilityError` means the named provider lacks the operation.
 
 `OpenAIVoiceProvider`, from `nexus-ai-pro/voice/openai`, takes `OpenAIVoiceProviderConfig`: the API
 key, base URL, organization, `transcriptionModel` (`gpt-4o-transcribe` by default), `speechModel`
@@ -219,14 +248,19 @@ key, base URL, organization, `transcriptionModel` (`gpt-4o-transcribe` by defaul
 
 ## Sessions
 
-`VoiceSessionConfig` sets up a conversation. Prompt text — `VoicePromptText`, one string or several
-joined with blank lines — goes in `systemPrompt`, `prompt`, and `instructions`, in that order. Beside
-them are the `taskPrompts`, the starting `messages`, the `tools`, and `toolSelection`: `all` offers
-every tool, and `task` offers only the tools of the task prompts that matched, or every tool when
-none did. `maxToolIterations` caps rounds of tool calls per turn (4 by default), and the sampling
-fields, `responseFormat`, `stop`, `userId`, and `metadata` pass through to each completion. It also
-holds the transcription, transcript message, and speech settings every turn shares,
-`maintainHistory` (on by default), and `onToolCall`, called after each tool call.
+`VoiceSessionConfig` sets up a conversation.
+
+| Field | What it sets |
+| --- | --- |
+| `systemPrompt`, `prompt`, `instructions` | Prompt text, joined in that order. Each is a `VoicePromptText`: one string, or several joined with blank lines. |
+| `taskPrompts` | Prompts that apply only when their task matches. |
+| `messages` | The conversation so far. |
+| `tools`, `toolSelection` | The tools, and which are offered: `all`, or `task` for only the matched task prompts' tools (every tool when none matched). |
+| `maxToolIterations` | Rounds of tool calls per turn. Defaults to 4. |
+| sampling, `responseFormat`, `stop`, `userId`, `metadata` | Passed to each completion. |
+| transcription, transcript message, speech | Settings every turn shares. |
+| `maintainHistory` | Keeps the conversation between turns. On by default. |
+| `onToolCall` | Called after each tool call. |
 
 A `VoiceTaskPrompt` has a name, prompt text and instructions added when it applies, the tools it
 needs, and `when`, a `VoiceTaskPromptMatcher`: a substring, a pattern, a list of either, or a function

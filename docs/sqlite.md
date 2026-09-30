@@ -47,34 +47,47 @@ const operations = new SqliteOperationStore(fromLibsql(createClient({ url: proce
 
 ## Operation records
 
-`SqliteOperationStore` implements the operation store contract — the same one the memory, Redis, and
-Postgres stores keep, checked by the same tests. It creates, reads, and updates records with a
-compare-and-set on their sequence, finds lapsed leases for recovery, enforces unique idempotency
-keys (a duplicate raises `OperationDuplicateError`), lists records, and `prune()`s finished ones
-older than a cutoff. `SqliteOperationStoreOptions` names the `table` (`nexus_operations` by default),
-and `sqliteOperationStoreMigration()` returns its schema for tooling of your own. It backs an
-`OperationRunner`, the agent server, and — through `OperationStoreCheckpointer` — graphs and
-workflows.
+`SqliteOperationStore` implements the operation store contract, the same one the memory, Redis, and
+Postgres stores keep, and passes the same tests. It backs an `OperationRunner`, the agent server, and —
+through `OperationStoreCheckpointer` — graphs and workflows.
+
+It does what every operation store does:
+
+- creates, reads, and updates records, with a compare-and-set on their sequence;
+- finds lapsed leases, for recovery;
+- enforces unique idempotency keys; a duplicate raises `OperationDuplicateError`;
+- lists records, and `prune()` deletes finished ones older than a cutoff.
+
+`SqliteOperationStoreOptions` names the `table` (`nexus_operations`). `sqliteOperationStoreMigration()`
+returns its schema, for your own tooling.
 
 ## Long-term memory
 
 `SqliteStore` implements the long-term store contract: namespaced items with expiry, filters, text
-queries, and semantic search through the embedding function in its `index`. The namespace prefix
-and expiry are matched in SQL; filters, text queries, and semantic ranking run in the process with
-the same helpers the in-memory store uses, so every store answers a search identically.
-`SqliteStoreOptions` takes the `table` (`nexus_store`), the `index`, and a clock; `sweep()` deletes
+queries, and semantic search through the embedding function in its `index`.
+
+The namespace prefix and expiry are matched in SQL. Filters, text queries, and semantic ranking run in
+the process, with the same helpers the in-memory store uses, so every store answers a search the same
+way.
+
+`SqliteStoreOptions` takes the `table` (`nexus_store`), the `index`, and a clock. `sweep()` deletes
 expired items, and `sqliteStoreMigration()` returns the schema.
 
 ## Retrieval vectors
 
 `SqliteVectorStore`, on `nexus-ai-pro/sqlite/vectors`, implements the `VectorStore` contract and passes
-the same contract test as every other store. Vectors are stored as float32 blobs, and metadata filters
-run in SQL against the metadata JSON, matching each value's type as well as its value.
-`SqliteVectorStoreOptions` sets the `dimensions`, the `table` (`nexus_vectors`), the `embed`
-function, and how similarity is computed: `scan`, the default, needs no extension and ranks the rows
-that pass the filter in JavaScript; `sqlite-vec` ranks inside SQLite with the extension's
-`vec_distance_cosine()`, so only the best rows leave the database. Load the extension into the handle
-first. `sqliteVectorStoreMigration()` returns the table's schema.
+the same contract test as every other store. Vectors are stored as float32 blobs. Metadata filters run
+in SQL against the metadata JSON, and match each value's type as well as its value.
+
+`SqliteVectorStoreOptions` sets the `dimensions`, the `table` (`nexus_vectors`), the `embed` function,
+and how similarity is computed:
+
+| `search` | How it ranks | Needs |
+| --- | --- | --- |
+| `scan` (default) | In JavaScript, over the rows that pass the filter. | Nothing. |
+| `sqlite-vec` | Inside SQLite, with `vec_distance_cosine()`, so only the best rows leave the database. | The sqlite-vec extension, loaded into the handle first. |
+
+`sqliteVectorStoreMigration()` returns the table's schema.
 
 ```ts
 import Database from 'better-sqlite3';

@@ -118,8 +118,8 @@ locked down, even on its local default:
 - On the single token, actions are recorded under `actor` — `studio` by default — so a promotion's
   history says who moved the label.
 
-Errors come back as JSON with a stable code, as a `StudioError`: a source that was not configured is a
-`404`, a refused promotion is a `409` with each gate's verdict, and a malformed request is a `400`.
+Errors come back as JSON with a stable code, as a `StudioError`. A source that was not configured is a
+`404`, a refused promotion a `409` with each gate's verdict, and a malformed request a `400`.
 
 ## Sharing it with a team
 
@@ -140,9 +140,9 @@ Four authenticators come bundled:
 - `personalTokens()` gives each person their own link, for a small team without an identity provider.
   The CLI reads them from a file: `--users users.json`, a list of `{ "id", "name", "role", "token" }`,
   which `loadUsers()` reads.
-- `headerAuth()` trusts the identity headers a signing-in reverse proxy sets — an OIDC proxy, an
-  identity-aware proxy, an access gateway — and only from the proxy: `HeaderAuthOptions` needs a
-  secret header the proxy adds, or the proxy's addresses, and maps groups to roles.
+- `headerAuth()` trusts the identity headers set by a reverse proxy that signs people in, such as an
+  OIDC proxy or an access gateway. It trusts them only from the proxy: `HeaderAuthOptions` needs a
+  secret header the proxy adds, or the proxy's addresses. It also maps groups to roles.
 - `bearerAuth()` accepts an `Authorization: Bearer` token checked by the function you pass — an OIDC
   token verified against the issuer's keys — for scripts and services; `BearerAuthOptions` maps its
   claims to a role.
@@ -166,29 +166,38 @@ export const options = {
 };
 ```
 
-With accounts, a change must carry the person's page token — which `csrfToken()` derives from a server
-`secret` and the user, and the page reads from its session — or bring its own `Authorization`
-header, so a signed-in browser cannot be used against the studio from another site. Give several
-replicas the same `secret`. A person reviews and promotes as themselves: a body cannot name someone
-else.
+With accounts, every change must carry the person's page token, or bring its own `Authorization`
+header. That stops another site from using a signed-in browser against the studio. `csrfToken()`
+derives the page token from a server `secret` and the user, and the page reads it from its session.
+Give several replicas the same `secret`.
 
-Every change, and every attempt a role refused, is written to the audit log as a `StudioAuditEntry`:
-who, their role, the action, the outcome, and when. Comments attach to runs, review items, proposals,
-threads, experiments, prompts, and bundles, each a `StudioComment`. Both live in a `StudioAuditLog`
-and a `StudioCommentStore`: `MemoryStudioJournal` by default, bounded by
-`MemoryStudioJournalOptions`, or `FileStudioJournal`, append-only JSON Lines files that survive a
-restart and ship to a log system as they are — `--journal <directory>` on the command line.
+People act as themselves: a request body cannot name someone else as the reviewer or promoter.
 
-Binding beyond the loopback interface is safe with accounts: the host name goes in `allowedHosts`,
-the session cookie is marked `Secure` when the studio is reached over HTTPS, and a studio that listens
-on the network with only its single token warns at start. `options.insights.slowMs` sets the latency
-the issues view reports as slow.
+Every change, and every attempt a role refused, goes into the audit log as a `StudioAuditEntry`: who,
+their role, the action, the outcome, and when. Comments attach to runs, review items, proposals,
+threads, experiments, prompts, and bundles, each as a `StudioComment`.
+
+The log is a `StudioAuditLog`, and comments a `StudioCommentStore`. Two classes implement both:
+
+- `MemoryStudioJournal`, the default, bounded by `MemoryStudioJournalOptions`;
+- `FileStudioJournal`, append-only JSON Lines files that survive a restart and can be shipped to a log
+  system as they are. On the command line, `--journal <directory>`.
+
+With accounts, the studio can safely listen beyond the loopback interface:
+
+- the host name goes in `allowedHosts`;
+- the session cookie is marked `Secure` when the studio is reached over HTTPS;
+- a studio listening on the network with only its single token warns at start.
+
+`options.insights.slowMs` sets the latency the issues view reports as slow.
 
 ## Pieces you can reuse
 
-`layoutGraph()`, re-exported from `nexus-ai-pro/graph/visualize`, lays a graph out in layers for drawing, returning a `GraphLayout` of `LaidOutNode` and
-`LaidOutEdge` values, with edges that point back up — cycles — marked so they can be drawn round the
-side. `parseArgs()` and `loadSources()` are the command's own argument parser and config loader, and
+`layoutGraph()`, re-exported from `nexus-ai-pro/graph/visualize`, lays a graph out in layers for
+drawing. It returns a `GraphLayout` of `LaidOutNode` and `LaidOutEdge` values. Edges that point back
+up — cycles — are marked, so they can be drawn around the side.
+
+`parseArgs()` and `loadSources()` are the command's own argument parser and config loader.
 `loadConfig()` also reads the `options` a config module exports.
 
 ## Limitations

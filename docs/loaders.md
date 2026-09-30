@@ -27,34 +27,42 @@ await loadIntoStore(
 
 ## Loading into a store
 
-Every loader returns a `DocumentLoader`: an async iterable of `DocumentSource` values — an id, the
-text, a source, and metadata — produced one at a time, so a corpus larger than memory streams
-through instead of being read whole. An ordinary array of documents is a loader too.
+Every loader returns a `DocumentLoader`: an async iterable of `DocumentSource` values, each with an id,
+the text, a source, and metadata. Documents arrive one at a time, so a corpus larger than memory
+streams through instead of being read whole. A plain array of documents is a loader too.
 
-`loadIntoStore()` streams loaders into one or more stores. Each batch of documents is split with
-the ingestion options and added to every store at once, so a vector store and the `KeywordIndex`
-that hybrid search reads fill in one pass. A store is any `ChunkSink` — anything with an `add()`
-for chunks. `LoadIntoStoreOptions` adds a `batchSize` (32 documents), a `signal` that stops between
-batches, and an `onBatch` callback for progress; the `LoadIntoStoreResult` counts documents, chunks,
-and characters. Chunk ids derive from document ids, and loaders use the file path, the URL, or the
-row key as the id, so loading the same corpus again replaces its chunks instead of duplicating them.
+`loadIntoStore()` streams loaders into one or more stores. Each batch of documents is split with the
+ingestion options and added to every store at once. So a vector store and the `KeywordIndex` that
+hybrid search reads fill up in one pass. A store is any `ChunkSink`: anything with an `add()` for
+chunks.
+
+`LoadIntoStoreOptions` adds a `batchSize` (32 documents), a `signal` that stops between batches, and an
+`onBatch` progress callback. The `LoadIntoStoreResult` counts documents, chunks, and characters.
+
+Reloading is safe. Chunk ids come from document ids, and loaders use the file path, URL, or row key as
+the id. Loading the same corpus again replaces its chunks instead of duplicating them.
 
 `collectDocuments()` reads loaders into an array instead, for inspection or for code that wants
 the documents themselves.
 
 ## Files
 
-The file loaders take one input or many. A `FileInput` is a path, a `file:` URL, or content already
-in memory with a name for it — `{ source: 'upload.md', content }` — which is how a loader reads an
-upload, a database blob, or a file on a runtime without a filesystem; `node:fs` is imported only
-when a path is read. `FileLoaderOptions` adds `metadata` to every document.
+The file loaders take one input or many. A `FileInput` is one of:
+
+- a path, or a `file:` URL;
+- content already in memory, with a name for it: `{ source: 'upload.md', content }`. That is how a
+  loader reads an upload, a database blob, or a file on a runtime without a filesystem.
+
+`node:fs` is imported only when a path is read. `FileLoaderOptions` adds `metadata` to every document.
 
 - **Text.** `loadText()` reads plain text files, one document each, dropping a byte-order mark.
-- **Directories.** `loadDirectory()` walks a directory in sorted order, so a load is reproducible,
-  and uses paths relative to it as ids. `DirectoryLoaderOptions` picks the `extensions`, a `parsers`
-  map from extension to a `FileParser` — any loader given one file, such as `loadMarkdown` — whether
-  to be `recursive`, an `ignore` test (by default `node_modules` and dot directories are skipped),
-  and `maxFiles` (10,000), a guard against pointing at the wrong directory.
+- **Directories.** `loadDirectory()` walks a directory in sorted order, so a load is reproducible. It
+  uses paths relative to the directory as ids. `DirectoryLoaderOptions` sets:
+  - `extensions`, the files to read;
+  - `parsers`, a map from extension to a `FileParser` — any loader given one file, such as
+    `loadMarkdown`;
+  - `recursive`, and an `ignore` test (by default, `node_modules` and dot directories are skipped);
+  - `maxFiles` (10,000), a guard against pointing at the wrong directory.
 - **Markdown.** `loadMarkdown()` reads Markdown with its front matter and title in the metadata, so a
   filter can select on them; ingest with `splitOnMarkdownHeadings` so no chunk spans two sections.
   `parseMarkdown()` is the parser on its own, returning a `MarkdownDocument` with the body, the
@@ -62,19 +70,21 @@ when a path is read. `FileLoaderOptions` adds `metadata` to every document.
   numbers, booleans, and inline lists — so no YAML parser is needed. `MarkdownLoaderOptions` can set
   `plainText`, which runs `markdownToPlainText()` to strip link targets, emphasis, and fences.
 - **HTML.** `loadHtml()` reads HTML files, with the page title and description in the metadata.
-  `htmlToText()` does the conversion without a DOM: scripts, styles, and the head are dropped, block
-  elements become line breaks, headings become Markdown headings — so HTML splits by section too — and
-  entities are decoded. It returns an `HtmlText` with the text, `title`, `description`, and every
-  link. `HtmlToTextOptions` keeps only `<main>` or `<article>` by default (`mainContent`) and resolves
-  links against a `baseUrl`; `HtmlLoaderOptions` combines them with the file options.
+  `htmlToText()` does the conversion without a DOM. It drops scripts, styles, and the head, turns
+  block elements into line breaks, and decodes entities. Headings become Markdown headings, so HTML
+  splits by section too. It returns an `HtmlText`: the text, `title`, `description`, and every link.
+  `HtmlToTextOptions` keeps only `<main>` or `<article>` by default (`mainContent`), and resolves links
+  against a `baseUrl`. `HtmlLoaderOptions` combines them with the file options.
 - **CSV.** `loadCsv()` makes one document per row, writing each column as `name: value` so a model
   reading a chunk knows what each value is. `CsvLoaderOptions` chooses the `textColumns`, an
   `idColumn` for stable ids, and `metadataColumns` to filter on. `parseCsv()` is an RFC 4180 parser
   — quoted delimiters, line breaks, and doubled quotes — and `CsvParseOptions` sets the `delimiter`.
-- **JSON.** `loadJson()` makes one document per record, from a JSON file or JSON Lines. Through
-  `JsonLoaderOptions`, `records` picks them out of the parsed value, `text` and `id` name a field by
-  dotted path or a function, `metadataFields` copies fields into the metadata, and `lines` reads one
-  value per line — on by default for `.jsonl` and `.ndjson`.
+- **JSON.** `loadJson()` makes one document per record, from a JSON file or JSON Lines.
+  `JsonLoaderOptions` sets:
+  - `records`, which picks the records out of the parsed value;
+  - `text` and `id`, each a field by dotted path, or a function;
+  - `metadataFields`, copied into the metadata;
+  - `lines`, which reads one value per line. On by default for `.jsonl` and `.ndjson`.
 - **PDF.** `loadPdf()` hands each file's bytes to your parser, a `PdfTextExtractor` wrapping
   `pdfjs-dist`, `unpdf`, or an OCR service, which returns the text or one string per page.
   `PdfLoaderOptions` takes that `extract` function and `splitPages`: on by default, one document per
@@ -92,14 +102,22 @@ const manuals = loadPdf(['manual.pdf', 'warranty.pdf'], {
 
 ## Web pages and sitemaps
 
-`loadWebPages()` fetches pages through the SSRF-safe fetch: private, loopback, and cloud-metadata
-addresses are refused unless explicitly allowed, and each redirect hop is checked again.
-`WebLoaderOptions` extends that `SafeFetchPolicy` — `allowedDomains`, `allowPrivateNetworks`, a
-resolver — with `maxBytes` (5 MB), `maxRedirects` (5), a per-page `timeoutMs` (15 seconds),
-`concurrency` (4 pages at once, still yielded in the order given), a `signal`, `metadata`, and
-`mainContent`. HTML becomes text through `htmlToText()`; plain text, Markdown, and JSON are kept as
-they are. A page that fails — a status other than 2xx, a type that is not text, a timeout — raises a
-`WebLoaderError` with the URL and status; set `onError: 'skip'` to pass over it and hear about it in
+`loadWebPages()` fetches pages through the SSRF-safe fetch. Private, loopback, and cloud-metadata
+addresses are refused unless explicitly allowed, and each redirect hop is checked again. HTML becomes
+text through `htmlToText()`; plain text, Markdown, and JSON are kept as they are.
+
+`WebLoaderOptions` extends that `SafeFetchPolicy` (`allowedDomains`, `allowPrivateNetworks`, a resolver):
+
+| Option | Default |
+| --- | --- |
+| `maxBytes` | 5 MB |
+| `maxRedirects` | 5 |
+| `timeoutMs`, per page | 15 seconds |
+| `concurrency` | 4 pages at once, still yielded in the order given |
+| `signal`, `metadata`, `mainContent` | — |
+
+A page that fails — a status other than 2xx, a type that is not text, a timeout — raises a
+`WebLoaderError` with the URL and status. Set `onError: 'skip'` to pass over it and hear about it in
 `onSkip`.
 
 `sitemapUrls()` reads a sitemap's page URLs, following a sitemap index into its sitemaps and
@@ -108,15 +126,20 @@ test and a `limit` (1,000 URLs).
 
 ## Git repositories
 
-`loadGitRepository()` reads the files a repository tracks, one document each. A remote URL is
-shallow-cloned into a temporary directory that is removed afterwards; a local path is read in place,
-unless a `ref` asks for another branch or tag. Binary files and files over the size limit are
-skipped, and each document carries the repository, the commit, and the path in its metadata, so a
-citation can link to the exact revision. `GitLoaderOptions` takes the `ref`, `extensions`, an
-`ignore` test, `parsers` as for directories, `maxFileBytes` (1 MB), the `git` executable, and a
-`timeoutMs` for the clone (2 minutes). It runs `git` without a shell, with credential prompts and the
-`ext::` transport disabled, and keeps committed line endings so a commit loads the same on every
-platform; a failure raises a `GitLoaderError` with what `git` printed.
+`loadGitRepository()` reads the files a repository tracks, one document each.
+
+- A remote URL is shallow-cloned into a temporary directory, which is removed afterwards.
+- A local path is read in place, unless a `ref` asks for another branch or tag.
+- Binary files, and files over the size limit, are skipped.
+- Each document carries the repository, the commit, and the path in its metadata, so a citation can
+  link to the exact revision.
+
+`GitLoaderOptions` takes the `ref`, `extensions`, an `ignore` test, `parsers` as for directories,
+`maxFileBytes` (1 MB), the `git` executable, and a `timeoutMs` for the clone (2 minutes).
+
+It runs `git` without a shell, with credential prompts and the `ext::` transport disabled. It keeps
+committed line endings, so a commit loads the same on every platform. A failure raises a
+`GitLoaderError` with what `git` printed.
 
 ## Limitations
 

@@ -2,7 +2,9 @@
 
 <!-- covers: ./mcp ./mcp/registry -->
 
-The Model Context Protocol in both directions, from `nexus-ai-pro/mcp`: `McpClient` borrows another server's tools as ordinary tool definitions, and `McpServer` lends this application's tools to other assistants, over stdio or any transport you supply.
+The Model Context Protocol, in both directions, from `nexus-ai-pro/mcp`. `McpClient` borrows another
+server's tools as ordinary tool definitions. `McpServer` lends your tools to other assistants. Both run
+over stdio, HTTP, or any transport you supply, and `McpRegistry` manages many servers from one file.
 
 ## Overview
 
@@ -32,20 +34,24 @@ client to a server in memory.
 ## The client
 
 `McpClient` takes a transport and `McpClientOptions`: the `clientInfo` name and version it reports,
-and `timeoutMs`, how long a request waits before failing (30 seconds by default). `connect()`
-performs the handshake, and the first request that needs it calls it for you. Then:
+and `timeoutMs`, how long a request waits (30 seconds). `connect()` performs the handshake; the first
+request that needs it calls it for you.
 
-- `listTools()` returns each tool as an `McpToolDescriptor`: its name, description, and JSON Schema.
-- `callTool()` runs one and returns an `McpToolResult`, a list of `McpContent` parts — text, or
-  base64 data with a MIME type — and `isError` when the tool reported a failure. A tool that fails
-  answers with `isError` rather than throwing; a protocol failure throws `McpError`.
-- `listResources()` returns `McpResourceDescriptor` values — URI, name, description, and MIME type —
-  and `readResource()` reads one as content parts.
-- `listPrompts()` and `getPrompt()` list the server's prompts and render one into messages.
-- `toNexusTools()` turns the tools into `ToolDefinition` values an agent or `ToolExecutor` can run. A
-  `prefix` keeps two servers' `search` tools apart. Each tool's result is its text, and a failure
-  throws, so the agent sees it as a failed tool call.
-- `close()` closes the transport and rejects every request still waiting.
+| Method | Returns |
+| --- | --- |
+| `listTools()` | Each tool as an `McpToolDescriptor`: name, description, and JSON Schema. |
+| `callTool()` | An `McpToolResult`: a list of `McpContent` parts (text, or base64 data with a MIME type), and `isError` when the tool reported a failure. |
+| `listResources()` | `McpResourceDescriptor` values: URI, name, description, and MIME type. |
+| `readResource()` | One resource, as content parts. |
+| `listPrompts()`, `getPrompt()` | The server's prompts, and one rendered into messages. |
+| `toNexusTools()` | The tools as `ToolDefinition` values an agent or `ToolExecutor` can run. |
+| `close()` | Closes the transport, rejecting requests still waiting. |
+
+Two kinds of failure are kept apart. A tool that fails answers with `isError`; it does not throw. A
+protocol failure throws `McpError`.
+
+With `toNexusTools()`, a `prefix` keeps two servers' `search` tools apart. Each tool returns its text,
+and a failure throws, so the agent sees a failed tool call.
 
 ## Transports
 
@@ -81,12 +87,13 @@ which is how an editor or desktop assistant launches it; nothing else may be wri
 
 ## A registry of servers
 
-`McpRegistry`, on `nexus-ai-pro/mcp/registry`, runs many MCP servers behind one configuration, which is
-the package's integration catalogue: whatever an MCP server exposes, under your policy. An
-`McpRegistryConfig` names the `servers` — or `mcpServers`, so the configuration file desktop MCP
-clients use works as it is — and `bundles` of their tools. `McpRegistry.fromFile()` reads one from
-JSON, and `validateMcpConfig()` checks one, naming the server and field at fault in an
-`McpRegistryError`.
+`McpRegistry`, on `nexus-ai-pro/mcp/registry`, runs many MCP servers from one configuration. It is the
+package's integration catalogue: whatever an MCP server exposes, under your policy.
+
+An `McpRegistryConfig` lists the `servers` and named `bundles` of their tools. It also accepts
+`mcpServers`, so the file desktop MCP clients use works as it is. `McpRegistry.fromFile()` reads one
+from JSON. `validateMcpConfig()` checks one, and an `McpRegistryError` names the server and field at
+fault.
 
 ```json
 {
@@ -110,23 +117,34 @@ const registry = await McpRegistry.fromFile('mcp.json');
 const agent = createAgent({ client: ai, model: 'gpt-5.4', tools: await registry.tools('support') });
 ```
 
-An `McpServerConfig` is a `command` run over stdio, with `args`, `env`, and `cwd`, or a `url` reached
-over HTTP with `headers`. `allowTools` and `denyTools` decide which tools agents see — `*` matches
-any run of characters, and deny wins — and `prefix` names them, the server's name by default, so two
-servers' `search` stay apart. `timeoutMs` bounds each request, and `enabled: false` keeps a server in
-the file but out of the registry. Any string may hold `${NAME}` placeholders, filled from the
-environment when the server connects, so the file names credentials without containing them; a
-missing variable is named in the error, never its value.
+An `McpServerConfig` describes one server:
 
-Servers connect on first use and stay connected. `tools()` takes bundles or server names — every
-server's tools when given none — and returns each tool once; a bundle entry is a server, or
-`server/tool` with a pattern such as `github/list_*`. `client()` returns one server's `McpClient`,
-`serverNames()` and `bundleNames()` list what is configured, and `refresh()` forgets the tool lists
-read so far. `health()` connects to every server in parallel and reports each as an `McpServerHealth`
-— whether it answered, how long it took, and how many tools it offers — without one failure failing the
-check. `McpRegistryOptions` sets where placeholders are read from (`process.env`), the handshake's
+| Field | What it sets |
+| --- | --- |
+| `command`, `args`, `env`, `cwd` | A local server, run over stdio. |
+| `url`, `headers` | A remote server, reached over HTTP. |
+| `allowTools`, `denyTools` | Which tools agents see. `*` matches any run of characters, and deny wins. |
+| `prefix` | The prefix of tool names agents see. Defaults to the server's name, so two servers' `search` stay apart; `false` keeps names as they are. |
+| `timeoutMs` | How long each request may take. |
+| `enabled` | `false` keeps the server in the file but out of the registry. |
+
+Any string may hold `${NAME}` placeholders, filled from the environment when the server connects. So
+the file names credentials without containing them. A missing variable is named in the error, never
+its value.
+
+Servers connect on first use and stay connected.
+
+| Method | What it does |
+| --- | --- |
+| `tools()` | Tools for an agent, from bundles or server names; every server's tools when given none. Each tool appears once. A bundle entry is a server, or `server/tool` with a pattern such as `github/list_*`. |
+| `client()` | One server's `McpClient`. |
+| `serverNames()`, `bundleNames()` | What is configured. |
+| `refresh()` | Forgets the tool lists read so far. |
+| `health()` | Connects to every server in parallel and reports each as an `McpServerHealth`: whether it answered, how long it took, and how many tools it offers. One failure does not fail the check. |
+| `close()` | Closes every connection. |
+
+`McpRegistryOptions` sets where placeholders are read from (`process.env`), the handshake's
 `clientInfo`, a `fetch` for HTTP servers, and a `transport` factory for custom transports and tests.
-`close()` closes every connection.
 
 ## Errors and versions
 

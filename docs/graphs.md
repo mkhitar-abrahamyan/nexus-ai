@@ -115,9 +115,9 @@ await graph.history(threadId);      // newest first
 graph.resumeFrom(threadId, 3);      // rewind and run forward
 ```
 
-**Route from inside a node.** When a node already knows where to go — an agent that just picked a
-tool, a triage step that classified a ticket — return a `Command` instead of splitting the decision
-into a separate router:
+**Route from inside a node.** Sometimes a node already knows where to go: an agent that just picked a
+tool, or a triage step that classified a ticket. Return a `Command` instead of adding a separate
+router:
 
 ```ts
 import { Command } from 'nexus-ai-pro/graph';
@@ -133,8 +133,8 @@ inside a subgraph can return `new Command({ graph: Command.PARENT, goto: 'human'
 back to the graph that contains it — how a nested agent escalates.
 
 **Aggregate after branches of different lengths.** `{ defer: true }` holds a node until every other
-pending task has finished, so an aggregator after a two-step branch and a one-step branch runs once,
-after both, rather than once per arrival.
+pending task has finished. An aggregator after a two-step branch and a one-step branch then runs once,
+after both, instead of once per arrival.
 
 **Pause for inspection.** Breakpoints stop a run before or after chosen nodes, checkpointed, without
 changing the nodes themselves:
@@ -155,9 +155,9 @@ so the next step follows that node's edges. `fork(threadId, { step })` copies th
 into a new thread and leaves the original untouched, so two answers to the same question can be run
 side by side.
 
-**Watch it run.** `onEvent` receives every task starting, retrying, and finishing with its update,
-every checkpoint written, and whatever a node passes to `context.emit()` — model tokens as they
-stream, a status line, an intermediate result:
+**Watch it run.** `onEvent` receives every task starting, retrying, and finishing, and every
+checkpoint written. It also receives whatever a node passes to `context.emit()`, such as model tokens
+as they stream, a status line, or an intermediate result:
 
 ```ts
 .addNode('write', async (ctx) => {
@@ -273,18 +273,38 @@ Each `Channel` is a `reduce()` that combines the value already there with a writ
 back: any subset of the channels. `GraphInput` is what `invoke()` accepts, narrowed to the declared
 input channels.
 
-`addNode()` takes a name, a `NodeFn`, and `NodeOptions`: a `RetryPolicy` (attempts, the first delay,
-the backoff factor, a ceiling, jitter, and a `retryOn` test), `timeoutMs`, `ends`, `defer`, and a
-`NodeCachePolicy` (the `key`, a `ttlMs` of 5 minutes by default, and a `store`). A cached result is a
-`NodeCacheEntry`: the updates the node returned and where it routed. `addEdge()` joins two nodes,
-`setEntry()` names the first, and `addConditionalEdges()` takes an `EdgeRouter`, a function of state
-that returns a `GraphRouteTarget` — a node name, a `Send`, or a list of either — with an optional
-mapping from its answers to node names. `START` and `END` are the entry and exit sentinels.
+`addNode()` takes a name, a `NodeFn`, and `NodeOptions`:
 
-A node receives a `NodeContext`: the frozen state, its name, the step, the thread, its task id, a
-`Send` input, the attempt, an abort signal, `interrupt()`, the long-term `store`, `report()` for
-progress, and `emit()` for custom events. It returns a `NodeResult` — an update, a `Command`, or
-nothing. A `Command` names its successors with a `CommandTarget`: a node, a `Send`, or a list.
+| Option | What it sets |
+| --- | --- |
+| `retry` | A `RetryPolicy`: attempts, first delay, backoff factor, a ceiling, jitter, and a `retryOn` test. |
+| `timeoutMs` | How long one attempt may take. |
+| `ends` | The nodes it can route to, for the diagram. |
+| `defer` | Runs it only after every other branch has finished. |
+| `cache` | A `NodeCachePolicy`: the `key`, a `ttlMs` (5 minutes), and a `store`. A cached result is a `NodeCacheEntry`: the updates the node returned, and where it routed. |
+
+Edges connect nodes:
+
+- `setEntry()` names the first node, and `addEdge()` joins two.
+- `addConditionalEdges()` routes by state. It takes an `EdgeRouter`: a function of state that returns a
+  `GraphRouteTarget` — a node name, a `Send`, or a list of either. An optional map turns its answers
+  into node names.
+- `START` and `END` are the entry and exit markers.
+
+A node receives a `NodeContext`:
+
+| Field | What it is |
+| --- | --- |
+| state | The state so far, frozen. |
+| name, step, thread, task id | Where the node is running. |
+| `Send` input, attempt | What this task was given, and which try this is. |
+| signal | Aborted on cancellation or timeout. |
+| `interrupt()` | Asks a person and waits for the answer. |
+| `store` | Long-term memory. |
+| `report()`, `emit()` | Progress, and custom events. |
+
+It returns a `NodeResult`: an update, a `Command`, or nothing. A `Command` names what runs next with a
+`CommandTarget`: a node, a `Send`, or a list.
 
 `compile()` checks the graph and returns a `CompiledGraph`. `CompileOptions` holds the `store`, the
 default node `cache`, breakpoints, `maxConcurrency`, a default `retry`, `onNodeError`, the
@@ -292,32 +312,46 @@ default node `cache`, breakpoints, `maxConcurrency`, a default `retry`, `onNodeE
 
 ## Running a graph
 
-`invoke()` runs to the end and returns a `GraphResult`: the thread, a `GraphStatus` (`running`,
-`awaiting_input`, `completed`, `failed`, or `interrupted`), the output state, the steps completed,
-and any interrupts, breakpoint, or error. `stream()` yields a `GraphStepEvent` per superstep — the
-nodes and tasks that ran, attempts where there were retries, the state, and the status — ending with
-an `interrupt`, `breakpoint`, or `done` event. A `GraphTask` is one unit of work: its id, its node,
-and its `Send` input.
+`invoke()` runs to the end and returns a `GraphResult`: the thread, the status, the output state, the
+steps completed, and any interrupts, breakpoint, or error. The `GraphStatus` is one of `running`,
+`awaiting_input`, `completed`, `failed`, or `interrupted`.
+
+`stream()` yields a `GraphStepEvent` per superstep: the nodes and tasks that ran, retry attempts, the
+state, and the status. It ends with an `interrupt`, `breakpoint`, or `done` event.
+
+A `GraphTask` is one unit of work: its id, its node, and its `Send` input.
 
 `GraphRunOptions` sets the `threadId`, `maxSteps`, a signal, metadata for every checkpoint,
 `maxConcurrency`, breakpoints for this run, `onEvent`, and `onProgress`. `onEvent` receives each
 `GraphEvent`: `task_start`, `task_retry`, `task_end` with the update and whether it was served from
 the cache, `checkpoint`, and `custom`. `onProgress` receives each `GraphProgress` a node reported.
 
-`resume()` and `resumeWith()` answer the one pending question, and `resumeInterrupts()` and
-`resumeInterruptsWith()` answer several by id. A node asks with an `InterruptRequest` — a `reason`
-and a JSON `payload` — and each question waits as a `PendingInterrupt` with its id, node, task, step,
-position within the node, and when it was asked. `interruptKey()` is the stable key an answer is
-stored under, by task, step, and index, so several `Send` tasks of one node keep their own answers.
-`continue()` carries on from a breakpoint, and `resumeFrom()` rewinds to a step and runs forward.
+A node asks a question with an `InterruptRequest`: a `reason` and a JSON `payload`. Each question
+waits as a `PendingInterrupt`, with its id, node, task, step, position within the node, and when it
+was asked.
+
+| Method | What it does |
+| --- | --- |
+| `resume()`, `resumeWith()` | Answer the one pending question. |
+| `resumeInterrupts()`, `resumeInterruptsWith()` | Answer several, by id. |
+| `continue()` | Carries on from a breakpoint. |
+| `resumeFrom()` | Rewinds to a step and runs forward. |
+
+`interruptKey()` is the stable key an answer is stored under: task, step, and index. That is how
+several `Send` tasks of one node keep their own answers.
 
 ## State and checkpoints
 
-A `GraphCheckpoint` is everything needed to resume a thread elsewhere: the step, every channel's
-value, the nodes and tasks to run next, the tasks of a paused step that already finished and the
-routes they chose, the status, the pending interrupts and answers already given, an error, a
-`GraphBreakpoint` (`before` or `after`, and its nodes), when it was written, and its metadata.
-`state()` and `history()` read them, `updateState()` edits one, and `fork()` copies a thread.
+A `GraphCheckpoint` is everything needed to resume a thread elsewhere:
+
+- the step, and every channel's value;
+- the nodes and tasks to run next;
+- for a paused step, the tasks that already finished and the routes they chose;
+- the status, the pending interrupts, and the answers already given;
+- an error, and a `GraphBreakpoint` (`before` or `after`, and its nodes);
+- when it was written, and its metadata.
+
+`state()` and `history()` read checkpoints, `updateState()` edits one, and `fork()` copies a thread.
 
 A `GraphCheckpointer` stores them: `put()`, `get()` the latest or one step, `history()` newest first,
 and optionally `delete()` and `threadIds()`. `MemoryGraphCheckpointer` is the default, bounded by
@@ -344,12 +378,16 @@ Every graph error extends `GraphError` and carries a stable `code`:
 
 ## Describing and drawing
 
-`describe()` returns a `GraphDescription`: the name, each node with its options and any subgraph,
-each edge — conditional or not, with its label — the routers whose targets cannot be known in
-advance, and the input and output channels. `toMermaid()` takes anything `Describable` — a
-description, or anything with `describe()` — and `MermaidOptions` for the direction (`TD` or `LR`),
-whether subgraphs are expanded or collapsed, and which nodes to highlight. `toGraphJSON()` returns a
-copy of the description, for a UI or a test.
+`describe()` returns a `GraphDescription`:
+
+- the name, and each node with its options and any subgraph;
+- each edge, conditional or not, with its label;
+- routers whose targets cannot be known in advance;
+- the input and output channels.
+
+`toMermaid()` draws anything `Describable` — a description, or anything with `describe()`. Its
+`MermaidOptions` set the direction (`TD` or `LR`), whether subgraphs are expanded or collapsed, and
+which nodes to highlight. `toGraphJSON()` returns a copy of the description, for a UI or a test.
 
 `toSvg()` draws the graph as a standalone SVG document with no dependency — write it to a file,
 inline it in a page, or hand it to any SVG rasterizer for PNG. `SvgOptions` sets the nodes to
@@ -364,18 +402,21 @@ import { toSvg } from 'nexus-ai-pro/graph/visualize';
 writeFileSync('support-agent.svg', toSvg(graph, { highlight: checkpoint.next }));
 ```
 
-`layoutGraph()` is the layered layout underneath — the same one the studio draws with. Each node sits
-one layer below the nearest node that leads to it, unreachable nodes are placed below everything
-else, and the result is a `GraphLayout`: each `LaidOutNode` with its position, size, kind, and
-deferred or cached marks, and each `LaidOutEdge` with a `back` flag for an edge that points up.
+`layoutGraph()` is the layered layout underneath, the same one the studio draws with. Each node sits
+one layer below the nearest node that leads to it, and unreachable nodes go at the bottom.
+
+It returns a `GraphLayout`. Each `LaidOutNode` has its position, size, kind, and marks for deferred or
+cached nodes. Each `LaidOutEdge` has a `back` flag for an edge that points up — a cycle.
 
 ## Functional workflows
 
-Some programs are better written as plain control flow — loops, early returns, `Promise.all` — and
-still need what a graph gives. `workflow()`, on `nexus-ai-pro/graph/functional`, makes a function
-durable: each `step()` records its result, so when the workflow runs again — resumed, continued, or
-recovered on another worker — finished steps return their recorded result without running, and the
-function carries on from the first step that did not finish.
+Some programs are better written as plain control flow — loops, early returns, `Promise.all` — but
+still need what a graph gives. `workflow()`, on `nexus-ai-pro/graph/functional`, makes an ordinary
+function durable.
+
+Each `step()` records its result. When the workflow runs again — resumed, continued, or recovered on
+another worker — finished steps return their recorded result without running. The function carries on
+from the first step that did not finish.
 
 ```ts
 import { workflow } from 'nexus-ai-pro/graph/functional';
@@ -416,13 +457,29 @@ The function receives its input and a `WorkflowContext`: the thread id, a signal
   an answer, the function runs again from the top — finished steps return their recorded results —
   and `interrupt()` returns the answer instead of stopping.
 
-`WorkflowOptions` names the workflow and sets the `checkpointer` (in memory by default, `false` for
-none), the `store`, a default `retry` for every step, `maxConcurrency` (16), and a clock. The
-`Workflow` it returns has `invoke()`, `stream()`, `resume()`, `resumeWith()`, `resumeInterrupts()` to
-answer several questions by id, `continue()` to run a thread on after a crash, a failure, or a
-cancellation, `state()`, `history()`, and `describe()`. `WorkflowRunOptions` sets the thread id, a
-signal, metadata for every checkpoint, and `onEvent`, which receives the same step events a graph's
-tasks produce, so `traceGraph()` records a workflow too.
+`WorkflowOptions` names the workflow and sets:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `checkpointer` | memory | Where step results are kept. `false` keeps none. |
+| `store` | — | Long-term memory for steps. |
+| `retry` | — | A default retry policy for every step. |
+| `maxConcurrency` | 16 | Steps running at once. |
+| clock | — | For tests. |
+
+The `Workflow` it returns has these methods:
+
+| Method | What it does |
+| --- | --- |
+| `invoke()`, `stream()` | Runs a thread, returning the result or streaming its events. |
+| `resume()`, `resumeWith()` | Answers the pending question and runs on. |
+| `resumeInterrupts()` | Answers several questions by id. |
+| `continue()` | Runs a thread on after a crash, a failure, or a cancellation. |
+| `state()`, `history()` | Reads its checkpoints. |
+| `describe()` | Its shape, for a diagram. |
+
+`WorkflowRunOptions` sets the thread id, a signal, and metadata for every checkpoint. Its `onEvent`
+receives the same step events a graph's tasks produce, so `traceGraph()` records a workflow too.
 
 `invoke()` returns a `WorkflowResult`: the thread, the status, the `output`, the `WorkflowState` —
 the input, every recorded step result, and the output — the number of recorded steps, and any
@@ -439,9 +496,9 @@ like a graph.
   cheap or idempotent.
 - The in-process checkpointer loses threads on restart; use an operation store for durability.
 - Cached node results must survive the cache store's serialization.
-- A workflow's code between steps runs again on every resume, so keep side effects inside steps,
-  and keep the order of step calls the same on every run: steps are matched to their recorded
-  results by name and call order. Step results must survive JSON serialization.
+- A workflow's code between steps runs again on every resume. Keep side effects inside steps.
+- Steps are matched to their recorded results by name and call order, so call them in the same order
+  on every run. Step results must survive JSON serialization.
 - Catching the error `interrupt()` throws inside a workflow hides the question; let it propagate.
 
 <!-- reference:start -->

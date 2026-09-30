@@ -2,11 +2,12 @@
 
 <!-- covers: ./server ./server/remote -->
 
-A self-hosted HTTP server for your assistants: threads, background runs, resumable event streams, and
-cron jobs, from `nexus-ai-pro/server`. It is a thin layer over parts that already exist — a run is a
-durable operation, a thread is a graph thread — so what it adds is the HTTP surface and the rules
-around a thread that is already busy. `nexus-ai-pro/server/remote` is the client, so calling a
-deployed agent never loads the server.
+A self-hosted HTTP server for your assistants, from `nexus-ai-pro/server`: threads, background runs,
+event streams you can resume, and cron jobs.
+
+It is a thin layer over parts that already exist. A run is a durable operation, and a thread is a
+graph thread. What the server adds is the HTTP surface, and the rules for a thread that is already
+busy. `nexus-ai-pro/server/remote` is the client, so calling a deployed agent never loads the server.
 
 ## A server in fifteen lines
 
@@ -28,11 +29,13 @@ createServer(toNodeListener(server)).listen(8080);
 and `cron` expose the pieces behind it. `start()` re-claims runs abandoned by a crashed worker and
 starts the scheduler; `stop()` stops the scheduler and leaves runs in flight to finish.
 
-`AgentServerOptions` takes the `assistants` by id and everything the run manager takes — the state
-store, the event log, the operation runner's settings, the busy policy, and the timeouts — plus the
-HTTP concerns: `basePath`,
-`authenticate`, `allowAnonymous`, `scopes`, `cron` with the jobs that exist from startup, and
-`heartbeatMs` for live streams.
+`AgentServerOptions` takes:
+
+- the `assistants`, by id;
+- everything the run manager takes: the state store, the event log, the operation runner's settings,
+  the busy policy, and the timeouts;
+- the HTTP settings: `basePath`, `authenticate`, `allowAnonymous`, `scopes`, `cron` with the jobs that
+  exist from startup, and `heartbeatMs` for live streams.
 
 ## The HTTP surface
 
@@ -54,17 +57,21 @@ Mount them under a prefix with `basePath`. A run is accepted with `202` and a `R
 
 ## Assistants
 
-An assistant is anything that streams events for an input — the `ServerAssistant` contract, whose only
-required member is `stream`. `graphAssistant()` serves a compiled graph, mapping threads to graph
-threads so state, interrupts, and history are the graph's own; `GraphLike` is the structural slice it
-needs, so the server entry point never imports the graph runtime. `GraphAssistantOptions` gives it a
-`description` for the assistants endpoint and `metadata` recorded on every checkpoint its runs create.
-A graph compiled without a checkpointer still serves stateless runs, but cannot resume or roll back.
-`functionAssistant()` serves a plain
-function, which may return a value or yield events. Optional members are what a thread needs:
-`resume` to answer an interrupt, `state` to report it, and `step` with `restore` for the rollback
-policy. `AssistantRunContext` is what an assistant receives: the run id, the thread, an abort signal,
-the principal, and the run's metadata.
+An assistant is anything that streams events for an input. That is the `ServerAssistant` contract, and
+its only required member is `stream`. Optional members are what a thread needs: `resume` to answer an
+interrupt, `state` to report it, and `step` with `restore` for the rollback policy.
+
+Two helpers build assistants:
+
+- `graphAssistant()` serves a compiled graph. Server threads map to graph threads, so state,
+  interrupts, and history are the graph's own. It needs only `GraphLike`, a structural slice, so the
+  server entry point never imports the graph runtime. `GraphAssistantOptions` sets a `description`
+  for the assistants endpoint, and `metadata` recorded on every checkpoint. A graph without a
+  checkpointer still serves stateless runs, but cannot resume or roll back.
+- `functionAssistant()` serves a plain function, which may return a value or yield events.
+
+An assistant receives an `AssistantRunContext`: the run id, the thread, an abort signal, the principal,
+and the run's metadata.
 
 ## Runs are durable operations
 
@@ -74,11 +81,11 @@ available as `server.runs` and usable on its own — `StartRunOptions` and `RunM
 it, and `RunRecord` and `RunStatus` are what it reports.
 
 - **Crash recovery.** A worker that dies leaves a record whose lease lapses. Another replica's
-  `start()`, or `runs.recover()`, claims it as a new attempt, so allow more than one:
+  `start()`, or `runs.recover()`, claims it as a new attempt. So allow more than one attempt:
   `operations: { retry: { maxAttempts: 2 } }`. A graph or workflow served by `graphAssistant()`
-  continues from the last checkpoint that run wrote, so only the step in flight when the worker died
-  runs again; any other assistant runs again from the start. The assistant sees the attempt in
-  `AssistantRunContext.attempt`, and its optional `recover()` hook is what continues the run.
+  continues from the last checkpoint that run wrote, so only the step in flight runs again. Any other
+  assistant starts over. The assistant sees the attempt in `AssistantRunContext.attempt`; its optional
+  `recover()` hook is what continues the run.
 - **Idempotency.** `idempotencyKey` on a run replays the existing run instead of starting a second,
   which is what makes a retried request safe.
 - **Cancellation.** `POST /runs/:id/cancel` aborts a local run at once and is observed by another
@@ -134,8 +141,10 @@ challenge or a redirect is returned. `allowAnonymous: false` refuses everything 
 configured, and `scopes` names the scope a read or a write route requires.
 
 Every thread, run, and cron job records its tenant, and a request only ever sees its own tenant's
-resources — another tenant's thread is a `404`, not a `403`, so the server does not confirm that it
-exists. Errors share `ServerError` and a stable code: `BadRequestError`, `UnauthorizedError`,
+resources. Another tenant's thread is a `404`, not a `403`, so the server does not even confirm it
+exists.
+
+Errors extend `ServerError` and have a stable code: `BadRequestError`, `UnauthorizedError`,
 `ForbiddenError`, `NotFoundError`, `ThreadBusyError`, and `AssistantCapabilityError`.
 
 ## Where state lives
@@ -164,11 +173,12 @@ const server = createAgentServer({
 
 ## Serving it
 
-`toNodeListener()` adapts the server to Node's `http`, and to anything that speaks its request and
-response objects: Express and Fastify take it as middleware, and a Nest controller can call it from a
-route handler. `NodeListenerOptions` sets the origin used to build request URLs and an error hook;
-`NodeRequestLike` and `NodeResponseLike` are the structural slices it needs. Streaming responses are
-piped through unbuffered, which is what keeps an event stream live.
+`toNodeListener()` adapts the server to Node's `http`, and to anything that uses its request and
+response objects. Express and Fastify take it as middleware, and a Nest controller can call it from a
+route handler. Streaming responses are passed through unbuffered, which keeps an event stream live.
+
+`NodeListenerOptions` sets the origin used to build request URLs, and an error hook. `NodeRequestLike`
+and `NodeResponseLike` are the structural slices it needs.
 
 ```ts
 import express from 'express';

@@ -2,7 +2,9 @@
 
 <!-- covers: ./cache ./cache/adapters ./cache/memory-cache ./cache/semantic-cache -->
 
-Response caching from `nexus-ai-pro/cache`: an exact cache keyed by the request, a semantic cache that reuses the answer to a request that means nearly the same, and memory, Redis, and SQLite adapters for where cached values live.
+Response caching, from `nexus-ai-pro/cache`. The exact cache answers a request it has seen before. The
+semantic cache also answers a request that means nearly the same. Cached values live in memory, Redis,
+or SQLite.
 
 ## Two caches, one switch
 
@@ -58,8 +60,8 @@ cache.set(createCacheKey({ model, messages }), answer, 300);
 ## The semantic cache
 
 `SemanticCache` answers a request that means nearly the same as an earlier one. It embeds the
-request, compares it with what it has, and returns the closest entry above `similarityThreshold`,
-which defaults to 0.88 — high enough that "reset my password" does not answer "cancel my account".
+request, compares it with what it holds, and returns the closest entry above `similarityThreshold`.
+The default, 0.88, is high enough that "reset my password" never answers "cancel my account".
 `SemanticCacheOptions` also sets `maxEntries`, `ttlSeconds`, and `embed`.
 
 `embed` is the part worth configuring. The default is hashed term vectors, which need no provider and
@@ -89,9 +91,9 @@ may be synchronous or asynchronous. Three adapters ship:
 | `RedisCacheAdapter` | `/cache/adapters` | Sharing a cache between processes; values are JSON under a key prefix |
 | `SQLiteCacheAdapter` | `/cache/adapters` | One machine, surviving restarts |
 
-`RedisLikeClient` and `SQLiteLikeDatabase` are the structural slices the last two need — the `get`,
-`set`, and `del` of an `ioredis`-style client, and the `prepare` and `exec` of a `better-sqlite3`
-handle — so neither library becomes a dependency of this package:
+The Redis and SQLite adapters take the client you already have, so neither library is a dependency.
+`RedisLikeClient` is the `get`, `set`, and `del` of an `ioredis`-style client. `SQLiteLikeDatabase` is the
+`prepare` and `exec` of a `better-sqlite3` handle:
 
 ```ts
 import { RedisCacheAdapter, SQLiteCacheAdapter } from 'nexus-ai-pro/cache/adapters';

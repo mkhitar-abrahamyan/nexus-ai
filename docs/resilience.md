@@ -151,32 +151,62 @@ Production controls include:
 
 ## The circuit breaker in detail
 
-`CircuitBreakerConfig` is the client's `circuitBreaker` option: `failureThreshold` consecutive
-failures (5 by default) or a `failureRateThreshold` share of calls over a rolling `windowMs` (60
-seconds), counted only after `minimumThroughput` calls (10), open a circuit. It stays open for
-`resetTimeoutMs` (30 seconds), then admits `halfOpenMaxCalls` probes (1), and closes after
-`successThreshold` probe successes (1). `isFailure` decides which errors count, and `onStateChange`
-receives every `CircuitStateChange`: the provider, the `CircuitState` it moved from and to —
-`closed`, `open`, or `half-open` — when, and why. For sharing, `store`, `workerId`, `syncIntervalMs`
-(1 second), `probeLeaseMs` (how long one worker holds the right to probe, 30 seconds), and
-`onStoreError` configure the rest; `now` replaces the clock in tests.
+`CircuitBreakerConfig` is the client's `circuitBreaker` option. A circuit moves between three
+`CircuitState` values — `closed`, `open`, and `half-open` — and these settings decide when:
 
-`CircuitBreaker` is usable on its own around any call. `allowRequest()` says whether a call may go,
-`recordSuccess()` and `recordFailure()` report how it went, `state()`, `isOpen()`, and
-`openProviders()` read the circuits, `snapshot()` returns a `CircuitSnapshot` per provider — its
-state, consecutive failures, calls and failures in the window, failure rate, when it opened, when it
-will probe, and the last error — and `reset()` closes one circuit or all of them. With a store,
-`sync()` pulls shared state and `flush()` waits for pending writes, for a clean shutdown.
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `failureThreshold` | 5 | Consecutive failures that open a circuit. |
+| `failureRateThreshold` | — | Or a share of failing calls, over `windowMs`. |
+| `windowMs` | 60 s | The rolling window for the failure rate. |
+| `minimumThroughput` | 10 | Calls needed in the window before the rate counts. |
+| `resetTimeoutMs` | 30 s | How long a circuit stays open. |
+| `halfOpenMaxCalls` | 1 | Probe calls allowed while half-open. |
+| `successThreshold` | 1 | Probe successes that close it again. |
+| `isFailure` | — | Which errors count as failures. |
+| `onStateChange` | — | Receives every `CircuitStateChange`: the provider, the states it moved from and to, when, and why. |
 
-A `CircuitStateStore` holds only the decisions every worker must agree on: `read()` every
-`SharedCircuitState` — a provider, `open` or `closed`, when it opened, when and by which worker it
-was last written, and why — `write()` one, and `claimProbe()`, which lets exactly one worker probe an
-open circuit for a lease. `MemoryCircuitStateStore` shares state within one process, for tests and
-for several clients in one process. `RedisCircuitStateStore` takes a `RedisCircuitLikeClient` —
-`hgetall`, `hget`, `hset`, `set` with `PX` and `NX`, `get`, `del`, and optionally `eval`, in `ioredis`
-argument order — and `RedisCircuitStateStoreOptions` with a key `prefix` and `useEval: false` to skip
-the Lua path. With `eval`, a transition is written only when it is newer than the stored one, in one
-step; without it, a stale transition can briefly win, and heals after one cooldown.
+For sharing state between workers:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `store` | — | The shared `CircuitStateStore`. |
+| `workerId` | — | This worker's name in the store. |
+| `syncIntervalMs` | 1 s | How often shared state is pulled. |
+| `probeLeaseMs` | 30 s | How long one worker holds the right to probe. |
+| `onStoreError` | — | Receives store failures. |
+
+`now` replaces the clock in tests.
+
+`CircuitBreaker` also works on its own, around any call:
+
+| Method | What it does |
+| --- | --- |
+| `allowRequest()` | May this call go? |
+| `recordSuccess()`, `recordFailure()` | Report how it went. |
+| `state()`, `isOpen()`, `openProviders()` | Read the circuits. |
+| `snapshot()` | A `CircuitSnapshot` per provider: state, consecutive failures, calls and failures in the window, failure rate, when it opened, when it will probe, and the last error. |
+| `reset()` | Closes one circuit, or all of them. |
+| `sync()`, `flush()` | With a store: pull shared state, and wait for pending writes before shutting down. |
+
+A `CircuitStateStore` holds only the decisions every worker must agree on. It has three methods:
+
+| Method | What it does |
+| --- | --- |
+| `read()` | Every `SharedCircuitState`: a provider, `open` or `closed`, when it opened, when and by which worker it was last written, and why. |
+| `write()` | Records one provider's state. |
+| `claimProbe()` | Lets exactly one worker probe an open circuit, for a lease. |
+
+Two stores are included:
+
+- `MemoryCircuitStateStore` shares state within one process, for tests and for several clients in one
+  process.
+- `RedisCircuitStateStore` shares it between processes. It takes a `RedisCircuitLikeClient` — `hgetall`,
+  `hget`, `hset`, `set` with `PX` and `NX`, `get`, `del`, and optionally `eval`, in `ioredis` argument
+  order — and `RedisCircuitStateStoreOptions`: a key `prefix`, and `useEval: false` to skip Lua.
+
+With `eval`, a change is written only when it is newer than the stored one, in one step. Without it, a
+stale change can briefly win; it heals after one cooldown.
 
 ## Rate limits in detail
 
@@ -185,19 +215,26 @@ step; without it, a stale transition can briefly win, and heals after one cooldo
 synchronously; `checkAsync()` counts through the configured store. Both throw `NexusRateLimitError`
 once a bucket is full.
 
-A `RateLimitStore` is one method, `hit(key, windowMs)`, returning a `RateLimitHit`: the count in the
-current window and when it resets. `MemoryRateLimitStore` keeps counters in the process, with
-`reset()` and `clear()`. `RedisRateLimitStore` takes a `RedisRateLimitLikeClient` — `incr`, `pexpire`,
-`pttl`, and optionally `eval` — and `RedisRateLimitStoreOptions` with a key `prefix` and `useEval`.
+A `RateLimitStore` has one method, `hit(key, windowMs)`. It returns a `RateLimitHit`: the count in the
+current window, and when the window resets.
+
+- `MemoryRateLimitStore` keeps counters in the process, with `reset()` and `clear()`.
+- `RedisRateLimitStore` shares them between processes. It takes a `RedisRateLimitLikeClient` (`incr`,
+  `pexpire`, `pttl`, and optionally `eval`) and `RedisRateLimitStoreOptions` (a key `prefix` and
+  `useEval`).
 
 ## Health
 
-`HealthConfig` turns provider health tracking on: `failureThreshold` consecutive failures (3 by
-default) or a score below `minScore` (20) mark a provider unhealthy, and the router ranks it lower.
-`ProviderHealthMonitor` does the tracking — `recordSuccess()` with a latency, `recordFailure()` with
-the error, `score()`, `isHealthy()`, and `snapshot()` — and each `ProviderHealthSnapshot` has the
-counts, consecutive failures, average latency, last error, and the score: 100, less 20 per
-consecutive failure up to 60, less 1 per second of average latency up to 30.
+`HealthConfig` turns on provider health tracking. A provider is unhealthy after `failureThreshold`
+consecutive failures (3), or when its score drops below `minScore` (20). The router ranks an unhealthy
+provider lower.
+
+The score starts at 100. It loses 20 per consecutive failure, up to 60, and 1 per second of average
+latency, up to 30.
+
+`ProviderHealthMonitor` does the tracking. `recordSuccess()` takes a latency and `recordFailure()` the
+error; `score()`, `isHealthy()`, and `snapshot()` read the result. Each `ProviderHealthSnapshot` has
+the counts, consecutive failures, average latency, last error, and score.
 
 ## Metrics and export
 
@@ -208,11 +245,11 @@ consecutive failure up to 60, less 1 per second of average latency up to 30.
 responses with latency and cost, errors, and each pipeline step.
 
 OpenTelemetry is reached through structural interfaces, so no OpenTelemetry package is a dependency.
-`OpenTelemetryMetricsSink` sends metrics through an `OpenTelemetryLikeMeter` — anything with
-`createCounter()` and `createHistogram()` — creating each instrument on first use.
-`OpenTelemetryTraceExporter` turns a pipeline trace into spans through an `OpenTelemetryLikeTracer`
-(`startSpan()`) and `OpenTelemetryLikeSpan` (`setAttribute()` and `end()`): one span for the pipeline
-and one per step, with the step's timing, outcome, and scalar metadata as attributes.
+
+| Piece | What it does |
+| --- | --- |
+| `OpenTelemetryMetricsSink` | Sends metrics through an `OpenTelemetryLikeMeter` — anything with `createCounter()` and `createHistogram()` — creating each instrument on first use. |
+| `OpenTelemetryTraceExporter` | Turns a pipeline trace into spans: one for the pipeline, and one per step with its timing, outcome, and metadata as attributes. It uses an `OpenTelemetryLikeTracer` (`startSpan()`) and `OpenTelemetryLikeSpan` (`setAttribute()` and `end()`). |
 
 ```ts
 import { metrics, trace } from '@opentelemetry/api';

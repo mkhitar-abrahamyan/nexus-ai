@@ -95,32 +95,42 @@ an error — and the priced cost.
 
 ## Errors
 
-Every failure is a `BatchError` with a stable `code`: `BatchValidationError` for a request refused
-before it is sent (a missing or duplicated `customId`, an empty batch), `BatchProviderError` for a
-provider failure, `BatchProviderNotFoundError` when no provider is registered under that name,
-`BatchCapabilityError` when a provider cannot do what was asked — cancelling, for instance — and
-`BatchProviderResponseError` when a provider's answer does not have the shape the adapter expects.
+Every failure is a `BatchError` with a stable `code`:
+
+| Error | When |
+| --- | --- |
+| `BatchValidationError` | A request is refused before it is sent: a missing or duplicated `customId`, or an empty batch. |
+| `BatchProviderError` | The provider failed. |
+| `BatchProviderNotFoundError` | No provider is registered under that name. |
+| `BatchCapabilityError` | The provider cannot do what was asked, such as cancelling. |
+| `BatchProviderResponseError` | The provider's answer does not have the shape the adapter expects. |
 
 ## Writing a provider
 
-`BatchProvider` is four methods — `submit`, `poll`, `results`, and an optional `cancel` — each
-taking a `BatchProviderCallContext` with the abort signal and request id. `BatchProviderInfo`
-declares the provider's name and its `BatchProviderCapabilities`: how many items and bytes a batch
-may hold, which completion windows it offers, whether it can cancel, and the discount it applies,
-which is what the manager prices with. A `BatchSubmitRequest` carries `BatchInputItem` values in,
-and `BatchOutputItem` values come back.
+`BatchProvider` has four methods: `submit`, `poll`, `results`, and an optional `cancel`. Each takes a
+`BatchProviderCallContext` with the abort signal and request id. A `BatchSubmitRequest` carries
+`BatchInputItem` values in, and `BatchOutputItem` values come back.
 
-The two bundled adapters are `OpenAIBatchProvider` and `AnthropicBatchProvider`, configured with
-`OpenAIBatchProviderOptions` and `AnthropicBatchProviderOptions`: an API key, a base URL, headers,
-a replacement `fetch`, and — for OpenAI — the endpoint each item targets, or for Anthropic the
-output token limit an item needs when it names none.
+`BatchProviderInfo` declares the provider's name and its `BatchProviderCapabilities`:
+
+- how many items and bytes a batch may hold;
+- which completion windows it offers;
+- whether it can cancel;
+- the discount it applies, which is what the manager prices with.
+
+Two adapters are bundled. Both take an API key, a base URL, headers, and a replacement `fetch`:
+
+| Adapter | Options | Also sets |
+| --- | --- | --- |
+| `OpenAIBatchProvider` | `OpenAIBatchProviderOptions` | The endpoint each item targets. |
+| `AnthropicBatchProvider` | `AnthropicBatchProviderOptions` | The output token limit for an item that names none. |
 
 ## Testing without a provider
 
-`MockBatchProvider` runs the whole submit-poll-collect cycle in memory, in milliseconds, with no
-account and no 24-hour wait. `MockBatchProviderOptions` scripts what the poll returns on each call,
-which `customId` values come back as errors, and what token usage to report, so a test can drive a
-mixed batch where some items fail and check exactly what the manager does with it.
+`MockBatchProvider` runs the whole submit, poll, and collect cycle in memory, in milliseconds, with no
+account and no 24-hour wait. `MockBatchProviderOptions` scripts what each poll returns, which
+`customId` values come back as errors, and the token usage to report. A test can then drive a mixed
+batch, where some items fail, and check exactly what the manager does.
 
 <!-- reference:start -->
 ## Reference

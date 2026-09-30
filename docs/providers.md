@@ -3,7 +3,9 @@
 <!-- covers: ./providers ./providers/anthropic ./providers/azure-openai ./providers/base ./providers/cohere ./providers/deepseek ./providers/errors ./providers/google ./providers/groq ./providers/llamacpp ./providers/lmstudio ./providers/mistral ./providers/ollama ./providers/openai ./providers/openrouter ./providers/type-guards ./models -->
 <!-- sources: src/router -->
 
-Twelve completion providers behind one contract, each on its own entry point so an application loads only the adapters it uses, plus the routing that chooses between them and the model registry it routes by. `BaseProvider` is the contract to implement for a provider that is not bundled.
+Twelve completion providers behind one contract, the routing that chooses between them, and the model
+registry routing reads. Each provider has its own entry point, so an application loads only the ones
+it uses. For a provider that is not bundled, implement `BaseProvider`.
 
 ## Providers and Routing
 
@@ -76,95 +78,146 @@ directly or to register it under another name.
 
 ## Writing a provider
 
-`BaseProvider`, on `/providers/base`, is the contract: an `info` — a `ProviderInfo` with the name and
-whether it runs locally, which privacy routing prefers — `complete()`, `stream()`, and a
-`healthCheck()` that defaults to true. Protected helpers build the base response, extract text,
-format tools, normalize errors, honour an aborted signal, and turn an async generator into a
-`NexusStream`, so a new adapter is mostly its request and response mapping.
+`BaseProvider`, on `/providers/base`, is the contract for a provider that is not bundled. Implement
+three things:
 
-`/providers/type-guards` has the small readers adapters use on untyped JSON: `isRecord()`,
-`asArray()`, `asString()`, and `asNumber()` coerce a value with a fallback, and `getRecord()`,
-`getArray()`, `getString()`, and `getNumber()` read one key safely.
+- `info`, a `ProviderInfo`: the name, and whether it runs locally, which privacy routing prefers;
+- `complete()`, for one response;
+- `stream()`, for a streamed one.
+
+`healthCheck()` is optional and defaults to healthy. Protected helpers do the shared work: build the
+base response, extract message text, format tools, normalize errors, honour an aborted signal, and
+turn an async generator into a `NexusStream`. So a new adapter is mostly request and response mapping.
+
+```ts
+import type { CompletionRequest } from 'nexus-ai-pro';
+import { BaseProvider } from 'nexus-ai-pro/providers/base';
+
+class GatewayProvider extends BaseProvider {
+  readonly info = { name: 'gateway', isLocal: false };
+
+  async complete(request: CompletionRequest) {
+    this.throwIfAborted(request);
+    const response = this.createBaseResponse('gateway', request.model);
+    response.content = await gateway.chat(this.extractTextContent(request.messages), request.signal);
+    return response;
+  }
+
+  stream(request: CompletionRequest) {
+    return this.createStream(async function* () {
+      for await (const text of gateway.chatStream(request.messages)) yield { type: 'text', content: text };
+    }, request.signal);
+  }
+}
+
+ai.registerProvider('gateway', new GatewayProvider());
+```
+
+`/providers/type-guards` has small readers for untyped JSON:
+
+| Function | What it does |
+| --- | --- |
+| `isRecord()` | Is the value a plain object? |
+| `asArray()`, `asString()`, `asNumber()` | Coerce a value, with a fallback. |
+| `getRecord()`, `getArray()`, `getString()`, `getNumber()` | Read one key safely. |
 
 ## Provider errors
 
-Every adapter reports failure as a `NexusProviderError`: the provider, the model, the HTTP status, a
-`NexusProviderErrorCategory` — `auth`, `abort`, `timeout`, `rate-limit`, `server-error`, `network`,
-`bad-response`, or `unknown` — whether retrying could succeed, and the cause. `NexusProviderErrorOptions`
-constructs one, inferring the category and retryability it is not given. Retries, failover, and the
-circuit breaker all decide from these fields.
+Every adapter reports failure as a `NexusProviderError`. It carries the provider, the model, the HTTP
+status, a category, whether a retry could succeed, and the cause. Retries, failover, and the circuit
+breaker all decide from these fields.
 
-`/providers/errors` has the builders adapters share. `createProviderHttpError()` builds one from a
-failed response, with the first 1,000 characters of its body. `toNexusProviderError()` wraps any
-error, returning a provider error unchanged. `createAbortProviderError()` is for a request the caller
-aborted, never retryable; `createTimeoutProviderError()` is for one that ran past its timeout,
-retryable. `categorizeProviderError()` infers a category from the status, then the error's name,
-code, and message; `isRetryableProviderError()` says whether a category is worth retrying — timeouts,
-rate limits, server errors, and network failures are — and `isAbortError()` recognizes an abort.
+The `NexusProviderErrorCategory` is one of `auth`, `abort`, `timeout`, `rate-limit`, `server-error`,
+`network`, `bad-response`, or `unknown`. `NexusProviderErrorOptions` constructs an error, inferring
+any category and retryability you leave out.
+
+`/providers/errors` has the builders adapters share:
+
+| Function | Use it for |
+| --- | --- |
+| `createProviderHttpError()` | A failed response, keeping the first 1,000 characters of its body. |
+| `toNexusProviderError()` | Any error. A provider error is returned unchanged. |
+| `createAbortProviderError()` | A request the caller aborted. Never retryable. |
+| `createTimeoutProviderError()` | A request that ran past its timeout. Retryable. |
+| `categorizeProviderError()` | Inferring a category from the status, then the error's name, code, and message. |
+| `isRetryableProviderError()` | Deciding whether to retry: timeouts, rate limits, server errors, and network failures are worth it. |
+| `isAbortError()` | Recognizing an abort. |
 
 ## Routing internals
 
-`Router` makes the decision: a directly named model, a matching rule, or the auto-router's ranking,
-then the fallbacks `routing.fallback` adds. A routing strategy sees a `RouterContext` — the request,
-the configuration, the providers, their health, and the providers whose circuit is open, which are
-excluded entirely rather than ranked lower. It returns a `RouteDecision`: the provider and model to
-try first, why, limits for that first attempt, and the fallbacks in order. `FailoverExecutor` runs
-the decision, trying each attempt with its own timeout, rate-limit retries, and circuit check, and
-throws with every attempt's error when none succeeds. Both are exported for a gateway that routes
-requests without the rest of the client.
+`Router` makes the routing decision, in this order:
+
+1. a model the request names directly;
+2. a matching rule;
+3. the auto-router's ranking;
+4. then the fallbacks that `routing.fallback` adds.
+
+A routing strategy sees a `RouterContext`: the request, the configuration, the providers, their
+health, and the providers whose circuit is open. Providers with an open circuit are excluded, not
+just ranked lower.
+
+It returns a `RouteDecision`: the provider and model to try first, why, limits for that first attempt,
+and the fallbacks in order. `FailoverExecutor` runs the decision. It tries each attempt with its own
+timeout, rate-limit retries, and circuit check. If none succeeds, it throws with every attempt's error.
+Both are exported for a gateway that routes requests without the rest of the client.
 
 ## Model Registry Generation
 
-The registry is generated from versioned provider data in `data/models/`, not hand-edited. The
-Claude 5 reasoning bug fixed in 1.4.0 was exactly the kind of error a hand-written literal of 100+
-models invites.
+The registry is generated from versioned provider data in `data/models/`, not edited by hand. A
+hand-written list of 100+ models invites mistakes; the Claude 5 reasoning bug fixed in 1.4.0 was one.
 
 ```bash
 npm run registry:generate   # data/models/*.json -> src/models/generated.ts
 npm run registry:check      # fails if the committed output is stale
 ```
 
-`registry:check` runs as part of `npm run check`, so committed data and committed output cannot
-drift apart. The generator validates required fields, price signs, context bounds, status values,
-and that every alias points at a model that exists — a dangling alias otherwise fails only when a
-request happens to use it.
+`registry:check` runs as part of `npm run check`, so committed data and output cannot drift apart. The
+generator checks required fields, price signs, context bounds, and status values. It also checks that
+every alias points at a real model; a dangling alias would otherwise fail only when a request used it.
 
-The runtime still reads the hand-written `KNOWN_MODELS`; a test asserts the generated registry
-matches it exactly. Swapping the runtime over is deliberately a separate change, so introducing the
-generator cannot quietly alter pricing data in the same release.
+The runtime still reads the hand-written `KNOWN_MODELS`, and a test asserts the generated registry
+matches it exactly. Switching the runtime over is a separate change, so adding the generator could not
+quietly change prices in the same release.
 
-`src/models/generated.ts` and `data/` are build-time artifacts and are **not** published. They
-duplicate `KNOWN_MODELS` exactly, and shipping them in both builds would add roughly 310KB to every
-install for data nothing reads. Both live in the repository, where a diff is what you actually want.
+`src/models/generated.ts` and `data/` are build-time files and are **not** published. They duplicate
+`KNOWN_MODELS`, and shipping them in both builds would add about 310KB to every install for data
+nothing reads. Both live in the repository, where a diff is what you want.
 
 ## Reading the registry
 
-`KNOWN_MODELS` maps each model to its `ModelCapabilities`: the provider and family, each `Modality`
-it accepts, streaming, tool calling, structured output and JSON mode, reasoning with the efforts it
-takes, a `PromptCachingCapability` — whether the provider accepts caller-placed breakpoints, which
-`CacheTtl` lifetimes, the minimum prefix, and how many breakpoints — which request options it honours
-(tool choice, parallel tool calls, seed, top-k, penalties), context and output limits, prices,
-quality and speed scores, release and knowledge cutoff, a `ModelStatus`, the `ModelEndpoint` values
-it is served on, and when and from where the entry was verified. `ProviderCapabilities` groups a
-provider's models with its name and locality, and a `CacheHint` is a breakpoint on a message or tool. Aliases such as
-`openai/best` resolve by intent; `MODEL_ALIAS_METADATA` gives each one's `AliasMetadata` — its
-`AliasStage` and whether it floats — and `REGISTRY_PROVENANCE` says where the bundled data came from
-and when it was verified. `resolveProvider()` names the provider a model belongs to.
+`KNOWN_MODELS` maps each model to its `ModelCapabilities`:
 
-`/models` reads it all through the application's own configuration, so a model registered with
-`models.registry` or an alias with `models.aliases` is seen like a bundled one:
+| Group | Fields |
+| --- | --- |
+| Identity | Provider and family, `ModelStatus`, release date, knowledge cutoff. |
+| Input | Each `Modality` it accepts. |
+| Features | Streaming, tool calling, structured output and JSON mode, reasoning and the efforts it takes. |
+| Caching | A `PromptCachingCapability`: whether it takes caller-placed breakpoints, which `CacheTtl` lifetimes, the minimum prefix, and how many breakpoints. |
+| Options honoured | Tool choice, parallel tool calls, seed, top-k, penalties. |
+| Limits and cost | Context and output limits, prices, quality and speed scores. |
+| Serving | The `ModelEndpoint` values it is served on. |
+| Provenance | When and where the entry was verified. |
 
-- `resolveModel()` resolves an alias to a `ResolvedModel` — the model, its provider, its
-  capabilities, and the alias metadata — and runs on every completion, so it reads the maps directly
-  instead of merging them. `resolveModelAlias()` resolves the name alone.
-- `getModelCapabilities()` returns one model's entry; `getModelRegistry()`, `getModelAliases()`, and
-  `getAliasMetadata()` return the merged maps, application entries winning.
-- `listKnownModels()` and `listModelsForProvider()` list names, sorted.
-- `describeModel()` returns `ModelProvenance`: the resolution plus when the entry was verified and
-  where its data came from, falling back to the registry-wide date for bundled entries.
-- `checkRegistryFreshness()` returns `RegistryFreshness` — when the data was verified, its age in
-  days, the window (180 days by default), whether it is stale, and entries older than the window —
-  and `assertRegistryFreshness()` throws when it is stale, for a release check.
+`ProviderCapabilities` groups a provider's models with its name and locality. A `CacheHint` is a
+breakpoint on a message or tool.
+
+Aliases such as `openai/best` resolve by intent. `MODEL_ALIAS_METADATA` gives each alias's
+`AliasMetadata`: its `AliasStage`, and whether it floats. `REGISTRY_PROVENANCE` says where the bundled
+data came from and when it was verified. `resolveProvider()` names the provider a model belongs to.
+
+`/models` reads the registry through your configuration. A model you register with `models.registry`,
+or an alias with `models.aliases`, is seen like a bundled one.
+
+| Function | Returns |
+| --- | --- |
+| `resolveModel()` | A `ResolvedModel`: the model, provider, capabilities, and alias metadata. It runs on every completion, so it reads the maps directly instead of merging them. |
+| `resolveModelAlias()` | The resolved name alone. |
+| `getModelCapabilities()` | One model's entry. |
+| `getModelRegistry()`, `getModelAliases()`, `getAliasMetadata()` | The merged maps. Your entries win. |
+| `listKnownModels()`, `listModelsForProvider()` | Model names, sorted. |
+| `describeModel()` | `ModelProvenance`: the resolution, plus when the entry was verified and where its data came from. |
+| `checkRegistryFreshness()` | `RegistryFreshness`: when the data was verified, its age, the window (180 days), whether it is stale, and entries older than the window. |
+| `assertRegistryFreshness()` | Throws when the data is stale, for a release check. |
 
 ## Limitations
 

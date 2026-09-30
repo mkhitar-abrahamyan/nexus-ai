@@ -2,10 +2,12 @@
 
 <!-- covers: ./context-hub -->
 
-Everything an agent runs with, versioned together: the prompts it uses, its instructions, the tools
-it is offered, its skills, and its settings, as one context bundle. A bundle is committed, labelled,
-promoted through evaluation gates, diffed, rolled back, and exported to move between projects — the
-way the [prompt registry](./prompts.md) treats a single prompt, for the whole context around it.
+Everything an agent runs with, versioned together as one context bundle: the prompts it uses, its
+instructions, the tools it is offered, its skills, and its settings.
+
+You commit a bundle, label it, promote it through evaluation gates, diff it, roll it back, and export
+it to another project. It is what the [prompt registry](./prompts.md) does for one prompt, applied to
+the whole context around it.
 
 ```ts
 import { PromptRegistry } from 'nexus-ai-pro/prompts/registry';
@@ -51,12 +53,15 @@ of a SHA-256 over every part but the metadata, which `contextVersion()` computes
 content is always the same version, in any project, and committing unchanged content records
 nothing. With a prompt registry, every pin must exist in it.
 
-`get()` finds a version by content version, label, or `latest`; `resolve()` returns it with the
-`ContextReference` experiments and traces record. `renderPrompt()` renders the prompt a bundle pins
-for a role through the registry, and records the bundle in the request's `metadata.context`.
-`contextInstructions()` joins the instructions into one system text, and `bindTools()` turns the
-bundle's tools into callable tool definitions by matching each to an implementation of yours by
-name — an implementation the bundle does not offer is never exposed.
+Using a bundle:
+
+| Function | What it does |
+| --- | --- |
+| `get()` | Finds a version by content version, label, or `latest`. |
+| `resolve()` | The same, with the `ContextReference` experiments and traces record. |
+| `renderPrompt()` | Renders the prompt a bundle pins for a role, recording the bundle in the request's `metadata.context`. |
+| `contextInstructions()` | Joins the instructions into one system text. |
+| `bindTools()` | Turns the bundle's tools into callable tools, matching each to your implementation by name. An implementation the bundle does not offer is never exposed. |
 
 ```ts
 const { bundle } = await hub.resolve('support-agent', 'production');
@@ -70,13 +75,18 @@ const agent = createAgent({
 
 ## Labels, promotion, and history
 
-Labels point at versions, and every change is recorded, as in the prompt registry. `label()` points
-one without gates and `unlabel()` removes one. `promote()` moves a label to a version — named
-directly, or whatever another label serves — once every gate for that label agrees, returning a
-`ContextPromotionResult` with each verdict; a refusal raises a `ContextPromotionError` unless `force`
-is set, and `force` is recorded in the note. `rollback()` moves a label back to where it pointed
-before. `history()`, `versions()`, `labels()`, and `names()` read the record; a `ContextLabel` and a
-`ContextHistoryEntry` have the shapes of their prompt counterparts.
+Labels point at versions, and every change is recorded, as in the prompt registry.
+
+| Method | What it does |
+| --- | --- |
+| `label()`, `unlabel()` | Point a label at a version without gates, or remove it. |
+| `promote()` | Moves a label to a version — named directly, or whatever another label serves — once every gate agrees. Returns a `ContextPromotionResult` with each verdict. |
+| `rollback()` | Moves a label back to where it pointed before. |
+| `history()`, `versions()`, `labels()`, `names()` | Read the record. |
+
+A refused promotion raises a `ContextPromotionError`, unless `force` is set; forcing is recorded in
+the note. A `ContextLabel` and a `ContextHistoryEntry` have the same shapes as their prompt
+counterparts.
 
 A `ContextPromotionGate` is a function of a `ContextPromotionContext` — the bundle, the version being
 promoted, the label, and what it serves now — that returns a verdict. Two come bundled:
@@ -86,17 +96,23 @@ promoted, the label, and what it serves now — that returns a verdict. Two come
   `noRegression` against the version it would replace.
 - `servedByContextGate()` requires another label, such as `staging`, to serve the version first.
 
-`evaluateContext()` runs a bundle over a dataset with a `ContextTarget` — your function that builds a
-request from the bundle and runs it — and records the bundle in the experiment's `metadata.context`,
-which is what the experiment gate looks for. With an evaluation cache and no fingerprint, the
-bundle's version is the fingerprint, so an unchanged bundle is scored again from its stored outputs;
-see [evaluation](./evaluation.md#caching).
+`evaluateContext()` runs a bundle over a dataset. You give it a `ContextTarget`: your function that
+builds a request from the bundle and runs it. The experiment records the bundle in
+`metadata.context`, which is what the experiment gate looks for.
+
+With an evaluation cache and no fingerprint, the bundle's version is the fingerprint. An unchanged
+bundle is then scored from its stored outputs; see [evaluation](./evaluation.md#caching).
 
 `ContextHubOptions` takes the `store`, the `prompts` registry, the `gates` by label, an `onChange`
-callback for every recorded change, and a clock. Errors are `ContextHubError` values with a stable
-code: a `ContextNotFoundError` for a missing bundle, version, or label; a `ContextConflictError` when
-a label moved during a change; and a `ContextDefinitionError` for an invalid definition, pin, or
-import.
+callback for every recorded change, and a clock.
+
+Errors are `ContextHubError` values with a stable code:
+
+| Error | When |
+| --- | --- |
+| `ContextNotFoundError` | A bundle, version, or label does not exist. |
+| `ContextConflictError` | A label moved while it was being changed. |
+| `ContextDefinitionError` | A definition, pin, or import is invalid. |
 
 ## Diffs
 
@@ -107,9 +123,9 @@ terminal or a pull request.
 
 ## Moving bundles between projects
 
-The hub keeps its state in a prompt store given to it alone, so every prompt adapter serves bundles:
-`MemoryPromptStore`, `FilePromptStore` — one reviewable JSON file per version, meant for version
-control — Redis, and Postgres.
+The hub keeps its state in a prompt store of its own, so every prompt adapter serves bundles:
+`MemoryPromptStore`, Redis, Postgres, and `FilePromptStore`, which writes one reviewable JSON file per
+version for version control.
 
 `export()` writes a bundle version as one `ContextBundleExport` document, carrying every prompt
 version it pins; `import()` commits those prompts into the other project's registry and then the

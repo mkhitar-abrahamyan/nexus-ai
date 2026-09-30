@@ -2,7 +2,9 @@
 
 <!-- covers: ./telephony ./telephony/realtime-bridge ./telephony/twilio -->
 
-Phone calls from `nexus-ai-pro/telephony`: outbound calls, webhook responses, call control, phone numbers, and media streams, with a Twilio adapter on `nexus-ai-pro/telephony/twilio` and a bridge on `nexus-ai-pro/telephony/realtime-bridge` that connects a call to a realtime voice session.
+Phone calls, from `nexus-ai-pro/telephony`: place calls, answer webhooks, control calls, manage phone
+numbers, and handle media streams. The Twilio adapter is on `nexus-ai-pro/telephony/twilio`. To put a
+voice agent on a call, `nexus-ai-pro/telephony/realtime-bridge` connects the call to a realtime session.
 
 ## Phone Number Telephony
 
@@ -135,11 +137,7 @@ await ai.updatePhoneNumber({
 
 ## Validating webhooks
 
-A provider signs every webhook request, and skipping the check lets anyone drive your call flow.
-`ai.validateTelephonyWebhook()` takes a `TelephonyWebhookValidationRequest`: the full public `url`
-the provider called, exactly as configured and with its query string, the method, the headers with
-the signature, the body raw or parsed, query `params` when the body was not what was signed, and an
-`authToken` to use instead of the configured one.
+A provider signs every webhook request. Skip the check and anyone can drive your call flow.
 
 ```ts
 const valid = await ai.validateTelephonyWebhook({
@@ -150,86 +148,133 @@ const valid = await ai.validateTelephonyWebhook({
 if (!valid) return new Response('Forbidden', { status: 403 });
 ```
 
+`ai.validateTelephonyWebhook()` takes a `TelephonyWebhookValidationRequest`:
+
+| Field | What to pass |
+| --- | --- |
+| `url` | The full public URL the provider called, exactly as configured, with its query string. |
+| method, `headers` | The request's, including the signature header. |
+| `body` | The body, raw or parsed. |
+| `params` | Query parameters, when the body was not what was signed. |
+| `authToken` | A token to use instead of the configured one. |
+
 ## Webhook responses
 
-`TelephonyResponseRequest` describes the answer to a call webhook, rendered into the provider's
-markup: `say` text, `playUrl` audio, a `TelephonyGatherConfig` to collect speech or keypad digits —
-what to listen for, where to post it, timeouts, language, the key that finishes input, how many
-digits, and prompts spoken while listening — a `TelephonyStreamConfig` to open a media stream, a
-redirect, a pause, and a hangup. A stream config has the WebSocket `url`, a `TelephonyStreamMode` —
-`unidirectional` sends the caller's audio to you, `bidirectional` also carries audio back — a name,
-a `TelephonyStreamTrack` (`inbound`, `outbound`, or `both`), a status callback with its
-`TelephonyHttpMethod`, and custom `parameters` delivered in the stream's start event.
+`TelephonyResponseRequest` describes how to answer a call webhook. It is rendered into the provider's
+markup. Combine any of these:
 
-The answer comes back as a `TelephonyWebhookResponse`: the provider, the content type, and the body
-to return. `createVoiceTwiML()` renders TwiML directly, without a client, escaping every value.
+| Field | What the caller gets |
+| --- | --- |
+| `say` | Spoken text. |
+| `playUrl` | Audio played from a URL. |
+| `gather` | A `TelephonyGatherConfig` that collects speech or keypad digits: what to listen for, where to post it, timeouts, language, the key that ends input, how many digits, and prompts spoken while listening. |
+| `stream` | A `TelephonyStreamConfig` that opens a media stream, below. |
+| redirect, pause, hangup | Call flow. |
+
+A `TelephonyStreamConfig` has:
+
+- the WebSocket `url`;
+- a `TelephonyStreamMode`: `unidirectional` sends the caller's audio to you, and `bidirectional` also
+  carries your audio back;
+- a `TelephonyStreamTrack`: `inbound`, `outbound`, or `both`;
+- a name, and a status callback with its `TelephonyHttpMethod`;
+- custom `parameters`, delivered in the stream's start event.
+
+The answer comes back as a `TelephonyWebhookResponse`: the provider, the content type, and the body to
+return. `createVoiceTwiML()` renders TwiML directly, without a client, escaping every value.
 
 ## Calls
 
-`CreateCallRequest` places a call: `to` and `from` in E.164 form, and one way to handle it — a
-`webhookUrl`, inline `twiml`, an `applicationSid`, or a `mediaStreamUrl` — with a status callback,
-recording, a ring timeout, answering-machine detection, and a signal. `CreateCallResponse` returns
-the call id and its first `TelephonyCallStatus`, usually `queued`; the statuses run through
-`ringing`, `in-progress`, and `completed`, or end in `busy`, `failed`, `no-answer`, or `canceled`.
+`CreateCallRequest` places a call. Give `to` and `from` in E.164 form, and one way to handle the call:
 
-`GetCallRequest` and `EndCallRequest` name a call by id; ending one takes `completed` to hang up or
-`canceled` to drop a call that has not been answered. Both return `TelephonyCallDetails`: status,
-`TelephonyCallDirection` (`inbound` or `outbound`), numbers, times, and `durationSeconds` and the
-price once the call has ended. `ai.parseTelephonyStatusCallback()` turns a status webhook into a
-`TelephonyStatusCallback` with the same fields and why the call ended.
+| Field | Handles the call with |
+| --- | --- |
+| `webhookUrl` | Your webhook, asked what to do. |
+| `twiml` | Inline TwiML. |
+| `applicationSid` | A Twilio application. |
+| `mediaStreamUrl` | A media stream to your WebSocket. |
+
+Optional fields add a status callback, recording, a ring timeout, answering-machine detection, and a
+signal. `CreateCallResponse` returns the call id and its first status.
+
+A `TelephonyCallStatus` is usually `queued` first, then `ringing`, `in-progress`, and `completed`. A
+call can also end `busy`, `failed`, `no-answer`, or `canceled`.
+
+`GetCallRequest` and `EndCallRequest` name a call by id. Ending takes `completed` to hang up, or
+`canceled` to drop a call that has not been answered. Both return `TelephonyCallDetails`:
+
+- the status, and the `TelephonyCallDirection` (`inbound` or `outbound`);
+- the numbers and times;
+- `durationSeconds` and the price, once the call has ended.
+
+`ai.parseTelephonyStatusCallback()` turns a status webhook into a `TelephonyStatusCallback`, with the
+same fields and why the call ended.
 
 ## Phone numbers
 
-`ListPhoneNumbersRequest` filters to one number and sets a page size. Each `TelephonyPhoneNumber`
-has the provider-side `id` used to update it, the number, its label, where it sends inbound calls,
-status events, and SMS, and whether it can do voice, SMS, and MMS. `UpdatePhoneNumberRequest`
-changes any of those, which is how a number is pointed at your agent.
+`ListPhoneNumbersRequest` filters to one number and sets a page size. Each `TelephonyPhoneNumber` has:
+
+- the provider-side `id`, used to update it;
+- the number and its label;
+- where it sends inbound calls, status events, and SMS;
+- whether it can do voice, SMS, and MMS.
+
+`UpdatePhoneNumberRequest` changes any of those. That is how you point a number at your agent.
 
 ## Media streams
 
-A media stream WebSocket carries `TelephonyMediaStreamEvent` values, discriminated on `event`, and
-`ai.parseTelephonyMediaEvent()` normalizes each provider's messages into them:
+A media stream carries `TelephonyMediaStreamEvent` values, told apart by `event`.
+`ai.parseTelephonyMediaEvent()` turns each provider's messages into them:
 
-- `TelephonyConnectedEvent` opens the socket.
-- `TelephonyStartEvent` arrives once, before any audio: the stream and call ids, the tracks, the
-  media format with its `TelephonyAudioEncoding` — Twilio streams 8 kHz mu-law — and your custom
-  parameters.
-- `TelephonyMediaEvent` is a chunk of base64 audio with its track, sequence number, and timestamp.
-- `TelephonyDtmfEvent` is a key the caller pressed.
-- `TelephonyMarkEvent` confirms that audio you sent has finished playing, so you know what the
-  caller has heard.
-- `TelephonyStopEvent` ends the stream.
+| Event | Meaning |
+| --- | --- |
+| `TelephonyConnectedEvent` | The socket opened. |
+| `TelephonyStartEvent` | Arrives once, before any audio: the stream and call ids, the tracks, the media format and its `TelephonyAudioEncoding`, and your custom parameters. Twilio streams 8 kHz mu-law. |
+| `TelephonyMediaEvent` | A chunk of base64 audio, with its track, sequence number, and timestamp. |
+| `TelephonyDtmfEvent` | The caller pressed a key. |
+| `TelephonyMarkEvent` | Audio you sent has finished playing, so you know what the caller heard. |
+| `TelephonyStopEvent` | The stream ended. |
 
-`ai.formatTelephonyAudioMessage()` builds what you send back as a `TelephonyOutboundAudioMessage`:
-audio, a named mark, or `clear` to drop audio already queued. Its `body` is ready to send on the
-socket.
+`ai.formatTelephonyAudioMessage()` builds what you send back, as a `TelephonyOutboundAudioMessage`:
+audio, a named mark, or `clear` to drop audio already queued. Its `body` is ready to send on the socket.
 
 ## Providers
 
-A `TelephonyProvider` is `info` and optional methods: create and end calls, render webhook
-responses, validate signatures, parse and format stream messages, read calls and status callbacks,
-and list and update numbers. `TelephonyProviderInfo.supports` says which exist. `TelephonyConfig` is
-the client's `telephony` option: a default provider and the providers by name. `TelephonyManager`
-routes each request to the named or default provider, and works without a client.
+A `TelephonyProvider` has an `info` and optional methods: create and end calls, render webhook
+responses, validate signatures, parse and format stream messages, read calls and status callbacks, and
+list and update numbers. `TelephonyProviderInfo.supports` says which methods exist.
 
-`TwilioTelephonyProvider` implements all of it. `TwilioTelephonyProviderConfig` takes the account
-SID and auth token — the token also validates webhooks — a REST base URL, and a `fetch`.
+`TelephonyConfig` is the client's `telephony` option: a default provider, and providers by name.
+`TelephonyManager` routes each request to the named or default provider. It also works without a
+client.
 
-A provider that fails, or no provider for an operation, raises `TelephonyProviderError`, naming the
-provider and carrying the cause; a provider that lacks the operation raises
-`TelephonyCapabilityError`.
+`TwilioTelephonyProvider` implements all of it. `TwilioTelephonyProviderConfig` takes the account SID
+and auth token (the token also validates webhooks), a REST base URL, and a `fetch`.
+
+Two errors cover failures. `TelephonyProviderError` means a provider failed, or none was configured
+for the operation; it names the provider and carries the cause. `TelephonyCapabilityError` means the
+provider lacks the operation.
 
 ## The realtime bridge in detail
 
-`TelephonyRealtimeBridgeOptions` takes the realtime `session`, the `telephony` manager
-that parses and formats stream messages, the provider name (`twilio` by default), and `send`, awaited
-so messages keep their order. `autoConnect` connects the session on the start event, `bargeIn`
-cancels speech on interruption, and `autoDisconnect` ends the session when the stream stops — all on
-by default — with `onStart`, `onStop`, `onDtmf`, and `onError` hooks; errors are reported, never
-thrown at the socket. The `TelephonyRealtimeBridge` it returns exposes the `callId`, `streamId`, and
-`parameters` once the stream starts, whether it has `closed`, `handleMessage()`, `flush()`, and
-`close()`. `twilioRealtimeAudioOptions()` sets both audio directions to 8 kHz mu-law, so audio passes
-through without transcoding.
+`TelephonyRealtimeBridgeOptions`:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `session` | — | The realtime session. |
+| `telephony` | — | The manager that parses and formats stream messages. |
+| provider | `twilio` | Which provider's messages these are. |
+| `send` | — | Sends a message on the socket. Awaited, so messages keep their order. |
+| `autoConnect` | on | Connects the session on the start event. |
+| `bargeIn` | on | Cancels the assistant's speech when the caller talks. |
+| `autoDisconnect` | on | Ends the session when the stream stops. |
+| `onStart`, `onStop`, `onDtmf`, `onError` | — | Hooks. Errors are reported here, never thrown at the socket. |
+
+The returned `TelephonyRealtimeBridge` exposes the `callId`, `streamId`, and `parameters` once the
+stream starts, whether it has `closed`, and `handleMessage()`, `flush()`, and `close()`.
+
+`twilioRealtimeAudioOptions()` sets both audio directions to 8 kHz mu-law, so audio passes through
+without transcoding.
 
 ## Limitations
 
