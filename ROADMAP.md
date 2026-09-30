@@ -1255,22 +1255,50 @@ in tables, and short sentences, with every export still explained.
 
 ---
 
-## 24. 1.24.0: deployment at scale, self-managed
+## 24. Shipped in 1.24.0 — deployment at scale, self-managed
 
-Running assistants as a service without a hosted platform.
+**Revisions.** `nexus-ai-pro/server/deployments`: several revisions of an assistant ship in one image,
+and the traffic split between them lives in the server's state store. `canary()`, `split()`,
+`promote()`, and `rollback()` change it, each kept in a history with who and why and guarded by an
+expected version. New threads are split by a stable hash, a thread keeps its revision while that
+revision takes traffic, and every run records its revision, share, reason, and deployment version.
 
-**Revisions.** Deploy an assistant as a versioned revision, roll back, and split traffic between two
-revisions for a canary, with the split recorded on every run.
+**A canary guard.** `watchCanaries()` compares each canary with the live revision over the same window,
+with the insights' statistics (`compareRuns()`), rolls back a regression, and moves one that holds up
+through its steps to promotion.
 
-**Scaling signals.** Queue depth, run latency, and lease health exposed as metrics an autoscaler reads,
-with a Helm chart and Kubernetes manifests that scale workers on them.
+**Scaling signals.** A worker queue in the server: a per-replica cap, API-only replicas, takeover of
+lapsed runs, and `drain()`, which hands runs still going to another worker without using a retry.
+`GET /scaling` and `GET /metrics` report queued and running runs, their load, the oldest wait, lapsed
+leases, replica capacity, and run counts and latency per revision. `deploy/kubernetes` and
+`deploy/helm` run an API tier and a worker pool that KEDA, or an HPA, scales on the load.
 
-**Tenancy at the server.** Per-tenant quotas, rate limits, and budgets enforced by the server.
+**Tenancy at the server.** `nexus-ai-pro/server/tenancy`: per-tenant active runs, runs per window, and
+spending per period, in memory or shared through Redis, answered with `429` and `Retry-After`.
 
-**A deployments view.** Revisions, traffic splits, and replica health in the studio.
+**A deployments view.** The studio shows traffic splits and their history, each revision's runs since
+the last change, replicas, the queue, and tenant usage, and admins canary, promote, and roll back.
+`nexus deploy` does the same from a pipeline.
 
-**Proof.** A canary revision takes a tenth of the traffic, is rolled back on a regression the insights
-detect, and a load test scales workers up and down on queue depth.
+**Proof.** A canary takes a tenth of 1,000 runs, each recording its revision; a canary seeded to fail is
+rolled back by the guard with the regression as the reason; and a load test in which an autoscaler reads
+`/scaling` grows the worker pool from one to at least four and back, with no run lost or run twice. The
+deployment template runs against the packed package in the clean-install test.
+
+**Documentation.** A deployments guide, and the last nine guides rewritten for readability.
+
+### What did not land, and where it went
+
+- **Tenant usage has no Postgres store.** Memory and Redis are included; any shared store can implement
+  the five-method `TenantUsageStore`.
+- **The Redis operation store reads every record to find queued work.** Postgres and SQLite do it in one
+  indexed query, which is the recommendation for large queues.
+- **The manifests and chart are not run on a live cluster in CI.** They are rendered and checked against
+  the server, and the autoscaling proof is an in-process autoscaler reading `/scaling`.
+- **A revision's code ships in every replica's image.** There are no per-revision replica pools; roll
+  out an image before giving its new revision traffic.
+- **Deployment changes are last-writer-wins** unless the caller passes `expectedVersion`, which the
+  guard, the studio, and `nexus deploy --version` do.
 
 ---
 

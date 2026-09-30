@@ -222,9 +222,11 @@ Shipped so far:
   as images;
 - document loaders, five more vector stores, hybrid retrieval with reranking, and an MCP registry;
 - a shared studio with accounts, roles, an audit log, and comments; a context hub; insights with
-  evaluated fix proposals; and evaluation caching.
+  evaluated fix proposals; and evaluation caching;
+- self-managed deployment at scale: revisions and canaries with automatic rollback, a worker queue
+  that autoscales on Kubernetes, and per-tenant limits.
 
-Next: self-managed deployment at scale, before 2.0.0 consolidates. The image family leaves experimental once recorded live
+Next: 2.0.0 consolidates. The image family leaves experimental once recorded live
 conformance passes on all three backends.
 
 ## Before Production

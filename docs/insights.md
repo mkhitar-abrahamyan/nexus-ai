@@ -82,6 +82,8 @@ const regressions = compareRuns(liveRuns, canaryRuns, { group: 'support@v2', met
 Each run is a `RunSample`: a `status` (`error` counts as a failure), and optionally `latencyMs`,
 `cost`, and `feedback`. A traced `Run` already fits. `CompareRunsOptions` has the group name for the
 summaries, the metrics, the feedback keys, `minRuns`, and the latency and cost margins.
+`minLatencyChangeMs` sets the smallest latency rise that counts, in milliseconds, which keeps noise on
+fast runs from reading as a regression. `detectRegressions()` takes it too.
 
 ## Proposed fixes
 

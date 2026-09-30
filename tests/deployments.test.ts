@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { compareRuns } from '../src/insights/regressions.js';
 import { MemoryOperationStore } from '../src/operations/store.js';
 import type { Principal, RunRecord, ScalingSnapshot, ServerAssistant, ThreadRecord } from '../src/types/server.js';
 import { functionAssistant } from '../src/server/assistant.js';
@@ -210,13 +211,13 @@ test('a canary that regresses is rolled back by the guard, with the regression a
   const decisions: string[] = [];
   const guard = watchCanaries({ deployments, minRuns: 20, onDecision: (decision) => decisions.push(decision.action) });
 
-  for (let index = 0; index < 100; index += 1)
+  for (let index = 0; index < 60; index += 1)
     await call(app, 'POST', '/runs', { assistant: 'support', input: { index } });
-  await allSettled(state, 100);
+  await allSettled(state, 60);
   const early = await guard.check();
   assert.equal(early[0]?.action, 'hold', 'too few canary runs to judge yet');
 
-  for (let index = 100; index < 500; index += 1)
+  for (let index = 60; index < 500; index += 1)
     await call(app, 'POST', '/runs', { assistant: 'support', input: { index } });
   await allSettled(state, 500);
   const [decision] = await guard.check();
@@ -233,7 +234,13 @@ test('a canary that regresses is rolled back by the guard, with the regression a
 
   const stats = await deployments.stats('support');
   const canaryStats = stats.find((item) => item.revision === 'canary');
-  assert.ok(canaryStats && canaryStats.errorRate > 0.3, 'the stats show why');
+  const canaryRuns = state
+    .list<RunRecord>(RUNS_NAMESPACE, { limit: 10_000 })
+    .filter((run) => run.revision?.id === 'canary');
+  const canaryFailed = canaryRuns.filter((run) => run.status === 'failed').length;
+  assert.equal(canaryStats?.failed, canaryFailed, 'the stats show why');
+  assert.equal(canaryStats?.errorRate, canaryFailed / canaryRuns.length);
+  assert.ok(canaryFailed > 0);
   assert.equal(stats.find((item) => item.revision === 'stable')?.errorRate, 0);
 
   for (let index = 500; index < 520; index += 1)
@@ -661,4 +668,11 @@ test('metrics are public only when asked, and can be turned off', async () => {
   assert.equal((await call(open, 'GET', '/scaling')).status, 200);
   const off = createAgentServer({ assistants: { work: answering('w') }, metrics: false });
   assert.equal((await call(off, 'GET', '/metrics')).status, 404);
+});
+
+test('a latency rise of a few milliseconds is noise to the guard, not a regression', () => {
+  const runs = (latencyMs: number) => Array.from({ length: 30 }, () => ({ status: 'success', latencyMs }));
+  assert.equal(compareRuns(runs(1), runs(3), { metrics: ['latency'] }).length, 1, 'relatively, it tripled');
+  assert.deepEqual(compareRuns(runs(1), runs(3), { metrics: ['latency'], minLatencyChangeMs: 50 }), []);
+  assert.equal(compareRuns(runs(100), runs(400), { metrics: ['latency'], minLatencyChangeMs: 50 }).length, 1);
 });

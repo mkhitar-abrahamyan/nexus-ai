@@ -480,6 +480,11 @@ export interface CanaryGuardOptions {
   metrics?: readonly RegressionMetric[];
   /** A rise in p95 latency, relative, that counts. Defaults to 0.25. */
   latencyIncrease?: number;
+  /**
+   * The smallest rise in p95 latency, in milliseconds, that counts. Defaults to 50, so a few
+   * milliseconds of noise on fast runs never rolls a canary back.
+   */
+  minLatencyChangeMs?: number;
   /** A rise in mean cost, relative, that counts. Defaults to 0.25. */
   costIncrease?: number;
   /**
@@ -576,6 +581,7 @@ export function watchCanaries(options: CanaryGuardOptions): CanaryGuard {
       feedback: options.feedback,
       minRuns,
       latencyIncrease: options.latencyIncrease,
+      minLatencyChangeMs: options.minLatencyChangeMs ?? 50,
       costIncrease: options.costIncrease,
     });
     if (regressions.length > 0) {

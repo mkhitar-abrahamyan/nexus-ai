@@ -38,6 +38,11 @@ export interface CompareRunsOptions {
   minRuns?: number;
   /** A rise in p95 latency, relative, that counts. Defaults to 0.25, a quarter slower. */
   latencyIncrease?: number;
+  /**
+   * The smallest rise in p95 latency, in milliseconds, that counts, however large it is relatively.
+   * Defaults to 0; raise it so a run that goes from 2 ms to 3 ms is not a regression.
+   */
+  minLatencyChangeMs?: number;
   /** A rise in mean cost, relative, that counts. Defaults to 0.25. */
   costIncrease?: number;
 }
@@ -62,6 +67,11 @@ export interface DetectRegressionsOptions {
   minRuns?: number;
   /** A rise in p95 latency, relative, that counts. Defaults to 0.25, a quarter slower. */
   latencyIncrease?: number;
+  /**
+   * The smallest rise in p95 latency, in milliseconds, that counts, however large it is relatively.
+   * Defaults to 0; raise it so a run that goes from 2 ms to 3 ms is not a regression.
+   */
+  minLatencyChangeMs?: number;
   /** A rise in mean cost, relative, that counts. Defaults to 0.25. */
   costIncrease?: number;
   /** Only root runs. On by default. */
@@ -167,7 +177,13 @@ export function compareRuns(
       const before = percentile(baseline.map((run) => run.latencyMs).filter(isNumber), 0.95);
       const after = percentile(current.map((run) => run.latencyMs).filter(isNumber), 0.95);
       const margin = options.latencyIncrease ?? 0.25;
-      if (before !== undefined && after !== undefined && before > 0 && after >= before * (1 + margin)) {
+      if (
+        before !== undefined &&
+        after !== undefined &&
+        before > 0 &&
+        after >= before * (1 + margin) &&
+        after - before >= (options.minLatencyChangeMs ?? 0)
+      ) {
         regressions.push({
           group: name,
           metric: 'latency-p95',

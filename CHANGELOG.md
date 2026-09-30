@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-09-30
+
 Deployment at scale, self-managed. Running assistants as a service without a hosted platform:
 revisions and canaries, a worker pool that scales on its queue, and limits per tenant.
 
@@ -17,8 +19,9 @@ revisions and canaries, a worker pool that scales on its queue, and limits per t
   run records its revision, share, reason, and the deployment version.
 - **A canary guard**: `watchCanaries()` compares each canary with the live revision over the same
   window, rolls it back when its error rate, latency, or cost regressed, and moves one that holds up
-  through its `steps` to promotion. `compareRuns()` on `nexus-ai-pro/insights` is the comparison,
-  lifted out of `detectRegressions()`.
+  through its `steps` to promotion. A latency rise must be at least `minLatencyChangeMs`, 50 ms by
+  default, so noise on fast runs never rolls a canary back. `compareRuns()` on `nexus-ai-pro/insights`
+  is the comparison, lifted out of `detectRegressions()`.
 - **A worker queue** in the agent server: with `queue`, a replica runs at most `concurrency` runs and
   leaves the rest queued for the next free worker; `claim: false` makes an API replica. Replicas take
   over lapsed runs every `recoverEveryMs`. `drain()` answers `/health` with `503`, stops claiming, and
@@ -1208,7 +1211,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.23.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.24.0...HEAD
+[1.24.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.23.0...v1.24.0
 [1.23.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.22.0...v1.23.0
 [1.22.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.20.0...v1.21.0

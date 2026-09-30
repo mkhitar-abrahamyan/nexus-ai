@@ -151,7 +151,7 @@ last changed. It uses the same statistics as the insights' regression detection:
 
 - an error rate counts when its rise passes a two-proportion z-test at 95%;
 - p95 latency, and mean cost if you ask for it, count when they rise by a relative margin, a quarter by
-  default.
+  default. A latency rise must also be at least 50 ms.
 
 A regressed canary is rolled back at once. The reason in the history names what got worse. A canary
 that holds up moves to its next step, and is promoted after the last one. Without `steps`, it stays
@@ -167,6 +167,7 @@ where it is until a person promotes it.
 | `minRuns` | 20 | Finished runs each side needs before a canary is judged. |
 | `metrics` | error rate, latency | What is compared. Add `cost` to compare mean cost. |
 | `latencyIncrease`, `costIncrease` | 0.25 | The relative rise that counts. |
+| `minLatencyChangeMs` | 50 | The smallest latency rise that counts, so noise on fast runs never rolls a canary back. |
 | `steps` | none | Shares to move through while the canary holds up, before promotion. |
 | `samples` | run records | Where runs come from. Give it traced runs to judge on feedback scores too. |
 | `feedback` | none | Feedback keys to compare, when `samples` supplies them. |

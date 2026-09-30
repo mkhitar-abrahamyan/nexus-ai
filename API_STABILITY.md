@@ -457,7 +457,7 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
 
-## Deployment stage (Unreleased)
+## Deployment stage (1.24.0)
 
 Deployments (`nexus-ai-pro/server/deployments`), tenant limits (`nexus-ai-pro/server/tenancy`), and the
 server's worker queue are experimental in production readiness. Their contracts follow the 1.x rules.
