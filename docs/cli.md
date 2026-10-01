@@ -24,6 +24,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | `nexus traces list`, `show`, `export` | Read a JSONL trace file, or any trace store a module exports. |
 | `nexus db sql` | Prints the Postgres schema for the adapters you use. |
 | `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
+| `nexus migrate` | Moves imports to the subpaths the 2.0 root import keeps them on. |
 
 `nexus help` prints every flag.
 
@@ -87,6 +88,30 @@ nexus deploy rollback support
 `--url` and `--token` override the environment variables. `--reason` is recorded in the history.
 `--version` refuses the change when someone moved the deployment first. The server's admin scope
 guards every one of these. See the [deployments guide](./deployments.md) for what they do.
+
+## Migrating to 2.0
+
+`nexus migrate` rewrites a codebase for the 2.0 root import, which keeps only the core client:
+
+```bash
+npx nexus migrate src            # reports what would change
+npx nexus migrate src --write    # rewrites the files
+npx nexus migrate src --check    # exits 1 while anything is left
+```
+
+It reads TypeScript and JavaScript files, and the code blocks in Markdown. It skips `node_modules`,
+build output, and version control.
+
+| It rewrites | It reports, for you to finish |
+| --- | --- |
+| `import`, `import type`, and `export … from` of the root | A namespace import of the root |
+| A destructured `require()` of the root | A dynamic `import()` or a whole `require()` of the root |
+| A name that moved under another name, keeping your local name | A read of a response's `estimatedCost` |
+| A deprecated alias, such as `ImageManagerConfig` | |
+
+A second run changes nothing. Comments inside an import list that it splits are not kept. It works on
+text, so an import statement inside a string is rewritten too. The
+[migration guide](../MIGRATING.md) covers what 2.0 changes beyond imports.
 
 ## Exit codes
 

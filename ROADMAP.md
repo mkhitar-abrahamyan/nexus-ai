@@ -480,7 +480,7 @@ Google Imagen, and ComfyUI. Everything below is implemented and tested.
 
   Scores in an uncertainty band go to a human-review queue.
 - **Modality cleanup: deferred to 2.0.** Splitting `inputModalities` from `outputModalities` is a
-  breaking registry change, and it is listed in section 25.
+  breaking registry change, and it is listed in section 26.
 
 - **Graph and agent correctness: all nine fixed.** Fixing number 5 also exposed a related defect
   that is now fixed: after a paused step resumed, the outgoing edges of siblings that had already
@@ -541,7 +541,7 @@ be large to get there. Three rules apply to every item below.
    - Ship the change additively in 1.x wherever possible.
    - Anything that must break is marked `@deprecated` and noted in the changelog at least one minor
      release before 2.0.0.
-   - Every breaking item is collected in section 25.
+   - Every breaking item is collected in section 26.
 
 | Release | Theme | Gap it closes | Proof it ships |
 | --- | --- | --- | --- |
@@ -559,6 +559,7 @@ be large to get there. Three rules apply to every item below.
 | 1.22.0 | Retrieval and integration breadth | Loaders, more vector stores, hybrid and reranked retrieval, an MCP registry | Hybrid retrieval beats vector-only on a stored dataset |
 | 1.23.0 | Team engineering platform | Shared studio with roles, a context hub, insights with proposed fixes, evaluation caching | A seeded regression found, clustered, and answered with an evaluated fix |
 | 1.24.0 | Deployment at scale, self-managed | Revisions, canaries, autoscaling signals, Helm, tenant quotas | A canary rolled back on a regression; workers scaling on queue depth |
+| 1.25.0 | The bridge to 2.0 | Every capability on its own subpath; everything 2.0 removes deprecated | A migrated consumer compiles; a codemod and a migration guide |
 | 2.0.0 | Consolidation | One lifecycle, slim root, optional validators, stable surfaces | Migration guide and codemod; install-footprint targets met |
 
 ---
@@ -620,7 +621,7 @@ in about three seconds, not twelve.
   are synchronous exported functions, and an ESM module cannot load a dependency synchronously on
   first use, so deferring `ajv` and `zod` behind a dynamic import would mean making public functions
   async — a breaking change. Moving them to optional peer dependencies in 2.0.0 fixes the install
-  cost properly, and section 25 already carries it.
+  cost properly, and section 26 already carries it.
 
 **Budgets.** `/graph` measured 52 KB after the work, against the 40 KB this section first guessed;
 the estimate was wrong, not the implementation, and the budget file records the real number. The root
@@ -1302,9 +1303,36 @@ deployment template runs against the packed package in the clean-install test.
 
 ---
 
-## 25. 2.0.0: consolidation
+## 25. 1.25.0: the bridge to 2.0
 
-2.0.0 ships once 1.11.0 through 1.24.0 are released, each experimental surface has had at least one
+The last 1.x minor. 2.0.0 may only remove what a 1.x release deprecated, and the last 1.x release
+logs each deprecated call once per process. This release does both, and ships the tools to migrate.
+
+**A subpath for every capability.** What could only be imported from the root gets an entry point of
+its own, each without a third-party dependency: grounding, web connectors, metrics and health, the
+pipeline, the router, the conformance suites, the Next.js handler, scanned file ingestion, and cost
+estimates.
+
+**The root import, deprecated down to the core.** Every root export except the core client, its config
+builders, its types, and the errors it throws is marked deprecated with the subpath to use. The marks
+and the codemod's map are generated from the export map, so they cannot disagree.
+
+**`nexus migrate`.** A codemod that moves imports to their subpaths, in source files and in Markdown,
+and lists what it cannot rewrite safely. `MIGRATING.md` covers every 2.0 change with before-and-after
+code.
+
+**The 2.0 shapes, readable now.** Directional modalities beside the old list, and the 2.0 checkpoint
+schema through `migrateCheckpoint()`.
+
+**Proof.** A consumer of the packed package, migrated by the codemod, compiles; every name in the
+codemod's map resolves where it points; an editor marks a moved root import deprecated and nothing
+else; and every guide's examples already use the 2.0 imports.
+
+---
+
+## 26. 2.0.0: consolidation
+
+2.0.0 ships once 1.11.0 through 1.25.0 are released, each experimental surface has had at least one
 minor release to settle, and every removal below has been deprecated in a 1.x release.
 
 **Breaking changes.**
@@ -1354,7 +1382,7 @@ moves to Node 24.
 
 ---
 
-## 26. Longer-term backlog
+## 27. Longer-term backlog
 
 **Absorbed by the releases above.** MCP adapters, human approval checkpoints, long-term memory, an
 evaluation platform, prompt and workflow versioning, record and replay fixtures, and the local
@@ -1381,7 +1409,7 @@ control plane.
 
 ---
 
-## 27. Design notes carried forward
+## 28. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -1433,7 +1461,7 @@ await ai.images.edit({
 
 ---
 
-## 28. How an item graduates
+## 29. How an item graduates
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.

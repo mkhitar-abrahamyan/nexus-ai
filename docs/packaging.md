@@ -7,7 +7,9 @@ pays only for what it imports. This guide lists the entry points and what each o
 
 ## Import Surface
 
-The root import is convenient:
+The root import holds the core client: the client, its config builders, its types, and the errors it
+throws. Since 1.25, everything else it re-exports is deprecated there, and 2.0 removes it. `nexus
+migrate` moves those imports to their subpaths; the [migration guide](../MIGRATING.md) has the details.
 
 ```ts
 import { NexusAI, createNexus, createNexusConfig } from 'nexus-ai-pro';
@@ -19,6 +21,15 @@ Focused subpaths are available for smaller imports:
 import { NexusAI } from 'nexus-ai-pro/core';
 import { createNexusConfig } from 'nexus-ai-pro/config';
 import { TokenOptimizer } from 'nexus-ai-pro/optimizer';
+import { estimateCost } from 'nexus-ai-pro/optimizer/cost';
+import { Router } from 'nexus-ai-pro/router';
+import { PipelineRunner } from 'nexus-ai-pro/pipeline';
+import { MetricsCollector, ProviderHealthMonitor } from 'nexus-ai-pro/ops';
+import { withRagContext, completeVerified } from 'nexus-ai-pro/grounding';
+import { ingestFilesAfterScan } from 'nexus-ai-pro/rag/files';
+import { createFetchUrlTool } from 'nexus-ai-pro/connectors';
+import { runProviderConformance } from 'nexus-ai-pro/testing';
+import { createNexusRouteHandler } from 'nexus-ai-pro/next';
 import { ContextWindowManager } from 'nexus-ai-pro/context';
 import { negotiateCompletionRequest } from 'nexus-ai-pro/capabilities';
 import { guardrailPolicy } from 'nexus-ai-pro/security';
@@ -69,53 +80,57 @@ The last column is what a size table usually hides: what an entry point forces y
 - The root import, `/core`, `/config`, and `/security` do, because JSON-schema and Zod validation
   live there.
 
-A production install is about 12.1 MB of `node_modules`, of which about 5.1 MB is this package. The
+A production install is about 12.3 MB of `node_modules`, of which about 5.3 MB is this package. The
 clean-install test holds that total to a ceiling too. `@types/node` adds 2.4 MB at install time, but
 it is types only, so it never appears in an import graph.
 
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 584 KB | 100% | +4.7 MB |
-| `nexus-ai-pro/config` | 457 KB | 78% | +4.7 MB |
-| `nexus-ai-pro/core` | 453 KB | 78% | +4.7 MB |
+| `nexus-ai-pro` | 585 KB | 100% | +4.7 MB |
+| `nexus-ai-pro/config` | 459 KB | 78% | +4.7 MB |
+| `nexus-ai-pro/core` | 455 KB | 78% | +4.7 MB |
 | `nexus-ai-pro/realtime` | 156 KB | 27% | none |
 | `nexus-ai-pro/server` | 109 KB | 19% | none |
 | `nexus-ai-pro/batch` | 108 KB | 18% | none |
 | `nexus-ai-pro/realtime/session` | 94 KB | 16% | none |
 | `nexus-ai-pro/embeddings` | 82 KB | 14% | none |
+| `nexus-ai-pro/router` | 73 KB | 12% | none |
 | `nexus-ai-pro/providers/groq` | 72 KB | 12% | none |
 | `nexus-ai-pro/providers/mistral` | 72 KB | 12% | none |
 | `nexus-ai-pro/providers/azure-openai` | 71 KB | 12% | none |
+| `nexus-ai-pro/providers/deepseek` | 71 KB | 12% | none |
+| `nexus-ai-pro/providers/llamacpp` | 71 KB | 12% | none |
+| `nexus-ai-pro/providers/lmstudio` | 71 KB | 12% | none |
+| `nexus-ai-pro/providers/openai` | 71 KB | 12% | none |
 | `nexus-ai-pro/providers/openrouter` | 71 KB | 12% | none |
-| `nexus-ai-pro/providers/deepseek` | 70 KB | 12% | none |
-| `nexus-ai-pro/providers/llamacpp` | 70 KB | 12% | none |
-| `nexus-ai-pro/providers/lmstudio` | 70 KB | 12% | none |
-| `nexus-ai-pro/providers/openai` | 70 KB | 12% | none |
+| `nexus-ai-pro/providers/anthropic` | 63 KB | 11% | none |
 | `nexus-ai-pro/agent` | 63 KB | 11% | none |
-| `nexus-ai-pro/providers/anthropic` | 62 KB | 11% | none |
-| `nexus-ai-pro/providers/google` | 60 KB | 10% | none |
+| `nexus-ai-pro/providers/google` | 61 KB | 10% | none |
 | `nexus-ai-pro/images` | 59 KB | 10% | none |
 | `nexus-ai-pro/providers/ollama` | 54 KB | 9% | none |
 | `nexus-ai-pro/postgres` | 51 KB | 9% | none |
+| `nexus-ai-pro/graph` | 50 KB | 9% | none |
 | `nexus-ai-pro/security` | 49 KB | 8% | +3.4 MB |
-| `nexus-ai-pro/graph` | 49 KB | 8% | none |
 | `nexus-ai-pro/operations` | 47 KB | 8% | none |
-| `nexus-ai-pro/batch/openai` | 46 KB | 8% | none |
-| `nexus-ai-pro/batch/anthropic` | 46 KB | 8% | none |
+| `nexus-ai-pro/batch/openai` | 47 KB | 8% | none |
+| `nexus-ai-pro/batch/anthropic` | 47 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% | none |
 | `nexus-ai-pro/providers/cohere` | 44 KB | 8% | none |
-| `nexus-ai-pro/batch/mock` | 41 KB | 7% | none |
+| `nexus-ai-pro/batch/mock` | 42 KB | 7% | none |
 | `nexus-ai-pro/evaluate` | 37 KB | 6% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 6% | none |
+| `nexus-ai-pro/optimizer/cost` | 36 KB | 6% | none |
+| `nexus-ai-pro/models` | 33 KB | 6% | none |
 | `nexus-ai-pro/context-hub` | 32 KB | 5% | none |
-| `nexus-ai-pro/models` | 32 KB | 5% | none |
 | `nexus-ai-pro/sqlite` | 31 KB | 5% | none |
 | `nexus-ai-pro/server/deployments` | 29 KB | 5% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 5% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 5% | none |
 | `nexus-ai-pro/evals` | 26 KB | 4% | none |
 | `nexus-ai-pro/insights` | 25 KB | 4% | none |
+| `nexus-ai-pro/ops` | 25 KB | 4% | none |
+| `nexus-ai-pro/testing` | 25 KB | 4% | none |
 | `nexus-ai-pro/graph/functional` | 24 KB | 4% | none |
 | `nexus-ai-pro/tracing` | 23 KB | 4% | none |
 | `nexus-ai-pro/loaders/web` | 23 KB | 4% | none |
@@ -128,12 +143,14 @@ it is types only, so it never appears in an import graph.
 | `nexus-ai-pro/realtime/mock` | 18 KB | 3% | none |
 | `nexus-ai-pro/telephony` | 18 KB | 3% | none |
 | `nexus-ai-pro/images/evals` | 17 KB | 3% | none |
+| `nexus-ai-pro/connectors` | 17 KB | 3% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 3% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 3% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 3% | none |
 | `nexus-ai-pro/embeddings/adapters` | 16 KB | 3% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 3% | none |
 | `nexus-ai-pro/mcp` | 15 KB | 3% | none |
+| `nexus-ai-pro/grounding` | 15 KB | 3% | none |
 | `nexus-ai-pro/prompts/client` | 15 KB | 3% | none |
 | `nexus-ai-pro/images/assets` | 14 KB | 2% | none |
 | `nexus-ai-pro/images/google` | 14 KB | 2% | none |
@@ -155,6 +172,7 @@ it is types only, so it never appears in an import graph.
 | `nexus-ai-pro/providers/base` | 10 KB | 2% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 2% | none |
 | `nexus-ai-pro/postgres/traces` | 10 KB | 2% | none |
+| `nexus-ai-pro/rag/files` | 10 KB | 2% | none |
 | `nexus-ai-pro/prompts` | 10 KB | 2% | none |
 | `nexus-ai-pro/rag/pinecone` | 10 KB | 2% | none |
 | `nexus-ai-pro/rag/chroma` | 10 KB | 2% | none |
@@ -184,6 +202,7 @@ it is types only, so it never appears in an import graph.
 | `nexus-ai-pro/prompts/redis` | 4 KB | 0.7% | none |
 | `nexus-ai-pro/loaders/csv` | 4 KB | 0.7% | none |
 | `nexus-ai-pro/operations/webhooks` | 3 KB | 0.5% | none |
+| `nexus-ai-pro/pipeline` | 3 KB | 0.5% | none |
 | `nexus-ai-pro/postgres/circuits` | 3 KB | 0.5% | none |
 | `nexus-ai-pro/ops/circuit-store` | 3 KB | 0.5% | none |
 | `nexus-ai-pro/cache/memory-cache` | 3 KB | 0.5% | none |
@@ -200,6 +219,7 @@ it is types only, so it never appears in an import graph.
 | `nexus-ai-pro/jobs/queue` | 2 KB | 0.3% | none |
 | `nexus-ai-pro/streaming` | 1 KB | 0.2% | none |
 | `nexus-ai-pro/providers/type-guards` | 1 KB | 0.2% | none |
+| `nexus-ai-pro/next` | 1 KB | 0.2% | none |
 | `nexus-ai-pro/jobs/batch` | 1 KB | 0.2% | none |
 <!-- size-table:end -->
 

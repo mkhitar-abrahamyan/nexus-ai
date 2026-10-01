@@ -6,7 +6,9 @@ import {
   REGISTRY_PROVENANCE,
   resolveProvider,
   type AliasMetadata,
+  type InputModality,
   type ModelCapabilities,
+  type OutputModality,
 } from '../types/providers.js';
 
 /** A model name resolved through aliases to a model, provider, and capabilities. */
@@ -98,6 +100,28 @@ export function listModelsForProvider(providerName: string, config?: Pick<NexusA
     })
     .map(([model]) => model)
     .sort();
+}
+
+/**
+ * What a model accepts and what it produces. The `inputModalities` and `outputModalities` it declares
+ * win; otherwise they are read from `modalities`, where `vision` is an image in, `image` is an image
+ * out, and `audio`, `video`, and `pdf` are inputs. Every model produces text unless it says otherwise.
+ */
+export function modalitiesOf(
+  capabilities: Pick<ModelCapabilities, 'modalities' | 'inputModalities' | 'outputModalities'>,
+): {
+  input: InputModality[];
+  output: OutputModality[];
+} {
+  const legacy = capabilities.modalities ?? [];
+  const input =
+    capabilities.inputModalities ??
+    legacy.flatMap((modality): InputModality[] =>
+      modality === 'vision' ? ['image'] : modality === 'image' ? [] : [modality],
+    );
+  const output =
+    capabilities.outputModalities ?? (['text', ...(legacy.includes('image') ? ['image'] : [])] as OutputModality[]);
+  return { input: [...new Set(input)], output: [...new Set(output)] };
 }
 
 /** A model's registry entry, resolving aliases first. */
@@ -205,3 +229,24 @@ export function assertRegistryFreshness(
       `which exceeds the ${freshness.maxAgeDays}-day window.${detail}`,
   );
 }
+
+export {
+  type AliasMetadata,
+  type AliasStage,
+  type CacheTtl,
+  DEFAULT_CACHE_PRICING,
+  type InputModality,
+  KNOWN_MODELS,
+  type Modality,
+  MODEL_ALIAS_METADATA,
+  type ModelCapabilities,
+  type ModelEndpoint,
+  type ModelStatus,
+  type OutputModality,
+  type PromptCachingCapability,
+  type ProviderCapabilities,
+  REGISTRY_PROVENANCE,
+  type ReasoningEffort,
+  type RoutingModelPreference,
+  resolveProvider,
+} from '../types/providers.js';

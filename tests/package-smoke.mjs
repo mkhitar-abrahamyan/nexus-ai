@@ -149,6 +149,18 @@ const imports = [
     ],
   },
   { specifier: 'nexus-ai-pro/server/remote', exports: ['createRemoteGraph'] },
+  { specifier: 'nexus-ai-pro/grounding', exports: ['withRagContext', 'completeVerified', 'withKnowledgeGraphContext'] },
+  { specifier: 'nexus-ai-pro/connectors', exports: ['createFetchUrlTool', 'createSearchTool'] },
+  {
+    specifier: 'nexus-ai-pro/ops',
+    exports: ['MetricsCollector', 'ProviderHealthMonitor', 'AuditLogger', 'RateLimiter'],
+  },
+  { specifier: 'nexus-ai-pro/pipeline', exports: ['PipelineRunner', 'createPipelineContext'] },
+  { specifier: 'nexus-ai-pro/router', exports: ['Router', 'FailoverExecutor'] },
+  { specifier: 'nexus-ai-pro/testing', exports: ['runProviderConformance', 'runImageProviderConformance'] },
+  { specifier: 'nexus-ai-pro/next', exports: ['createNexusRouteHandler'] },
+  { specifier: 'nexus-ai-pro/rag/files', exports: ['ingestFilesAfterScan', 'createPdfExtractor'] },
+  { specifier: 'nexus-ai-pro/optimizer/cost', exports: ['estimateCost', 'assertWithinCostBudget', 'CostBudgetError'] },
   { specifier: 'nexus-ai-pro/server/deployments', exports: ['Deployments', 'watchCanaries', 'bucket'] },
   { specifier: 'nexus-ai-pro/server/tenancy', exports: ['tenantLimits', 'MemoryTenantUsage', 'RedisTenantUsage'] },
   {

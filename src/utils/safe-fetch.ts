@@ -25,6 +25,7 @@ export class UrlPolicyError extends Error {
   }
 }
 
+/** An address a host name resolved to: the address alone, or with its IP family. */
 export type WebResolvedAddress = string | { address: string; family?: 4 | 6 };
 
 /**

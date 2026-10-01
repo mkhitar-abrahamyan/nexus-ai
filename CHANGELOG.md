@@ -4,6 +4,48 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+The bridge to 2.0. Everything 2.0 removes is deprecated now, every capability has a subpath of its
+own, and the tools to migrate ship with it, so a codebase can move while it is still on 1.x.
+
+### Added
+
+- **A subpath for every capability.** What could only be imported from the root has an entry point
+  of its own, each with no third-party dependency: `nexus-ai-pro/grounding` (grounded prompts,
+  verification, self-consistency, knowledge graphs), `/connectors` (web tools), `/ops` (metrics,
+  health, audit, OpenTelemetry export, rate limiting), `/pipeline`, `/router`, `/testing`
+  (conformance suites), `/next` (the route handler), `/rag/files` (scanned file ingestion), and
+  `/optimizer/cost` (cost estimates and budgets). Grounding alone is 15 KB, where it used to mean the
+  584 KB root and its validators. `hardenPrompt()` joins `/security`, `Tokenizer` joins `/optimizer`, the
+  registry's data joins `/models`, and the capability types join `/capabilities`.
+- **`nexus migrate`**, a codemod that moves imports to the subpaths the 2.0 root keeps them on. It
+  rewrites `import`, `import type`, `export … from`, and destructured `require()` in TypeScript,
+  JavaScript, and Markdown code blocks, keeps local names when a name moved under another, and lists
+  what it cannot rewrite safely. `--check` fails a CI job while anything is left.
+- **`MIGRATING.md`**, shipped in the package: every change 2.0 makes, with before-and-after code.
+- **Modalities with a direction**: `inputModalities` and `outputModalities` on a model's capabilities,
+  `modalitiesOf()` on `nexus-ai-pro/models` to read either shape, and both as routing requirements.
+- **The 2.0 checkpoint schema, readable now**: `migrateCheckpoint()` and `GraphCheckpointV2` on
+  `nexus-ai-pro/graph`.
+
+### Deprecated
+
+- 499 exports of the root import, each in favour of the subpath that already provides it. 2.0 keeps
+  only the core client, its config builders, its types, and the errors it throws on the root. Editors
+  strike a deprecated import through and name the subpath; `nexus migrate` moves them.
+- `ModelCapabilities.modalities` and `routing.requiredCapabilities.modalities`, for the directional
+  fields. The routing requirement warns once per process.
+- `GraphCheckpoint.interrupt`, for `interrupts`.
+
+### Changed
+
+- The guides' examples import from subpaths, as 2.0 requires.
+
+### Fixed
+
+- The agents guide pointed at `nexus-ai-pro/connectors`, which did not exist. It does now.
+- `tenantLimits({ now })` drives the default usage and rate stores too. They kept the system clock, so
+  a budget judged on a replaced clock reset when the real day ended.
+
 ## [1.24.0] - 2026-09-30
 
 Deployment at scale, self-managed. Running assistants as a service without a hosted platform:

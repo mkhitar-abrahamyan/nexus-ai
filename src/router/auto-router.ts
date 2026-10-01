@@ -1,7 +1,8 @@
 import type { RouterContext, RouteDecision } from './types.js';
 import type { NexusAIConfig } from '../types/config.js';
 import type { ModelCapabilities, RoutingModelPreference } from '../types/providers.js';
-import { getModelRegistry, listModelsForProvider, resolveModel } from '../models/registry.js';
+import { getModelRegistry, listModelsForProvider, modalitiesOf, resolveModel } from '../models/registry.js';
+import { warnDeprecated } from '../utils/deprecation.js';
 
 interface Candidate {
   providerName: string;
@@ -235,9 +236,18 @@ export class AutoRouter {
       return false;
     if (requirements.statuses?.length && caps.status && !requirements.statuses.includes(caps.status)) return false;
     if (requirements.modalities?.length) {
+      warnDeprecated(
+        'NEXUS_DEP_REQUIRED_MODALITIES',
+        'routing.requiredCapabilities.modalities is deprecated and removed in 2.0. Use inputModalities and outputModalities.',
+      );
       for (const modality of requirements.modalities) {
         if (!caps.modalities.includes(modality)) return false;
       }
+    }
+    if (requirements.inputModalities?.length || requirements.outputModalities?.length) {
+      const { input, output } = modalitiesOf(caps);
+      if (requirements.inputModalities?.some((modality) => !input.includes(modality))) return false;
+      if (requirements.outputModalities?.some((modality) => !output.includes(modality))) return false;
     }
 
     return true;

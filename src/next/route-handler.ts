@@ -1,8 +1,11 @@
 import type { NexusAI } from '../core/nexus.js';
 import type { CompletionRequest } from '../types/messages.js';
 
+/** Options for `createNexusRouteHandler()`. */
 export interface NexusRouteHandlerOptions {
+  /** The client that answers each request. */
   ai: NexusAI;
+  /** Streams the answer as server-sent events instead of returning it whole. Off by default. */
   stream?: boolean;
 }
 

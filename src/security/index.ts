@@ -255,6 +255,7 @@ export { PIIDetector } from './pii-detector.js';
 export { GUARDRAIL_POLICIES, type GuardrailPolicyName, guardrailPolicy } from './policies.js';
 export { SchemaValidator } from './schema-validator.js';
 export { SemanticInjectionClassifier } from './semantic-injection-classifier.js';
+export { hardenPrompt, type PromptHardeningOptions } from './prompt-hardening.js';
 export {
   type FileUpload,
   scanUploads,

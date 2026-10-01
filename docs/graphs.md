@@ -360,6 +360,27 @@ which the least recently written thread is dropped). `OperationStoreCheckpointer
 checkpoint as an operation record, with `OperationStoreCheckpointerOptions.maxPerThread` (50), so any
 operation store — memory, Redis, or Postgres — makes a thread durable.
 
+### The 2.0 checkpoint schema
+
+2.0 gives every checkpoint an id and its pending tasks, and keeps questions only in `interrupts`.
+The single `interrupt` field is deprecated. Checkpointers write the 1.x schema until 2.0, and read
+it throughout 2.x.
+
+`migrateCheckpoint()` reads either schema and returns a `GraphCheckpointV2`, so code written for 2.0
+already works on what a 1.x checkpointer stored:
+
+```ts
+import { migrateCheckpoint } from 'nexus-ai-pro/graph';
+
+const checkpoint = migrateCheckpoint(await checkpointer.get('order-991'));
+checkpoint.id;         // 'order-991:3'
+checkpoint.tasks;      // always present, one per node or Send
+checkpoint.interrupts; // every pending question, empty when none
+```
+
+A 1.x checkpoint gains its id, as `<threadId>:<step>`, its tasks spelled out from `next` when it
+carried none, and its question moved into `interrupts`. A 2.0 checkpoint passes through unchanged.
+
 ## Errors
 
 Every graph error extends `GraphError` and carries a stable `code`:
@@ -526,6 +547,7 @@ specific entry point that provides it.
 | `GraphBreakpoint` | interface | Where a run paused for debugging. |
 | `GraphCheckpoint` | interface | A graph's full state after a superstep, which is everything needed to resume the run elsewhere. |
 | `GraphCheckpointer` | interface | Durable storage for checkpoints. |
+| `GraphCheckpointV2` | interface | A checkpoint in the 2.0 schema. |
 | `GraphDescription` | interface | A graph's shape, as data: what `describe()` returns and what the visualizer draws. |
 | `GraphError` | class | Base class for graph errors, each with a stable `code`. |
 | `GraphEvent` | type | Fine-grained events delivered to `GraphRunOptions.onEvent`. |
@@ -550,6 +572,7 @@ specific entry point that provides it.
 | `MemoryGraphCheckpointer` | class | In-process checkpoint history. |
 | `MemoryGraphCheckpointerOptions` | interface | Options for the in-process checkpointer. |
 | `mergeObject` | function | Shallow-merges object writes, so two branches can each contribute their own keys. |
+| `migrateCheckpoint` | function | Reads a checkpoint in the 2.0 schema from one in either schema, so code written against 2.0 can read what a 1.x checkpointer stored. |
 | `NodeCacheEntry` | interface | A cached node result: the writes it made and where it routed. |
 | `NodeCachePolicy` | interface | How a node reuses its results: the key, how long a result lasts, and where results are kept. |
 | `NodeContext` | interface | What a node receives when it runs. |

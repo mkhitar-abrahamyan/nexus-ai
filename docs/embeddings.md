@@ -79,7 +79,8 @@ Existing vector stores keep their contract. `toEmbeddingFunction()` adapts the f
 function `MemoryVectorStore`, the semantic cache, and RAG ingestion already accept:
 
 ```ts
-import { MemoryVectorStore, toEmbeddingFunction } from 'nexus-ai-pro';
+import { toEmbeddingFunction } from 'nexus-ai-pro/embeddings';
+import { MemoryVectorStore } from 'nexus-ai-pro/rag';
 
 const store = new MemoryVectorStore(toEmbeddingFunction(ai, { inputType: 'document' }));
 ```

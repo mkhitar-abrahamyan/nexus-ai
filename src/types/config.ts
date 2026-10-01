@@ -5,7 +5,15 @@ import type { VoiceConfig } from './voice.js';
 import type { ImageConfig } from './images.js';
 import type { EmbeddingConfig } from './embeddings.js';
 import type { TelephonyConfig } from './telephony.js';
-import type { AliasMetadata, Modality, ModelCapabilities, ModelStatus, RoutingModelPreference } from './providers.js';
+import type {
+  AliasMetadata,
+  InputModality,
+  Modality,
+  ModelCapabilities,
+  ModelStatus,
+  OutputModality,
+  RoutingModelPreference,
+} from './providers.js';
 import type { CapabilityConfig } from './capabilities.js';
 import type { PipelineConfig } from '../pipeline/types.js';
 import type { CacheAdapter } from '../cache/adapters.js';
@@ -431,7 +439,16 @@ export interface RoutingConfig {
    * reasoning, context size, price ceilings, and lifecycle status.
    */
   requiredCapabilities?: {
+    /**
+     * Modalities without a direction.
+     *
+     * @deprecated Use `inputModalities` and `outputModalities`. Removed in 2.0.
+     */
     modalities?: Modality[];
+    /** What every candidate must accept, such as `['image', 'pdf']` for a request with attachments. */
+    inputModalities?: InputModality[];
+    /** What every candidate must produce, such as `['image']` for image generation. */
+    outputModalities?: OutputModality[];
     streaming?: boolean;
     toolCalling?: boolean;
     structuredOutputs?: boolean;

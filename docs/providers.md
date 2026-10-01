@@ -1,6 +1,6 @@
 # Providers, routing, and the model registry
 
-<!-- covers: ./providers ./providers/anthropic ./providers/azure-openai ./providers/base ./providers/cohere ./providers/deepseek ./providers/errors ./providers/google ./providers/groq ./providers/llamacpp ./providers/lmstudio ./providers/mistral ./providers/ollama ./providers/openai ./providers/openrouter ./providers/type-guards ./models -->
+<!-- covers: ./providers ./providers/anthropic ./providers/azure-openai ./providers/base ./providers/cohere ./providers/deepseek ./providers/errors ./providers/google ./providers/groq ./providers/llamacpp ./providers/lmstudio ./providers/mistral ./providers/ollama ./providers/openai ./providers/openrouter ./providers/type-guards ./models ./router -->
 <!-- sources: src/router -->
 
 Twelve completion providers behind one contract, the routing that chooses between them, and the model
@@ -157,9 +157,10 @@ health, and the providers whose circuit is open. Providers with an open circuit 
 just ranked lower.
 
 It returns a `RouteDecision`: the provider and model to try first, why, limits for that first attempt,
-and the fallbacks in order. `FailoverExecutor` runs the decision. It tries each attempt with its own
-timeout, rate-limit retries, and circuit check. If none succeeds, it throws with every attempt's error.
-Both are exported for a gateway that routes requests without the rest of the client.
+and the fallbacks in order. Each fallback is a `RouteAttempt`. `FailoverExecutor` runs the decision.
+It tries each attempt with its own timeout, rate-limit retries, and circuit check. If none succeeds, it
+throws with every attempt's error. Both are on `nexus-ai-pro/router`, for a gateway that routes
+requests without the rest of the client.
 
 ## Model Registry Generation
 
@@ -190,13 +191,39 @@ nothing reads. Both live in the repository, where a diff is what you want.
 | Group | Fields |
 | --- | --- |
 | Identity | Provider and family, `ModelStatus`, release date, knowledge cutoff. |
-| Input | Each `Modality` it accepts. |
+| Modalities | What it accepts and what it produces. See below. |
 | Features | Streaming, tool calling, structured output and JSON mode, reasoning and the efforts it takes. |
 | Caching | A `PromptCachingCapability`: whether it takes caller-placed breakpoints, which `CacheTtl` lifetimes, the minimum prefix, and how many breakpoints. |
 | Options honoured | Tool choice, parallel tool calls, seed, top-k, penalties. |
 | Limits and cost | Context and output limits, prices, quality and speed scores. |
 | Serving | The `ModelEndpoint` values it is served on. |
 | Provenance | When and where the entry was verified. |
+
+### What a model accepts and produces
+
+Each entry still lists its `modalities`, each a `Modality`, in one list that does not say which way each
+one flows:
+`vision` is an image in, and `image` an image out. That list is deprecated; 2.0 replaces it with two.
+
+- `inputModalities` lists each `InputModality` the model accepts: text, image, audio, video, or pdf.
+- `outputModalities` lists each `OutputModality` it produces: text, image, or audio.
+
+`modalitiesOf()` reads both from any entry. It uses the new fields when the entry declares them, and
+otherwise derives them from `modalities`:
+
+```ts
+import { getModelCapabilities, modalitiesOf } from 'nexus-ai-pro/models';
+
+const { input, output } = modalitiesOf(getModelCapabilities('gemini-3-pro-image-preview')!);
+// input: ['text', 'image'], output: ['text', 'image']
+```
+
+Routing requires them the same way. `routing.requiredCapabilities` takes `inputModalities` and
+`outputModalities`; its old `modalities` still works, and warns once that 2.0 removes it.
+
+A model you define must still set `modalities` in 1.x. Set the two new fields beside it, and 2.0 needs
+nothing more.
+
 
 `ProviderCapabilities` groups a provider's models with its name and locality. A `CacheHint` is a
 breakpoint on a message or tool.
@@ -238,20 +265,39 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `AliasMetadata` | interface | Where an alias stands and what it points to. |
+| `AliasStage` | type | Publication stage of a model alias. |
 | `assertRegistryFreshness` | function | Throws when the bundled registry has not been verified inside the configured window. |
+| `CacheTtl` | type | Lifetime of a provider-side prompt cache entry. |
 | `checkRegistryFreshness` | function | Measures how old the bundled registry data is. |
+| `DEFAULT_CACHE_PRICING` | constant | Fallback cache pricing as a multiple of the standard input rate, applied when a model does not declare `costPer1kCachedInput` or `costPer1kCacheWrite`. |
 | `describeModel` | function | Reports where a model entry came from and when it was last checked. |
 | `getAliasMetadata` | function | Stage and provenance for every alias, with application-registered metadata layered on top. |
 | `getModelAliases` | function | Bundled and application aliases merged, application aliases winning. |
 | `getModelCapabilities` | function | A model's registry entry, resolving aliases first. |
 | `getModelRegistry` | function | Bundled and application model entries merged, application entries winning. |
+| `InputModality` | type | What a model accepts: text, images, audio, video, or PDF documents. |
+| `KNOWN_MODELS` | constant | The bundled model registry: capabilities and prices for every model the package knows by name. |
 | `listKnownModels` | function | Every model name in the registry, sorted. |
 | `listModelsForProvider` | function | Every model in the registry that belongs to a provider, sorted. |
+| `modalitiesOf` | function | What a model accepts and what it produces. |
+| `Modality` | type | What a model handles, in one list: text, images in (`vision`), audio, video, images out (`image`), or PDF documents. |
+| `MODEL_ALIAS_METADATA` | constant | Stage and provenance for every bundled alias, derived from its target so the two cannot drift. |
+| `ModelCapabilities` | interface | Declared model behavior. |
+| `ModelEndpoint` | type | Which provider API a model is served through. |
 | `ModelProvenance` | interface | Where a model entry came from and when it was last checked. |
+| `ModelStatus` | type | Where a model is in its provider's lifecycle. |
+| `OutputModality` | type | What a model produces: text, images, or audio. |
+| `PromptCachingCapability` | interface | How a model supports prompt caching. |
+| `ProviderCapabilities` | interface | A provider and the models it serves. |
+| `ReasoningEffort` | type | Portable reasoning effort, from none to the most the model offers. |
+| `REGISTRY_PROVENANCE` | constant | Default provenance for bundled registry entries that do not carry their own `verifiedAt`. |
 | `RegistryFreshness` | interface | How old the model registry is. |
 | `ResolvedModel` | interface | A model name resolved through aliases to a model, provider, and capabilities. |
 | `resolveModel` | function | Resolves an alias and looks up model capabilities. |
 | `resolveModelAlias` | function | Resolves an alias, checking application aliases before bundled ones. |
+| `resolveProvider` | function | The provider a model name belongs to, from its prefix, or `null` when the name gives no clue. |
+| `RoutingModelPreference` | type | A model the router should prefer, optionally weighted above others. |
 
 ### `nexus-ai-pro/providers/anthropic`
 
@@ -360,11 +406,12 @@ specific entry point that provides it.
 | `getString` | function | A string at a key, or the fallback. |
 | `isRecord` | function | Whether a value is a plain object, not null or an array. |
 
-### `nexus-ai-pro`
+### `nexus-ai-pro/router`
 
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `FailoverExecutor` | class | Runs a routing decision: the primary provider, then each fallback, honouring per-attempt timeouts, rate limits, and circuits. |
+| `RouteAttempt` | interface | One provider and model to try, with limits that apply to this attempt only. |
 | `RouteDecision` | interface | Where a request goes: the provider and model to try first, and what to try if they fail. |
 | `Router` | class | Chooses where a request goes: a direct model, a matching rule, or the auto-router's ranking, with the fallbacks `routing.fallback` adds on top. |
 | `RouterContext` | interface | What a routing strategy sees when it picks a provider. |

@@ -226,7 +226,9 @@ Shipped so far:
 - self-managed deployment at scale: revisions and canaries with automatic rollback, a worker queue
   that autoscales on Kubernetes, and per-tenant limits.
 
-Next: 2.0.0 consolidates. The image family leaves experimental once recorded live
+Next: 2.0.0 consolidates. It slims the root import to the core client; `npx nexus migrate src --write`
+moves your imports today, and [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md)
+covers the rest. The image family leaves experimental once recorded live
 conformance passes on all three backends.
 
 ## Before Production

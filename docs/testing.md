@@ -1,6 +1,6 @@
 # Testing with recorded traffic
 
-<!-- covers: ./testing/record -->
+<!-- covers: ./testing ./testing/record -->
 <!-- sources: src/testing -->
 
 Tests that call a provider need credentials. With recordings, they run everywhere else too.
@@ -86,7 +86,7 @@ asserts on the results; a report prints them. The suites are exported from the r
 ### Chat providers
 
 ```ts
-import { runProviderConformance } from 'nexus-ai-pro';
+import { runProviderConformance } from 'nexus-ai-pro/testing';
 
 const results = await runProviderConformance('openai', provider, { testStream: true, testTools: true });
 assert.ok(results.every((result) => result.completeOk && result.streamOk !== false), JSON.stringify(results));
@@ -145,27 +145,7 @@ optional `validate`.
 Generated from the doc comments by `npm run docs:update`. Each export is listed once, under the most
 specific entry point that provides it.
 
-### `nexus-ai-pro/testing/record`
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `fixtureFetch` | function | Picks recording, replay, or the live network by mode, so one test file serves all three. |
-| `FixtureMissingError` | class | Raised on replay when no recording matches a request. |
-| `FixtureMode` | type | `record` captures live traffic, `replay` serves fixtures, `live` passes through untouched. |
-| `FixtureOptions` | interface | Where fixtures live and how requests are matched to them. |
-| `installFetch` | function | Replaces `globalThis.fetch` until the returned function is called, for code that does not take a `fetch` option — several completion providers call the global directly. |
-| `MatchInput` | interface | What a matcher sees: the request, with credentials already removed. |
-| `readFixtures` | function | Reads every exchange in a fixture directory, for inspection or a custom replay. |
-| `RecordedExchange` | interface | One request and the response it got, as written to a fixture file. |
-| `RecordedRequest` | interface | A recorded request, with credentials removed. |
-| `RecordedResponse` | interface | A recorded response. |
-| `recordingFetch` | function | Wraps a real fetch so that every exchange is written to the fixture directory. |
-| `RecordingFetch` | type | A fetch that also lets a test wait for every fixture it has written. |
-| `RecordOptions` | interface | Options for recording. |
-| `replayFetch` | function | Serves recorded exchanges instead of calling the network. |
-| `ReplayOptions` | interface | Options for replaying. |
-
-### `nexus-ai-pro`
+### `nexus-ai-pro/testing`
 
 | Export | Kind | Summary |
 | --- | --- | --- |
@@ -186,4 +166,24 @@ specific entry point that provides it.
 | `runEmbeddingProviderConformance` | function | Checks an embeddings adapter against the neutral contract. |
 | `runImageProviderConformance` | function | Checks an image adapter against the neutral contract: the results it returns, the operations it declares, and optionally how it handles an aborted signal. |
 | `runProviderConformance` | function | Checks a chat provider against the neutral contract: completion, and optionally streaming, health, JSON output, and tool calls. |
+
+### `nexus-ai-pro/testing/record`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `fixtureFetch` | function | Picks recording, replay, or the live network by mode, so one test file serves all three. |
+| `FixtureMissingError` | class | Raised on replay when no recording matches a request. |
+| `FixtureMode` | type | `record` captures live traffic, `replay` serves fixtures, `live` passes through untouched. |
+| `FixtureOptions` | interface | Where fixtures live and how requests are matched to them. |
+| `installFetch` | function | Replaces `globalThis.fetch` until the returned function is called, for code that does not take a `fetch` option — several completion providers call the global directly. |
+| `MatchInput` | interface | What a matcher sees: the request, with credentials already removed. |
+| `readFixtures` | function | Reads every exchange in a fixture directory, for inspection or a custom replay. |
+| `RecordedExchange` | interface | One request and the response it got, as written to a fixture file. |
+| `RecordedRequest` | interface | A recorded request, with credentials removed. |
+| `RecordedResponse` | interface | A recorded response. |
+| `recordingFetch` | function | Wraps a real fetch so that every exchange is written to the fixture directory. |
+| `RecordingFetch` | type | A fetch that also lets a test wait for every fixture it has written. |
+| `RecordOptions` | interface | Options for recording. |
+| `replayFetch` | function | Serves recorded exchanges instead of calling the network. |
+| `ReplayOptions` | interface | Options for replaying. |
 <!-- reference:end -->

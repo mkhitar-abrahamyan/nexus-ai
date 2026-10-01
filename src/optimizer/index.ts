@@ -76,3 +76,4 @@ export class TokenOptimizer {
 
 export { PromptDensifier } from './densifier.js';
 export { BudgetEnforcer, TokenBudgetError } from './budget.js';
+export { Tokenizer } from '../utils/tokenizer.js';

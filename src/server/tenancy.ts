@@ -43,7 +43,7 @@ export interface TenantLimitsOptions {
    * milliseconds. Set it above the longest run. Defaults to an hour.
    */
   slotTtlMs?: number;
-  /** Replaces the system clock, for tests. */
+  /** Replaces the system clock, for tests. The default usage and rate stores keep time by it too. */
   now?: () => Date;
 }
 
@@ -94,9 +94,11 @@ export interface TenantLimiter extends TenantGate {
  * move on their own. Point `usage` and `rates` at Redis and every replica enforces one set of limits.
  */
 export function tenantLimits(options: TenantLimitsOptions): TenantLimiter {
-  const usageStore = options.usage ?? new MemoryTenantUsage();
-  const rates = options.rates ?? new MemoryRateLimitStore();
   const now = options.now ?? (() => new Date());
+  // The default stores keep time by the same clock, so a replaced clock moves every window together.
+  const clock = () => now().getTime();
+  const usageStore = options.usage ?? new MemoryTenantUsage(clock);
+  const rates = options.rates ?? new MemoryRateLimitStore(clock);
   const slotTtlMs = options.slotTtlMs ?? 3_600_000;
 
   const limitsOf = async (tenantId: string | undefined): Promise<TenantLimits | undefined> => {

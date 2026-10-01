@@ -1,6 +1,6 @@
 # Grounding: retrieval, citations, and verification
 
-<!-- covers: ./rag ./rag/qdrant -->
+<!-- covers: ./grounding ./rag ./rag/files ./rag/qdrant -->
 <!-- sources: src/hallucination src/rag -->
 
 Grounding makes an answer follow from evidence, and catches it when it does not. Four steps:
@@ -13,7 +13,8 @@ Grounding makes an answer follow from evidence, and catches it when it does not.
 Every export here comes from the root import, except ingestion, which is on `nexus-ai-pro/rag`.
 
 ```ts
-import { MemoryVectorStore, withRagContext } from 'nexus-ai-pro';
+import { withRagContext } from 'nexus-ai-pro/grounding';
+import { MemoryVectorStore } from 'nexus-ai-pro/rag';
 
 const store = new MemoryVectorStore();
 await store.add([{ id: 'doc-1', content: 'NexusAI supports RAG context with citations.', source: 'docs' }]);
@@ -56,7 +57,7 @@ stores.
 3. It chunks the text.
 
 ```ts
-import { ingestFilesAfterScan, createPdfExtractor } from 'nexus-ai-pro';
+import { ingestFilesAfterScan, createPdfExtractor } from 'nexus-ai-pro/rag/files';
 
 const { chunks, skippedFiles } = await ingestFilesAfterScan(uploads, {
   extractors: [createPdfExtractor(myPdfToText)],
@@ -205,35 +206,7 @@ its minimal client contract.
 Generated from the doc comments by `npm run docs:update`. Each export is listed once, under the most
 specific entry point that provides it.
 
-### `nexus-ai-pro/rag`
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `cosineSimilarity` | function | Cosine similarity of two unit-length vectors, as their dot product. |
-| `createHashEmbeddings` | function | Hashed term-count vectors, normalized to unit length. |
-| `EmbeddingProvider` | type | Turns texts into vectors, one per text, in order. |
-| `ingestDocuments` | function | Splits documents into overlapping chunks for retrieval. |
-| `IngestionOptions` | interface | How documents are split. |
-| `IngestionResult` | interface | The chunks produced from a set of documents. |
-| `ingestText` | function | Splits one text into overlapping chunks for retrieval. |
-| `matchesMetadata` | function | Whether a chunk's metadata satisfies an exact-match filter. |
-| `MemoryVectorStore` | class | Chunks and their vectors in process memory, searched by cosine similarity. |
-| `normalizeVector` | function | Scales a vector to unit length, so a dot product is its cosine similarity. |
-| `RagChunk` | interface | A passage of retrieved context. |
-| `VectorDocument` | interface | A chunk to store, with its vector when already computed. |
-| `VectorSearchOptions` | interface | Options for a vector search. |
-| `VectorSearchResult` | interface | A stored chunk returned by a search. |
-| `VectorStore` | interface | Where retrieval chunks live and how they are searched. |
-
-### `nexus-ai-pro/rag/qdrant`
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `QdrantError` | class | Raised when Qdrant answers with an error. |
-| `QdrantVectorStore` | class | Retrieval chunks in a Qdrant collection, through its REST API. |
-| `QdrantVectorStoreOptions` | interface | Options for the Qdrant store. |
-
-### `nexus-ai-pro`
+### `nexus-ai-pro/grounding`
 
 | Export | Kind | Summary |
 | --- | --- | --- |
@@ -241,21 +214,16 @@ specific entry point that provides it.
 | `completeVerified` | function | Completes a request, checks each claim in the answer against the context, and asks for one revision when claims are unsupported. |
 | `completeWithSelfConsistency` | function | Samples several answers and returns the one they agree with most. |
 | `ConsistencyClient` | interface | The part of a client that self-consistency needs. |
-| `createOcrExtractor` | function | An extractor for images, around your own OCR function. |
-| `createPdfExtractor` | function | An extractor for PDF files, around your own PDF-to-text function. |
 | `extractCitations` | function | Every distinct bracketed citation in a text. |
 | `extractFacts` | function | Splits an answer into sentence-level claims, dropping "I don't know" style answers. |
 | `FactualOptions` | interface | Options for `withFactualDefaults()`. |
-| `FileIngestionOptions` | interface | Options for `ingestFilesAfterScan()`. |
-| `FileIngestionResult` | interface | The chunks produced from a set of files, and the files that could not be read. |
-| `FileTextExtractor` | interface | Turns one kind of file into text, such as PDF or an image through OCR. |
-| `ingestFilesAfterScan` | function | Scans uploads, extracts their text, and splits it into chunks. |
 | `KnowledgeGraph` | interface | Entities and the relationships between them. |
 | `KnowledgeGraphEdge` | interface | A relationship between two entities. |
 | `KnowledgeGraphNode` | interface | An entity in a knowledge graph. |
 | `KnowledgeGraphOptions` | interface | Options for `withKnowledgeGraphContext()`. |
 | `lexicalEntailment` | function | Whether a context supports a claim by term overlap: at least 72% of its significant terms, or the claim appearing verbatim. |
 | `NliVerifier` | interface | A natural-language-inference model that judges whether a context entails a claim. |
+| `RagChunk` | interface | A passage of retrieved context. |
 | `RagOptions` | interface | Options for `withRagContext()`. |
 | `selectGraphFacts` | function | Ranks a graph's relationships by how many terms they share with the query and states the best as fact lines. |
 | `selectMostConsistent` | function | The response whose text is most similar to the others'. |
@@ -270,4 +238,42 @@ specific entry point that provides it.
 | `withFactualDefaults` | function | Adds a system message that asks for factual, conservative answers, with low sampling defaults. |
 | `withKnowledgeGraphContext` | function | Adds the graph facts most relevant to the request as a system message, telling the model not to infer relationships the graph lacks. |
 | `withRagContext` | function | Adds retrieved passages as a system message, telling the model to answer only from them and cite them. |
+
+### `nexus-ai-pro/rag`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `cosineSimilarity` | function | Cosine similarity of two unit-length vectors, as their dot product. |
+| `createHashEmbeddings` | function | Hashed term-count vectors, normalized to unit length. |
+| `EmbeddingProvider` | type | Turns texts into vectors, one per text, in order. |
+| `ingestDocuments` | function | Splits documents into overlapping chunks for retrieval. |
+| `IngestionOptions` | interface | How documents are split. |
+| `IngestionResult` | interface | The chunks produced from a set of documents. |
+| `ingestText` | function | Splits one text into overlapping chunks for retrieval. |
+| `matchesMetadata` | function | Whether a chunk's metadata satisfies an exact-match filter. |
+| `MemoryVectorStore` | class | Chunks and their vectors in process memory, searched by cosine similarity. |
+| `normalizeVector` | function | Scales a vector to unit length, so a dot product is its cosine similarity. |
+| `VectorDocument` | interface | A chunk to store, with its vector when already computed. |
+| `VectorSearchOptions` | interface | Options for a vector search. |
+| `VectorSearchResult` | interface | A stored chunk returned by a search. |
+| `VectorStore` | interface | Where retrieval chunks live and how they are searched. |
+
+### `nexus-ai-pro/rag/files`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `createOcrExtractor` | function | An extractor for images, around your own OCR function. |
+| `createPdfExtractor` | function | An extractor for PDF files, around your own PDF-to-text function. |
+| `FileIngestionOptions` | interface | Options for `ingestFilesAfterScan()`. |
+| `FileIngestionResult` | interface | The chunks produced from a set of files, and the files that could not be read. |
+| `FileTextExtractor` | interface | Turns one kind of file into text, such as PDF or an image through OCR. |
+| `ingestFilesAfterScan` | function | Scans uploads, extracts their text, and splits it into chunks. |
+
+### `nexus-ai-pro/rag/qdrant`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `QdrantError` | class | Raised when Qdrant answers with an error. |
+| `QdrantVectorStore` | class | Retrieval chunks in a Qdrant collection, through its REST API. |
+| `QdrantVectorStoreOptions` | interface | Options for the Qdrant store. |
 <!-- reference:end -->

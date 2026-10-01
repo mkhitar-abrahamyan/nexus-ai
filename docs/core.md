@@ -1,6 +1,6 @@
 # The client: requests, context, cost, and streaming
 
-<!-- covers: . ./core ./config ./streaming ./capabilities ./context ./optimizer -->
+<!-- covers: . ./core ./config ./streaming ./capabilities ./context ./optimizer ./optimizer/cost ./pipeline ./next -->
 <!-- sources: src/core src/types src/pipeline src/optimizer src/next src/utils -->
 
 `NexusAI` is the client every other part plugs into. It gives you one request shape across providers,
@@ -403,7 +403,7 @@ newer than the bundled registry.
 Registry provenance is inspectable, and a release check can fail on stale data:
 
 ```ts
-import { describeModel, assertRegistryFreshness } from 'nexus-ai-pro';
+import { describeModel, assertRegistryFreshness } from 'nexus-ai-pro/models';
 
 console.log(describeModel('anthropic/best'));
 // { model: 'claude-opus-4-8', verifiedAt: '…', alias: { stage: 'stable', floating: true }, … }
@@ -450,7 +450,7 @@ provider call, output checks, and caching. `PipelineConfig` is where you step in
 | --- | --- |
 | `PipelineHooksConfig` | Run your function at a stage, named by a `PipelineHookName`. |
 | `PipelineMiddleware`, `PipelineStep` | Add a stage of your own. |
-| `PipelineRunner`, `createPipelineContext()` | Run the whole pipeline yourself, as the client does. |
+| `PipelineRunner`, `createPipelineContext()` | Run the whole pipeline yourself, as the client does. From `nexus-ai-pro/pipeline`. |
 
 Every hook receives the `PipelineContext`:
 
@@ -466,12 +466,12 @@ It is returned on `response.meta.pipeline` unless `includeTraceInResponse` is of
 
 ## Serving a request from a framework
 
-`createNexusRouteHandler()` returns a Next.js route handler that completes the posted request, or
-streams it as server-sent events when streaming is on:
+`createNexusRouteHandler()`, from `nexus-ai-pro/next`, returns a Next.js route handler. It completes the
+posted request, or streams it as server-sent events when `NexusRouteHandlerOptions.stream` is on:
 
 ```ts
 // app/api/chat/route.ts
-import { createNexusRouteHandler } from 'nexus-ai-pro';
+import { createNexusRouteHandler } from 'nexus-ai-pro/next';
 export const POST = createNexusRouteHandler({ ai, stream: true });
 ```
 
@@ -494,13 +494,34 @@ For a full HTTP surface — threads, background runs, resumable streams — see 
 
 ## The registry, in passing
 
-The root also re-exports the model registry, for convenience. The [providers guide](./providers.md)
-explains it:
+The root also re-exports the model registry. The [providers guide](./providers.md) explains it:
 
 - data: `KNOWN_MODELS`, `MODEL_ALIAS_METADATA`, `REGISTRY_PROVENANCE`;
 - lookup: `resolveProvider()`;
 - types: `ModelCapabilities`, `ModelEndpoint`, `ModelStatus`, `Modality`, `AliasMetadata`, `AliasStage`,
   `ProviderCapabilities`, `PromptCachingCapability`, `CacheTtl`, and `CacheHint`.
+
+The types stay on the root. The data and the lookup move to `nexus-ai-pro/models` in 2.0.
+
+## The root import, now and in 2.0
+
+The root import has always re-exported most of the package. In 2.0 it keeps only the core client:
+
+| Kept on the root | Examples |
+| --- | --- |
+| The client and its config builders | `NexusAI`, `createNexus`, `createNexusConfig` |
+| Request helpers | `tool()`, the streaming helpers, the usage and pricing helpers |
+| Types of configuration, requests, and responses | `NexusAIConfig`, `CompletionRequest`, `NexusResponse` |
+| Errors the client throws | `NexusProviderError`, `NexusSecurityError`, `CostBudgetError` |
+
+Everything else is already on a subpath, and deprecated on the root since 1.25. Your editor strikes a
+deprecated import through and names the subpath. The command line moves them for you:
+
+```bash
+npx nexus migrate src --write
+```
+
+The [migration guide](../MIGRATING.md) lists every change 2.0 makes, with before-and-after code.
 
 <!-- reference:start -->
 ## Reference
@@ -512,6 +533,10 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `CapabilityConfig` | interface | How capability negotiation behaves. |
+| `CapabilityPolicy` | type | How the runtime reacts when a request asks for something the target model does not declare. |
+| `CapabilityWarning` | interface | A request option that was dropped or adjusted because the model does not support it as written. |
+| `CapabilityWarningAction` | type | What happened to a requested option that the model could not honor as written. |
 | `negotiateCompletionRequest` | function | Reconciles a completion request against the target model's declared capabilities. |
 | `NegotiateOptions` | interface | Options for capability negotiation. |
 | `NegotiationResult` | interface | A request after negotiation, with what was changed. |
@@ -546,6 +571,13 @@ specific entry point that provides it.
 | --- | --- | --- |
 | `NexusAI` | class | Main runtime facade for provider routing, security, optimization, evals, voice, jobs, and observability. |
 
+### `nexus-ai-pro/next`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `createNexusRouteHandler` | function | Creates a Next.js `POST` route handler that completes the posted request, or streams it as server-sent events when streaming is on. |
+| `NexusRouteHandlerOptions` | interface | Options for `createNexusRouteHandler()`. |
+
 ### `nexus-ai-pro/optimizer`
 
 | Export | Kind | Summary |
@@ -553,7 +585,35 @@ specific entry point that provides it.
 | `BudgetEnforcer` | class | Checks requests against an input token budget and applies its over-budget strategy. |
 | `PromptDensifier` | class | Rewrites prompts to use fewer tokens without changing what they say. |
 | `TokenBudgetError` | class | Raised when a request exceeds its input token budget and `onExceeded` is `error`, the default. |
+| `Tokenizer` | class | Estimates token counts without a model-specific tokenizer, for budgets, planning, and context windows. |
 | `TokenOptimizer` | class | Applies densification and the token budget to a request, reporting what each did. |
+
+### `nexus-ai-pro/optimizer/cost`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `assertWithinCostBudget` | function | Throws `CostBudgetError` when an estimate exceeds the budget. |
+| `CostBudgetError` | class | Raised when a request's estimated cost exceeds its budget. |
+| `CostEstimateInput` | interface | Input for `estimateCost()`. |
+| `DEFAULT_CURRENCY` | constant | Currency and cost-budget enforcement, with no dependency on the model registry. |
+| `estimateCost` | function | Prices a request from the model registry, with cached reads and writes on their own lines. |
+| `formatCost` | function | Formats an amount the way `ResponseMeta.estimatedCost` has always presented it. |
+
+### `nexus-ai-pro/pipeline`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `createPipelineContext` | function | A fresh pipeline context for a request. |
+| `PipelineConfig` | interface | Hooks and tracing around every request. |
+| `PipelineContext` | interface | The request as it moves through the pipeline, handed to every hook. |
+| `PipelineHookName` | type | Points in a request's pipeline where application hooks run: before input processing, after security, around the provider call, and before the response returns. |
+| `PipelineHooksConfig` | type | Hooks by point; several hooks at one point run in order. |
+| `PipelineMiddleware` | type | A hook: inspects the context, and may return a new context, a replacement request, a replacement response, or nothing to leave it unchanged. |
+| `PipelineRunner` | class | Runs the request pipeline's hooks and custom steps, and times each stage into the request's trace. |
+| `PipelineStep` | interface | A custom stage appended to the pipeline. |
+| `PipelineStepName` | type | A pipeline stage, as it appears in a trace: a hook point, one of the built-in stages, or a custom step's name. |
+| `PipelineTrace` | interface | Every stage a request went through, with timings. |
+| `PipelineTraceStep` | interface | One timed stage of a request. |
 
 ### `nexus-ai-pro/streaming`
 
@@ -567,10 +627,7 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
-| `AliasMetadata` | interface | Where an alias stands and what it points to. |
-| `AliasStage` | type | Publication stage of a model alias. |
 | `AnthropicProviderConfig` | interface | Configuration for Anthropic, or an Anthropic-compatible endpoint through `baseUrl`. |
-| `assertWithinCostBudget` | function | Throws `CostBudgetError` when an estimate exceeds the budget. |
 | `AudioContent` | interface | An audio part of a message, for audio-capable models, or a transcript standing in for the audio. |
 | `AuditLogConfig` | interface | What gets written to the audit log. |
 | `AzureOpenAIProviderConfig` | interface | Configuration for Azure OpenAI deployment-scoped chat completions. |
@@ -581,37 +638,23 @@ specific entry point that provides it.
 | `BuildMetaOptions` | interface | Options for `buildMeta()`: the provider's token counts plus the call's context. |
 | `buildUsage` | function | Normalizes provider token counts into the portable `TokenUsage` shape. |
 | `CacheHint` | type | Marks a message or tool definition as the end of a cacheable prefix. |
-| `CacheTtl` | type | Lifetime of a provider-side prompt cache entry. |
-| `CapabilityConfig` | interface | How capability negotiation behaves. |
-| `CapabilityPolicy` | type | How the runtime reacts when a request asks for something the target model does not declare. |
-| `CapabilityWarning` | interface | A request option that was dropped or adjusted because the model does not support it as written. |
-| `CapabilityWarningAction` | type | What happened to a requested option that the model could not honor as written. |
 | `CohereProviderConfig` | interface | Configuration for Cohere. |
 | `CompletionRequest` | interface | A completion request: the model, the conversation, and every control over how it is answered. |
 | `ContentPart` | type | One part of a multimodal message. |
 | `costAmount` | function | Numeric cost for metrics and budgets, without parsing the formatted display string. |
 | `CostBudgetConfig` | interface | Refuses or flags a request whose estimated cost exceeds a limit, before it is sent. |
-| `CostBudgetError` | class | Raised when a request's estimated cost exceeds its budget. |
 | `CostEstimate` | interface | What a request is estimated to cost, before it is sent. |
-| `CostEstimateInput` | interface | Input for `estimateCost()`. |
 | `createNexus` | function | Creates a `NexusAI` instance from either the full production config or a small beginner shorthand. |
 | `CreateNexusOptions` | interface | Options for `createNexus()`: the full configuration, or a one-provider shorthand whose credentials fall back to the provider's usual environment variables. |
 | `CreateNexusProvider` | type | Providers the `createNexus()` shorthand can configure by name. |
-| `createNexusRouteHandler` | function | Creates a Next.js `POST` route handler that completes the posted request, or streams it as server-sent events when streaming is on. |
-| `createPipelineContext` | function | A fresh pipeline context for a request. |
 | `CustomProviderConfig` | interface | Configuration for user-owned OpenAI- or Anthropic-compatible endpoints. |
 | `DeepSeekProviderConfig` | interface | Configuration for the DeepSeek OpenAI-compatible provider. |
-| `DEFAULT_CACHE_PRICING` | constant | Fallback cache pricing as a multiple of the standard input rate, applied when a model does not declare `costPer1kCachedInput` or `costPer1kCacheWrite`. |
-| `DEFAULT_CURRENCY` | constant | Currency and cost-budget enforcement, with no dependency on the model registry. |
 | `DensificationConfig` | interface | Rewriting prompts to use fewer tokens without changing what they say. |
 | `ensureUsageAndCost` | function | Guarantees `usage` and `cost` on a response built by a custom provider that predates them. |
-| `estimateCost` | function | Prices a request from the model registry, with cached reads and writes on their own lines. |
 | `FallbackConfig` | interface | Models tried when the route the router chose fails, applied to every request, including one that names its model. |
-| `formatCost` | function | Formats an amount the way `ResponseMeta.estimatedCost` has always presented it. |
 | `GoogleProviderConfig` | interface | Configuration for Google's Gemini API. |
 | `GroqProviderConfig` | interface | Configuration for Groq. |
 | `ImageContent` | interface | An image part of a message, for vision-capable models. |
-| `KNOWN_MODELS` | constant | The bundled model registry: capabilities and prices for every model the package knows by name. |
 | `LlamaCppProviderConfig` | interface | Configuration for a local llama.cpp OpenAI-compatible server. |
 | `LMStudioProviderConfig` | interface | Configuration for a local LM Studio OpenAI-compatible server. |
 | `LogEvent` | interface | One structured log event. |
@@ -620,11 +663,6 @@ specific entry point that provides it.
 | `Message` | interface | One message in a conversation. |
 | `MessageRole` | type | Who a message is from: instructions, the user, the model, or a tool result. |
 | `MistralProviderConfig` | interface | Configuration for Mistral. |
-| `Modality` | type | What a model accepts as input: text, images, audio, video, generated images, or PDF documents. |
-| `MODEL_ALIAS_METADATA` | constant | Stage and provenance for every bundled alias, derived from its target so the two cannot drift. |
-| `ModelCapabilities` | interface | Declared model behavior. |
-| `ModelEndpoint` | type | Which provider API a model is served through. |
-| `ModelStatus` | type | Where a model is in its provider's lifecycle. |
 | `NexusAIConfig` | interface | Everything a `NexusAI` client needs. |
 | `NexusPlan` | interface | What `ai.plan()` says a request would do, without sending it: the route, the tokens, the cost, and whether guardrails would block it. |
 | `NexusResponse` | interface | A completion. |
@@ -633,39 +671,22 @@ specific entry point that provides it.
 | `OllamaProviderConfig` | interface | Configuration for a local Ollama server. |
 | `OpenAIProviderConfig` | interface | Configuration for OpenAI, and for any OpenAI-compatible server — vLLM, a gateway, a proxy — through `baseUrl`. |
 | `OptimizationResult` | interface | An optimized value with what optimization did to it. |
-| `PipelineConfig` | interface | Hooks and tracing around every request. |
-| `PipelineContext` | interface | The request as it moves through the pipeline, handed to every hook. |
-| `PipelineHookName` | type | Points in a request's pipeline where application hooks run: before input processing, after security, around the provider call, and before the response returns. |
-| `PipelineHooksConfig` | type | Hooks by point; several hooks at one point run in order. |
-| `PipelineMiddleware` | type | A hook: inspects the context, and may return a new context, a replacement request, a replacement response, or nothing to leave it unchanged. |
-| `PipelineRunner` | class | Runs the request pipeline's hooks and custom steps, and times each stage into the request's trace. |
-| `PipelineStep` | interface | A custom stage appended to the pipeline. |
-| `PipelineStepName` | type | A pipeline stage, as it appears in a trace: a hook point, one of the built-in stages, or a custom step's name. |
-| `PipelineTrace` | interface | Every stage a request went through, with timings. |
-| `PipelineTraceStep` | interface | One timed stage of a request. |
 | `priceUsage` | function | Prices a normalized usage record, keeping each token class on its own line. |
 | `PriceUsageOptions` | interface | Options for `priceUsage()`. |
 | `PromptCacheConfig` | interface | Provider-side prompt caching. |
-| `PromptCachingCapability` | interface | How a model supports prompt caching. |
-| `ProviderCapabilities` | interface | A provider and the models it serves. |
 | `ProvidersConfig` | interface | Provider configs that Nexus can register from the constructor. |
 | `RateLimitConfig` | interface | Limits how many requests are allowed per window. |
 | `ReasoningConfig` | interface | Requested reasoning behavior. |
-| `ReasoningEffort` | type | Portable reasoning effort, from none to the most the model offers. |
-| `REGISTRY_PROVENANCE` | constant | Default provenance for bundled registry entries that do not carry their own `verifiedAt`. |
-| `resolveProvider` | function | The provider a model name belongs to, from its prefix, or `null` when the name gives no clue. |
 | `ResponseCost` | interface | Numeric cost of one operation. |
 | `ResponseFormatConfig` | interface | A response format applied to every request that does not set its own. |
 | `ResponseFormatError` | class | Raised when a response does not match the requested format and cannot be repaired. |
 | `ResponseMeta` | interface | How a completion was produced: provider, model, timing, tokens, cost, and every policy that touched it. |
 | `RetryConfig` | interface | How a failed provider call is retried before failover moves on. |
 | `RoutingConfig` | interface | How requests with `model: 'auto'` are routed. |
-| `RoutingModelPreference` | type | A model the router should prefer, optionally weighted above others. |
 | `RoutingRule` | interface | A routing rule: when a request matches, route it to a model. |
 | `RoutingStrategy` | type | What the auto-router optimizes for: price, latency, quality, or keeping data on local models. |
 | `StreamChunk` | interface | One streamed event. |
 | `TextContent` | interface | A text part of a message. |
-| `Tokenizer` | class | Estimates token counts without a model-specific tokenizer, for budgets, planning, and context windows. |
 | `TokenOptimizerConfig` | interface | Token optimization applied before a request is sent. |
 | `TokenUsage` | interface | Token accounting for one operation. |
 | `TokenUsageSnapshot` | interface | Token counts before and after optimization. |

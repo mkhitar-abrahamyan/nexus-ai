@@ -334,7 +334,12 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   gotos?: Record<string, Array<string | { node: string; input?: unknown }>>;
   /** Where the run stands. */
   status: GraphStatus;
-  /** First pending question, kept for callers that expect exactly one. */
+  /**
+   * First pending question, kept for callers that expect exactly one.
+   *
+   * @deprecated Read `interrupts`, which holds every question. The 2.0 checkpoint schema drops this
+   * field; `migrateCheckpoint()` reads either schema.
+   */
   interrupt?: PendingInterrupt;
   /** Every question the paused superstep asked. Parallel tasks can each ask one. */
   interrupts?: PendingInterrupt[];

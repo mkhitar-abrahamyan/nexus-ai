@@ -1,6 +1,6 @@
 # Agents and tools
 
-<!-- covers: ./agent -->
+<!-- covers: ./agent ./connectors -->
 <!-- sources: src/agent src/connectors -->
 
 Tool-calling agents, from `nexus-ai-pro/agent`. There are two:
@@ -127,7 +127,8 @@ thrown error, so one bad call does not end a run. An unknown tool name is report
 
 - `createFetchUrlTool()` reads text from a URL. It refuses private and link-local addresses, follows
   a bounded number of redirects, truncates a long response, and times out. `WebConnectorOptions` sets
-  those limits and the SSRF policy.
+  those limits and the SSRF policy, including a resolver that answers each host name with its
+  `WebResolvedAddress` values.
 - `createSearchTool()` wraps a search function you supply, so the search provider stays yours.
 
 ## The pieces, by name
@@ -185,12 +186,18 @@ specific entry point that provides it.
 | `ToolExecutionResult` | interface | What running one tool produced. |
 | `ToolExecutor` | class | Runs tool calls by name, reporting failures as results rather than throwing. |
 
+### `nexus-ai-pro/connectors`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `createFetchUrlTool` | function | A `fetch_url` tool that reads text from public URLs allowed by the policy, refusing private addresses. |
+| `createSearchTool` | function | A search tool around your own search function. |
+| `WebConnectorOptions` | interface | Options for the fetch-URL tool, including its SSRF policy. |
+| `WebResolvedAddress` | type | An address a host name resolved to: the address alone, or with its IP family. |
+
 ### `nexus-ai-pro`
 
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `AgentModelClient` | interface | The part of a client the agent loop needs. |
-| `createFetchUrlTool` | function | A `fetch_url` tool that reads text from public URLs allowed by the policy, refusing private addresses. |
-| `createSearchTool` | function | A search tool around your own search function. |
-| `WebConnectorOptions` | interface | Options for the fetch-URL tool, including its SSRF policy. |
 <!-- reference:end -->

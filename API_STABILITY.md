@@ -457,6 +457,21 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
 
+## 2.0 preparation stage (Unreleased)
+
+The last 1.x minor deprecates what 2.0 removes. Deprecated APIs keep working, unchanged, for the rest
+of the 1.x line.
+
+- The 2.0 root import keeps the core client, its config builders, the types of its configuration,
+  requests, and responses, and the errors it throws. Every other root export is deprecated in favour of
+  the subpath that already provides it, under the same name or, where noted, another.
+- Every deprecated option warns once per process through Node's `DeprecationWarning` channel, so
+  `--throw-deprecation` finds them in a test run. Deprecated exports and fields are marked in the type
+  declarations, where editors show them.
+- `nexus migrate` and its map follow the root's deprecations; both are generated from the export map,
+  so they cannot disagree.
+- A 1.x checkpoint stays readable throughout 2.x, by both checkpointers and by `migrateCheckpoint()`.
+
 ## Deployment stage (1.24.0)
 
 Deployments (`nexus-ai-pro/server/deployments`), tenant limits (`nexus-ai-pro/server/tenancy`), and the

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const npmCli = process.env.npm_execpath;
 const npmCommand = npmCli ? process.execPath : process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -963,6 +963,50 @@ void unsubscribeRealtime;
 
   const tsc = path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc');
   run(process.execPath, [tsc, '-p', consumerDir], consumerDir);
+
+  // The same consumer, migrated by `nexus migrate` to the imports 2.0 keeps, must compile against the
+  // same package: every name the codemod moves really is exported, under that name, where it points.
+  const { migrateSource } = await import(pathToFileURL(path.join(repoRoot, 'dist', 'cli', 'migrate.js')).href);
+  const original = readFileSync(path.join(consumerDir, 'index.ts'), 'utf8');
+  const migrated = migrateSource(original, { file: 'index.ts' });
+  if (migrated.changes.length < 40) {
+    throw new Error(`The consumer should exercise the codemod widely; it moved ${migrated.changes.length} names`);
+  }
+  if (migrateSource(migrated.text, { file: 'index.ts' }).changes.length !== 0) {
+    throw new Error('A second migration should change nothing');
+  }
+  mkdirSync(path.join(consumerDir, 'migrated'));
+  writeFileSync(path.join(consumerDir, 'migrated', 'index.ts'), migrated.text);
+  writeFileSync(
+    path.join(consumerDir, 'tsconfig.migrated.json'),
+    JSON.stringify({ extends: './tsconfig.json', include: ['migrated/index.ts'] }, null, 2),
+  );
+  // And every name in the codemod's map, imported from where it points: a type-only import takes
+  // values and types alike, so one compile checks the whole map against the packed declarations.
+  const { ROOT_MOVES } = await import(pathToFileURL(path.join(repoRoot, 'dist', 'cli', 'root-moves.js')).href);
+  const bySubpath = new Map();
+  for (const [name, [subpath, renamed]] of Object.entries(ROOT_MOVES)) {
+    bySubpath.set(subpath, [...(bySubpath.get(subpath) ?? []), renamed ?? name]);
+  }
+  let alias = 0;
+  const lines = [];
+  for (const [subpath, names] of bySubpath) {
+    const specifiers = names.map((name) => {
+      alias += 1;
+      return `${name} as Moved${alias}`;
+    });
+    lines.push(`import type { ${specifiers.join(', ')} } from '${subpath}';`);
+  }
+  writeFileSync(path.join(consumerDir, 'migrated', 'moves.ts'), `${lines.join('\n')}\nexport {};\n`);
+  writeFileSync(
+    path.join(consumerDir, 'tsconfig.migrated.json'),
+    JSON.stringify({ extends: './tsconfig.json', include: ['migrated/index.ts', 'migrated/moves.ts'] }, null, 2),
+  );
+  run(process.execPath, [tsc, '-p', path.join(consumerDir, 'tsconfig.migrated.json')], consumerDir);
+  console.log(
+    `Migrated consumer compiles: ${migrated.changes.length} imports moved, and all ${alias} mapped names resolve where the map points.`,
+  );
+
   writeFileSync(
     path.join(consumerDir, 'tsconfig.browser.json'),
     JSON.stringify(

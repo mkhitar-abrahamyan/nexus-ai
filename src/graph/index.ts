@@ -1,4 +1,5 @@
 export { CompiledGraph, StateGraph, createGraph } from './graph.js';
+export { type GraphCheckpointV2, migrateCheckpoint } from './checkpoint-migration.js';
 export {
   appendList,
   appendSet,

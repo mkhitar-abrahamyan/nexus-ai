@@ -1,7 +1,13 @@
 /**
- * What a model accepts as input: text, images, audio, video, generated images, or PDF documents.
+ * What a model handles, in one list: text, images in (`vision`), audio, video, images out (`image`),
+ * or PDF documents. The list does not say which way each one flows; `InputModality` and
+ * `OutputModality` do, and replace it in 2.0.
  */
 export type Modality = 'text' | 'vision' | 'audio' | 'video' | 'image' | 'pdf';
+/** What a model accepts: text, images, audio, video, or PDF documents. */
+export type InputModality = 'text' | 'image' | 'audio' | 'video' | 'pdf';
+/** What a model produces: text, images, or audio. */
+export type OutputModality = 'text' | 'image' | 'audio';
 /** Where a model is in its provider's lifecycle. */
 export type ModelStatus = 'stable' | 'preview' | 'latest' | 'deprecated';
 /** Which provider API a model is served through. */
@@ -51,8 +57,17 @@ export interface ModelCapabilities {
   provider?: string;
   /** Model family, for grouping versions. */
   family?: string;
-  /** What the model accepts as input. */
+  /**
+   * What the model handles, without saying which way.
+   *
+   * @deprecated Still required in 1.x. Set `inputModalities` and `outputModalities` alongside it, and
+   * read either through `modalitiesOf()`. 2.0 requires the two new fields and drops this one.
+   */
   modalities: Modality[];
+  /** What the model accepts. Derived from `modalities` when omitted; `modalitiesOf()` reads either. */
+  inputModalities?: InputModality[];
+  /** What the model produces. Derived from `modalities` when omitted; `modalitiesOf()` reads either. */
+  outputModalities?: OutputModality[];
   /** Whether it can stream. */
   streaming: boolean;
   /** Whether it can call tools. */

@@ -650,6 +650,96 @@
         "default": "./dist-cjs/postgres/evaluate.js"
       }
     },
+    "./optimizer/cost": {
+      "import": {
+        "types": "./dist/optimizer/cost.d.ts",
+        "default": "./dist/optimizer/cost.js"
+      },
+      "require": {
+        "types": "./dist-cjs/optimizer/cost.d.ts",
+        "default": "./dist-cjs/optimizer/cost.js"
+      }
+    },
+    "./grounding": {
+      "import": {
+        "types": "./dist/hallucination/index.d.ts",
+        "default": "./dist/hallucination/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/hallucination/index.d.ts",
+        "default": "./dist-cjs/hallucination/index.js"
+      }
+    },
+    "./connectors": {
+      "import": {
+        "types": "./dist/connectors/web.d.ts",
+        "default": "./dist/connectors/web.js"
+      },
+      "require": {
+        "types": "./dist-cjs/connectors/web.d.ts",
+        "default": "./dist-cjs/connectors/web.js"
+      }
+    },
+    "./ops": {
+      "import": {
+        "types": "./dist/ops/index.d.ts",
+        "default": "./dist/ops/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/ops/index.d.ts",
+        "default": "./dist-cjs/ops/index.js"
+      }
+    },
+    "./pipeline": {
+      "import": {
+        "types": "./dist/pipeline/index.d.ts",
+        "default": "./dist/pipeline/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/pipeline/index.d.ts",
+        "default": "./dist-cjs/pipeline/index.js"
+      }
+    },
+    "./router": {
+      "import": {
+        "types": "./dist/router/index.d.ts",
+        "default": "./dist/router/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/router/index.d.ts",
+        "default": "./dist-cjs/router/index.js"
+      }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing/index.d.ts",
+        "default": "./dist/testing/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/testing/index.d.ts",
+        "default": "./dist-cjs/testing/index.js"
+      }
+    },
+    "./next": {
+      "import": {
+        "types": "./dist/next/route-handler.d.ts",
+        "default": "./dist/next/route-handler.js"
+      },
+      "require": {
+        "types": "./dist-cjs/next/route-handler.d.ts",
+        "default": "./dist-cjs/next/route-handler.js"
+      }
+    },
+    "./rag/files": {
+      "import": {
+        "types": "./dist/rag/file-ingestion.d.ts",
+        "default": "./dist/rag/file-ingestion.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/file-ingestion.d.ts",
+        "default": "./dist-cjs/rag/file-ingestion.js"
+      }
+    },
     "./server": {
       "import": {
         "types": "./dist/server/index.d.ts",
@@ -1283,7 +1373,7 @@
     "studio:demo": "node studio/scripts/run.mjs studio/example/start.ts",
     "test:studio": "node studio/scripts/run.mjs test",
     "test:studio-install": "node studio/scripts/install-smoke.mjs",
-    "docs:guides": "node scripts/check-guide-coverage.mjs && node scripts/check-doc-imports.mjs",
+    "docs:guides": "node scripts/check-guide-coverage.mjs && node scripts/check-doc-imports.mjs && node scripts/root-migration.mjs --check",
     "docs:update": "node scripts/check-guide-coverage.mjs --update",
     "size:update": "node scripts/check-subpath-sizes.mjs --update",
     "registry:generate": "node scripts/generate-model-registry.mjs",
@@ -1439,6 +1529,7 @@
     "README.md",
     "API_STABILITY.md",
     "CHANGELOG.md",
+    "MIGRATING.md",
     "SECURITY.md",
     "LICENSE"
   ],
@@ -1642,6 +1733,33 @@
       ],
       "server": [
         "dist-cjs/server/index.d.ts"
+      ],
+      "optimizer/cost": [
+        "dist-cjs/optimizer/cost.d.ts"
+      ],
+      "grounding": [
+        "dist-cjs/hallucination/index.d.ts"
+      ],
+      "connectors": [
+        "dist-cjs/connectors/web.d.ts"
+      ],
+      "ops": [
+        "dist-cjs/ops/index.d.ts"
+      ],
+      "pipeline": [
+        "dist-cjs/pipeline/index.d.ts"
+      ],
+      "router": [
+        "dist-cjs/router/index.d.ts"
+      ],
+      "testing": [
+        "dist-cjs/testing/index.d.ts"
+      ],
+      "next": [
+        "dist-cjs/next/route-handler.d.ts"
+      ],
+      "rag/files": [
+        "dist-cjs/rag/file-ingestion.d.ts"
       ],
       "server/remote": [
         "dist-cjs/server/remote.d.ts"

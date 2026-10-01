@@ -311,3 +311,10 @@ function nearestEffort(requested: ReasoningEffort, supported: ReasoningEffort[])
   }
   return best;
 }
+
+export type {
+  CapabilityConfig,
+  CapabilityPolicy,
+  CapabilityWarning,
+  CapabilityWarningAction,
+} from '../types/capabilities.js';

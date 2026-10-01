@@ -239,6 +239,7 @@ specific entry point that provides it.
 | `GUARDRAIL_POLICIES` | constant | The bundled guardrail presets, as security configurations. |
 | `guardrailPolicy` | function | A bundled guardrail preset, with your overrides merged over it. |
 | `GuardrailPolicyName` | type | Names of the bundled guardrail presets. |
+| `hardenPrompt` | function | Wraps user content in delimiters and adds a system instruction to treat it as data, not instructions. |
 | `InjectionCalibrationExample` | interface | One labelled prompt for calibrating the injection classifier. |
 | `InjectionCalibrationResult` | interface | How the classifier performed at one threshold. |
 | `InjectionDetector` | class | Finds prompt-injection attempts by pattern. |
@@ -246,6 +247,7 @@ specific entry point that provides it.
 | `NexusSecurityError` | class | Raised when guardrails block a request or a response. |
 | `OutputGuard` | class | Checks responses for leaked secrets, PII, and other unsafe output. |
 | `PIIDetector` | class | Finds and masks personal data such as emails, phone numbers, and card numbers. |
+| `PromptHardeningOptions` | interface | Options for `hardenPrompt()`. |
 | `scanUploads` | function | Scans a set of files with a one-off scanner. |
 | `SchemaValidator` | class | Validates a request's shape before it is sent. |
 | `SecurityPipeline` | class | Runs the input and output guardrails: schema validation, injection and PII detection, and output checks, at a security level or with a full configuration. |
@@ -260,7 +262,6 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
-| `hardenPrompt` | function | Wraps user content in delimiters and adds a system instruction to treat it as data, not instructions. |
 | `InjectionDetectionConfig` | interface | Prompt-injection detection on input. |
 | `PIIConfig` | interface | Detection of personal data in input. |
 | `PIIType` | type | Kinds of personal data and secrets the PII detector recognizes. |

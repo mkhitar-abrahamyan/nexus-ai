@@ -17,6 +17,7 @@ export interface ParsedArgs {
 export const BOOLEAN_FLAGS = new Set([
   'all',
   'allow-dataset-mismatch',
+  'check',
   'densify',
   'fail',
   'fail-on-regression',
@@ -24,6 +25,7 @@ export const BOOLEAN_FLAGS = new Set([
   'json',
   'print',
   'reveal-values',
+  'write',
 ]);
 
 export function parseArgs(args: string[]): ParsedArgs {

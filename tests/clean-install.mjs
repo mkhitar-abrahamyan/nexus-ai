@@ -52,8 +52,11 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // module of the evaluation family, never loaded by the root.
 // Raised again in 1.24.0 for deployment at scale: the deployments and tenancy subpaths, the server's
 // worker queue, draining, and metrics, and `nexus deploy`. The deploy/ templates are not shipped.
-const MAX_PACKED_BYTES = 870_000;
-const MAX_UNPACKED_BYTES = 5_450_000;
+// Raised again in 1.25.0 for the bridge to 2.0: a deprecation note on each of the 499 root exports
+// that move, carried in both declaration builds; `nexus migrate` and its map; nine entry points; and
+// MIGRATING.md. The notes go when 2.0 drops those exports from the root.
+const MAX_PACKED_BYTES = 900_000;
+const MAX_UNPACKED_BYTES = 5_650_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Most of
 // the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the
 // README size table reports third-party install cost per entry point. Raised with the unpacked ceiling
