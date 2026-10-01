@@ -1303,30 +1303,43 @@ deployment template runs against the packed package in the clean-install test.
 
 ---
 
-## 25. 1.25.0: the bridge to 2.0
+## 25. Shipped in 1.25.0 — the bridge to 2.0
 
-The last 1.x minor. 2.0.0 may only remove what a 1.x release deprecated, and the last 1.x release
-logs each deprecated call once per process. This release does both, and ships the tools to migrate.
+**A subpath for every capability.** What could only be imported from the root has an entry point of
+its own, each without a third-party dependency: `grounding`, `connectors`, `ops`, `pipeline`,
+`router`, `testing`, `next`, `rag/files`, and `optimizer/cost`. Grounding alone is 15 KB, where it used
+to mean the 584 KB root and its validators.
 
-**A subpath for every capability.** What could only be imported from the root gets an entry point of
-its own, each without a third-party dependency: grounding, web connectors, metrics and health, the
-pipeline, the router, the conformance suites, the Next.js handler, scanned file ingestion, and cost
-estimates.
+**The root import, deprecated down to the core.** 499 root exports are marked deprecated with the
+subpath to use; the 2.0 root keeps the core client, its config builders, its types, and the errors it
+throws. `scripts/root-migration.mjs` generates the marks and the codemod's map from the export map and
+checks them in CI.
 
-**The root import, deprecated down to the core.** Every root export except the core client, its config
-builders, its types, and the errors it throws is marked deprecated with the subpath to use. The marks
-and the codemod's map are generated from the export map, so they cannot disagree.
+**`nexus migrate`.** A codemod for TypeScript, JavaScript, and Markdown code blocks that moves imports,
+keeps local names for exports that moved under another name, and lists what it cannot rewrite safely.
+`MIGRATING.md` ships in the package.
 
-**`nexus migrate`.** A codemod that moves imports to their subpaths, in source files and in Markdown,
-and lists what it cannot rewrite safely. `MIGRATING.md` covers every 2.0 change with before-and-after
-code.
+**The 2.0 shapes, readable now.** `inputModalities` and `outputModalities` beside the old list, read
+through `modalitiesOf()` and usable as routing requirements; and the 2.0 checkpoint schema through
+`migrateCheckpoint()`.
 
-**The 2.0 shapes, readable now.** Directional modalities beside the old list, and the 2.0 checkpoint
-schema through `migrateCheckpoint()`.
+**Proof.** The type consumer migrates its own code with the codemod and compiles against the packed
+package, and all 499 mapped names resolve where the map points. An editor marks a moved root import
+deprecated and nothing else, and every guide's examples already use the 2.0 imports.
 
-**Proof.** A consumer of the packed package, migrated by the codemod, compiles; every name in the
-codemod's map resolves where it points; an editor marks a moved root import deprecated and nothing
-else; and every guide's examples already use the 2.0 imports.
+### What did not land, and where it went
+
+- **Root imports are flagged by editors, not at run time.** A re-export has no hook to warn from, so
+  the type declarations and `nexus migrate --check` carry the deprecation; deprecated options still
+  warn once per process.
+- **The built-in registry does not declare the directional modalities yet.** `modalitiesOf()` derives
+  them; 2.0 writes them into the registry and requires them.
+- **Checkpointers still write the 1.x schema**, by design until 2.0, which writes version 2 and keeps
+  reading version 1.
+- **The codemod works on text.** Comments inside an import list it splits are not kept, and an import
+  statement inside a string is rewritten too.
+- **One lifecycle, `ProviderCallContext`, typed pipeline contexts, and mixed outputs** are 2.0 design
+  work, listed in section 26.
 
 ---
 

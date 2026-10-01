@@ -457,7 +457,7 @@ with nexus-ai-pro and declares the core versions it works with as a peer depende
 - The access rules are a guarantee: loopback binding by default, a token on every request, the token
   in a header for every change, and loopback hosts only unless others are allowed.
 
-## 2.0 preparation stage (Unreleased)
+## 2.0 preparation stage (1.25.0)
 
 The last 1.x minor deprecates what 2.0 removes. Deprecated APIs keep working, unchanged, for the rest
 of the 1.x line.

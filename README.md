@@ -224,7 +224,9 @@ Shipped so far:
 - a shared studio with accounts, roles, an audit log, and comments; a context hub; insights with
   evaluated fix proposals; and evaluation caching;
 - self-managed deployment at scale: revisions and canaries with automatic rollback, a worker queue
-  that autoscales on Kubernetes, and per-tenant limits.
+  that autoscales on Kubernetes, and per-tenant limits;
+- the bridge to 2.0: every capability on a subpath of its own, everything 2.0 removes deprecated, and
+  a codemod that moves your imports.
 
 Next: 2.0.0 consolidates. It slims the root import to the core client; `npx nexus migrate src --write`
 moves your imports today, and [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md)

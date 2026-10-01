@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-10-01
+
 The bridge to 2.0. Everything 2.0 removes is deprecated now, every capability has a subpath of its
 own, and the tools to migrate ship with it, so a codebase can move while it is still on 1.x.
 
@@ -1253,7 +1255,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.24.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.25.0...HEAD
+[1.25.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.24.0...v1.25.0
 [1.24.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.23.0...v1.24.0
 [1.23.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.22.0...v1.23.0
 [1.22.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.21.0...v1.22.0
