@@ -1,3 +1,4 @@
+import type { OperationLifecycleLike } from '../types/lifecycle.js';
 import type { RealtimeError } from './errors.js';
 
 /**
@@ -847,6 +848,11 @@ export interface RealtimeSecurityOptions {
 export interface RealtimeSessionConfig {
   /** Session id. Generated when omitted. */
   id?: string;
+  /**
+   * Runs the session as one operation of a client's lifecycle: pass `ai.lifecycle`. It is admitted
+   * when it first connects and finishes when it disconnects, with its estimated cost.
+   */
+  lifecycle?: OperationLifecycleLike;
   /** Provider name, for records and telemetry. Defaults to `openai`. */
   provider?: RealtimeProviderName;
   /** The realtime model to use. */

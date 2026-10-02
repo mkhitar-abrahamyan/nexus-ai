@@ -1,3 +1,4 @@
+import type { OperationLifecycleLike } from './lifecycle.js';
 /**
  * Typed state graphs: nodes, edges, cycles, subgraphs, and durable checkpoints.
  *
@@ -305,8 +306,17 @@ export type GraphRouteTarget = string | Send | Array<string | Send>;
 
 /**
  * A graph's full state after a superstep, which is everything needed to resume the run elsewhere.
+ *
+ * This is schema version 2, the one 2.x writes. Every checkpoint carries its id and its pending
+ * tasks, and its questions are only in `interrupts`. A checkpoint that 1.x stored is a
+ * `GraphCheckpointV1`; the bundled checkpointers read it into this shape, and `migrateCheckpoint()`
+ * does the same for a custom one.
  */
 export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
+  /** The schema version. */
+  version: 2;
+  /** The checkpoint's id: the thread and the step, as `<threadId>:<step>`. */
+  id: string;
   /** The thread it belongs to. */
   threadId: string;
   /** Supersteps completed. The checkpoint after step N describes the state entering step N+1. */
@@ -316,13 +326,12 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   /** Nodes to run next. Empty means the run is finished. */
   next: string[];
   /**
-   * Tasks to run next, present only when they carry more than their node names: `Send` inputs, or
-   * several tasks of one node. Otherwise `next` says everything, and a plain graph's checkpoint is
-   * exactly what it was before.
+   * Tasks of the pending superstep, one per node or `Send`. Empty when the run is finished. A step
+   * that paused keeps all of its tasks here, and `completed` says which already ran.
    */
-  tasks?: GraphTask[];
+  tasks: GraphTask[];
   /**
-   * Nodes of the pending superstep that already finished before it paused or failed. Their writes
+   * Tasks of the pending superstep that already finished before it paused or failed. Their writes
    * are already in `state`, so they are not run again, but their outgoing edges still count when the
    * step completes.
    */
@@ -334,15 +343,8 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   gotos?: Record<string, Array<string | { node: string; input?: unknown }>>;
   /** Where the run stands. */
   status: GraphStatus;
-  /**
-   * First pending question, kept for callers that expect exactly one.
-   *
-   * @deprecated Read `interrupts`, which holds every question. The 2.0 checkpoint schema drops this
-   * field; `migrateCheckpoint()` reads either schema.
-   */
-  interrupt?: PendingInterrupt;
-  /** Every question the paused superstep asked. Parallel tasks can each ask one. */
-  interrupts?: PendingInterrupt[];
+  /** Every question the paused superstep asked. Empty when the run is not waiting for input. */
+  interrupts: PendingInterrupt[];
   /** Values already supplied for interrupts, keyed by `taskId:step:index`. */
   resolved?: Record<string, unknown>;
   /** Why the run failed, when it did. */
@@ -354,6 +356,26 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   /** Application data, including `graph` when the graph was compiled with a name. */
   metadata?: Record<string, unknown>;
 }
+
+/**
+ * A checkpoint as 1.x stored it: no version or id, tasks only when `next` could not say them, and the
+ * first question repeated in `interrupt`. 2.x never writes this shape and reads it for the whole 2.x
+ * line.
+ */
+export interface GraphCheckpointV1<S extends ChannelSchema = ChannelSchema>
+  extends Omit<GraphCheckpoint<S>, 'version' | 'id' | 'tasks' | 'interrupts'> {
+  /** Absent: version 1 had no version field. */
+  version?: undefined;
+  /** Tasks to run next, present only when they carry more than their node names. */
+  tasks?: GraphTask[];
+  /** The first pending question. */
+  interrupt?: PendingInterrupt;
+  /** Every pending question, when the step asked more than one. */
+  interrupts?: PendingInterrupt[];
+}
+
+/** What a checkpointer may hand back: a checkpoint 2.x wrote, or one 1.x wrote before the upgrade. */
+export type StoredGraphCheckpoint<S extends ChannelSchema = ChannelSchema> = GraphCheckpoint<S> | GraphCheckpointV1<S>;
 
 /** Where a run paused for debugging. `continue()` carries on from it. */
 export interface GraphBreakpoint {
@@ -377,10 +399,13 @@ export interface GraphBreakpoint {
 export interface GraphCheckpointer {
   /** Stores a checkpoint, replacing any at the same step or later. */
   put(checkpoint: GraphCheckpoint): Promise<void> | void;
-  /** Latest checkpoint for a thread, or the one at `step` when given. */
-  get(threadId: string, step?: number): Promise<GraphCheckpoint | undefined> | GraphCheckpoint | undefined;
+  /**
+   * Latest checkpoint for a thread, or the one at `step` when given. A store holding checkpoints
+   * from 1.x may return them as they are; the graph reads either schema.
+   */
+  get(threadId: string, step?: number): Promise<StoredGraphCheckpoint | undefined> | StoredGraphCheckpoint | undefined;
   /** Newest first. Used for time travel and for showing an operator what happened. */
-  history(threadId: string, limit?: number): Promise<GraphCheckpoint[]> | GraphCheckpoint[];
+  history(threadId: string, limit?: number): Promise<StoredGraphCheckpoint[]> | StoredGraphCheckpoint[];
   /** Deletes every checkpoint of a thread. */
   delete?(threadId: string): Promise<void> | void;
   /** Every thread with a checkpoint, for tools that browse threads, such as the studio. */
@@ -560,6 +585,14 @@ export interface CompileOptions {
   maxSteps?: number;
   /** Identifies this graph. Recorded on every checkpoint as `metadata.graph`. */
   name?: string;
+  /**
+   * Runs every invocation as one operation of a client's lifecycle: pass `ai.lifecycle`. A run is
+   * then authorized, counted, audited, and seen by the lifecycle's hooks like the client's own calls,
+   * and the model calls its nodes make are operations of their own.
+   */
+  lifecycle?: OperationLifecycleLike;
+  /** How the lifecycle labels these runs. Defaults to `graph`; `createAgent()` sets `agent`. */
+  lifecycleFamily?: 'graph' | 'agent';
   /** Replaces the system clock, for tests. */
   now?: () => Date;
 }

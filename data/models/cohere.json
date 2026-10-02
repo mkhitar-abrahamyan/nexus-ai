@@ -4,7 +4,8 @@
     "cohere/command-r-plus": {
       "provider": "cohere",
       "family": "command-r-plus",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -24,7 +25,8 @@
     "cohere/command-r": {
       "provider": "cohere",
       "family": "command-r",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -44,7 +46,8 @@
     "cohere/command-a-03-2025": {
       "provider": "cohere",
       "family": "command-a",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -64,7 +67,8 @@
     "cohere/command-a-reasoning-08-2025": {
       "provider": "cohere",
       "family": "command-a-reasoning",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -84,7 +88,8 @@
     "cohere/command-a-vision-07-2025": {
       "provider": "cohere",
       "family": "command-a-vision",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -104,7 +109,8 @@
     "cohere/command-a-translate-08-2025": {
       "provider": "cohere",
       "family": "command-a-translate",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -124,7 +130,8 @@
     "cohere/command-r7b-12-2024": {
       "provider": "cohere",
       "family": "command-r7b",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -144,7 +151,8 @@
     "cohere/c4ai-aya-expanse-32b": {
       "provider": "cohere",
       "family": "aya-expanse",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -164,7 +172,8 @@
     "cohere/c4ai-aya-vision-32b": {
       "provider": "cohere",
       "family": "aya-vision",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -184,7 +193,8 @@
     "cohere/tiny-aya-global": {
       "provider": "cohere",
       "family": "tiny-aya",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": false,
       "toolCalling": true,
       "structuredOutputs": false,

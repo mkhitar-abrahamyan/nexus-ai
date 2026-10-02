@@ -1,4 +1,4 @@
-import { TokenOptimizer } from 'nexus-ai-pro';
+import { TokenOptimizer } from 'nexus-ai-pro/optimizer';
 
 const optimizer = new TokenOptimizer({
   densification: {

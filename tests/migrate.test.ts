@@ -94,6 +94,20 @@ test('what cannot be rewritten safely is reported with its line, and left alone'
   );
 });
 
+test('options and fields 2.0 removed are reported for a person to check', () => {
+  const source = [
+    "const google = { apiKey: 'k', projectId: 'p' };",
+    'const health = { enabled: true, latencyHalfLife: 5 };',
+    "const entry = { modalities: ['text', 'vision'], streaming: true };",
+    "const tools = { requiresApproval: ['refund'] };",
+    'const fine = { inputModalities: ["text"] };',
+  ].join('\n');
+  const { text, notes } = migrate(source);
+  assert.equal(text, source, 'nothing is rewritten');
+  assert.deepEqual(notes.map((note) => note.line).sort(), [1, 2, 3, 4]);
+  assert.ok(notes.some((note) => /inputModalities/.test(note.message)));
+});
+
 test('Markdown is migrated inside code blocks only, with lines counted from the top of the file', () => {
   const source = [
     '# Guide',
@@ -123,7 +137,7 @@ test('Windows line endings are kept, and a second run changes nothing', () => {
   const once = migrate(source).text;
   assert.equal(
     once,
-    "import {\r\n  NexusAI,\r\n} from 'nexus-ai-pro';\r\nimport {\r\n  OperationRunner,\r\n} from 'nexus-ai-pro/operations';\r\n",
+    "import { NexusAI } from 'nexus-ai-pro';\r\nimport { OperationRunner } from 'nexus-ai-pro/operations';\r\n",
   );
   assert.equal(migrate(once).text, once);
 });

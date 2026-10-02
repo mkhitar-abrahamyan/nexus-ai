@@ -9,12 +9,6 @@ export interface DensificationConfig {
   enabled?: boolean;
   /** Leaves fenced code blocks untouched. Defaults to true. */
   preserveCodeBlocks?: boolean;
-  /**
-   * Ignored: densification never rewrites Markdown structure.
-   *
-   * @deprecated Has never been read. It will be removed in 2.0.
-   */
-  preserveMarkdown?: boolean;
   /** Techniques to apply. Defaults to all three. */
   techniques?: Array<'whitespace-cleanup' | 'phrase-compression' | 'list-compaction'>;
 }

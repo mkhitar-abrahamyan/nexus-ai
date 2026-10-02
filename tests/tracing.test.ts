@@ -36,7 +36,6 @@ const response = (overrides: Partial<NexusResponse> = {}): NexusResponse =>
       tokensInput: 10,
       tokensOutput: 5,
       tokensSaved: 0,
-      estimatedCost: '$0.01',
       usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
       cost: { amount: 0.01, currency: 'USD', basis: 'estimated' },
     },

@@ -1,5 +1,6 @@
-import type { GraphCheckpoint, GraphCheckpointer } from '../types/graph.js';
+import type { GraphCheckpoint, GraphCheckpointer, StoredGraphCheckpoint } from '../types/graph.js';
 import type { OperationRecord, OperationStore } from '../types/operations.js';
+import { migrateCheckpoint } from './checkpoint-migration.js';
 
 /** Options for the in-process checkpointer. */
 export interface MemoryGraphCheckpointerOptions {
@@ -22,7 +23,7 @@ export interface MemoryGraphCheckpointerOptions {
  * `OperationStoreCheckpointer` does.
  */
 export class MemoryGraphCheckpointer implements GraphCheckpointer {
-  private readonly threads = new Map<string, GraphCheckpoint[]>();
+  private readonly threads = new Map<string, StoredGraphCheckpoint[]>();
   private readonly maxPerThread: number;
   private readonly maxThreads: number;
 
@@ -57,13 +58,16 @@ export class MemoryGraphCheckpointer implements GraphCheckpointer {
     const list = this.threads.get(threadId);
     if (!list?.length) return undefined;
     const found = step === undefined ? list[list.length - 1] : list.find((item) => item.step === step);
-    return found ? clone(found) : undefined;
+    return found ? migrateCheckpoint(clone(found)) : undefined;
   }
 
   /** A thread's checkpoints, newest first. Defaults to 20. */
   history(threadId: string, limit = 20): GraphCheckpoint[] {
     const list = this.threads.get(threadId) ?? [];
-    return [...list].reverse().slice(0, limit).map(clone);
+    return [...list]
+      .reverse()
+      .slice(0, limit)
+      .map((item) => migrateCheckpoint(clone(item)));
   }
 
   /** Deletes a thread's checkpoints. */
@@ -98,7 +102,7 @@ export class OperationStoreCheckpointer implements GraphCheckpointer {
   private readonly maxPerThread: number;
 
   constructor(
-    private readonly store: OperationStore<GraphCheckpoint | ThreadHead>,
+    private readonly store: OperationStore<StoredGraphCheckpoint | ThreadHead>,
     options: OperationStoreCheckpointerOptions = {},
   ) {
     this.maxPerThread = options.maxPerThread ?? 50;
@@ -122,12 +126,15 @@ export class OperationStoreCheckpointer implements GraphCheckpointer {
     await this.write(checkpoint.threadId, { kind: 'graph-thread', latest: checkpoint.step, steps });
   }
 
-  /** The latest checkpoint of a thread, or the one at a given step. */
+  /**
+   * The latest checkpoint of a thread, or the one at a given step. A checkpoint 1.x wrote is read
+   * into the current schema.
+   */
   async get(threadId: string, step?: number): Promise<GraphCheckpoint | undefined> {
     const target = step ?? (await this.readHead(threadId))?.latest;
     if (target === undefined) return undefined;
     const record = await this.store.read(stepId(threadId, target));
-    return record?.result && !isHead(record.result) ? (record.result as GraphCheckpoint) : undefined;
+    return record?.result && !isHead(record.result) ? migrateCheckpoint(record.result) : undefined;
   }
 
   /** A thread's checkpoints, newest first. Defaults to 20. */

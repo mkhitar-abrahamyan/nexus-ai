@@ -26,7 +26,6 @@ function response(content: string, toolCalls: ToolCall[]): NexusResponse {
       tokensInput: 1,
       tokensOutput: 1,
       tokensSaved: 0,
-      estimatedCost: '$0.00',
       cacheHit: false,
       guardrailsApplied: [],
     },

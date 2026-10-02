@@ -248,6 +248,11 @@ list and update numbers. `TelephonyProviderInfo.supports` says which methods exi
 `TelephonyManager` routes each request to the named or default provider. It also works without a
 client.
 
+The calls that reach the provider's API — creating, reading, and ending calls, and listing and
+updating numbers — run through the client's [lifecycle](./lifecycle.md). Each is authorized,
+audited, and counted, and each provider method receives the call's `ProviderCallContext` as its
+second argument. Rendering a webhook response and parsing a message are local, so they do not.
+
 `TwilioTelephonyProvider` implements all of it. `TwilioTelephonyProviderConfig` takes the account SID
 and auth token (the token also validates webhooks), a REST base URL, and a `fetch`.
 

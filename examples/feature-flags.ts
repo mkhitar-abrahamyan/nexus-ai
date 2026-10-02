@@ -1,4 +1,5 @@
-import { NexusAI, guardrailPolicy } from 'nexus-ai-pro';
+import { NexusAI } from 'nexus-ai-pro';
+import { guardrailPolicy } from 'nexus-ai-pro/security';
 
 function envFlag(name: string): boolean {
   return process.env[name] === '1' || process.env[name] === 'true';

@@ -4,7 +4,8 @@
     "lmstudio/local-model": {
       "provider": "lmstudio",
       "family": "local",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,

@@ -1,3 +1,4 @@
+import type { ProviderCallContext } from './lifecycle.js';
 import type { CompletionRequest } from './messages.js';
 import type { NexusResponse, ResponseCost, TokenUsage } from './response.js';
 
@@ -141,14 +142,12 @@ export interface BatchJobResult {
   raw?: unknown;
 }
 
-/** What a batch adapter receives with every call. */
-export interface BatchProviderCallContext {
-  /** The request's id. */
-  requestId: string;
-  /** Aborts the call. It does not cancel the provider-side batch; `cancel` does. */
-  signal: AbortSignal;
-  /** Replays a submission instead of creating a second batch. */
-  idempotencyKey?: string;
+/**
+ * What a batch adapter receives with every call: the context every family's provider receives, with
+ * the attempt number. Its signal aborts the call, not the provider-side batch; `cancel` does that, and
+ * its idempotency key replays a submission instead of creating a second batch.
+ */
+export interface BatchProviderCallContext extends ProviderCallContext {
   /** This attempt's number, starting at 1. */
   attempt: number;
 }

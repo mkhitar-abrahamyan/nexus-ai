@@ -64,7 +64,11 @@ try {
   const tarball = path.join(packDir, packed.filename);
 
   runNpm(['init', '-y'], consumerDir);
-  runNpm(['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumerDir);
+  // Node's type definitions are an optional peer in 2.0: a Node consumer installs them itself.
+  runNpm(
+    ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', tarball, '@types/node@^22'],
+    consumerDir,
+  );
 
   writeFileSync(
     path.join(consumerDir, 'tsconfig.json'),
@@ -867,7 +871,6 @@ const meta: ResponseMeta = {
   tokensInput: 1,
   tokensOutput: 1,
   tokensSaved: 0,
-  estimatedCost: '$0.00',
   cacheHit: false,
   guardrailsApplied: [],
 };
@@ -962,10 +965,10 @@ void unsubscribeRealtime;
   );
 
   const tsc = path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc');
-  run(process.execPath, [tsc, '-p', consumerDir], consumerDir);
 
-  // The same consumer, migrated by `nexus migrate` to the imports 2.0 keeps, must compile against the
-  // same package: every name the codemod moves really is exported, under that name, where it points.
+  // The consumer above imports as 1.x did, from the root. 2.0 compiles it only once `nexus migrate`
+  // has moved those imports, so the migrated copy must compile against the packed package: every name
+  // the codemod moves really is exported, under that name, where it points.
   const { migrateSource } = await import(pathToFileURL(path.join(repoRoot, 'dist', 'cli', 'migrate.js')).href);
   const original = readFileSync(path.join(consumerDir, 'index.ts'), 'utf8');
   const migrated = migrateSource(original, { file: 'index.ts' });
@@ -1034,6 +1037,9 @@ import { createRealtimeSession } from 'nexus-ai-pro/realtime/session';
 import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
 import { definePrompt } from 'nexus-ai-pro/prompts';
 import { PromptClient } from 'nexus-ai-pro/prompts/client';
+import { NexusAI, toolOutput, type NexusResponse } from 'nexus-ai-pro';
+import { createGraph, lastValue } from 'nexus-ai-pro/graph';
+import { budgetLedger } from 'nexus-ai-pro/lifecycle';
 
 // Templates and serving compile with browser types only: no Node API reaches either entry point.
 const greeting = definePrompt({ name: 'greeting', messages: [{ role: 'user', content: 'Hello {{name}}' }] });
@@ -1048,6 +1054,19 @@ const session = createRealtimeSession({ model: 'gpt-realtime', transport });
 const audioElement = document.createElement('audio');
 const connection: Promise<void> = session.connect({ audioElement, microphone: true });
 void connection;
+
+// The client, graphs, and the lifecycle compile without Node's type definitions, which 2.0 made an
+// optional peer.
+const ai = new NexusAI({ providers: {}, lifecycle: { budget: budgetLedger({ limit: 1 }) } });
+const graph = createGraph({ channels: { answer: lastValue<string>('') } })
+  .addNode('answer', async () => ({
+    answer: (await ai.complete({ model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] })).content,
+  }))
+  .addEdge('__start__', 'answer')
+  .addEdge('answer', '__end__')
+  .compile({ lifecycle: ai.lifecycle });
+const reply: Promise<NexusResponse> = ai.complete({ model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] });
+void [graph, reply, toolOutput('ok')];
 `,
   );
   run(process.execPath, [tsc, '-p', path.join(consumerDir, 'tsconfig.browser.json')], consumerDir);

@@ -1,12 +1,13 @@
 # API Stability Policy
 
-This policy describes compatibility guarantees for `nexus-ai-pro`. The 1.x compatibility guarantees
-apply beginning with version 1.0.0.
+This policy describes compatibility guarantees for `nexus-ai-pro`. The 2.x guarantees apply beginning
+with version 2.0.0, as the 1.x guarantees applied from 1.0.0. The sections for the 1.x stages below
+still describe each surface; where they say "the 1.x rules", read the rules of the current major line.
 
 ## Release stages
 
-The package follows semantic versioning. Within the 1.x line, incompatible changes to stable public
-APIs require a major release. Minor releases may add backward-compatible features, and patch releases
+The package follows semantic versioning. Within a major line, incompatible changes to stable public
+APIs require the next major release. Minor releases may add backward-compatible features, and patch releases
 are intended to remain backward compatible.
 
 The following surfaces are public and covered by this policy:
@@ -39,6 +40,45 @@ Both are covered by this policy:
 
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
+
+## 2.0 stage (Unreleased)
+
+2.0 removes what 1.x deprecated and promotes the surfaces that have settled.
+
+**Promoted to stable.** These follow the 2.x rules without an experimental label:
+
+- graphs, with their advanced APIs: `Send`, `Command`, breakpoints, `updateState()`, `fork()`, node
+  caching, and functional workflows (`nexus-ai-pro/graph`, `/graph/functional`, `/graph/visualize`);
+- the store (`nexus-ai-pro/store`, `/store/redis`), agents (`nexus-ai-pro/agent`), and tracing
+  (`nexus-ai-pro/tracing`);
+- evaluation (`nexus-ai-pro/evaluate`) and prompts (`nexus-ai-pro/prompts` and `/postgres/prompts`);
+- the agent server (`nexus-ai-pro/server`): its routes, `RunRecord`, `ThreadRecord`, `RunEvent`, and
+  recovery.
+
+**New in 2.0, and stable from the start:**
+
+- the operation lifecycle: the stage order, `LifecycleConfig`, `LifecycleHooks`, the
+  `OperationDescriptor`, `OperationOutcome`, and `OperationTicket` shapes, the `BudgetLedger`
+  contract, and `ProviderCallContext`. New families and stages may be added in a minor release;
+  existing ones keep their names;
+- mixed content: `AssetContent`, `ToolOutput`, and `response.assets`;
+- checkpoint schema version 2. Both checkpointers read version 1 throughout 2.x.
+
+**Still experimental in production readiness**, each following the 2.x rules all the same:
+
+- images, until recorded live conformance passes on all three backends;
+- the studio package;
+- deployments, tenant limits, and the server's worker queue (1.24);
+- the context hub, insights, and the studio's accounts (1.23);
+- the loaders, the vector stores added in 1.20 and 1.22, the retrievers, and the MCP registry;
+- the SQLite adapters (1.21).
+
+**Root import.** The root exports the core client, its config builders, its types, the errors it
+throws, the lifecycle, and `tool()` and `toolOutput()`. Adding anything else to the root waits for a
+major release, and a check in CI fails when the root grows.
+
+**Dependencies.** The package has no required dependency. `zod`, `ajv`, `ajv-formats`, and
+`@types/node` are optional peers; making any of them required again would need a major release.
 
 ## Capability negotiation stage
 

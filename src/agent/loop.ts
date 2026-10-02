@@ -1,7 +1,7 @@
 import type { AgentConfig, AgentResult, AgentStep, ToolExecutionResult } from '../types/agent.js';
 import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
-import { ToolExecutor } from './tool.js';
+import { ToolExecutor, toolMessageContent } from './tool.js';
 
 /** The part of a client the agent loop needs. */
 export interface AgentModelClient {
@@ -93,7 +93,7 @@ export class AgentLoop {
         messages.push({
           role: 'tool',
           toolCallId: toolCall.id,
-          content: JSON.stringify(result.ok ? result.result : { error: result.error }),
+          content: toolMessageContent(result),
         });
       }
     }

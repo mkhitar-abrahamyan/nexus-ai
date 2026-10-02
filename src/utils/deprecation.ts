@@ -20,8 +20,3 @@ export function warnDeprecated(code: string, message: string): void {
     console.warn(`DeprecationWarning [${code}]: ${message}`);
   }
 }
-
-/** Warns when an option is present, for the options that have never been read. */
-export function warnUnreadOption(present: boolean, code: string, option: string): void {
-  if (present) warnDeprecated(code, `${option} has never been read and will be removed in 2.0. Remove it.`);
-}

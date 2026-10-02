@@ -5,6 +5,7 @@ import {
   snapshotRealtimeConversation,
 } from './conversation.js';
 import { RealtimeError, toRealtimeError } from './errors.js';
+import type { OperationTicket } from '../types/lifecycle.js';
 import { TypedEventEmitter } from './events.js';
 import { createRealtimeId } from './id.js';
 import {
@@ -87,6 +88,9 @@ export class RealtimeSession {
   private audioLimitTriggered = false;
   private activeConnectionCounted = false;
   private connectionSpan?: RealtimeSpanLike;
+  /** The lifecycle operation this session runs as, between its first connect and its disconnect. */
+  private ticket?: OperationTicket;
+  private operationSettled: Promise<void> = Promise.resolve();
 
   constructor(private readonly config: RealtimeSessionConfig) {
     this.id = config.id || (config.idFactory || createRealtimeId)('session');
@@ -214,6 +218,26 @@ export class RealtimeSession {
     this.bindAbortSignal(options.signal);
 
     this.connectPromise = (async () => {
+      if (this.config.lifecycle && !this.ticket) {
+        try {
+          this.ticket = await this.config.lifecycle.start(
+            {
+              family: 'realtime',
+              operation: 'realtime.session',
+              provider: this.provider,
+              model: this.model,
+              metadata: { sessionId: this.id },
+            },
+            { signal: this.controller.signal },
+          );
+        } catch (error) {
+          // Refused before anything connected: the lifecycle has already recorded why.
+          this.setState('failed');
+          this.connectPromise = undefined;
+          this.connectionSpan = undefined;
+          throw error;
+        }
+      }
       try {
         await this.config.transport.connect(mergedConfig);
         if (this.manualDisconnect || this.controller.signal.aborted) throw abortError(this.controller.signal);
@@ -243,6 +267,7 @@ export class RealtimeSession {
           this.setState('failed');
           this.applyEvent({ type: 'error', error: normalized, timestamp: this.clock.now() });
         }
+        this.settleOperation(normalized);
         throw normalized;
       } finally {
         this.connectPromise = undefined;
@@ -266,6 +291,7 @@ export class RealtimeSession {
       this.finishDisconnect('client disconnect', true);
       for (const unsubscribe of this.transportUnsubscribers.splice(0)) unsubscribe();
     }
+    await this.operationSettled;
   }
 
   /** Sends a raw provider event. */
@@ -716,6 +742,20 @@ export class RealtimeSession {
     this.recordInactiveConnection();
     this.setState('disconnected');
     this.applyEvent({ type: 'session.disconnected', reason, expected, timestamp: this.clock.now() });
+    this.settleOperation(expected ? undefined : new Error(reason ?? 'Realtime session disconnected unexpectedly'));
+  }
+
+  /** Finishes the session's lifecycle operation once: with its cost, or with the error that ended it. */
+  private settleOperation(error?: unknown): void {
+    const ticket = this.ticket;
+    if (!ticket) return;
+    this.ticket = undefined;
+    const cost = this.conversation.metrics.estimatedCost;
+    this.operationSettled = (
+      error === undefined
+        ? ticket.succeed({ ...(cost !== undefined ? { cost } : {}), metadata: { sessionId: this.id } })
+        : ticket.fail(error)
+    ).catch(() => undefined);
   }
 
   private awaitConfirmation(call: RealtimeToolCall, signal: AbortSignal): Promise<boolean> {

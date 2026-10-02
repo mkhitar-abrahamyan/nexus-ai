@@ -73,8 +73,20 @@ Each adapter has its own entry point, so an application that uses one provider l
 | `LMStudioProvider` | `/providers/lmstudio` | LM Studio's local OpenAI-compatible server |
 | `LlamaCppProvider` | `/providers/llamacpp` | llama.cpp's local OpenAI-compatible server |
 
-The client constructs them from `providers` configuration; construct one yourself to call it
-directly or to register it under another name.
+The client constructs them from `providers` configuration, and each adapter's module loads on that
+provider's first call. So configuring a provider you never call costs no import time. Construct one
+yourself to call it directly or to register it under another name.
+
+Every adapter sends a conversation's tool calls and results back the way its API expects:
+
+| Adapter | The model's tool calls | Their results |
+| --- | --- | --- |
+| OpenAI chat | `tool_calls` on the assistant message | One `tool` message per call, under the call's id; images follow as one user message |
+| OpenAI Responses | `function_call` items | `function_call_output` items, under the call's id |
+| Anthropic | `tool_use` blocks | `tool_result` blocks, every result of a turn in one user message, images included |
+| Google | `functionCall` parts | `functionResponse` parts, named for the function that asked, images beside them |
+
+An asset part in a message is sent as one reference line, never as its bytes.
 
 ## Writing a provider
 
@@ -84,6 +96,10 @@ three things:
 - `info`, a `ProviderInfo`: the name, and whether it runs locally, which privacy routing prefers;
 - `complete()`, for one response;
 - `stream()`, for a streamed one.
+
+Both calls receive the operation's `ProviderCallContext` as a second argument: its request id, abort
+signal, deadline, trace headers, and idempotency key. Ignore it, or pass the parts your API accepts;
+the [lifecycle guide](./lifecycle.md) shows how.
 
 `healthCheck()` is optional and defaults to healthy. Protected helpers do the shared work: build the
 base response, extract message text, format tools, normalize errors, honour an aborted signal, and
@@ -201,15 +217,13 @@ nothing reads. Both live in the repository, where a diff is what you want.
 
 ### What a model accepts and produces
 
-Each entry still lists its `modalities`, each a `Modality`, in one list that does not say which way each
-one flows:
-`vision` is an image in, and `image` an image out. That list is deprecated; 2.0 replaces it with two.
+Every entry says which way each modality flows, in two lists:
 
 - `inputModalities` lists each `InputModality` the model accepts: text, image, audio, video, or pdf.
 - `outputModalities` lists each `OutputModality` it produces: text, image, or audio.
 
-`modalitiesOf()` reads both from any entry. It uses the new fields when the entry declares them, and
-otherwise derives them from `modalities`:
+Both are required, on a bundled entry and on one you register. `modalitiesOf()` returns copies of
+the two, in one call:
 
 ```ts
 import { getModelCapabilities, modalitiesOf } from 'nexus-ai-pro/models';
@@ -219,11 +233,7 @@ const { input, output } = modalitiesOf(getModelCapabilities('gemini-3-pro-image-
 ```
 
 Routing requires them the same way. `routing.requiredCapabilities` takes `inputModalities` and
-`outputModalities`; its old `modalities` still works, and warns once that 2.0 removes it.
-
-A model you define must still set `modalities` in 1.x. Set the two new fields beside it, and 2.0 needs
-nothing more.
-
+`outputModalities`, so a request with a PDF attached can route only to models that read one.
 
 `ProviderCapabilities` groups a provider's models with its name and locality. A `CacheHint` is a
 breakpoint on a message or tool.
@@ -233,7 +243,12 @@ Aliases such as `openai/best` resolve by intent. `MODEL_ALIAS_METADATA` gives ea
 data came from and when it was verified. `resolveProvider()` names the provider a model belongs to.
 
 `/models` reads the registry through your configuration. A model you register with `models.registry`,
-or an alias with `models.aliases`, is seen like a bundled one.
+or an alias with `models.aliases`, is seen like a bundled one. A name with a provider prefix, such as
+`google/gemini-2.5-flash`, finds the entry filed without it, but only when that entry belongs to the
+provider the prefix names.
+
+`DEFAULT_CACHE_PRICING` holds each provider's cache rates, as multiples of its standard input price.
+It applies when a model declares no cached-read or cache-write price of its own.
 
 | Function | Returns |
 | --- | --- |
@@ -280,8 +295,7 @@ specific entry point that provides it.
 | `KNOWN_MODELS` | constant | The bundled model registry: capabilities and prices for every model the package knows by name. |
 | `listKnownModels` | function | Every model name in the registry, sorted. |
 | `listModelsForProvider` | function | Every model in the registry that belongs to a provider, sorted. |
-| `modalitiesOf` | function | What a model accepts and what it produces. |
-| `Modality` | type | What a model handles, in one list: text, images in (`vision`), audio, video, images out (`image`), or PDF documents. |
+| `modalitiesOf` | function | What a model accepts and what it produces, as copies a caller may change. |
 | `MODEL_ALIAS_METADATA` | constant | Stage and provenance for every bundled alias, derived from its target so the two cannot drift. |
 | `ModelCapabilities` | interface | Declared model behavior. |
 | `ModelEndpoint` | type | Which provider API a model is served through. |

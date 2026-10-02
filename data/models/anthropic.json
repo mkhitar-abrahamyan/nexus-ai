@@ -4,7 +4,8 @@
     "claude-sonnet-5-0": {
       "provider": "anthropic",
       "family": "claude-sonnet-5.0",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -40,7 +41,8 @@
     "claude-haiku-5-0": {
       "provider": "anthropic",
       "family": "claude-haiku-5.0",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -76,7 +78,8 @@
     "claude-opus-4-8": {
       "provider": "anthropic",
       "family": "claude-opus-4.8",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -112,7 +115,8 @@
     "claude-fable-5-0": {
       "provider": "anthropic",
       "family": "claude-fable-5.0",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -148,7 +152,8 @@
     "claude-opus-4-7": {
       "provider": "anthropic",
       "family": "claude-opus-4.7",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -184,7 +189,8 @@
     "claude-opus-4-6": {
       "provider": "anthropic",
       "family": "claude-opus-4.6",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -221,7 +227,8 @@
     "claude-opus-4-5-20251101": {
       "provider": "anthropic",
       "family": "claude-opus-4.5",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -258,7 +265,8 @@
     "claude-sonnet-4-6": {
       "provider": "anthropic",
       "family": "claude-sonnet-4.6",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -294,7 +302,8 @@
     "claude-haiku-4-5-20251001": {
       "provider": "anthropic",
       "family": "claude-haiku-4.5",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -330,7 +339,8 @@
     "claude-opus-4-1-20250805": {
       "provider": "anthropic",
       "family": "claude-opus-4.1",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -366,7 +376,8 @@
     "claude-opus-4-20250514": {
       "provider": "anthropic",
       "family": "claude-opus-4",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -402,7 +413,8 @@
     "claude-sonnet-4-20250514": {
       "provider": "anthropic",
       "family": "claude-sonnet-4",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -438,7 +450,8 @@
     "claude-3-7-sonnet-20250219": {
       "provider": "anthropic",
       "family": "claude-3.7",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -474,7 +487,8 @@
     "claude-3-5-sonnet-20241022": {
       "provider": "anthropic",
       "family": "claude-3.5",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -507,7 +521,8 @@
     "claude-3-5-sonnet-20240620": {
       "provider": "anthropic",
       "family": "claude-3.5",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -540,7 +555,8 @@
     "claude-3-5-haiku-20241022": {
       "provider": "anthropic",
       "family": "claude-haiku-3.5",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,
@@ -573,7 +589,8 @@
     "claude-3-haiku-20240307": {
       "provider": "anthropic",
       "family": "claude-haiku-3",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": false,

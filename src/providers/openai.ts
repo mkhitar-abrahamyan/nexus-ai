@@ -1,5 +1,7 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
-import type { CompletionRequest, ContentPart, Message, ToolChoice } from '../types/messages.js';
+import type { ProviderCallContext } from '../types/lifecycle.js';
+import type { CompletionRequest, ContentPart, ImageContent, Message, ToolChoice } from '../types/messages.js';
+import { assetReference, imagePlaceholder, imagesOf, textOf, wireImage } from './content.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
 import type { OpenAIProviderConfig } from '../types/config.js';
 import { buildMeta, type UsageInput } from '../core/usage.js';
@@ -9,6 +11,8 @@ import { asArray, asNumber, asString, getArray, getNumber, getRecord, getString,
 
 interface RequestOptions {
   signal?: AbortSignal;
+  idempotencyKey?: string;
+  headers?: Record<string, string>;
 }
 
 interface OpenAIClient {
@@ -53,7 +57,9 @@ interface OpenAIChatCompletionParams {
 
 interface OpenAIChatMessage {
   role: Message['role'];
-  content: string | OpenAIChatContentPart[];
+  content: string | OpenAIChatContentPart[] | null;
+  tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+  tool_call_id?: string;
 }
 
 type OpenAIChatContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
@@ -95,7 +101,7 @@ interface OpenAIChatCompletionChunk {
 
 interface OpenAIResponsesCreateParams {
   model: string;
-  input: Array<{ role: string; content: string }>;
+  input: unknown[];
   temperature?: number;
   max_output_tokens?: number;
   top_p?: number;
@@ -167,54 +173,88 @@ export class OpenAIProvider extends BaseProvider {
     return this.client;
   }
 
+  /**
+   * The conversation in chat form. An assistant turn carries its tool calls, and each result goes
+   * back as a `tool` message under the call's id. The chat API takes only text in a tool message,
+   * so images a tool returned follow the run of tool messages as one user message.
+   */
   private formatMessages(messages: Message[]): OpenAIChatMessage[] {
-    return messages.map((msg) => {
-      if (typeof msg.content === 'string') {
-        return { role: msg.role, content: msg.content };
+    const formatted: OpenAIChatMessage[] = [];
+    let toolImages: OpenAIChatContentPart[] = [];
+    const flushToolImages = (): void => {
+      if (!toolImages.length) return;
+      formatted.push({ role: 'user', content: [{ type: 'text', text: 'Images the tools returned:' }, ...toolImages] });
+      toolImages = [];
+    };
+
+    for (const msg of messages) {
+      if (msg.role === 'tool') {
+        const images = imagesOf(msg.content).map((part) => this.formatContentPart(part));
+        toolImages.push(...images);
+        formatted.push({
+          role: 'tool',
+          tool_call_id: msg.toolCallId ?? '',
+          content: textOf(msg.content) || (images.length ? 'The result is the images that follow.' : ''),
+        });
+        continue;
+      }
+      flushToolImages();
+
+      if (msg.role === 'assistant' && msg.toolCalls?.length) {
+        formatted.push({
+          role: 'assistant',
+          content: textOf(msg.content) || null,
+          tool_calls: msg.toolCalls.map((call) => ({
+            id: call.id,
+            type: 'function',
+            function: { name: call.function.name, arguments: call.function.arguments },
+          })),
+        });
+        continue;
       }
 
-      const parts: OpenAIChatContentPart[] = msg.content.map((part: ContentPart) => {
-        switch (part.type) {
-          case 'text':
-            return { type: 'text', text: part.text };
-          case 'image': {
-            const src = part.source;
-            if ('url' in src) {
-              return { type: 'image_url', image_url: { url: src.url } };
-            }
-            if ('base64' in src) {
-              const mime = src.mimeType || 'image/png';
-              return { type: 'image_url', image_url: { url: `data:${mime};base64,${src.base64}` } };
-            }
-            if ('buffer' in src) {
-              const mime = src.mimeType || 'image/png';
-              const b64 = src.buffer.toString('base64');
-              return { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } };
-            }
-            return { type: 'text', text: '[image from path requires preprocessing]' };
-          }
-          default:
-            return { type: 'text', text: `[${part.type} content is not yet supported for this provider]` };
-        }
+      formatted.push({
+        role: msg.role,
+        content:
+          typeof msg.content === 'string' ? msg.content : msg.content.map((part) => this.formatContentPart(part)),
       });
+    }
+    flushToolImages();
+    return formatted;
+  }
 
-      return { role: msg.role, content: parts };
-    });
+  private formatContentPart(part: ContentPart): OpenAIChatContentPart {
+    switch (part.type) {
+      case 'text':
+        return { type: 'text', text: part.text };
+      case 'asset':
+        return { type: 'text', text: assetReference(part.asset) };
+      case 'image': {
+        const image = wireImage(part);
+        if (image?.kind === 'url') return { type: 'image_url', image_url: { url: image.url } };
+        if (image?.kind === 'base64') {
+          return { type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` } };
+        }
+        return { type: 'text', text: imagePlaceholder(part) };
+      }
+      default:
+        return { type: 'text', text: `[${part.type} content is not yet supported for this provider]` };
+    }
   }
 
   /** Runs one completion. */
-  async complete(request: CompletionRequest): Promise<NexusResponse> {
+  async complete(request: CompletionRequest, context?: ProviderCallContext): Promise<NexusResponse> {
     const providerRequest = this.withProviderModel(request);
     try {
       this.throwIfAborted(providerRequest);
       if (this.requiresResponsesApi(providerRequest.model)) {
-        return await this.completeResponses(providerRequest);
+        return await this.completeResponses(providerRequest, context);
       }
 
       const client = await this.getClient();
       const startTime = Date.now();
       const params = this.createChatParams(providerRequest);
-      const result = await client.chat.completions.create(params, this.requestOptions(providerRequest));
+      const result = await client.chat.completions.create(params, this.requestOptions(providerRequest, context));
       const choice = result.choices[0];
 
       if (!choice?.message) {
@@ -234,7 +274,7 @@ export class OpenAIProvider extends BaseProvider {
   }
 
   /** Streams one completion. */
-  stream(request: CompletionRequest): NexusStream {
+  stream(request: CompletionRequest, context?: ProviderCallContext): NexusStream {
     const self = this;
 
     return this.createStream(async function* () {
@@ -242,7 +282,7 @@ export class OpenAIProvider extends BaseProvider {
         const providerRequest = self.withProviderModel(request);
         self.throwIfAborted(providerRequest);
         if (self.requiresResponsesApi(providerRequest.model)) {
-          yield* self.streamResponses(providerRequest);
+          yield* self.streamResponses(providerRequest, context);
           return;
         }
 
@@ -253,7 +293,10 @@ export class OpenAIProvider extends BaseProvider {
           stream: true,
         };
         if (self.includeStreamUsage()) streamParams.stream_options = { include_usage: true };
-        const stream = await client.chat.completions.create(streamParams, self.requestOptions(providerRequest));
+        const stream = await client.chat.completions.create(
+          streamParams,
+          self.requestOptions(providerRequest, context),
+        );
 
         const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
         // Usage arrives on its own final chunk when stream_options is enabled, which can be after
@@ -385,7 +428,7 @@ export class OpenAIProvider extends BaseProvider {
     }
   }
 
-  private async completeResponses(request: CompletionRequest): Promise<NexusResponse> {
+  private async completeResponses(request: CompletionRequest, context?: ProviderCallContext): Promise<NexusResponse> {
     const client = await this.getClient();
     const responses = client.responses;
     if (!responses?.create) {
@@ -395,7 +438,7 @@ export class OpenAIProvider extends BaseProvider {
     }
 
     const startTime = Date.now();
-    const result = await responses.create(this.createResponsesParams(request), this.requestOptions(request));
+    const result = await responses.create(this.createResponsesParams(request), this.requestOptions(request, context));
     const toolCalls = this.extractResponsesToolCalls(result);
 
     return {
@@ -407,7 +450,10 @@ export class OpenAIProvider extends BaseProvider {
     };
   }
 
-  private async *streamResponses(request: CompletionRequest): AsyncGenerator<StreamChunk> {
+  private async *streamResponses(
+    request: CompletionRequest,
+    context?: ProviderCallContext,
+  ): AsyncGenerator<StreamChunk> {
     const client = await this.getClient();
     const responses = client.responses;
     if (!responses?.create) {
@@ -422,7 +468,7 @@ export class OpenAIProvider extends BaseProvider {
         ...this.createResponsesParams(request),
         stream: true,
       },
-      this.requestOptions(request),
+      this.requestOptions(request, context),
     );
     const toolCallBuffers = new Map<string, { id: string; name: string; args: string }>();
 
@@ -551,11 +597,76 @@ export class OpenAIProvider extends BaseProvider {
     return Boolean(endpoints?.includes('responses') && !endpoints.includes('chat'));
   }
 
-  private formatResponsesInput(messages: Message[]): Array<{ role: string; content: string }> {
-    return this.extractTextContent(messages).map((message) => ({
-      role: message.role === 'tool' ? 'user' : message.role,
-      content: message.content,
-    }));
+  /**
+   * The conversation as Responses input items: a tool call is a `function_call` item, its result a
+   * `function_call_output` item under the same call id, and images a tool returned follow as one
+   * user message.
+   */
+  private formatResponsesInput(messages: Message[]): unknown[] {
+    const input: unknown[] = [];
+    let toolImages: ImageContent[] = [];
+    const flushToolImages = (): void => {
+      if (!toolImages.length) return;
+      input.push({
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'Images the tools returned:' },
+          ...toolImages.map((part) => this.responsesImage(part)),
+        ],
+      });
+      toolImages = [];
+    };
+
+    for (const message of messages) {
+      if (message.role === 'tool') {
+        const images = imagesOf(message.content);
+        toolImages.push(...images);
+        input.push({
+          type: 'function_call_output',
+          call_id: message.toolCallId ?? '',
+          output: textOf(message.content) || (images.length ? 'The result is the images that follow.' : ''),
+        });
+        continue;
+      }
+      flushToolImages();
+
+      if (message.role === 'assistant' && message.toolCalls?.length) {
+        const said = textOf(message.content);
+        if (said) input.push({ role: 'assistant', content: said });
+        for (const call of message.toolCalls) {
+          input.push({
+            type: 'function_call',
+            call_id: call.id,
+            name: call.function.name,
+            arguments: call.function.arguments,
+          });
+        }
+        continue;
+      }
+
+      const images = message.role === 'user' ? imagesOf(message.content) : [];
+      input.push(
+        images.length
+          ? {
+              role: message.role,
+              content: [
+                { type: 'input_text', text: textOf(message.content) },
+                ...images.map((part) => this.responsesImage(part)),
+              ],
+            }
+          : { role: message.role, content: textOf(message.content) },
+      );
+    }
+    flushToolImages();
+    return input;
+  }
+
+  private responsesImage(part: ImageContent): Record<string, unknown> {
+    const image = wireImage(part);
+    if (image?.kind === 'url') return { type: 'input_image', image_url: image.url };
+    if (image?.kind === 'base64')
+      return { type: 'input_image', image_url: `data:${image.mimeType};base64,${image.data}` };
+    return { type: 'input_text', text: imagePlaceholder(part) };
   }
 
   private formatResponsesTools(tools?: CompletionRequest['tools']): unknown[] | undefined {
@@ -628,8 +739,12 @@ export class OpenAIProvider extends BaseProvider {
     return buildMeta({ provider: this.info.name, model, latencyMs, ...usage });
   }
 
-  private requestOptions(request: CompletionRequest): RequestOptions | undefined {
-    return request.signal ? { signal: request.signal } : undefined;
+  private requestOptions(request: CompletionRequest, context?: ProviderCallContext): RequestOptions | undefined {
+    const options: RequestOptions = {};
+    if (request.signal) options.signal = request.signal;
+    if (context?.idempotencyKey) options.idempotencyKey = context.idempotencyKey;
+    if (context?.traceContext) options.headers = context.traceContext;
+    return options.signal || options.idempotencyKey || options.headers ? options : undefined;
   }
 
   private withProviderModel(request: CompletionRequest): CompletionRequest {

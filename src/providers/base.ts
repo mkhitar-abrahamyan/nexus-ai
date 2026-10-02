@@ -1,3 +1,4 @@
+import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest, Message, ToolDefinition } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
 import { generateRequestId } from '../utils/ids.js';
@@ -16,10 +17,13 @@ export abstract class BaseProvider {
   /** Provider name and locality. */
   abstract readonly info: ProviderInfo;
 
-  /** Runs one completion. */
-  abstract complete(request: CompletionRequest): Promise<NexusResponse>;
-  /** Streams one completion. */
-  abstract stream(request: CompletionRequest): NexusStream;
+  /**
+   * Runs one completion. `context` carries the operation's id, its deadline, its trace headers, and
+   * its idempotency key; `request.signal` and `context.signal` are the same signal.
+   */
+  abstract complete(request: CompletionRequest, context?: ProviderCallContext): Promise<NexusResponse>;
+  /** Streams one completion, with the same `context` as `complete()`. */
+  abstract stream(request: CompletionRequest, context?: ProviderCallContext): NexusStream;
 
   /**
    * Whether the provider is reachable. Defaults to true; adapters override it with a real check.
@@ -41,7 +45,6 @@ export abstract class BaseProvider {
         tokensInput: 0,
         tokensOutput: 0,
         tokensSaved: 0,
-        estimatedCost: '$0.00',
         cacheHit: false,
         guardrailsApplied: [],
       },

@@ -1,3 +1,4 @@
+import type { ProviderCallContext } from './lifecycle.js';
 /** What an image request does: create an image from a prompt, or change an existing one. */
 export type ImageOperation = 'generate' | 'edit';
 
@@ -336,20 +337,13 @@ export interface ImageProviderInfo {
   capabilities: ImageProviderCapabilities;
 }
 
-/** What an image provider receives with every call besides the request. */
-export interface ImageProviderCallContext {
+/**
+ * What an image provider receives with every call besides the request: the context every family's
+ * provider receives, and the operation the call belongs to.
+ */
+export interface ImageProviderCallContext extends ProviderCallContext {
   /** The durable operation's id. */
   operationId: string;
-  /** The request's id. */
-  requestId: string;
-  /** Aborted when the operation is cancelled or its deadline passes. */
-  signal: AbortSignal;
-  /** Epoch milliseconds by which the call must finish. */
-  deadline?: number;
-  /** Passed to providers that deduplicate requests themselves. */
-  idempotencyKey?: string;
-  /** Trace propagation headers, for providers that accept them. */
-  traceContext?: Record<string, string>;
 }
 
 /**
@@ -429,9 +423,6 @@ export interface ImageConfig {
   /** Replaces the system clock, for tests. */
   now?: () => Date;
 }
-
-/** @deprecated Prefer `ImageConfig`; retained as an explicit manager-local alias. */
-export type ImageManagerConfig = ImageConfig;
 
 /** An image operation as queued work: which operation, and its request. */
 export type ImageOperationSubmission =

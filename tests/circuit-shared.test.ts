@@ -35,7 +35,6 @@ function response(provider: string): NexusResponse {
       tokensInput: 1,
       tokensOutput: 1,
       tokensSaved: 0,
-      estimatedCost: '$0.00',
       cacheHit: false,
       guardrailsApplied: [],
     },

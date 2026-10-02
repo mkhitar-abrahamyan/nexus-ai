@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,12 +66,11 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // MIGRATING.md. The notes go when 2.0 drops those exports from the root.
 const MAX_PACKED_BYTES = 900_000;
 const MAX_UNPACKED_BYTES = 5_650_000;
-// What a consumer actually installs: this package plus the dependencies it forces on them. Most of
-// the difference from the unpacked size above is `zod`, `ajv`, and `@types/node`, which is why the
-// README size table reports third-party install cost per entry point. Raised with the unpacked ceiling
-// in 1.21.0, 1.22.0, 1.23.0, and 1.24.0; slimming the root and making the validators optional in 2.0 is
-// what brings it down.
-const MAX_INSTALLED_BYTES = 13_000_000;
+// What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
+// that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
+// 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
+// came down from 13 MB to hold that.
+const MAX_INSTALLED_BYTES = 6_000_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
@@ -171,7 +179,7 @@ try {
   const smokeScript = `
 import assert from 'node:assert/strict';
 
-const optionalPeers = ['openai', '@anthropic-ai/sdk', 'ollama'];
+const optionalPeers = ['openai', '@anthropic-ai/sdk', 'ollama', 'zod', 'ajv', 'ajv-formats'];
 for (const specifier of optionalPeers) {
   try {
     await import(specifier);
@@ -184,7 +192,9 @@ for (const specifier of optionalPeers) {
 }
 
 const imports = [
-  ['nexus-ai-pro', ['NexusAI', 'createNexus', 'createNexusConfig', 'NexusProviderError', 'OpenAIProvider', 'AnthropicProvider', 'OllamaProvider']],
+  ['nexus-ai-pro', ['NexusAI', 'createNexus', 'createNexusConfig', 'NexusProviderError', 'OperationLifecycle', 'toolOutput']],
+  ['nexus-ai-pro/lifecycle', ['budgetLedger', 'OperationLifecycle']],
+  ['nexus-ai-pro/graph', ['createGraph', 'MemoryGraphCheckpointer']],
   ['nexus-ai-pro/core', ['NexusAI']],
   ['nexus-ai-pro/config', ['NexusConfigBuilder', 'createNexusConfig']],
   ['nexus-ai-pro/providers/openai', ['OpenAIProvider']],
@@ -215,12 +225,61 @@ for (const [specifier, exportNames] of imports) {
     assert.ok(exportName in module, \`\${specifier} should export \${exportName}\`);
   }
 }
+
+// With nothing installed but this package, a graph runs and the client completes through its own
+// lifecycle; a JSON Schema response format, which needs the optional ajv, says how to install it.
+const { NexusAI } = await import('nexus-ai-pro');
+const { BaseProvider } = await import('nexus-ai-pro/providers');
+const { createGraph, lastValue } = await import('nexus-ai-pro/graph');
+class Echo extends BaseProvider {
+  info = { name: 'echo', isLocal: true };
+  async complete(request) {
+    const meta = { requestId: 'r', providerUsed: 'echo', modelUsed: request.model, latencyMs: 0, tokensInput: 1, tokensOutput: 1, tokensSaved: 0, cacheHit: false, guardrailsApplied: [] };
+    return { content: '{"ok":true}', role: 'assistant', finishReason: 'stop', meta };
+  }
+  stream() {
+    return { async *[Symbol.asyncIterator]() {}, abort() {} };
+  }
+}
+const finished = [];
+const ai = new NexusAI({
+  providers: {},
+  routing: { mode: 'direct' },
+  defaultModel: 'echo/model',
+  security: 'off',
+  lifecycle: { hooks: { onFinish: (operation, outcome) => finished.push(\`\${operation.family}:\${outcome.status}\`) } },
+});
+ai.registerProvider('echo', new Echo());
+const graph = createGraph({ channels: { answer: lastValue('') } })
+  .addNode('ask', async () => ({ answer: (await ai.complete({ model: 'echo/model', messages: [{ role: 'user', content: 'hi' }] })).content }))
+  .addEdge('__start__', 'ask')
+  .addEdge('ask', '__end__')
+  .compile({ lifecycle: ai.lifecycle });
+const result = await graph.invoke({});
+assert.equal(result.state.answer, '{"ok":true}');
+assert.deepEqual(finished, ['completion:succeeded', 'graph:succeeded']);
+await assert.rejects(
+  () =>
+    ai.complete({
+      model: 'echo/model',
+      messages: [{ role: 'user', content: 'hi' }],
+      responseFormat: { type: 'json_schema', schema: { type: 'object', properties: { ok: { type: 'boolean' } } } },
+    }),
+  /needs ajv and ajv-formats, which are optional/,
+);
 `;
   const smokePath = path.join(consumerDir, 'smoke.mjs');
   writeFileSync(smokePath, smokeScript);
   run(process.execPath, [smokePath], consumerDir);
 
   runNpm(['exec', '--offline', '--', 'nexus', 'help'], consumerDir);
+  for (const optional of ['zod', 'ajv', 'ajv-formats', '@types/node']) {
+    assert.equal(
+      existsSync(path.join(consumerDir, 'node_modules', optional)),
+      false,
+      `a production install should not bring in the optional peer ${optional}`,
+    );
+  }
   const installedBytes = directorySize(path.join(consumerDir, 'node_modules'));
   assert.ok(
     installedBytes < MAX_INSTALLED_BYTES,

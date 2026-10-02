@@ -142,7 +142,6 @@ function toPseudoResponse(content: string, toolCalls: ToolCall[], meta: Partial<
       tokensInput: meta.tokensInput || 0,
       tokensOutput: meta.tokensOutput || 0,
       tokensSaved: meta.tokensSaved || 0,
-      estimatedCost: meta.estimatedCost || '$0.00',
       cacheHit: meta.cacheHit || false,
       guardrailsApplied: meta.guardrailsApplied || [],
     },

@@ -69,8 +69,10 @@ not generate 2,880 polls while a fast one is still caught by the first few short
 
 `BatchConfig` registers providers, names the default, and sets the poll interval, its upper bound
 once backoff has grown it, and the timeout — 26 hours by default, just past the 24-hour tier.
-`BatchManagerRuntime` supplies what the manager runs on: the operation runner configuration that makes a submitted batch durable, and the
-model registry it prices results against. Providers can also be added later with
+`BatchManagerRuntime` supplies what the manager runs on: the operation runner configuration that
+makes a submitted batch durable, the model registry it prices results against, and optionally a
+client's `lifecycle`. With it, each submission is authorized before the provider sees it, and its
+priced cost is charged to the client's budget when the batch is collected. Providers can also be added later with
 `registerBatchProvider()`, and `hasBatchProvider()` and `listBatchProviders()` report what is
 registered.
 
@@ -155,7 +157,7 @@ specific entry point that provides it.
 | `BatchManagerRuntime` | interface | What the batch manager runs on. |
 | `BatchOutputItem` | interface | The outcome of one batched request. |
 | `BatchProvider` | interface | A provider's asynchronous batch tier. |
-| `BatchProviderCallContext` | interface | What a batch adapter receives with every call. |
+| `BatchProviderCallContext` | interface | What a batch adapter receives with every call: the context every family's provider receives, with the attempt number. |
 | `BatchProviderCapabilities` | interface | What a batch tier supports. |
 | `BatchProviderError` | class | Raised when a batch provider fails. |
 | `BatchProviderInfo` | interface | Identifies a batch adapter and what it supports. |

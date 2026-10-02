@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  CohereProvider,
-  GoogleProvider,
-  OllamaProvider,
-  type CompletionRequest,
-  type StreamChunk,
-} from '../src/index.js';
+import type { CompletionRequest, StreamChunk } from '../src/index.js';
+import { CohereProvider } from '../src/providers/cohere.js';
+import { GoogleProvider } from '../src/providers/google.js';
+import { OllamaProvider } from '../src/providers/ollama.js';
 
 function request(overrides: Partial<CompletionRequest> = {}): CompletionRequest {
   return {
@@ -179,7 +176,7 @@ test('Google streams thought parts as reasoning chunks and reports final usage',
     assert.equal(chunks[1].content, 'final');
     assert.equal(chunks[2].meta?.usage?.inputTokens, 50);
     assert.equal(chunks[2].meta?.usage?.cachedReadTokens, 40);
-    assert.notEqual(chunks[2].meta?.estimatedCost, '$0.00', 'streamed responses report real cost');
+    assert.ok((chunks[2].meta?.cost?.amount ?? 0) > 0, 'streamed responses report real cost');
   } finally {
     globalThis.fetch = original;
   }

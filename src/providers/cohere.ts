@@ -2,8 +2,7 @@ import { BaseProvider, type ProviderInfo } from './base.js';
 import type { CohereProviderConfig } from '../types/config.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
-import { generateRequestId } from '../utils/ids.js';
-import { KNOWN_MODELS } from '../types/providers.js';
+import { buildMeta, priceUsage } from '../core/usage.js';
 import { createProviderHttpError } from './errors.js';
 import { asString, getString, isRecord } from './type-guards.js';
 
@@ -78,23 +77,16 @@ export class CohereProvider extends BaseProvider {
       const inputTokens = usage.input_tokens || usage.prompt_tokens || 0;
       const outputTokens = usage.output_tokens || usage.completion_tokens || 0;
 
-      return {
-        content,
-        role: 'assistant',
-        finishReason: 'stop',
-        meta: {
-          requestId: generateRequestId(),
-          providerUsed: 'cohere',
-          modelUsed: result.model || model,
-          latencyMs: Date.now() - startTime,
-          tokensInput: inputTokens,
-          tokensOutput: outputTokens,
-          tokensSaved: 0,
-          estimatedCost: this.estimateCost(model, inputTokens, outputTokens),
-          cacheHit: false,
-          guardrailsApplied: [],
-        },
-      };
+      const meta = buildMeta({
+        provider: 'cohere',
+        model: result.model || model,
+        latencyMs: Date.now() - startTime,
+        inputTokens,
+        outputTokens,
+      });
+      // The registry files Cohere models under the `cohere/` prefix the API does not accept.
+      if (meta.usage) meta.cost = priceUsage({ model: `cohere/${model}`, usage: meta.usage });
+      return { content, role: 'assistant', finishReason: 'stop', meta };
     } catch (error) {
       throw this.normalizeProviderError(error, request, { model });
     }
@@ -148,11 +140,5 @@ export class CohereProvider extends BaseProvider {
         .join('');
     }
     return result.text || '';
-  }
-
-  private estimateCost(model: string, inputTokens: number, outputTokens: number): string {
-    const caps = KNOWN_MODELS[model] || KNOWN_MODELS[`cohere/${model}`];
-    if (!caps) return '$0.00';
-    return `$${((inputTokens / 1000) * caps.costPer1kInput + (outputTokens / 1000) * caps.costPer1kOutput).toFixed(4)}`;
   }
 }

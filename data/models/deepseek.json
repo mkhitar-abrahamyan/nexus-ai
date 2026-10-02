@@ -4,7 +4,8 @@
     "deepseek/deepseek-v3": {
       "provider": "deepseek",
       "family": "deepseek-v3",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -28,7 +29,8 @@
     "deepseek/deepseek-r1": {
       "provider": "deepseek",
       "family": "deepseek-r1",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -52,7 +54,8 @@
     "deepseek/deepseek-chat": {
       "provider": "deepseek",
       "family": "deepseek-chat",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -76,7 +79,8 @@
     "deepseek/deepseek-reasoner": {
       "provider": "deepseek",
       "family": "deepseek-reasoner",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,

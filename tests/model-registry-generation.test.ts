@@ -55,7 +55,8 @@ test('generated entries are sorted, so a data diff is readable', () => {
 
 test('every generated model declares the fields routing and pricing depend on', () => {
   for (const [name, capabilities] of Object.entries(GENERATED_MODELS)) {
-    assert.ok(Array.isArray(capabilities.modalities), `${name}: modalities`);
+    assert.ok(capabilities.inputModalities.length > 0, `${name}: inputModalities`);
+    assert.ok(capabilities.outputModalities.length > 0, `${name}: outputModalities`);
     assert.equal(typeof capabilities.streaming, 'boolean', `${name}: streaming`);
     assert.equal(typeof capabilities.toolCalling, 'boolean', `${name}: toolCalling`);
     assert.ok(capabilities.maxContextTokens > 0, `${name}: maxContextTokens`);

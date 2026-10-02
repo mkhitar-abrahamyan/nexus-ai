@@ -101,6 +101,9 @@ through an in-process handle, not a store, so an image operation does not surviv
 
 ## The lifecycle
 
+This is the life of a durable record. It is not the [operation lifecycle](./lifecycle.md) every call
+runs through, which authorizes, budgets, and audits each call whether it is durable or not.
+
 An `OperationStatus` is one of `queued`, `running`, `retrying`, `succeeded`, `failed`, `cancelling`,
 `cancelled`, or `expired`.
 
@@ -291,7 +294,7 @@ const results = await runBatch(documents, (doc) => ai.complete(summarizeRequest(
 | Helper | What it does |
 | --- | --- |
 | `runBatch()` | Runs a worker over items with bounded concurrency. Returns a `BatchItemResult` per item, in input order: its index, whether it succeeded, and the value or error. `BatchOptions` sets `concurrency` (3) and `stopOnError`, which stops starting items after the first failure. |
-| `JobQueue` | Runs a worker over enqueued payloads, with `QueueOptions` for `concurrency` (1) and `maxAttempts` (1). Each `QueueJob` has an id, the payload, its attempts, a status (`queued`, `running`, `completed`, or `failed`), and the result or error. `list()` and `get()` read them. |
+| `JobQueue` | Runs a worker over enqueued payloads, with `QueueOptions` for `concurrency` (1), `maxAttempts` (1), and a client's `lifecycle`, which runs each attempt as a `job` operation. Each `QueueJob` has an id, the payload, its attempts, a status (`queued`, `running`, `completed`, or `failed`), and the result or error. `list()` and `get()` read them. |
 | `DurableQueueAdapter` | Storage for job records: `enqueue()`, `get()`, `update()`, and `list()`. It stores jobs; running them is up to your worker. |
 | `RedisQueueAdapter` | That storage in Redis, through a `RedisQueueLikeClient` (`lpush`, `hset`, `hget`, `hvals`). |
 | `BullMQQueueAdapter` | Hands jobs to an existing BullMQ queue through the `BullMQLikeQueue` slice. BullMQ's own workers run them, and it reads a job's result back by id. |

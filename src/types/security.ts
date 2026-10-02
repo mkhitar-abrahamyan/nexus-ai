@@ -22,12 +22,6 @@ export type PIIType = 'email' | 'phone' | 'credit-card' | 'ip-address' | 'aws-ke
 export interface InjectionDetectionConfig {
   /** Turns detection on. */
   enabled?: boolean;
-  /**
-   * Ignored: the patterns match or they do not.
-   *
-   * @deprecated Has never been read. It will be removed in 2.0.
-   */
-  sensitivity?: number;
   /** What a detection does: block the request, record it, or neutralize the text. */
   onDetection?: 'block' | 'flag' | 'transform';
   /** Extra patterns to treat as injection. */
@@ -90,12 +84,6 @@ export interface UrlRiskConfig {
 export interface ToolPolicyConfig {
   /** The only tool names a request may carry; any other tool blocks it. Unset or empty allows every tool. */
   allowedNames?: string[];
-  /**
-   * Ignored: approval before a tool runs belongs to the agent loop.
-   *
-   * @deprecated Has never been read. It will be removed in 2.0.
-   */
-  requiresApproval?: string[];
 }
 
 /** Terms a response must not contain. */

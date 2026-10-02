@@ -75,15 +75,37 @@ export function resolveModel(model: string, config?: Pick<NexusAIConfig, 'models
   const normalized = resolved.startsWith('ollama/') ? resolved.slice(7) : resolved;
   const custom = models?.registry;
   const bundled = models?.includeDefaults === false ? undefined : KNOWN_MODELS;
+  const providerName = resolveProvider(resolved) || (resolved.includes('/') ? resolved.split('/')[0] : null);
 
   return {
     requestedModel: model,
     model: resolved,
-    providerName: resolveProvider(resolved) || (resolved.includes('/') ? resolved.split('/')[0] : null),
+    providerName,
     capabilities:
-      custom?.[resolved] || custom?.[normalized] || bundled?.[resolved] || bundled?.[normalized] || undefined,
+      custom?.[resolved] ||
+      custom?.[normalized] ||
+      bundled?.[resolved] ||
+      bundled?.[normalized] ||
+      unprefixedEntry(resolved, providerName, custom) ||
+      unprefixedEntry(resolved, providerName, bundled),
     alias: resolved === model ? undefined : models?.aliasMetadata?.[model] || MODEL_ALIAS_METADATA[model],
   };
+}
+
+/**
+ * The entry for `google/gemini-2.5-flash` is filed as `gemini-2.5-flash`. A prefixed name finds it
+ * when the entry belongs to the provider the prefix names, so `azure/gpt-4o` does not borrow the
+ * OpenAI entry by accident.
+ */
+function unprefixedEntry(
+  model: string,
+  providerName: string | null,
+  registry: Record<string, ModelCapabilities> | undefined,
+): ModelCapabilities | undefined {
+  const slash = model.indexOf('/');
+  if (!registry || slash < 0 || !providerName) return undefined;
+  const entry = registry[model.slice(slash + 1)];
+  return entry?.provider === providerName ? entry : undefined;
 }
 
 /** Every model name in the registry, sorted. */
@@ -103,25 +125,14 @@ export function listModelsForProvider(providerName: string, config?: Pick<NexusA
 }
 
 /**
- * What a model accepts and what it produces. The `inputModalities` and `outputModalities` it declares
- * win; otherwise they are read from `modalities`, where `vision` is an image in, `image` is an image
- * out, and `audio`, `video`, and `pdf` are inputs. Every model produces text unless it says otherwise.
+ * What a model accepts and what it produces, as copies a caller may change. The two lists are
+ * required on every registry entry; this reads them in one call.
  */
-export function modalitiesOf(
-  capabilities: Pick<ModelCapabilities, 'modalities' | 'inputModalities' | 'outputModalities'>,
-): {
+export function modalitiesOf(capabilities: Pick<ModelCapabilities, 'inputModalities' | 'outputModalities'>): {
   input: InputModality[];
   output: OutputModality[];
 } {
-  const legacy = capabilities.modalities ?? [];
-  const input =
-    capabilities.inputModalities ??
-    legacy.flatMap((modality): InputModality[] =>
-      modality === 'vision' ? ['image'] : modality === 'image' ? [] : [modality],
-    );
-  const output =
-    capabilities.outputModalities ?? (['text', ...(legacy.includes('image') ? ['image'] : [])] as OutputModality[]);
-  return { input: [...new Set(input)], output: [...new Set(output)] };
+  return { input: [...capabilities.inputModalities], output: [...capabilities.outputModalities] };
 }
 
 /** A model's registry entry, resolving aliases first. */
@@ -237,7 +248,6 @@ export {
   DEFAULT_CACHE_PRICING,
   type InputModality,
   KNOWN_MODELS,
-  type Modality,
   MODEL_ALIAS_METADATA,
   type ModelCapabilities,
   type ModelEndpoint,

@@ -18,6 +18,7 @@ import type {
 } from '../types/telephony.js';
 import { TelephonyCapabilityError, TelephonyProviderError } from './errors.js';
 import { FamilyTelemetry, type FamilyRuntime } from '../ops/family-telemetry.js';
+import type { ProviderCallContext } from '../types/lifecycle.js';
 
 type TelephonyCapability =
   | 'createCall'
@@ -71,27 +72,9 @@ export class TelephonyManager {
     const provider = this.resolveProvider('createCall', request.provider || this.config.defaultProvider);
     const createCall = provider.createCall;
     if (!createCall) throw new TelephonyCapabilityError(provider.info.name, 'outbound calls');
-
-    return this.telemetry.run({ operation: 'createCall', provider: provider.info.name }, () =>
-      this.callCreate(provider.info.name, createCall.bind(provider), request),
+    return this.call('createCall', provider, request.signal, 'Telephony call creation', (context) =>
+      createCall.call(provider, request, context),
     );
-  }
-
-  private async callCreate(
-    providerName: string,
-    createCall: (request: CreateCallRequest) => Promise<CreateCallResponse>,
-    request: CreateCallRequest,
-  ): Promise<CreateCallResponse> {
-    try {
-      return await createCall(request);
-    } catch (error) {
-      if (error instanceof TelephonyProviderError) throw error;
-      throw new TelephonyProviderError(
-        `Telephony call creation failed for provider "${providerName}"`,
-        providerName,
-        error,
-      );
-    }
   }
 
   /** Builds a webhook response, such as TwiML. */
@@ -121,18 +104,11 @@ export class TelephonyManager {
   /** Reads a call's details. */
   async getCall(request: GetCallRequest): Promise<TelephonyCallDetails> {
     const provider = this.resolveProvider('getCall', request.provider || this.config.defaultProvider);
-    if (!provider.getCall) throw new TelephonyCapabilityError(provider.info.name, 'call lookup');
-
-    try {
-      return await provider.getCall(request);
-    } catch (error) {
-      if (error instanceof TelephonyProviderError) throw error;
-      throw new TelephonyProviderError(
-        `Telephony call lookup failed for provider "${provider.info.name}"`,
-        provider.info.name,
-        error,
-      );
-    }
+    const getCall = provider.getCall;
+    if (!getCall) throw new TelephonyCapabilityError(provider.info.name, 'call lookup');
+    return this.call('getCall', provider, request.signal, 'Telephony call lookup', (context) =>
+      getCall.call(provider, request, context),
+    );
   }
 
   /** Ends a call in progress. */
@@ -140,27 +116,9 @@ export class TelephonyManager {
     const provider = this.resolveProvider('endCall', request.provider || this.config.defaultProvider);
     const endCall = provider.endCall;
     if (!endCall) throw new TelephonyCapabilityError(provider.info.name, 'call control');
-
-    return this.telemetry.run({ operation: 'endCall', provider: provider.info.name }, () =>
-      this.callEnd(provider.info.name, endCall.bind(provider), request),
+    return this.call('endCall', provider, request.signal, 'Telephony call hangup', (context) =>
+      endCall.call(provider, request, context),
     );
-  }
-
-  private async callEnd(
-    providerName: string,
-    endCall: (request: EndCallRequest) => Promise<TelephonyCallDetails>,
-    request: EndCallRequest,
-  ): Promise<TelephonyCallDetails> {
-    try {
-      return await endCall(request);
-    } catch (error) {
-      if (error instanceof TelephonyProviderError) throw error;
-      throw new TelephonyProviderError(
-        `Telephony call hangup failed for provider "${providerName}"`,
-        providerName,
-        error,
-      );
-    }
   }
 
   /** Parses a status callback through the named provider. */
@@ -178,35 +136,21 @@ export class TelephonyManager {
   /** Lists phone numbers. */
   async listPhoneNumbers(request: ListPhoneNumbersRequest = {}): Promise<TelephonyPhoneNumber[]> {
     const provider = this.resolveProvider('listPhoneNumbers', request.provider || this.config.defaultProvider);
-    if (!provider.listPhoneNumbers) throw new TelephonyCapabilityError(provider.info.name, 'phone number listing');
-
-    try {
-      return await provider.listPhoneNumbers(request);
-    } catch (error) {
-      if (error instanceof TelephonyProviderError) throw error;
-      throw new TelephonyProviderError(
-        `Telephony phone number listing failed for provider "${provider.info.name}"`,
-        provider.info.name,
-        error,
-      );
-    }
+    const listPhoneNumbers = provider.listPhoneNumbers;
+    if (!listPhoneNumbers) throw new TelephonyCapabilityError(provider.info.name, 'phone number listing');
+    return this.call('listPhoneNumbers', provider, request.signal, 'Telephony phone number listing', (context) =>
+      listPhoneNumbers.call(provider, request, context),
+    );
   }
 
   /** Changes where a phone number sends its calls. */
   async updatePhoneNumber(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber> {
     const provider = this.resolveProvider('updatePhoneNumber', request.provider || this.config.defaultProvider);
-    if (!provider.updatePhoneNumber) throw new TelephonyCapabilityError(provider.info.name, 'phone number updates');
-
-    try {
-      return await provider.updatePhoneNumber(request);
-    } catch (error) {
-      if (error instanceof TelephonyProviderError) throw error;
-      throw new TelephonyProviderError(
-        `Telephony phone number update failed for provider "${provider.info.name}"`,
-        provider.info.name,
-        error,
-      );
-    }
+    const updatePhoneNumber = provider.updatePhoneNumber;
+    if (!updatePhoneNumber) throw new TelephonyCapabilityError(provider.info.name, 'phone number updates');
+    return this.call('updatePhoneNumber', provider, request.signal, 'Telephony phone number update', (context) =>
+      updatePhoneNumber.call(provider, request, context),
+    );
   }
 
   /** Parses a media-stream message through the named provider. */
@@ -229,6 +173,28 @@ export class TelephonyManager {
     const provider = this.resolveProvider('formatAudioMessage', providerName);
     if (!provider.formatAudioMessage) throw new TelephonyCapabilityError(provider.info.name, 'outbound media messages');
     return provider.formatAudioMessage(streamId, payload, options);
+  }
+
+  /**
+   * Runs one provider API call through the client's lifecycle, wrapping a provider's own error so the
+   * caller always sees a `TelephonyProviderError`.
+   */
+  private call<T>(
+    operation: string,
+    provider: TelephonyProvider,
+    signal: AbortSignal | undefined,
+    action: string,
+    fn: (context: ProviderCallContext) => Promise<T>,
+  ): Promise<T> {
+    const name = provider.info.name;
+    return this.telemetry.run({ operation, provider: name, ...(signal ? { signal } : {}) }, async (context) => {
+      try {
+        return await fn(context);
+      } catch (error) {
+        if (error instanceof TelephonyProviderError) throw error;
+        throw new TelephonyProviderError(`${action} failed for provider "${name}"`, name, error);
+      }
+    });
   }
 
   private resolveProvider(capability: TelephonyCapability, preferred?: string): TelephonyProvider {

@@ -6,8 +6,8 @@ export interface FileUpload {
   mimeType?: string;
   /** Size in bytes. Measured from `content` when omitted. */
   sizeBytes?: number;
-  /** The contents. Text contents are scanned for forbidden patterns. */
-  content?: string | Buffer;
+  /** The contents, as text or bytes; a Node `Buffer` is bytes. Text contents are scanned for forbidden patterns. */
+  content?: string | Uint8Array;
 }
 
 /** Options for scanning uploads. */
@@ -132,7 +132,7 @@ function extensionOf(name: string): string {
   return index === -1 ? '' : name.slice(index).toLowerCase();
 }
 
-function sizeOf(content?: string | Buffer): number {
+function sizeOf(content?: string | Uint8Array): number {
   if (!content) return 0;
-  return typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
+  return typeof content === 'string' ? new TextEncoder().encode(content).byteLength : content.byteLength;
 }

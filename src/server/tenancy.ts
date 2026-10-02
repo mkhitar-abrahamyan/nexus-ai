@@ -1,12 +1,13 @@
 import { MemoryRateLimitStore, type RateLimitStore } from '../ops/rate-limit-adapters.js';
 import type { Principal, TenantGate } from '../types/server.js';
 import { TenantLimitError } from './errors.js';
+import type { BudgetPeriod } from '../types/lifecycle.js';
+import { describePeriod, periodEnd, periodStart } from '../utils/periods.js';
 
 export { type TenantLimit, TenantLimitError } from './errors.js';
 export type { TenantGate } from '../types/server.js';
 
-/** A calendar period in UTC, or a fixed window in milliseconds. */
-export type BudgetPeriod = 'hour' | 'day' | 'week' | 'month' | { windowMs: number };
+export type { BudgetPeriod } from '../types/lifecycle.js';
 
 /** What one tenant may do. Every limit is optional; one that is not set is not enforced. */
 export interface TenantLimits {
@@ -329,34 +330,4 @@ export class RedisTenantUsage implements TenantUsageStore {
   async total(key: string): Promise<number> {
     return Number(await this.client.eval(TOTAL, 1, this.prefix + key));
   }
-}
-
-/** The start of the period `at` falls in, as epoch milliseconds, in UTC. */
-function periodStart(period: BudgetPeriod, at: Date): number {
-  if (typeof period === 'object') return Math.floor(at.getTime() / period.windowMs) * period.windowMs;
-  const date = new Date(at.getTime());
-  if (period === 'hour')
-    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), date.getUTCHours());
-  if (period === 'day') return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-  if (period === 'week') {
-    // Weeks start on Monday.
-    const day = (date.getUTCDay() + 6) % 7;
-    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - day);
-  }
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
-}
-
-/** When the period `at` falls in ends, as epoch milliseconds. */
-function periodEnd(period: BudgetPeriod, at: Date): number {
-  const start = periodStart(period, at);
-  if (typeof period === 'object') return start + period.windowMs;
-  if (period === 'hour') return start + 3_600_000;
-  if (period === 'day') return start + 86_400_000;
-  if (period === 'week') return start + 7 * 86_400_000;
-  const date = new Date(start);
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
-}
-
-function describePeriod(period: BudgetPeriod): string {
-  return typeof period === 'object' ? `${period.windowMs / 1000}s window` : period;
 }

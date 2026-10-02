@@ -31,6 +31,43 @@ const result = await ai.agent({
 });
 ```
 
+## Tools that return images and files
+
+A tool's result usually goes back to the model as JSON. A tool that made an image, or found a file,
+should not send it that way: base64 text costs tokens and the model cannot see it. Return a
+`toolOutput()` instead. Its parts are sent as the tool message itself.
+
+```ts
+import { tool, toolOutput } from 'nexus-ai-pro';
+
+const renderChart = tool({
+  name: 'render_chart',
+  description: 'Renders a sales chart and stores it.',
+  parameters: { type: 'object', properties: { year: { type: 'number' } } },
+  execute: async ({ year }) => {
+    const chart = await render(year);
+    const stored = await assets.put(chart.bytes, { mimeType: 'image/png' });
+    return toolOutput(
+      `Rendered the ${year} chart.`,
+      { type: 'asset', asset: stored },                     // named by reference
+      { type: 'image', source: { asset: { location: { kind: 'bytes', data: chart.bytes }, mimeType: 'image/png' } } }, // shown
+    );
+  },
+});
+```
+
+| Part | What the model receives |
+| --- | --- |
+| A string, or a text part | The text. |
+| `{ type: 'asset', asset }` | One reference line: the asset's id, where it lives, and its type. Never its bytes. |
+| `{ type: 'image', source }` | The image itself, for a model that reads images. |
+
+Each adapter sends these the way its API expects. Anthropic and Google take images inside the tool
+result. The OpenAI chat API takes only text in a tool message, so the images follow the results in one
+user message. `isToolOutput()` tells a `toolOutput()` from any other result, and
+`toolMessageContent()` turns a `ToolExecutionResult` into the content the model reads. Both are for a
+loop of your own.
+
 ## Agents
 
 An agent is a graph. So it gets what a graph has: checkpoints, human approval, parallel work, forks,
@@ -67,6 +104,10 @@ if (run.status === 'awaiting_input') {
 ```
 
 Because it is a checkpoint, the approval can arrive days later, from another process.
+
+**An agent is an operation of its client.** Pass `lifecycle: ai.lifecycle`, and every run is
+authorized, counted, and audited as an `agent` operation, alongside the model calls it makes.
+`ai.agent()` runs as one already. The [lifecycle guide](./lifecycle.md) explains what that shares.
 
 ## Middleware
 
@@ -177,6 +218,7 @@ specific entry point that provides it.
 | `AgentToolResult` | interface | What a tool call produced. |
 | `createAgent` | function | Builds an agent and returns it as a compiled graph. |
 | `CreateAgentOptions` | interface | Options for `createAgent()`. |
+| `isToolOutput` | function | True for a result built with `toolOutput()`. |
 | `limitToolCalls` | function | Caps how often a tool may be called in one run. |
 | `redactMessages` | function | Redacts matching text from requests, and optionally from responses. |
 | `RedactOptions` | interface | Options for `redactMiddleware()`. |
@@ -185,6 +227,8 @@ specific entry point that provides it.
 | `tool` | function | Defines a tool the model can call, typing its arguments. |
 | `ToolExecutionResult` | interface | What running one tool produced. |
 | `ToolExecutor` | class | Runs tool calls by name, reporting failures as results rather than throwing. |
+| `toolMessageContent` | function | What the model reads for a tool's result: the parts of a `toolOutput()`, or anything else as JSON. |
+| `toolOutput` | function | Builds a tool's result as content: text, images, and asset references, in order. |
 
 ### `nexus-ai-pro/connectors`
 
@@ -194,10 +238,4 @@ specific entry point that provides it.
 | `createSearchTool` | function | A search tool around your own search function. |
 | `WebConnectorOptions` | interface | Options for the fetch-URL tool, including its SSRF policy. |
 | `WebResolvedAddress` | type | An address a host name resolved to: the address alone, or with its IP family. |
-
-### `nexus-ai-pro`
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `AgentModelClient` | interface | The part of a client the agent loop needs. |
 <!-- reference:end -->

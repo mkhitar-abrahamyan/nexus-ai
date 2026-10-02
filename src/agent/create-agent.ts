@@ -1,3 +1,4 @@
+import type { OperationLifecycleLike } from '../types/lifecycle.js';
 import { appendList, counter, lastValue } from '../graph/channels.js';
 import { type CompiledGraph, createGraph } from '../graph/graph.js';
 import type { GraphCheckpointer, NodeContext } from '../types/graph.js';
@@ -5,7 +6,7 @@ import { Command, END, Send } from '../types/graph.js';
 import type { CompletionRequest, Message, ToolDefinition } from '../types/messages.js';
 import type { NexusResponse, ToolCall } from '../types/response.js';
 import type { Store } from '../types/store.js';
-import { ToolExecutor } from './tool.js';
+import { ToolExecutor, toolMessageContent } from './tool.js';
 
 /**
  * An agent as a graph.
@@ -112,6 +113,11 @@ export interface CreateAgentOptions {
   responseFormat?: CompletionRequest['responseFormat'];
   /** Application data sent with every model request. */
   metadata?: Record<string, unknown>;
+  /**
+   * Runs every invocation as one operation of a client's lifecycle, labelled `agent`: pass
+   * `ai.lifecycle`. Its model calls are operations of their own.
+   */
+  lifecycle?: OperationLifecycleLike;
 }
 
 const agentChannels = () => ({
@@ -264,6 +270,7 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
     ...(options.checkpointer === undefined ? {} : { checkpointer: options.checkpointer }),
     ...(options.store ? { store: options.store } : {}),
     ...(options.name ? { name: options.name } : {}),
+    ...(options.lifecycle ? { lifecycle: options.lifecycle, lifecycleFamily: 'agent' as const } : {}),
   });
 }
 
@@ -307,7 +314,7 @@ function toolMessage(call: ToolCall, result: AgentToolResult): Message {
   return {
     role: 'tool',
     toolCallId: call.id,
-    content: JSON.stringify(result.ok ? (result.result ?? null) : { error: result.error }),
+    content: toolMessageContent(result),
   };
 }
 

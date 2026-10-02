@@ -5,6 +5,11 @@ import { redactSensitiveText } from '../security/output-guard.js';
 export class AuditLogger {
   constructor(private config?: AuditLogConfig) {}
 
+  /** Whether events are written at all. */
+  get enabled(): boolean {
+    return this.config?.enabled === true;
+  }
+
   /** Writes one event. Does nothing when audit logging is off. */
   async log(event: AuditLogEvent): Promise<void> {
     if (!this.config?.enabled) return;

@@ -1,4 +1,4 @@
-import { createOcrExtractor, createPdfExtractor, ingestFilesAfterScan } from 'nexus-ai-pro';
+import { createOcrExtractor, createPdfExtractor, ingestFilesAfterScan } from 'nexus-ai-pro/rag/files';
 
 // Wire your preferred OCR/PDF libraries here, for example:
 // - pdf-parse, pdfjs-dist, or a hosted document AI parser for PDFs

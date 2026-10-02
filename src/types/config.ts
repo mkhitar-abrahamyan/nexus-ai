@@ -8,13 +8,13 @@ import type { TelephonyConfig } from './telephony.js';
 import type {
   AliasMetadata,
   InputModality,
-  Modality,
   ModelCapabilities,
   ModelStatus,
   OutputModality,
   RoutingModelPreference,
 } from './providers.js';
 import type { CapabilityConfig } from './capabilities.js';
+import type { LifecycleConfig, OperationFamily } from './lifecycle.js';
 import type { PipelineConfig } from '../pipeline/types.js';
 import type { CacheAdapter } from '../cache/adapters.js';
 import type { SemanticCacheOptions } from '../cache/semantic-cache.js';
@@ -86,26 +86,12 @@ export interface GoogleProviderConfig {
   apiKey: string;
   /** API base URL. */
   baseUrl?: string;
-  /**
-   * Ignored: the Gemini API is addressed by API key alone, and Vertex AI projects are not supported
-   * by this adapter.
-   *
-   * @deprecated Has never been read. It will be removed in 2.0.
-   */
-  projectId?: string;
 }
 
 /** Configuration for a local Ollama server. */
 export interface OllamaProviderConfig {
   /** Server URL. Defaults to `http://localhost:11434`. */
   baseUrl?: string;
-  /**
-   * Ignored: set `timeout` on the client or `timeoutMs` on a request, which apply to every
-   * provider, Ollama included.
-   *
-   * @deprecated Has never been read. It will be removed in 2.0.
-   */
-  timeout?: number;
 }
 
 /** Configuration for Groq. */
@@ -315,13 +301,34 @@ export interface AuditLogConfig {
   sink?: (event: AuditLogEvent) => void | Promise<void>;
 }
 
+/**
+ * One audit record. Every operation of every family writes a `request` when it is admitted, then a
+ * `response`, a `blocked`, or an `error`, under the same request id.
+ */
 export interface AuditLogEvent {
-  type: 'request' | 'response' | 'blocked';
+  /**
+   * What happened: an operation was admitted, answered, refused before it ran, or failed after it
+   * started.
+   */
+  type: 'request' | 'response' | 'blocked' | 'error';
+  /** The family of the operation, such as `completion` or `image`. */
+  family?: OperationFamily;
+  /** The operation, such as `complete` or `images.generate`. */
+  operation?: string;
+  /** The operation's request id, the same on each of its events and on its response. */
   requestId?: string;
+  /** The user the operation ran for. */
   userId?: string;
+  /** The model, once routing has chosen one. */
   model?: string;
+  /** The provider, once routing has chosen one. */
   provider?: string;
+  /** ISO-8601 time the event was written. */
   timestamp: string;
+  /**
+   * Details: the request or response when `includeInput` or `includeOutput` is set, a refused
+   * operation's findings, and a failed one's error. Redacted unless `includeSensitiveData` is set.
+   */
   metadata?: Record<string, unknown>;
 }
 
@@ -439,12 +446,6 @@ export interface RoutingConfig {
    * reasoning, context size, price ceilings, and lifecycle status.
    */
   requiredCapabilities?: {
-    /**
-     * Modalities without a direction.
-     *
-     * @deprecated Use `inputModalities` and `outputModalities`. Removed in 2.0.
-     */
-    modalities?: Modality[];
     /** What every candidate must accept, such as `['image', 'pdf']` for a request with attachments. */
     inputModalities?: InputModality[];
     /** What every candidate must produce, such as `['image']` for image generation. */
@@ -513,6 +514,12 @@ export interface NexusAIConfig {
   costBudget?: CostBudgetConfig;
   /** Hooks around each stage of a request. */
   pipeline?: PipelineConfig;
+  /**
+   * What every operation of every family shares: authorization, a spend budget, and hooks that run
+   * around each call. Completions, streams, embeddings, voice, telephony, and images all pass
+   * through it, and a graph, an agent, or a realtime session given `ai.lifecycle` does too.
+   */
+  lifecycle?: LifecycleConfig;
   /** Metrics collection. */
   metrics?: MetricsConfig;
   /** Provider health monitoring, which ranks a struggling provider lower. */

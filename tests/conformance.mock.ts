@@ -1,11 +1,6 @@
-import {
-  BaseProvider,
-  runProviderConformance,
-  type CompletionRequest,
-  type NexusResponse,
-  type NexusStream,
-  type StreamChunk,
-} from '../src/index.js';
+import type { CompletionRequest, NexusResponse, NexusStream, StreamChunk } from '../src/index.js';
+import { BaseProvider } from '../src/providers/base.js';
+import { runProviderConformance } from '../src/testing/index.js';
 
 class MockProvider extends BaseProvider {
   readonly info = { name: 'mock', isLocal: true };

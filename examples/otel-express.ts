@@ -2,7 +2,8 @@ import express from 'express';
 import { trace } from '@opentelemetry/api';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { ConsoleSpanExporter } from '@opentelemetry/sdk-trace-node';
-import { NexusAI, OpenTelemetryTraceExporter } from 'nexus-ai-pro';
+import { NexusAI } from 'nexus-ai-pro';
+import { OpenTelemetryTraceExporter } from 'nexus-ai-pro/ops';
 
 // Optional example dependency install:
 // npm install express @opentelemetry/api @opentelemetry/sdk-node @opentelemetry/sdk-trace-node

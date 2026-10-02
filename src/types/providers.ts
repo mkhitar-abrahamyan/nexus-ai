@@ -1,9 +1,3 @@
-/**
- * What a model handles, in one list: text, images in (`vision`), audio, video, images out (`image`),
- * or PDF documents. The list does not say which way each one flows; `InputModality` and
- * `OutputModality` do, and replace it in 2.0.
- */
-export type Modality = 'text' | 'vision' | 'audio' | 'video' | 'image' | 'pdf';
 /** What a model accepts: text, images, audio, video, or PDF documents. */
 export type InputModality = 'text' | 'image' | 'audio' | 'video' | 'pdf';
 /** What a model produces: text, images, or audio. */
@@ -57,17 +51,10 @@ export interface ModelCapabilities {
   provider?: string;
   /** Model family, for grouping versions. */
   family?: string;
-  /**
-   * What the model handles, without saying which way.
-   *
-   * @deprecated Still required in 1.x. Set `inputModalities` and `outputModalities` alongside it, and
-   * read either through `modalitiesOf()`. 2.0 requires the two new fields and drops this one.
-   */
-  modalities: Modality[];
-  /** What the model accepts. Derived from `modalities` when omitted; `modalitiesOf()` reads either. */
-  inputModalities?: InputModality[];
-  /** What the model produces. Derived from `modalities` when omitted; `modalitiesOf()` reads either. */
-  outputModalities?: OutputModality[];
+  /** What the model accepts. An image in is `image`; a PDF document is `pdf`. */
+  inputModalities: InputModality[];
+  /** What the model produces. Almost always `['text']`; an image model adds `image`. */
+  outputModalities: OutputModality[];
   /** Whether it can stream. */
   streaming: boolean;
   /** Whether it can call tools. */
@@ -193,7 +180,8 @@ const gpt5 = (
   model({
     provider: 'openai',
     family,
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -245,7 +233,8 @@ const claude = (
   model({
     provider: 'anthropic',
     family,
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: false,
@@ -289,7 +278,8 @@ const gemini = (
   model({
     provider: 'google',
     family,
-    modalities: ['text', 'vision', 'audio', 'video', 'pdf'],
+    inputModalities: ['text', 'image', 'audio', 'video', 'pdf'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -317,7 +307,7 @@ const gemini = (
 const openAiCompatible = (
   provider: string,
   family: string,
-  modalities: Modality[],
+  inputModalities: InputModality[],
   maxContextTokens: number,
   maxOutputTokens: number,
   inputPerMillion: number,
@@ -331,7 +321,8 @@ const openAiCompatible = (
   model({
     provider,
     family,
-    modalities,
+    inputModalities,
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -359,7 +350,7 @@ const openAiCompatible = (
 
 const cohere = (
   family: string,
-  modalities: Modality[],
+  inputModalities: InputModality[],
   maxContextTokens: number,
   maxOutputTokens: number,
   qualityScore: number,
@@ -370,7 +361,8 @@ const cohere = (
   model({
     provider: 'cohere',
     family,
-    modalities,
+    inputModalities,
+    outputModalities: ['text'],
     streaming: false,
     toolCalling: true,
     structuredOutputs: false,
@@ -455,7 +447,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'gpt-4.5-preview': model({
     provider: 'openai',
     family: 'gpt-4.5',
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -473,7 +466,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   o1: model({
     provider: 'openai',
     family: 'o-series',
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -492,7 +486,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'o1-mini': model({
     provider: 'openai',
     family: 'o-series',
-    modalities: ['text'],
+    inputModalities: ['text'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -511,7 +506,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'gpt-4.1': model({
     provider: 'openai',
     family: 'gpt-4.1',
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -529,7 +525,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'gpt-4.1-mini': model({
     provider: 'openai',
     family: 'gpt-4.1',
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -547,7 +544,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'gpt-4.1-nano': model({
     provider: 'openai',
     family: 'gpt-4.1',
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -565,7 +563,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'gpt-4o': model({
     provider: 'openai',
     family: 'gpt-4o',
-    modalities: ['text', 'vision', 'audio'],
+    inputModalities: ['text', 'image', 'audio'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -583,7 +582,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'gpt-4o-mini': model({
     provider: 'openai',
     family: 'gpt-4o',
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -601,7 +601,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   o3: model({
     provider: 'openai',
     family: 'o-series',
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -620,7 +621,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'o3-mini': model({
     provider: 'openai',
     family: 'o-series',
-    modalities: ['text'],
+    inputModalities: ['text'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -639,7 +641,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'o4-mini': model({
     provider: 'openai',
     family: 'o-series',
-    modalities: ['text', 'vision'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     structuredOutputs: true,
@@ -658,7 +661,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'gpt-oss-120b': model({
     provider: 'openai',
     family: 'gpt-oss',
-    modalities: ['text'],
+    inputModalities: ['text'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     maxContextTokens: 131000,
@@ -674,7 +678,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'gpt-oss-20b': model({
     provider: 'openai',
     family: 'gpt-oss',
-    modalities: ['text'],
+    inputModalities: ['text'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     maxContextTokens: 131000,
@@ -729,7 +734,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'gemini-3-flash-preview': gemini('gemini-3', 1048576, 0.5, 3, 90, 94, '2025-12', '2025-01', 'preview'),
   'gemini-3-pro-image-preview': {
     ...gemini('gemini-3-image', 65536, 2, 12, 88, 70, '2025-11', '2025-01', 'preview'),
-    modalities: ['text', 'vision', 'image'],
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text', 'image'],
     toolCalling: false,
   },
   'gemini-2.5-pro': gemini('gemini-2.5', 1048576, 1.25, 10, 92, 76, '2025-06', '2025-01'),
@@ -814,7 +820,7 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'groq/meta-llama/llama-4-scout-17b-16e-instruct': openAiCompatible(
     'groq',
     'llama-4',
-    ['text', 'vision'],
+    ['text', 'image'],
     131072,
     8192,
     0.11,
@@ -909,7 +915,7 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'mistral/pixtral-12b': openAiCompatible(
     'mistral',
     'pixtral-12b',
-    ['text', 'vision'],
+    ['text', 'image'],
     128000,
     8192,
     0.15,
@@ -923,7 +929,7 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'mistral/pixtral-large-2411': openAiCompatible(
     'mistral',
     'pixtral-large-2411',
-    ['text', 'vision'],
+    ['text', 'image'],
     128000,
     8192,
     2,
@@ -937,7 +943,7 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'mistral/mistral-medium-3-5': openAiCompatible(
     'mistral',
     'mistral-medium-3.5',
-    ['text', 'vision', 'pdf'],
+    ['text', 'image', 'pdf'],
     256000,
     8192,
     1.5,
@@ -949,7 +955,7 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'mistral/mistral-small-2603': openAiCompatible(
     'mistral',
     'mistral-small-4',
-    ['text', 'vision'],
+    ['text', 'image'],
     256000,
     8192,
     0.2,
@@ -963,7 +969,7 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'mistral/mistral-large-2512': openAiCompatible(
     'mistral',
     'mistral-large-3',
-    ['text', 'vision'],
+    ['text', 'image'],
     256000,
     8192,
     2,
@@ -1005,7 +1011,7 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'mistral/magistral-medium-2509': openAiCompatible(
     'mistral',
     'magistral-medium-1.2',
-    ['text', 'vision'],
+    ['text', 'image'],
     128000,
     8192,
     2,
@@ -1130,11 +1136,11 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   'cohere/command-r': cohere('command-r', ['text'], 128000, 4000, 78, 92, '2024'),
   'cohere/command-a-03-2025': cohere('command-a', ['text'], 256000, 8000, 86, 80, '2025-03'),
   'cohere/command-a-reasoning-08-2025': cohere('command-a-reasoning', ['text'], 256000, 32000, 88, 68, '2025-08'),
-  'cohere/command-a-vision-07-2025': cohere('command-a-vision', ['text', 'vision'], 128000, 8000, 84, 78, '2025-07'),
+  'cohere/command-a-vision-07-2025': cohere('command-a-vision', ['text', 'image'], 128000, 8000, 84, 78, '2025-07'),
   'cohere/command-a-translate-08-2025': cohere('command-a-translate', ['text'], 8000, 8000, 84, 82, '2025-08'),
   'cohere/command-r7b-12-2024': cohere('command-r7b', ['text'], 128000, 4000, 74, 94, '2024-12'),
   'cohere/c4ai-aya-expanse-32b': cohere('aya-expanse', ['text'], 128000, 4000, 76, 84, '2024'),
-  'cohere/c4ai-aya-vision-32b': cohere('aya-vision', ['text', 'vision'], 16000, 4000, 78, 78, '2024'),
+  'cohere/c4ai-aya-vision-32b': cohere('aya-vision', ['text', 'image'], 16000, 4000, 78, 78, '2024'),
   'cohere/tiny-aya-global': cohere('tiny-aya', ['text'], 8000, 8000, 62, 98, '2026'),
 };
 

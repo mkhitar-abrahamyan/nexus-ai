@@ -266,7 +266,6 @@ An `ImageResult` holds:
 
 `ImageConfig` is the client's `images` option. It sets a `defaultProvider`, `providers` by name, a
 `safety` policy, an `inputResolver`, the `tenantId` for stored inputs, an id generator, and a clock.
-`ImageManagerConfig` is a deprecated alias for it.
 
 `ImageManager` is the family behind `ai.images`. Its methods are `registerImageProvider()`,
 `hasImageProvider()`, `listImageProviders()`, `generate()`, `edit()`, and `submit()`. `submit()`
@@ -285,8 +284,10 @@ capabilities declare what the provider can do, so the manager refuses anything e
 - fixed dimensions, aspect ratios, qualities, and count limits;
 - whether it supports masks, references (and how many), transparency, seeds, and negative prompts.
 
-Each call receives an `ImageProviderCallContext`: the operation and request ids, a signal, a deadline,
-the idempotency key, and trace headers.
+Each call receives an `ImageProviderCallContext`: the `ProviderCallContext` every provider receives —
+request id, signal, deadline, idempotency key, and trace headers — with the operation's id. An
+operation runs through the client's [lifecycle](./lifecycle.md), so it is authorized and audited
+like a completion, and a provider that prices in dollars is charged to the shared budget.
 
 ## Safety
 
@@ -485,14 +486,13 @@ specific entry point that provides it.
 | `ImageError` | class | Base class for image errors, each with a stable `code`. |
 | `ImageGenerateRequest` | interface | Creates images from a prompt. |
 | `ImageManager` | class | Routes image generation and edits to registered providers, as operations with status, cancellation, and events. |
-| `ImageManagerConfig` | type | Deprecated: Prefer `ImageConfig`; retained as an explicit manager-local alias. |
 | `ImageMaskInput` | interface | A mask that marks which part of the input an edit may change. |
 | `ImageOperation` | type | What an image request does: create an image from a prompt, or change an existing one. |
 | `ImageOperationCancelledError` | class | Raised when work continues on a cancelled image operation. |
 | `ImageOperationSubmission` | type | An image operation as queued work: which operation, and its request. |
 | `ImageOutputFormat` | type | Encoding for generated images. |
 | `ImageProvider` | interface | An image generation backend. |
-| `ImageProviderCallContext` | interface | What an image provider receives with every call besides the request. |
+| `ImageProviderCallContext` | interface | What an image provider receives with every call besides the request: the context every family's provider receives, and the operation the call belongs to. |
 | `ImageProviderCapabilities` | interface | What an image provider supports, so routing and validation can refuse a request before it costs anything. |
 | `ImageProviderError` | class | Raised when an image provider fails. |
 | `ImageProviderInfo` | interface | Identifies an image provider and what it supports. |

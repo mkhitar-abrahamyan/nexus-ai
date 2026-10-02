@@ -1,6 +1,7 @@
 import type { PipelineTrace } from '../pipeline/types.js';
 import type { CapabilityWarning } from './capabilities.js';
 import type { ContextWindowUsage } from './context-window.js';
+import type { AssetInput } from './images.js';
 
 /**
  * Token accounting for one operation.
@@ -66,11 +67,6 @@ export interface ResponseMeta {
   tokensOutput: number;
   /** Tokens removed by optimization before the request was sent. */
   tokensSaved: number;
-  /**
-   * @deprecated Use `cost.amount`, which is numeric and carries a currency. This formatted string
-   * is retained for compatibility and will be removed in the next major release.
-   */
-  estimatedCost: string;
   /** Full token breakdown, including cached and reasoning tokens when the provider reports them. */
   usage?: TokenUsage;
   /** Numeric cost, priced per token class. */
@@ -83,8 +79,14 @@ export interface ResponseMeta {
   guardrailsApplied: string[];
   /** Why the router chose the provider, and how many fallbacks were available. */
   routingDecision?: {
+    /** Why the router chose this route. */
     reason: string;
+    /** How many fallbacks the route had. */
     fallbacksConsidered: number;
+    /** The provider the answering attempt was sent to. */
+    provider?: string;
+    /** The model the answering attempt was sent to, as the registry names it. The response is priced on it. */
+    model?: string;
   };
   /** What context-window trimming did to the request. */
   contextWindow?: ContextWindowUsage;
@@ -126,6 +128,11 @@ export interface NexusResponse {
   role: 'assistant';
   /** Tool calls the model made. */
   toolCalls?: ToolCall[];
+  /**
+   * Assets the model produced alongside its text, such as images from a model whose
+   * `outputModalities` include `image`. Bytes stay bytes; nothing is encoded into `content`.
+   */
+  assets?: AssetInput[];
   /**
    * Why generation stopped: a natural end, tool calls, the token limit, a content filter, or an
    * error.

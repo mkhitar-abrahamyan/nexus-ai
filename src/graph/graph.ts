@@ -25,6 +25,7 @@ import type {
 } from '../types/graph.js';
 import { Command, END, Send, START } from '../types/graph.js';
 import { MemoryGraphCheckpointer } from './checkpointer.js';
+import { type CheckpointDraft, migrateCheckpoint, toCheckpoint } from './checkpoint-migration.js';
 import type { NodeCache } from './node-cache.js';
 import {
   GraphInterrupt,
@@ -255,15 +256,15 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   resume(threadId: string, value: unknown, runOptions: GraphRunOptions = {}): AsyncIterable<GraphStepEvent<S>> {
     return this.run(threadId, runOptions, async () => {
       const checkpoint = await this.requireCheckpoint(threadId);
-      if (checkpoint.status !== 'awaiting_input' || !checkpoint.interrupt) {
+      const [first] = checkpoint.interrupts;
+      if (checkpoint.status !== 'awaiting_input' || !first) {
         throw new GraphNotInterruptedError(threadId, checkpoint.status);
       }
       return {
         ...checkpoint,
         status: 'running',
-        interrupt: undefined,
-        interrupts: undefined,
-        resolved: { ...checkpoint.resolved, [checkpoint.interrupt.id]: value },
+        interrupts: [],
+        resolved: { ...checkpoint.resolved, [first.id]: value },
       };
     });
   }
@@ -288,10 +289,10 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   ): AsyncIterable<GraphStepEvent<S>> {
     return this.run(threadId, runOptions, async () => {
       const checkpoint = await this.requireCheckpoint(threadId);
-      if (checkpoint.status !== 'awaiting_input' || !checkpoint.interrupt) {
+      if (checkpoint.status !== 'awaiting_input' || checkpoint.interrupts.length === 0) {
         throw new GraphNotInterruptedError(threadId, checkpoint.status);
       }
-      const pending = checkpoint.interrupts ?? [checkpoint.interrupt];
+      const pending = checkpoint.interrupts;
       const unknown = Object.keys(answers).filter((id) => !pending.some((item) => item.id === id));
       if (unknown.length > 0) {
         throw new GraphValidationError(
@@ -301,8 +302,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       return {
         ...checkpoint,
         status: 'running',
-        interrupt: undefined,
-        interrupts: undefined,
+        interrupts: [],
         resolved: { ...checkpoint.resolved, ...answers },
       };
     });
@@ -335,20 +335,22 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
    */
   resumeFrom(threadId: string, step: number, runOptions: GraphRunOptions = {}): AsyncIterable<GraphStepEvent<S>> {
     return this.run(threadId, runOptions, async () => {
-      const checkpoint = (await this.checkpointer()?.get(threadId, step)) as GraphCheckpoint<S> | undefined;
-      if (!checkpoint) throw new GraphThreadNotFoundError(threadId);
-      return { ...checkpoint, status: 'running' };
+      const stored = await this.checkpointer()?.get(threadId, step);
+      if (!stored) throw new GraphThreadNotFoundError(threadId);
+      return { ...(migrateCheckpoint(stored) as GraphCheckpoint<S>), status: 'running' };
     });
   }
 
   /** Latest checkpoint, or the one at `step`. */
   async state(threadId: string, step?: number): Promise<GraphCheckpoint<S> | undefined> {
-    return (await this.checkpointer()?.get(threadId, step)) as GraphCheckpoint<S> | undefined;
+    const stored = await this.checkpointer()?.get(threadId, step);
+    return stored ? (migrateCheckpoint(stored) as GraphCheckpoint<S>) : undefined;
   }
 
   /** Checkpoints for a thread, newest first. */
   async history(threadId: string, limit?: number): Promise<Array<GraphCheckpoint<S>>> {
-    return ((await this.checkpointer()?.history(threadId, limit)) ?? []) as Array<GraphCheckpoint<S>>;
+    const stored = (await this.checkpointer()?.history(threadId, limit)) ?? [];
+    return stored.map((item) => migrateCheckpoint(item) as GraphCheckpoint<S>);
   }
 
   /**
@@ -370,12 +372,13 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       const paused = await this.state(runOptions.threadId as string);
       let result: GraphResult<S, O>;
 
-      if (paused?.status === 'awaiting_input' && paused.interrupt) {
+      const question = paused?.status === 'awaiting_input' ? paused.interrupts[0] : undefined;
+      if (paused && question) {
         // The parent node is being replayed after an answer. Every answer the subgraph already
         // received came through an earlier parent interrupt, so consume those positions in order;
         // the next position is the answer to the question the subgraph is waiting on now.
         const answered = Object.keys(paused.resolved ?? {}).length;
-        for (let index = 0; index < answered; index += 1) context.interrupt({ reason: paused.interrupt.reason });
+        for (let index = 0; index < answered; index += 1) context.interrupt({ reason: question.reason });
         result = this.checkpointResult(paused);
       } else {
         // Only the channels the subgraph accepts are passed in; with no declared input, every
@@ -480,14 +483,12 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     const createdAt = this.now().toISOString();
 
     if (!options.asNode) {
-      const edited: GraphCheckpoint<S> = {
+      return this.save({
         ...checkpoint,
         state,
         createdAt,
         metadata: { ...checkpoint.metadata, source: 'update' },
-      };
-      await this.save(edited);
-      return edited;
+      });
     }
 
     if (!this.nodes.has(options.asNode)) {
@@ -500,7 +501,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     }
     const step = checkpoint.step + 1;
     const next = await this.nextTasks([options.asNode], state, step);
-    const written: GraphCheckpoint<S> = {
+    return this.save({
       threadId,
       step,
       state,
@@ -509,9 +510,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       resolved: checkpoint.resolved,
       createdAt,
       metadata: { ...checkpoint.metadata, source: 'update', asNode: options.asNode },
-    };
-    await this.save(written);
-    return written;
+    });
   }
 
   /**
@@ -524,10 +523,10 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   async fork(threadId: string, options: { step?: number; threadId?: string } = {}): Promise<string> {
     const store = this.checkpointer();
     if (!store) throw new GraphValidationError('fork() needs a checkpointer to copy history from');
-    const history = (await store.history(threadId, Number.MAX_SAFE_INTEGER)) as Array<GraphCheckpoint<S>>;
+    const history = (await store.history(threadId, Number.MAX_SAFE_INTEGER)).map((item) => migrateCheckpoint(item));
     if (history.length === 0) throw new GraphThreadNotFoundError(threadId);
 
-    const cutoff = options.step ?? (history[0] as GraphCheckpoint<S>).step;
+    const cutoff = options.step ?? (history[0] as GraphCheckpoint).step;
     const lineage = history.filter((item) => item.step <= cutoff).reverse();
     if (lineage.at(-1)?.step !== cutoff) {
       throw new GraphValidationError(`Thread "${threadId}" has no checkpoint at step ${cutoff} to fork from`);
@@ -537,31 +536,77 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       throw new GraphValidationError(`Thread "${forkId}" already exists; choose another id for the fork`);
     }
     for (const item of lineage) {
-      await store.put({
-        ...item,
-        threadId: forkId,
-        metadata: { ...item.metadata, forkedFrom: { threadId, step: cutoff } },
-      } as GraphCheckpoint);
+      await store.put(
+        toCheckpoint({
+          ...item,
+          threadId: forkId,
+          metadata: { ...item.metadata, forkedFrom: { threadId, step: cutoff } },
+        }),
+      );
     }
     return forkId;
   }
 
   // ── Execution ────────────────────────────────────────────────────
 
+  /**
+   * Runs the supersteps, as one operation of the compiled lifecycle when there is one. The run is
+   * admitted before its first superstep and finishes with its last, however it ends.
+   */
   private async *run(
     threadId: string,
     runOptions: GraphRunOptions,
-    seed: () => Promise<GraphCheckpoint<S>>,
+    seed: () => Promise<CheckpointDraft<S>>,
+  ): AsyncGenerator<GraphStepEvent<S>, void, void> {
+    const lifecycle = this.options.lifecycle;
+    if (!lifecycle) {
+      yield* this.runSteps(threadId, runOptions, seed);
+      return;
+    }
+    const ticket = await lifecycle.start(
+      {
+        family: this.options.lifecycleFamily ?? 'graph',
+        operation: this.options.name ? `${this.options.lifecycleFamily ?? 'graph'}.${this.options.name}` : 'graph.run',
+        metadata: { threadId, ...(this.options.name ? { graph: this.options.name } : {}) },
+      },
+      runOptions.signal ? { signal: runOptions.signal } : {},
+    );
+    let last: GraphStepEvent<S> | undefined;
+    let settled = false;
+    try {
+      for await (const event of this.runSteps(threadId, runOptions, seed)) {
+        last = event;
+        yield event;
+      }
+      settled = true;
+      await ticket.succeed({ metadata: { threadId, status: last?.status ?? 'completed', steps: last?.step ?? 0 } });
+    } catch (error) {
+      settled = true;
+      await ticket.fail(error);
+      throw error;
+    } finally {
+      // The caller stopped reading the stream before the run ended.
+      if (!settled)
+        await ticket.fail(
+          Object.assign(new Error('The graph run was stopped before it ended'), { name: 'AbortError' }),
+        );
+    }
+  }
+
+  private async *runSteps(
+    threadId: string,
+    runOptions: GraphRunOptions,
+    seed: () => Promise<CheckpointDraft<S>>,
   ): AsyncGenerator<GraphStepEvent<S>, void, void> {
     const maxSteps = runOptions.maxSteps ?? this.options.maxSteps ?? DEFAULT_MAX_STEPS;
     const stopBefore = runOptions.interruptBefore ?? this.options.interruptBefore ?? [];
     const stopAfter = runOptions.interruptAfter ?? this.options.interruptAfter ?? [];
-    const persist = async (written: GraphCheckpoint<S>): Promise<void> => {
+    const persist = async (written: CheckpointDraft<S>): Promise<void> => {
       await this.save(written);
       notify(runOptions, { type: 'checkpoint', step: written.step, status: written.status, next: written.next });
     };
 
-    let checkpoint = await seed();
+    let checkpoint: CheckpointDraft<S> = await seed();
     // continue() from a "before" breakpoint must run the step it paused in front of, not pause again.
     let passBreakpoint = checkpoint.breakpoint?.when === 'before';
     if (checkpoint.breakpoint) checkpoint = { ...checkpoint, breakpoint: undefined };
@@ -658,7 +703,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       if (failure) {
         // Keep what the siblings that already finished wrote, and carry only the unfinished tasks, so
         // continue() retries the failure without repeating side effects that already happened.
-        const failed: GraphCheckpoint<S> = {
+        const failed: CheckpointDraft<S> = {
           ...checkpoint,
           state,
           ...pausedFields(allTasks, unfinished),
@@ -686,7 +731,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
           completed,
           ...routeFields,
           status: asking ? 'awaiting_input' : 'interrupted',
-          ...(asking ? { interrupt: interrupts[0], interrupts } : {}),
+          interrupts,
           createdAt: this.now().toISOString(),
         };
         await persist(checkpoint);
@@ -746,7 +791,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     task: GraphTask,
     step: number,
     threadId: string,
-    checkpoint: GraphCheckpoint<S>,
+    checkpoint: CheckpointDraft<S>,
     runOptions: GraphRunOptions,
     stepSignal: AbortSignal,
   ): Promise<TaskOutcome<S>> {
@@ -855,7 +900,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     task: GraphTask,
     step: number,
     threadId: string,
-    checkpoint: GraphCheckpoint<S>,
+    checkpoint: CheckpointDraft<S>,
     runOptions: GraphRunOptions,
     signal: AbortSignal,
     attempt: number,
@@ -1020,17 +1065,22 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   private async requireCheckpoint(threadId: string): Promise<GraphCheckpoint<S>> {
     const checkpoint = await this.checkpointer()?.get(threadId);
     if (!checkpoint) throw new GraphThreadNotFoundError(threadId);
-    return checkpoint as GraphCheckpoint<S>;
+    return migrateCheckpoint(checkpoint) as GraphCheckpoint<S>;
   }
 
-  /** Persists a checkpoint. The store keeps opaque state; the schema stays this class's business. */
-  private async save(checkpoint: GraphCheckpoint<S>): Promise<void> {
+  /**
+   * Completes a checkpoint in the current schema and persists it. The store keeps opaque state; the
+   * schema stays this class's business.
+   */
+  private async save(draft: CheckpointDraft<S>): Promise<GraphCheckpoint<S>> {
+    const checkpoint = toCheckpoint(draft);
     const store = this.checkpointer();
-    if (!store) return;
+    if (!store) return checkpoint;
     const named = this.options.name
       ? { ...checkpoint, metadata: { ...checkpoint.metadata, graph: this.options.name } }
       : checkpoint;
     await store.put(named as GraphCheckpoint);
+    return checkpoint;
   }
 
   private checkpointResult(checkpoint: GraphCheckpoint<S>): GraphResult<S, O> {
@@ -1039,8 +1089,9 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       status: checkpoint.status,
       state: this.visible(checkpoint.state),
       steps: checkpoint.step,
-      ...(checkpoint.interrupt ? { interrupt: checkpoint.interrupt } : {}),
-      ...(checkpoint.interrupts ? { interrupts: checkpoint.interrupts } : {}),
+      ...(checkpoint.interrupts.length
+        ? { interrupt: checkpoint.interrupts[0], interrupts: checkpoint.interrupts }
+        : {}),
       ...(checkpoint.breakpoint ? { breakpoint: checkpoint.breakpoint } : {}),
     };
   }
@@ -1050,7 +1101,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   }
 
   private toEvent(
-    checkpoint: GraphCheckpoint<S>,
+    checkpoint: CheckpointDraft<S>,
     nodes: string[],
     tasks?: GraphTask[],
     attempts?: Record<string, number>,
@@ -1071,8 +1122,9 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       ...(attempts && Object.keys(attempts).length > 0 ? { attempts } : {}),
       state: checkpoint.state,
       status: checkpoint.status,
-      ...(checkpoint.interrupt ? { interrupt: checkpoint.interrupt } : {}),
-      ...(checkpoint.interrupts?.length ? { interrupts: checkpoint.interrupts } : {}),
+      ...(checkpoint.interrupts?.length
+        ? { interrupt: checkpoint.interrupts[0], interrupts: checkpoint.interrupts }
+        : {}),
       ...(checkpoint.breakpoint ? { breakpoint: checkpoint.breakpoint } : {}),
     };
   }
@@ -1145,22 +1197,15 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The tasks a checkpoint describes. A plain checkpoint names only nodes, and each is one task. */
-function tasksOf(checkpoint: GraphCheckpoint<ChannelSchema>): GraphTask[] {
+/** The tasks a checkpoint describes. A draft without them names only nodes, and each is one task. */
+function tasksOf(checkpoint: CheckpointDraft<ChannelSchema>): GraphTask[] {
   if (checkpoint.tasks?.length) return checkpoint.tasks;
   return checkpoint.next.map((node) => ({ id: node, node }));
 }
 
-/**
- * Writes the pending work onto a checkpoint.
- *
- * `tasks` is stored only when it says something `next` cannot: a `Send` input, or two tasks of one
- * node. A graph that never uses `Send` therefore writes exactly the checkpoint it always did.
- */
-function pendingFields(tasks: GraphTask[]): { next: string[]; tasks?: GraphTask[] } {
-  const next = tasks.map((task) => task.node);
-  const plain = tasks.every((task) => task.id === task.node && task.input === undefined);
-  return plain ? { next } : { next, tasks };
+/** Writes the pending work onto a checkpoint: the nodes to run next, and the tasks that run them. */
+function pendingFields(tasks: GraphTask[]): { next: string[]; tasks: GraphTask[] } {
+  return { next: tasks.map((task) => task.node), tasks };
 }
 
 /**
@@ -1169,8 +1214,7 @@ function pendingFields(tasks: GraphTask[]): { next: string[]; tasks?: GraphTask[
  * The whole step's task list is kept, not just what is left, because the tasks that finished are what
  * `completed` refers to and what the step routes from once it finishes.
  */
-function pausedFields(all: GraphTask[], unfinished: GraphTask[]): { next: string[]; tasks?: GraphTask[] } {
-  if (all.length === unfinished.length) return pendingFields(unfinished);
+function pausedFields(all: GraphTask[], unfinished: GraphTask[]): { next: string[]; tasks: GraphTask[] } {
   return { next: unfinished.map((task) => task.node), tasks: all };
 }
 

@@ -7,14 +7,17 @@ import {
   type NexusProviderErrorCategory,
 } from '../providers/errors.js';
 import type { RetryConfig } from '../types/config.js';
+import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
+import { generateRequestId } from '../utils/ids.js';
 import type { RouteAttempt, RouteDecision } from './types.js';
 
 const ABORT_SETTLE_GRACE_MS = 100;
 
 interface AttemptContext {
   signal: AbortSignal;
+  deadline?: number;
   cancellationError(): NexusProviderError | undefined;
   cleanup(): void;
 }
@@ -37,6 +40,11 @@ export interface ExecutionOptions {
    * a request away from a provider the router chose before the circuit changed.
    */
   allowAttempt?: (providerName: string) => boolean;
+  /**
+   * What every attempt hands its provider besides the request: the operation's id, its trace
+   * headers, and its idempotency key. Each attempt adds its own signal and deadline.
+   */
+  callContext?: Omit<ProviderCallContext, 'signal' | 'deadline'>;
 }
 
 /**
@@ -80,17 +88,18 @@ export class FailoverExecutor {
           );
           const started = Date.now();
           const providerPromise = Promise.resolve(
-            provider.complete({
-              ...request,
-              model: attempt.model,
-              signal: context.signal,
-            }),
+            provider.complete(
+              { ...request, model: attempt.model, signal: context.signal },
+              callContextOf(options, context),
+            ),
           );
           const response = await this.waitForCompletion(providerPromise, context, attempt.providerName, attempt.model);
           options.onAttemptSuccess?.(attempt.providerName, Date.now() - started);
           response.meta.routingDecision = {
             reason: decision.reason,
             fallbacksConsidered: attempts.length - 1,
+            provider: attempt.providerName,
+            model: attempt.model,
           };
           if (retryIndex > 0) {
             response.meta.guardrailsApplied.push(`provider-retry-${retryIndex}`);
@@ -202,11 +211,10 @@ export class FailoverExecutor {
             attempt.providerName,
             attempt.model,
           );
-          providerStream = provider.stream({
-            ...request,
-            model: attempt.model,
-            signal: context.signal,
-          });
+          providerStream = provider.stream(
+            { ...request, model: attempt.model, signal: context.signal },
+            callContextOf(options, context),
+          );
           abortProviderStream = () => this.abortProviderStream(providerStream);
           context.signal.addEventListener('abort', abortProviderStream, { once: true });
           iterator = providerStream[Symbol.asyncIterator]();
@@ -355,6 +363,7 @@ export class FailoverExecutor {
 
     return {
       signal: controller.signal,
+      ...(timeoutMs !== undefined ? { deadline: Date.now() + timeoutMs } : {}),
       cancellationError: () => cancellation,
       cleanup: () => {
         if (timeout) clearTimeout(timeout);
@@ -519,6 +528,16 @@ export class FailoverExecutor {
       cleanup: () => signal?.removeEventListener('abort', abort),
     };
   }
+}
+
+/** The context one attempt hands its provider: the operation's, with the attempt's signal and deadline. */
+function callContextOf(options: ExecutionOptions, attempt: AttemptContext): ProviderCallContext {
+  return {
+    ...options.callContext,
+    requestId: options.callContext?.requestId ?? generateRequestId(),
+    signal: attempt.signal,
+    ...(attempt.deadline !== undefined ? { deadline: attempt.deadline } : {}),
+  };
 }
 
 /** Every attempt a decision describes, the first one carrying the decision's own limits. */

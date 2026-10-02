@@ -1,10 +1,10 @@
+import { NexusAI } from 'nexus-ai-pro';
 import {
-  NexusAI,
   supportTriageWorkflow,
   salesQualificationWorkflow,
   legalReviewWorkflow,
   codeReviewWorkflow,
-} from 'nexus-ai-pro';
+} from 'nexus-ai-pro/workflows';
 
 const ai = new NexusAI({
   providers: {

@@ -1,5 +1,10 @@
 export { CompiledGraph, StateGraph, createGraph } from './graph.js';
-export { type GraphCheckpointV2, migrateCheckpoint } from './checkpoint-migration.js';
+export {
+  type CheckpointDraft,
+  type GraphCheckpointV2,
+  migrateCheckpoint,
+  toCheckpoint,
+} from './checkpoint-migration.js';
 export {
   appendList,
   appendSet,
@@ -34,6 +39,7 @@ export type {
   EdgeRouter,
   GraphBreakpoint,
   GraphCheckpoint,
+  GraphCheckpointV1,
   GraphCheckpointer,
   GraphDescription,
   GraphEvent,
@@ -56,4 +62,5 @@ export type {
   RetryPolicy,
   StateOf,
   StateUpdate,
+  StoredGraphCheckpoint,
 } from '../types/graph.js';

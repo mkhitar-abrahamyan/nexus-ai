@@ -462,7 +462,7 @@ Evaluation modules for "eval run" export { target, dataset, evaluators, summary?
 "eval gate" exits 1 when a metric got worse beyond noise, a new failure appeared, or the datasets differ.
 Trace store modules export any TraceStore as { store }, such as a PostgresTraceStore over the application's own pool.
 "deploy" reads NEXUS_SERVER_URL and NEXUS_SERVER_TOKEN when --url and --token are not given.
-"migrate" moves imports to the subpaths the 2.0 root keeps them on; --check exits 1 while any remain.`);
+"migrate" moves 1.x root imports to their 2.0 subpaths and reports removed options; --check exits 1 while any remain.`);
 }
 
 main().catch((error) => {

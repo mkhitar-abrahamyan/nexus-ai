@@ -1,4 +1,6 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
+import { assetReference, imagePlaceholder, textOf, toolArguments, wireImage } from './content.js';
+import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CacheHint, CompletionRequest, ContentPart, Message, ReasoningConfig } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
 import type { AnthropicProviderConfig } from '../types/config.js';
@@ -121,6 +123,8 @@ function anthropicUsage(usage: AnthropicUsage | undefined): UsageInput {
 
 interface RequestOptions {
   signal?: AbortSignal;
+  idempotencyKey?: string;
+  headers?: Record<string, string>;
 }
 
 interface AnthropicClient {
@@ -171,14 +175,30 @@ interface AnthropicTextBlock {
   cache_control?: AnthropicCacheControl;
 }
 
-type AnthropicContentBlock =
-  | AnthropicTextBlock
+type AnthropicImageBlock =
   | {
       type: 'image';
       source: { type: 'base64'; media_type: string; data: string };
       cache_control?: AnthropicCacheControl;
     }
   | { type: 'image'; source: { type: 'url'; url: string }; cache_control?: AnthropicCacheControl };
+
+type AnthropicContentBlock =
+  | AnthropicTextBlock
+  | AnthropicImageBlock
+  | {
+      type: 'tool_use';
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+      cache_control?: AnthropicCacheControl;
+    }
+  | {
+      type: 'tool_result';
+      tool_use_id: string;
+      content: Array<AnthropicTextBlock | AnthropicImageBlock>;
+      cache_control?: AnthropicCacheControl;
+    };
 
 interface AnthropicToolParam {
   name: string;
@@ -253,6 +273,52 @@ export class AnthropicProvider extends BaseProvider {
 
       const control = plan?.marks.get(msg);
 
+      if (msg.role === 'tool') {
+        const result: AnthropicContentBlock = {
+          type: 'tool_result',
+          tool_use_id: msg.toolCallId ?? '',
+          // Anthropic refuses an empty text block, so a result with no text sends none.
+          content: this.formatBlocks(msg.content).filter(
+            (block): block is AnthropicTextBlock | AnthropicImageBlock =>
+              (block.type === 'text' && block.text.length > 0) || block.type === 'image',
+          ),
+          ...(control ? { cache_control: control } : {}),
+        };
+        // Every result answering one assistant turn goes in the one user message that follows it.
+        const previous = formatted.at(-1);
+        if (
+          previous?.role === 'user' &&
+          Array.isArray(previous.content) &&
+          previous.content.length > 0 &&
+          previous.content.every((block) => block.type === 'tool_result')
+        ) {
+          previous.content.push(result);
+        } else {
+          formatted.push({ role: 'user', content: [result] });
+        }
+        continue;
+      }
+
+      if (msg.role === 'assistant' && msg.toolCalls?.length) {
+        const said = textOf(msg.content);
+        const blocks: AnthropicContentBlock[] = [
+          ...(said ? [{ type: 'text' as const, text: said }] : []),
+          ...msg.toolCalls.map((call) => ({
+            type: 'tool_use' as const,
+            id: call.id,
+            name: call.function.name,
+            input: toolArguments(call),
+          })),
+        ];
+        if (control)
+          blocks[blocks.length - 1] = {
+            ...(blocks[blocks.length - 1] as AnthropicContentBlock),
+            cache_control: control,
+          };
+        formatted.push({ role: 'assistant', content: blocks });
+        continue;
+      }
+
       if (typeof msg.content === 'string') {
         formatted.push({
           role: msg.role === 'assistant' ? 'assistant' : 'user',
@@ -261,46 +327,37 @@ export class AnthropicProvider extends BaseProvider {
         continue;
       }
 
-      const parts = msg.content.map((part: ContentPart): AnthropicContentBlock => {
-        switch (part.type) {
-          case 'text':
-            return { type: 'text', text: part.text };
-          case 'image': {
-            const src = part.source;
-            if ('base64' in src) {
-              return {
-                type: 'image',
-                source: { type: 'base64', media_type: src.mimeType || 'image/png', data: src.base64 },
-              };
-            }
-            if ('buffer' in src) {
-              return {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: src.mimeType || 'image/png',
-                  data: src.buffer.toString('base64'),
-                },
-              };
-            }
-            if ('url' in src) {
-              return { type: 'image', source: { type: 'url', url: src.url } };
-            }
-            return { type: 'text', text: '[image from path requires preprocessing]' };
-          }
-          default:
-            return { type: 'text', text: `[${part.type} content is not yet supported for this provider]` };
-        }
-      });
-
+      const parts = this.formatBlocks(msg.content);
       if (control && parts.length) {
-        parts[parts.length - 1] = { ...parts[parts.length - 1], cache_control: control };
+        parts[parts.length - 1] = { ...(parts[parts.length - 1] as AnthropicContentBlock), cache_control: control };
       }
 
       formatted.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: parts });
     }
 
     return { system, messages: formatted };
+  }
+
+  private formatBlocks(content: Message['content']): AnthropicContentBlock[] {
+    if (typeof content === 'string') return [{ type: 'text', text: content }];
+    return content.map((part: ContentPart): AnthropicContentBlock => {
+      switch (part.type) {
+        case 'text':
+          return { type: 'text', text: part.text };
+        case 'asset':
+          return { type: 'text', text: assetReference(part.asset) };
+        case 'image': {
+          const image = wireImage(part);
+          if (image?.kind === 'base64') {
+            return { type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.data } };
+          }
+          if (image?.kind === 'url') return { type: 'image', source: { type: 'url', url: image.url } };
+          return { type: 'text', text: imagePlaceholder(part) };
+        }
+        default:
+          return { type: 'text', text: `[${part.type} content is not yet supported for this provider]` };
+      }
+    });
   }
 
   private formatToolsAnthropic(tools?: CompletionRequest['tools'], plan?: CachePlan): AnthropicToolParam[] | undefined {
@@ -320,14 +377,14 @@ export class AnthropicProvider extends BaseProvider {
   }
 
   /** Runs one completion. */
-  async complete(request: CompletionRequest): Promise<NexusResponse> {
+  async complete(request: CompletionRequest, context?: ProviderCallContext): Promise<NexusResponse> {
     const providerRequest = this.withProviderModel(request);
     try {
       this.throwIfAborted(providerRequest);
       const client = await this.getClient();
       const startTime = Date.now();
       const params = this.createParams(providerRequest);
-      const result = await client.messages.create(params, this.requestOptions(providerRequest));
+      const result = await client.messages.create(params, this.requestOptions(providerRequest, context));
       const latency = Date.now() - startTime;
 
       let content = '';
@@ -364,7 +421,7 @@ export class AnthropicProvider extends BaseProvider {
   }
 
   /** Streams one completion. */
-  stream(request: CompletionRequest): NexusStream {
+  stream(request: CompletionRequest, context?: ProviderCallContext): NexusStream {
     const self = this;
 
     return this.createStream(async function* () {
@@ -378,7 +435,7 @@ export class AnthropicProvider extends BaseProvider {
             ...self.createParams(providerRequest),
             stream: true,
           },
-          self.requestOptions(providerRequest),
+          self.requestOptions(providerRequest, context),
         );
 
         // Anthropic splits usage across the opening and closing events: prompt and cache counts
@@ -468,8 +525,12 @@ export class AnthropicProvider extends BaseProvider {
       .join('\n');
   }
 
-  private requestOptions(request: CompletionRequest): RequestOptions | undefined {
-    return request.signal ? { signal: request.signal } : undefined;
+  private requestOptions(request: CompletionRequest, context?: ProviderCallContext): RequestOptions | undefined {
+    const options: RequestOptions = {};
+    if (request.signal) options.signal = request.signal;
+    if (context?.idempotencyKey) options.idempotencyKey = context.idempotencyKey;
+    if (context?.traceContext) options.headers = context.traceContext;
+    return options.signal || options.idempotencyKey || options.headers ? options : undefined;
   }
 
   private withProviderModel(request: CompletionRequest): CompletionRequest {

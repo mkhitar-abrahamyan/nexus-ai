@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type {
+  AgentStep,
+  CompletionRequest,
+  NexusAIConfig,
+  NexusResponse,
+  NexusStream,
+  ToolCall,
+} from '../src/index.js';
+import { AgentLoop } from '../src/agent/index.js';
 import {
-  AgentLoop,
-  BaseProvider,
-  Router,
   biasScore,
   calculateEvalMetrics,
   contextualPrecision,
@@ -18,13 +24,9 @@ import {
   semanticSimilarity,
   tokensPerSecond,
   toxicityScore,
-  type AgentStep,
-  type CompletionRequest,
-  type NexusAIConfig,
-  type NexusResponse,
-  type NexusStream,
-  type ToolCall,
-} from '../src/index.js';
+} from '../src/evals/index.js';
+import { BaseProvider } from '../src/providers/base.js';
+import { Router } from '../src/router/index.js';
 
 function meta(model = 'mock/test'): NexusResponse['meta'] {
   return {
@@ -35,7 +37,6 @@ function meta(model = 'mock/test'): NexusResponse['meta'] {
     tokensInput: 0,
     tokensOutput: 0,
     tokensSaved: 0,
-    estimatedCost: '$0.00',
     cacheHit: false,
     guardrailsApplied: [],
   };

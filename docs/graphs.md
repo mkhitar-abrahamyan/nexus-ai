@@ -321,6 +321,10 @@ state, and the status. It ends with an `interrupt`, `breakpoint`, or `done` even
 
 A `GraphTask` is one unit of work: its id, its node, and its `Send` input.
 
+Compile with `lifecycle: ai.lifecycle`, and each run becomes one operation of the client: authorized
+before its first step, audited and counted when it ends. `lifecycleFamily` labels it `graph`, or
+`agent` as `createAgent()` sets. The [lifecycle guide](./lifecycle.md) has the details.
+
 `GraphRunOptions` sets the `threadId`, `maxSteps`, a signal, metadata for every checkpoint,
 `maxConcurrency`, breakpoints for this run, `onEvent`, and `onProgress`. `onEvent` receives each
 `GraphEvent`: `task_start`, `task_retry`, `task_end` with the update and whether it was served from
@@ -344,10 +348,11 @@ several `Send` tasks of one node keep their own answers.
 
 A `GraphCheckpoint` is everything needed to resume a thread elsewhere:
 
+- its schema `version`, 2, and its `id`, as `<threadId>:<step>`;
 - the step, and every channel's value;
-- the nodes and tasks to run next;
+- the nodes to run next, and the `tasks` that run them, always spelled out;
 - for a paused step, the tasks that already finished and the routes they chose;
-- the status, the pending interrupts, and the answers already given;
+- the status, every pending question in `interrupts`, and the answers already given;
 - an error, and a `GraphBreakpoint` (`before` or `after`, and its nodes);
 - when it was written, and its metadata.
 
@@ -360,26 +365,33 @@ which the least recently written thread is dropped). `OperationStoreCheckpointer
 checkpoint as an operation record, with `OperationStoreCheckpointerOptions.maxPerThread` (50), so any
 operation store — memory, Redis, or Postgres — makes a thread durable.
 
-### The 2.0 checkpoint schema
+### Checkpoints 1.x wrote
 
-2.0 gives every checkpoint an id and its pending tasks, and keeps questions only in `interrupts`.
-The single `interrupt` field is deprecated. Checkpointers write the 1.x schema until 2.0, and read
-it throughout 2.x.
+2.x writes version 2 and reads version 1 for the whole 2.x line, so a thread a 1.x deployment left
+waiting resumes after the upgrade. A `GraphCheckpointV1` is that older shape: no version or id, tasks
+only when `next` could not say them, and the first question repeated in `interrupt`.
 
-`migrateCheckpoint()` reads either schema and returns a `GraphCheckpointV2`, so code written for 2.0
-already works on what a 1.x checkpointer stored:
+A checkpointer's `get()` and `history()` return a `StoredGraphCheckpoint`, which is either shape. The
+bundled checkpointers read version 1 into version 2, and so does the graph for a checkpointer of your
+own. `migrateCheckpoint()` does it for code that reads a store directly:
 
 ```ts
 import { migrateCheckpoint } from 'nexus-ai-pro/graph';
 
-const checkpoint = migrateCheckpoint(await checkpointer.get('order-991'));
-checkpoint.id;         // 'order-991:3'
-checkpoint.tasks;      // always present, one per node or Send
-checkpoint.interrupts; // every pending question, empty when none
+const stored = await checkpointer.get('order-991');
+const checkpoint = stored && migrateCheckpoint(stored);
+checkpoint?.id;         // 'order-991:3'
+checkpoint?.tasks;      // always present, one per node or Send
+checkpoint?.interrupts; // every pending question, empty when none
 ```
 
-A 1.x checkpoint gains its id, as `<threadId>:<step>`, its tasks spelled out from `next` when it
-carried none, and its question moved into `interrupts`. A 2.0 checkpoint passes through unchanged.
+A version 1 checkpoint gains its id, its tasks spelled out from `next` when it carried none, and its
+question moved into `interrupts`. A version 2 checkpoint passes through unchanged. `GraphCheckpointV2`
+is kept as another name for `GraphCheckpoint`, so code written against 1.25 compiles.
+
+To build a checkpoint by hand, for a seed or a test, write a `CheckpointDraft` — a checkpoint without
+its version, id, tasks, and questions — and pass it to `toCheckpoint()`. It fills those in, and always
+derives the id again, so a copy moved to another thread never keeps a stale one.
 
 ## Errors
 
@@ -486,6 +498,7 @@ The function receives its input and a `WorkflowContext`: the thread id, a signal
 | `store` | — | Long-term memory for steps. |
 | `retry` | — | A default retry policy for every step. |
 | `maxConcurrency` | 16 | Steps running at once. |
+| `lifecycle` | — | Runs each invocation as one operation of a client: `ai.lifecycle`. |
 | clock | — | For tests. |
 
 The `Workflow` it returns has these methods:
@@ -536,6 +549,7 @@ specific entry point that provides it.
 | `appendSet` | function | Keeps distinct values in first-seen order. |
 | `Channel` | interface | One slot of graph state, plus the rule for combining writes into it. |
 | `ChannelSchema` | type | A graph's state channels, by name. |
+| `CheckpointDraft` | type | A checkpoint being assembled, before `toCheckpoint()` fills in its id, tasks, and questions. |
 | `Command` | class | Updates state and chooses what runs next, in one return value. |
 | `CommandTarget` | type | Where a `Command` sends control. |
 | `CompiledGraph` | class | A validated graph, ready to run. |
@@ -547,7 +561,8 @@ specific entry point that provides it.
 | `GraphBreakpoint` | interface | Where a run paused for debugging. |
 | `GraphCheckpoint` | interface | A graph's full state after a superstep, which is everything needed to resume the run elsewhere. |
 | `GraphCheckpointer` | interface | Durable storage for checkpoints. |
-| `GraphCheckpointV2` | interface | A checkpoint in the 2.0 schema. |
+| `GraphCheckpointV1` | interface | A checkpoint as 1.x stored it: no version or id, tasks only when `next` could not say them, and the first question repeated in `interrupt`. |
+| `GraphCheckpointV2` | type | Deprecated: Use `GraphCheckpoint`, which is this schema in 2.0. The 2.0 checkpoint schema under the name 1.25 gave it, so code written against 1.25 compiles. |
 | `GraphDescription` | interface | A graph's shape, as data: what `describe()` returns and what the visualizer draws. |
 | `GraphError` | class | Base class for graph errors, each with a stable `code`. |
 | `GraphEvent` | type | Fine-grained events delivered to `GraphRunOptions.onEvent`. |
@@ -572,7 +587,7 @@ specific entry point that provides it.
 | `MemoryGraphCheckpointer` | class | In-process checkpoint history. |
 | `MemoryGraphCheckpointerOptions` | interface | Options for the in-process checkpointer. |
 | `mergeObject` | function | Shallow-merges object writes, so two branches can each contribute their own keys. |
-| `migrateCheckpoint` | function | Reads a checkpoint in the 2.0 schema from one in either schema, so code written against 2.0 can read what a 1.x checkpointer stored. |
+| `migrateCheckpoint` | function | Reads a checkpoint in the current schema from one in either schema. |
 | `NodeCacheEntry` | interface | A cached node result: the writes it made and where it routed. |
 | `NodeCachePolicy` | interface | How a node reuses its results: the key, how long a result lasts, and where results are kept. |
 | `NodeContext` | interface | What a node receives when it runs. |
@@ -589,6 +604,8 @@ specific entry point that provides it.
 | `StateGraph` | class | Builds a typed state graph. |
 | `StateOf` | type | The state object a schema describes. |
 | `StateUpdate` | type | What a node may write back. |
+| `StoredGraphCheckpoint` | type | What a checkpointer may hand back: a checkpoint 2.x wrote, or one 1.x wrote before the upgrade. |
+| `toCheckpoint` | function | Turns a draft or a stored checkpoint of either schema into one in the current schema. |
 
 ### `nexus-ai-pro/graph/functional`
 

@@ -1,5 +1,3 @@
-import { warnUnreadOption } from '../utils/deprecation.js';
-
 /** One provider's health, as tracked from real calls. */
 export interface ProviderHealthSnapshot {
   /** The provider. */
@@ -31,12 +29,6 @@ export interface HealthConfig {
   enabled?: boolean;
   /** Consecutive failures that mark a provider unhealthy. Defaults to 3. */
   failureThreshold?: number;
-  /**
-   * Ignored: latency is always averaged with a fixed weight of 0.3 for the newest call.
-   *
-   * @deprecated Has never been read. It will be removed in 2.0.
-   */
-  latencyHalfLife?: number;
   /** Score below which a provider is unhealthy. Defaults to 20. */
   minScore?: number;
 }
@@ -54,13 +46,7 @@ interface ProviderHealthState {
 export class ProviderHealthMonitor {
   private states = new Map<string, ProviderHealthState>();
 
-  constructor(private config: HealthConfig = {}) {
-    warnUnreadOption(
-      config.latencyHalfLife !== undefined,
-      'NEXUS_DEP_HEALTH_LATENCY_HALF_LIFE',
-      'HealthConfig.latencyHalfLife',
-    );
-  }
+  constructor(private config: HealthConfig = {}) {}
 
   /** Records a successful call and its latency. */
   recordSuccess(providerName: string, latencyMs: number): void {

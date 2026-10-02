@@ -1,3 +1,4 @@
+import type { ProviderCallContext } from './lifecycle.js';
 import type { CacheConfig, RateLimitConfig, RetryConfig } from './config.js';
 import type { ModelStatus } from './providers.js';
 import type { ResponseCost, TokenUsage } from './response.js';
@@ -229,22 +230,15 @@ export interface EmbeddingProviderInfo {
   capabilities: EmbeddingProviderCapabilities;
 }
 
-/** What an adapter receives with every batch besides the request. */
-export interface EmbeddingProviderCallContext {
-  /** The request's id. */
-  requestId: string;
-  /** Aborted when the request is cancelled or times out. */
-  signal: AbortSignal;
+/**
+ * What an adapter receives with every batch besides the request: the context every family's provider
+ * receives, and where this batch sits in the request.
+ */
+export interface EmbeddingProviderCallContext extends ProviderCallContext {
   /** 1 for the first try; higher on a retry. */
   attempt: number;
   /** Index of this batch within the request, starting at 0. */
   batchIndex: number;
-  /** Epoch milliseconds by which the call must finish. */
-  deadline?: number;
-  /** Passed to providers that deduplicate requests themselves. */
-  idempotencyKey?: string;
-  /** Trace propagation headers, for providers that accept them. */
-  traceContext?: Record<string, string>;
 }
 
 /**

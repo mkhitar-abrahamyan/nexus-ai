@@ -7,19 +7,21 @@ pays only for what it imports. This guide lists the entry points and what each o
 
 ## Import Surface
 
-The root import holds the core client: the client, its config builders, its types, and the errors it
-throws. Since 1.25, everything else it re-exports is deprecated there, and 2.0 removes it. `nexus
-migrate` moves those imports to their subpaths; the [migration guide](../MIGRATING.md) has the details.
+The root import holds the core client and nothing else: the client, its config builders, its types,
+the errors it throws, and the lifecycle every call runs through. Code written for 1.x imported
+families from the root too; `nexus migrate` moves those imports to their subpaths, and the
+[migration guide](../MIGRATING.md) has the details.
 
 ```ts
 import { NexusAI, createNexus, createNexusConfig } from 'nexus-ai-pro';
 ```
 
-Focused subpaths are available for smaller imports:
+Every family is on a subpath of its own:
 
 ```ts
 import { NexusAI } from 'nexus-ai-pro/core';
 import { createNexusConfig } from 'nexus-ai-pro/config';
+import { budgetLedger } from 'nexus-ai-pro/lifecycle';
 import { TokenOptimizer } from 'nexus-ai-pro/optimizer';
 import { estimateCost } from 'nexus-ai-pro/optimizer/cost';
 import { Router } from 'nexus-ai-pro/router';
@@ -61,7 +63,10 @@ import { createTelephonyRealtimeBridge } from 'nexus-ai-pro/telephony/realtime-b
 
 | Fact | Detail |
 | --- | --- |
+| Required dependencies | None. |
 | Provider SDKs | Optional peer dependencies. |
+| Validators | `zod`, `ajv`, and `ajv-formats` are optional peers: a zod shape brings its own zod, and only a JSON Schema response format needs ajv. |
+| Node's types | `@types/node` is an optional peer. A Node project installs it, as it would for any other code; the client, graphs, and the lifecycle compile without it. |
 | Module formats | ESM and CommonJS builds. |
 | Node.js | 22 or newer. |
 | Tree shaking | Marked `sideEffects: false`. |
@@ -75,152 +80,154 @@ budget. So the numbers stay true.
 
 The last column is what a size table usually hides: what an entry point forces you to install.
 
-- Most entry points force nothing. `/graph`, `/operations`, `/server`, `/images/*`, `/batch`,
-  `/embeddings`, and the rest import no third-party package.
-- The root import, `/core`, `/config`, and `/security` do, because JSON-schema and Zod validation
-  live there.
+No entry point forces one. The root, `/graph`, `/server`, `/images/*`, and the rest import no
+third-party package, and the validators load only when a JSON Schema has to be checked.
 
-A production install is about 12.3 MB of `node_modules`, of which about 5.3 MB is this package. The
-clean-install test holds that total to a ceiling too. `@types/node` adds 2.4 MB at install time, but
-it is types only, so it never appears in an import graph.
+A production install is about 5.3 MB of `node_modules`, and all of it is this package. Until 2.0 it
+was 12.3 MB, because `zod`, `ajv`, and `@types/node` came with it. The clean-install test holds the
+total to a ceiling, and checks that none of the optional peers is installed.
+
+The package itself is most of what remains: an ESM and a CommonJS build, each with its type
+declarations, which carry every doc comment to your editor.
 
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 585 KB | 100% | +4.7 MB |
-| `nexus-ai-pro/config` | 459 KB | 78% | +4.7 MB |
-| `nexus-ai-pro/core` | 455 KB | 78% | +4.7 MB |
-| `nexus-ai-pro/realtime` | 156 KB | 27% | none |
-| `nexus-ai-pro/server` | 109 KB | 19% | none |
-| `nexus-ai-pro/batch` | 108 KB | 18% | none |
-| `nexus-ai-pro/realtime/session` | 94 KB | 16% | none |
-| `nexus-ai-pro/embeddings` | 82 KB | 14% | none |
-| `nexus-ai-pro/router` | 73 KB | 12% | none |
-| `nexus-ai-pro/providers/groq` | 72 KB | 12% | none |
-| `nexus-ai-pro/providers/mistral` | 72 KB | 12% | none |
-| `nexus-ai-pro/providers/azure-openai` | 71 KB | 12% | none |
-| `nexus-ai-pro/providers/deepseek` | 71 KB | 12% | none |
-| `nexus-ai-pro/providers/llamacpp` | 71 KB | 12% | none |
-| `nexus-ai-pro/providers/lmstudio` | 71 KB | 12% | none |
-| `nexus-ai-pro/providers/openai` | 71 KB | 12% | none |
-| `nexus-ai-pro/providers/openrouter` | 71 KB | 12% | none |
-| `nexus-ai-pro/providers/anthropic` | 63 KB | 11% | none |
-| `nexus-ai-pro/agent` | 63 KB | 11% | none |
-| `nexus-ai-pro/providers/google` | 61 KB | 10% | none |
-| `nexus-ai-pro/images` | 59 KB | 10% | none |
-| `nexus-ai-pro/providers/ollama` | 54 KB | 9% | none |
-| `nexus-ai-pro/postgres` | 51 KB | 9% | none |
-| `nexus-ai-pro/graph` | 50 KB | 9% | none |
-| `nexus-ai-pro/security` | 49 KB | 8% | +3.4 MB |
-| `nexus-ai-pro/operations` | 47 KB | 8% | none |
-| `nexus-ai-pro/batch/openai` | 47 KB | 8% | none |
-| `nexus-ai-pro/batch/anthropic` | 47 KB | 8% | none |
-| `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 8% | none |
-| `nexus-ai-pro/providers/cohere` | 44 KB | 8% | none |
-| `nexus-ai-pro/batch/mock` | 42 KB | 7% | none |
-| `nexus-ai-pro/evaluate` | 37 KB | 6% | none |
-| `nexus-ai-pro/prompts/registry` | 37 KB | 6% | none |
-| `nexus-ai-pro/optimizer/cost` | 36 KB | 6% | none |
-| `nexus-ai-pro/models` | 33 KB | 6% | none |
-| `nexus-ai-pro/context-hub` | 32 KB | 5% | none |
-| `nexus-ai-pro/sqlite` | 31 KB | 5% | none |
-| `nexus-ai-pro/server/deployments` | 29 KB | 5% | none |
-| `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 5% | none |
-| `nexus-ai-pro/images/inputs` | 27 KB | 5% | none |
-| `nexus-ai-pro/evals` | 26 KB | 4% | none |
-| `nexus-ai-pro/insights` | 25 KB | 4% | none |
-| `nexus-ai-pro/ops` | 25 KB | 4% | none |
-| `nexus-ai-pro/testing` | 25 KB | 4% | none |
-| `nexus-ai-pro/graph/functional` | 24 KB | 4% | none |
-| `nexus-ai-pro/tracing` | 23 KB | 4% | none |
-| `nexus-ai-pro/loaders/web` | 23 KB | 4% | none |
-| `nexus-ai-pro/images/stores` | 21 KB | 4% | none |
-| `nexus-ai-pro/telephony/twilio` | 21 KB | 4% | none |
-| `nexus-ai-pro/images/transform` | 20 KB | 3% | none |
-| `nexus-ai-pro/images/openai` | 19 KB | 3% | none |
-| `nexus-ai-pro/voice` | 18 KB | 3% | none |
-| `nexus-ai-pro/mcp/registry` | 18 KB | 3% | none |
-| `nexus-ai-pro/realtime/mock` | 18 KB | 3% | none |
-| `nexus-ai-pro/telephony` | 18 KB | 3% | none |
-| `nexus-ai-pro/images/evals` | 17 KB | 3% | none |
-| `nexus-ai-pro/connectors` | 17 KB | 3% | none |
-| `nexus-ai-pro/rag/retrievers` | 17 KB | 3% | none |
-| `nexus-ai-pro/workflows` | 17 KB | 3% | none |
-| `nexus-ai-pro/images/comfyui` | 16 KB | 3% | none |
-| `nexus-ai-pro/embeddings/adapters` | 16 KB | 3% | none |
-| `nexus-ai-pro/realtime/conversation` | 16 KB | 3% | none |
-| `nexus-ai-pro/mcp` | 15 KB | 3% | none |
-| `nexus-ai-pro/grounding` | 15 KB | 3% | none |
-| `nexus-ai-pro/prompts/client` | 15 KB | 3% | none |
-| `nexus-ai-pro/images/assets` | 14 KB | 2% | none |
-| `nexus-ai-pro/images/google` | 14 KB | 2% | none |
-| `nexus-ai-pro/context` | 13 KB | 2% | none |
-| `nexus-ai-pro/sqlite/operations` | 13 KB | 2% | none |
-| `nexus-ai-pro/postgres/operations` | 13 KB | 2% | none |
-| `nexus-ai-pro/realtime/tools` | 13 KB | 2% | none |
-| `nexus-ai-pro/sqlite/vectors` | 12 KB | 2% | none |
-| `nexus-ai-pro/server/tenancy` | 12 KB | 2% | none |
-| `nexus-ai-pro/rag/weaviate` | 12 KB | 2% | none |
-| `nexus-ai-pro/optimizer` | 11 KB | 2% | none |
-| `nexus-ai-pro/voice/session` | 11 KB | 2% | none |
-| `nexus-ai-pro/images/mock` | 11 KB | 2% | none |
-| `nexus-ai-pro/operations/adapters` | 11 KB | 2% | none |
-| `nexus-ai-pro/postgres/store` | 11 KB | 2% | none |
-| `nexus-ai-pro/rag/qdrant` | 11 KB | 2% | none |
-| `nexus-ai-pro/rag/redis` | 11 KB | 2% | none |
-| `nexus-ai-pro/providers` | 10 KB | 2% | none |
-| `nexus-ai-pro/providers/base` | 10 KB | 2% | none |
-| `nexus-ai-pro/postgres/vectors` | 10 KB | 2% | none |
-| `nexus-ai-pro/postgres/traces` | 10 KB | 2% | none |
-| `nexus-ai-pro/rag/files` | 10 KB | 2% | none |
-| `nexus-ai-pro/prompts` | 10 KB | 2% | none |
-| `nexus-ai-pro/rag/pinecone` | 10 KB | 2% | none |
-| `nexus-ai-pro/rag/chroma` | 10 KB | 2% | none |
-| `nexus-ai-pro/voice/openai` | 9 KB | 2% | none |
-| `nexus-ai-pro/images/moderation` | 9 KB | 2% | none |
-| `nexus-ai-pro/sqlite/store` | 9 KB | 2% | none |
-| `nexus-ai-pro/graph/visualize` | 9 KB | 2% | none |
-| `nexus-ai-pro/testing/record` | 9 KB | 2% | none |
-| `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 2% | none |
-| `nexus-ai-pro/embeddings/models` | 8 KB | 1% | none |
-| `nexus-ai-pro/realtime/openai-server` | 8 KB | 1% | none |
-| `nexus-ai-pro/capabilities` | 8 KB | 1% | none |
-| `nexus-ai-pro/loaders` | 7 KB | 1% | none |
-| `nexus-ai-pro/store` | 6 KB | 1% | none |
-| `nexus-ai-pro/store/redis` | 6 KB | 1% | none |
-| `nexus-ai-pro/server/remote` | 6 KB | 1% | none |
-| `nexus-ai-pro/postgres/prompts` | 6 KB | 1% | none |
-| `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 1% | none |
-| `nexus-ai-pro/providers/errors` | 5 KB | 0.9% | none |
-| `nexus-ai-pro/embeddings/mock` | 5 KB | 0.9% | none |
-| `nexus-ai-pro/postgres/evaluate` | 5 KB | 0.9% | none |
-| `nexus-ai-pro/cache/semantic-cache` | 5 KB | 0.9% | none |
-| `nexus-ai-pro/rag` | 5 KB | 0.9% | none |
-| `nexus-ai-pro/loaders/html` | 5 KB | 0.9% | none |
-| `nexus-ai-pro/evals/judge` | 5 KB | 0.9% | none |
-| `nexus-ai-pro/prompts/file` | 4 KB | 0.7% | none |
-| `nexus-ai-pro/prompts/redis` | 4 KB | 0.7% | none |
-| `nexus-ai-pro/loaders/csv` | 4 KB | 0.7% | none |
-| `nexus-ai-pro/operations/webhooks` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/pipeline` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/postgres/circuits` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/ops/circuit-store` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/cache/memory-cache` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/loaders/text` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/loaders/markdown` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/loaders/json` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/loaders/pdf` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/loaders/git` | 3 KB | 0.5% | none |
-| `nexus-ai-pro/ops/rate-limit-adapters` | 2 KB | 0.3% | none |
-| `nexus-ai-pro/cache` | 2 KB | 0.3% | none |
-| `nexus-ai-pro/cache/adapters` | 2 KB | 0.3% | none |
-| `nexus-ai-pro/jobs` | 2 KB | 0.3% | none |
-| `nexus-ai-pro/jobs/durable-adapters` | 2 KB | 0.3% | none |
-| `nexus-ai-pro/jobs/queue` | 2 KB | 0.3% | none |
-| `nexus-ai-pro/streaming` | 1 KB | 0.2% | none |
-| `nexus-ai-pro/providers/type-guards` | 1 KB | 0.2% | none |
-| `nexus-ai-pro/next` | 1 KB | 0.2% | none |
-| `nexus-ai-pro/jobs/batch` | 1 KB | 0.2% | none |
+| `nexus-ai-pro` | 320 KB | 100% | none |
+| `nexus-ai-pro/config` | 312 KB | 98% | none |
+| `nexus-ai-pro/core` | 308 KB | 96% | none |
+| `nexus-ai-pro/realtime` | 158 KB | 49% | none |
+| `nexus-ai-pro/batch` | 110 KB | 34% | none |
+| `nexus-ai-pro/server` | 109 KB | 34% | none |
+| `nexus-ai-pro/realtime/session` | 96 KB | 30% | none |
+| `nexus-ai-pro/providers/groq` | 80 KB | 25% | none |
+| `nexus-ai-pro/providers/mistral` | 80 KB | 25% | none |
+| `nexus-ai-pro/providers/azure-openai` | 79 KB | 25% | none |
+| `nexus-ai-pro/providers/openrouter` | 79 KB | 25% | none |
+| `nexus-ai-pro/providers/deepseek` | 78 KB | 24% | none |
+| `nexus-ai-pro/providers/llamacpp` | 78 KB | 24% | none |
+| `nexus-ai-pro/providers/lmstudio` | 78 KB | 24% | none |
+| `nexus-ai-pro/providers/openai` | 78 KB | 24% | none |
+| `nexus-ai-pro/router` | 73 KB | 23% | none |
+| `nexus-ai-pro/providers/anthropic` | 68 KB | 21% | none |
+| `nexus-ai-pro/agent` | 66 KB | 21% | none |
+| `nexus-ai-pro/providers/google` | 65 KB | 20% | none |
+| `nexus-ai-pro/providers/cohere` | 55 KB | 17% | none |
+| `nexus-ai-pro/providers/ollama` | 54 KB | 17% | none |
+| `nexus-ai-pro/security` | 53 KB | 17% | none |
+| `nexus-ai-pro/images` | 52 KB | 16% | none |
+| `nexus-ai-pro/graph` | 51 KB | 16% | none |
+| `nexus-ai-pro/postgres` | 51 KB | 16% | none |
+| `nexus-ai-pro/batch/openai` | 48 KB | 15% | none |
+| `nexus-ai-pro/operations` | 47 KB | 15% | none |
+| `nexus-ai-pro/batch/anthropic` | 47 KB | 15% | none |
+| `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 14% | none |
+| `nexus-ai-pro/batch/mock` | 43 KB | 13% | none |
+| `nexus-ai-pro/evaluate` | 37 KB | 12% | none |
+| `nexus-ai-pro/optimizer/cost` | 37 KB | 12% | none |
+| `nexus-ai-pro/prompts/registry` | 37 KB | 12% | none |
+| `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
+| `nexus-ai-pro/models` | 34 KB | 11% | none |
+| `nexus-ai-pro/ops` | 33 KB | 10% | none |
+| `nexus-ai-pro/context-hub` | 32 KB | 10% | none |
+| `nexus-ai-pro/sqlite` | 31 KB | 10% | none |
+| `nexus-ai-pro/server/deployments` | 29 KB | 9% | none |
+| `nexus-ai-pro/voice` | 28 KB | 9% | none |
+| `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 9% | none |
+| `nexus-ai-pro/telephony` | 28 KB | 9% | none |
+| `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
+| `nexus-ai-pro/evals` | 26 KB | 8% | none |
+| `nexus-ai-pro/graph/functional` | 25 KB | 8% | none |
+| `nexus-ai-pro/insights` | 25 KB | 8% | none |
+| `nexus-ai-pro/testing` | 25 KB | 8% | none |
+| `nexus-ai-pro/tracing` | 23 KB | 7% | none |
+| `nexus-ai-pro/loaders/web` | 23 KB | 7% | none |
+| `nexus-ai-pro/images/stores` | 21 KB | 7% | none |
+| `nexus-ai-pro/telephony/twilio` | 21 KB | 7% | none |
+| `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
+| `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
+| `nexus-ai-pro/mcp/registry` | 18 KB | 6% | none |
+| `nexus-ai-pro/connectors` | 18 KB | 6% | none |
+| `nexus-ai-pro/realtime/mock` | 18 KB | 6% | none |
+| `nexus-ai-pro/images/evals` | 17 KB | 5% | none |
+| `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
+| `nexus-ai-pro/workflows` | 17 KB | 5% | none |
+| `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
+| `nexus-ai-pro/embeddings/adapters` | 16 KB | 5% | none |
+| `nexus-ai-pro/realtime/conversation` | 16 KB | 5% | none |
+| `nexus-ai-pro/mcp` | 15 KB | 5% | none |
+| `nexus-ai-pro/grounding` | 15 KB | 5% | none |
+| `nexus-ai-pro/prompts/client` | 15 KB | 5% | none |
+| `nexus-ai-pro/lifecycle` | 15 KB | 5% | none |
+| `nexus-ai-pro/context` | 14 KB | 4% | none |
+| `nexus-ai-pro/images/assets` | 14 KB | 4% | none |
+| `nexus-ai-pro/images/google` | 14 KB | 4% | none |
+| `nexus-ai-pro/sqlite/operations` | 13 KB | 4% | none |
+| `nexus-ai-pro/postgres/operations` | 13 KB | 4% | none |
+| `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
+| `nexus-ai-pro/sqlite/vectors` | 12 KB | 4% | none |
+| `nexus-ai-pro/server/tenancy` | 12 KB | 4% | none |
+| `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
+| `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
+| `nexus-ai-pro/voice/session` | 11 KB | 3% | none |
+| `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
+| `nexus-ai-pro/operations/adapters` | 11 KB | 3% | none |
+| `nexus-ai-pro/postgres/store` | 11 KB | 3% | none |
+| `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
+| `nexus-ai-pro/rag/redis` | 11 KB | 3% | none |
+| `nexus-ai-pro/providers` | 10 KB | 3% | none |
+| `nexus-ai-pro/providers/base` | 10 KB | 3% | none |
+| `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |
+| `nexus-ai-pro/postgres/traces` | 10 KB | 3% | none |
+| `nexus-ai-pro/rag/files` | 10 KB | 3% | none |
+| `nexus-ai-pro/prompts` | 10 KB | 3% | none |
+| `nexus-ai-pro/rag/pinecone` | 10 KB | 3% | none |
+| `nexus-ai-pro/rag/chroma` | 10 KB | 3% | none |
+| `nexus-ai-pro/voice/openai` | 9 KB | 3% | none |
+| `nexus-ai-pro/images/moderation` | 9 KB | 3% | none |
+| `nexus-ai-pro/sqlite/store` | 9 KB | 3% | none |
+| `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
+| `nexus-ai-pro/testing/record` | 9 KB | 3% | none |
+| `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
+| `nexus-ai-pro/embeddings/models` | 8 KB | 3% | none |
+| `nexus-ai-pro/realtime/openai-server` | 8 KB | 3% | none |
+| `nexus-ai-pro/capabilities` | 8 KB | 3% | none |
+| `nexus-ai-pro/loaders` | 7 KB | 2% | none |
+| `nexus-ai-pro/store` | 6 KB | 2% | none |
+| `nexus-ai-pro/store/redis` | 6 KB | 2% | none |
+| `nexus-ai-pro/server/remote` | 6 KB | 2% | none |
+| `nexus-ai-pro/postgres/prompts` | 6 KB | 2% | none |
+| `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 2% | none |
+| `nexus-ai-pro/providers/errors` | 5 KB | 2% | none |
+| `nexus-ai-pro/embeddings/mock` | 5 KB | 2% | none |
+| `nexus-ai-pro/postgres/evaluate` | 5 KB | 2% | none |
+| `nexus-ai-pro/cache/semantic-cache` | 5 KB | 2% | none |
+| `nexus-ai-pro/rag` | 5 KB | 2% | none |
+| `nexus-ai-pro/loaders/html` | 5 KB | 2% | none |
+| `nexus-ai-pro/evals/judge` | 5 KB | 2% | none |
+| `nexus-ai-pro/pipeline` | 4 KB | 1% | none |
+| `nexus-ai-pro/prompts/file` | 4 KB | 1% | none |
+| `nexus-ai-pro/prompts/redis` | 4 KB | 1% | none |
+| `nexus-ai-pro/loaders/csv` | 4 KB | 1% | none |
+| `nexus-ai-pro/operations/webhooks` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/postgres/circuits` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/ops/circuit-store` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/cache/memory-cache` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/loaders/text` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/loaders/markdown` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/loaders/json` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/loaders/pdf` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/loaders/git` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/ops/rate-limit-adapters` | 2 KB | 0.6% | none |
+| `nexus-ai-pro/cache` | 2 KB | 0.6% | none |
+| `nexus-ai-pro/cache/adapters` | 2 KB | 0.6% | none |
+| `nexus-ai-pro/jobs` | 2 KB | 0.6% | none |
+| `nexus-ai-pro/jobs/durable-adapters` | 2 KB | 0.6% | none |
+| `nexus-ai-pro/jobs/queue` | 2 KB | 0.6% | none |
+| `nexus-ai-pro/streaming` | 1 KB | 0.3% | none |
+| `nexus-ai-pro/providers/type-guards` | 1 KB | 0.3% | none |
+| `nexus-ai-pro/next` | 1 KB | 0.3% | none |
+| `nexus-ai-pro/jobs/batch` | 1 KB | 0.3% | none |
 <!-- size-table:end -->
 
 A capability that only works by importing the whole runtime is treated as a design problem, not an

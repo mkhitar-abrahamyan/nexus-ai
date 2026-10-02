@@ -402,11 +402,15 @@ test('a named thread id is reported back trimmed, exactly as it was stored', asy
 test('the in-memory checkpointer drops the least recently written thread past maxThreads', () => {
   const checkpointer = new MemoryGraphCheckpointer({ maxThreads: 2 });
   const checkpoint = (threadId: string, step: number) => ({
+    version: 2 as const,
+    id: `${threadId}:${step}`,
     threadId,
     step,
     state: {},
     next: [],
+    tasks: [],
     status: 'completed' as const,
+    interrupts: [],
     createdAt: new Date(0).toISOString(),
   });
 

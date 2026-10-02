@@ -1,8 +1,9 @@
 import { OpenAIProvider } from './openai.js';
 import type { GroqProviderConfig } from '../types/config.js';
+import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest } from '../types/messages.js';
-import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
-import { KNOWN_MODELS } from '../types/providers.js';
+import type { NexusResponse, NexusStream, ResponseMeta, StreamChunk } from '../types/response.js';
+import { priceUsage } from '../core/usage.js';
 
 /** Groq's chat API. */
 export class GroqProvider extends OpenAIProvider {
@@ -17,46 +18,47 @@ export class GroqProvider extends OpenAIProvider {
   }
 
   /** Runs one completion. */
-  async complete(request: CompletionRequest): Promise<NexusResponse> {
-    const response = await super.complete({ ...request, model: this.stripPrefix(request.model) });
+  async complete(request: CompletionRequest, context?: ProviderCallContext): Promise<NexusResponse> {
+    const response = await super.complete({ ...request, model: this.stripPrefix(request.model) }, context);
     return {
       ...response,
       meta: {
-        ...response.meta,
-        providerUsed: 'groq',
+        ...this.withProviderMeta(response.meta, request.model),
         modelUsed: response.meta.modelUsed || this.stripPrefix(request.model),
-        estimatedCost: this.estimateProviderCost(request.model, response.meta.tokensInput, response.meta.tokensOutput),
       },
     };
   }
 
   /** Streams one completion. */
-  stream(request: CompletionRequest): NexusStream {
-    const stream = super.stream({ ...request, model: this.stripPrefix(request.model) });
+  stream(request: CompletionRequest, context?: ProviderCallContext): NexusStream {
+    const stream = super.stream({ ...request, model: this.stripPrefix(request.model) }, context);
+    const self = this;
     return this.createStream(async function* () {
       for await (const chunk of stream) {
         if (chunk.type === 'done') {
-          yield {
-            ...chunk,
-            meta: {
-              ...chunk.meta,
-              providerUsed: 'groq',
-            },
-          } satisfies StreamChunk;
+          yield { ...chunk, meta: self.withProviderMeta(chunk.meta ?? {}, request.model) } satisfies StreamChunk;
           continue;
         }
         yield chunk;
       }
-    });
+    }, request.signal);
   }
 
   private stripPrefix(model: string): string {
     return model.startsWith('groq/') ? model.slice('groq/'.length) : model;
   }
 
-  private estimateProviderCost(model: string, inputTokens: number, outputTokens: number): string {
-    const caps = KNOWN_MODELS[model];
-    if (!caps) return '$0.00';
-    return `$${((inputTokens / 1000) * caps.costPer1kInput + (outputTokens / 1000) * caps.costPer1kOutput).toFixed(4)}`;
+  /**
+   * Names Groq as the provider and prices the call against its registry entry, which is filed
+   * under the `groq/` prefix the API does not accept.
+   */
+  private withProviderMeta<M extends Partial<ResponseMeta>>(meta: M, model: string): M {
+    const usage = meta.usage;
+    const registryName = model.startsWith('groq/') ? model : `groq/${model}`;
+    return {
+      ...meta,
+      providerUsed: 'groq',
+      ...(usage && meta.cost?.basis !== 'reported' ? { cost: priceUsage({ model: registryName, usage }) } : {}),
+    };
   }
 }

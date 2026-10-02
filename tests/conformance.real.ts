@@ -1,15 +1,13 @@
-import {
-  AnthropicProvider,
-  CohereProvider,
-  GoogleProvider,
-  GroqProvider,
-  MistralProvider,
-  OllamaProvider,
-  OpenAIProvider,
-  OpenRouterProvider,
-  runProviderConformance,
-  type BaseProvider,
-} from '../src/index.js';
+import { AnthropicProvider } from '../src/providers/anthropic.js';
+import type { BaseProvider } from '../src/providers/base.js';
+import { CohereProvider } from '../src/providers/cohere.js';
+import { GoogleProvider } from '../src/providers/google.js';
+import { GroqProvider } from '../src/providers/groq.js';
+import { MistralProvider } from '../src/providers/mistral.js';
+import { OllamaProvider } from '../src/providers/ollama.js';
+import { OpenAIProvider } from '../src/providers/openai.js';
+import { OpenRouterProvider } from '../src/providers/openrouter.js';
+import { runProviderConformance } from '../src/testing/index.js';
 
 interface RealConformanceProvider {
   name: string;

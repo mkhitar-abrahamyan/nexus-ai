@@ -4,7 +4,8 @@
     "groq/openai/gpt-oss-120b": {
       "provider": "groq",
       "family": "gpt-oss",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -27,7 +28,8 @@
     "groq/openai/gpt-oss-20b": {
       "provider": "groq",
       "family": "gpt-oss",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -50,7 +52,8 @@
     "groq/llama-3.3-70b-versatile": {
       "provider": "groq",
       "family": "llama-3.3",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -73,7 +76,8 @@
     "groq/llama-3.1-8b-instant": {
       "provider": "groq",
       "family": "llama-3.1",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -96,7 +100,8 @@
     "groq/groq/compound": {
       "provider": "groq",
       "family": "compound",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -120,7 +125,8 @@
     "groq/groq/compound-mini": {
       "provider": "groq",
       "family": "compound",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -144,7 +150,8 @@
     "groq/meta-llama/llama-4-scout-17b-16e-instruct": {
       "provider": "groq",
       "family": "llama-4",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -167,7 +174,8 @@
     "groq/qwen/qwen3-32b": {
       "provider": "groq",
       "family": "qwen3",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -190,7 +198,8 @@
     "groq/openai/gpt-oss-safeguard-20b": {
       "provider": "groq",
       "family": "safety",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -213,7 +222,8 @@
     "groq/meta-llama/llama-prompt-guard-2-22m": {
       "provider": "groq",
       "family": "prompt-guard",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -236,7 +246,8 @@
     "groq/meta-llama/llama-prompt-guard-2-86m": {
       "provider": "groq",
       "family": "prompt-guard",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,

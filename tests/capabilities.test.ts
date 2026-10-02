@@ -1,25 +1,23 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  AnthropicProvider,
-  BaseProvider,
   NexusAI,
   NexusCapabilityError,
-  OpenAIProvider,
-  assertRegistryFreshness,
   buildMeta,
-  checkRegistryFreshness,
   costAmount,
-  describeModel,
   ensureUsageAndCost,
-  estimateCost,
-  negotiateCompletionRequest,
   type CompletionRequest,
   type ModelCapabilities,
   type NexusResponse,
   type NexusStream,
   type StreamChunk,
 } from '../src/index.js';
+import { negotiateCompletionRequest } from '../src/capabilities/negotiate.js';
+import { assertRegistryFreshness, checkRegistryFreshness, describeModel } from '../src/models/registry.js';
+import { estimateCost } from '../src/optimizer/cost.js';
+import { AnthropicProvider } from '../src/providers/anthropic.js';
+import { BaseProvider } from '../src/providers/base.js';
+import { OpenAIProvider } from '../src/providers/openai.js';
 
 function request(overrides: Partial<CompletionRequest> = {}): CompletionRequest {
   return {
@@ -32,7 +30,8 @@ function request(overrides: Partial<CompletionRequest> = {}): CompletionRequest 
 function capabilities(overrides: Partial<ModelCapabilities> = {}): ModelCapabilities {
   return {
     provider: 'mock',
-    modalities: ['text'],
+    inputModalities: ['text'],
+    outputModalities: ['text'],
     streaming: true,
     toolCalling: true,
     maxContextTokens: 128000,
@@ -228,7 +227,7 @@ test('buildMeta reports uncached input separately while the legacy field keeps t
   assert.ok(cost);
   assert.equal(cost.basis, 'estimated');
   assert.equal(cost.currency, 'USD');
-  assert.equal(meta.estimatedCost, `$${cost.amount.toFixed(4)}`);
+  assert.equal('estimatedCost' in meta, false, 'the formatted string is gone in 2.0');
 });
 
 test('responses from a provider that predates structured usage are filled in', () => {
@@ -240,7 +239,6 @@ test('responses from a provider that predates structured usage are filled in', (
     tokensInput: 1000,
     tokensOutput: 500,
     tokensSaved: 0,
-    estimatedCost: '$0.00',
     cacheHit: false,
     guardrailsApplied: [],
   });
@@ -252,22 +250,20 @@ test('responses from a provider that predates structured usage are filled in', (
   assert.equal(costAmount(meta), meta.cost.amount);
 });
 
-test('costAmount falls back to the formatted string for a hand-built response', () => {
-  assert.equal(
-    costAmount({
-      requestId: 'r1',
-      providerUsed: 'custom',
-      modelUsed: 'custom',
-      latencyMs: 1,
-      tokensInput: 0,
-      tokensOutput: 0,
-      tokensSaved: 0,
-      estimatedCost: '$1.2500',
-      cacheHit: false,
-      guardrailsApplied: [],
-    }),
-    1.25,
-  );
+test('costAmount reads the priced amount, and 0 for a response nothing priced', () => {
+  const meta = {
+    requestId: 'r1',
+    providerUsed: 'custom',
+    modelUsed: 'custom',
+    latencyMs: 1,
+    tokensInput: 0,
+    tokensOutput: 0,
+    tokensSaved: 0,
+    cacheHit: false,
+    guardrailsApplied: [],
+  };
+  assert.equal(costAmount(meta), 0);
+  assert.equal(costAmount({ ...meta, cost: { amount: 1.25, currency: 'USD', basis: 'reported' } }), 1.25);
 });
 
 // ── Registry provenance ────────────────────────────────────────────
@@ -535,7 +531,6 @@ class RecordingProvider extends BaseProvider {
         tokensInput: 1000,
         tokensOutput: 500,
         tokensSaved: 0,
-        estimatedCost: '$0.00',
         cacheHit: false,
         guardrailsApplied: [],
       },

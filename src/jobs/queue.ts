@@ -1,3 +1,5 @@
+import { withLifecycle } from '../lifecycle/run.js';
+import type { OperationLifecycleLike } from '../types/lifecycle.js';
 /** A job in an in-process queue. */
 export interface QueueJob<T = unknown> {
   /** The job's id. */
@@ -20,6 +22,11 @@ export interface QueueOptions {
   concurrency?: number;
   /** Tries per job before it is marked failed. Defaults to 1. */
   maxAttempts?: number;
+  /**
+   * Runs every attempt as one operation of a client's lifecycle, labelled `job`: pass
+   * `ai.lifecycle`. A refused job fails like any other, and is retried if attempts remain.
+   */
+  lifecycle?: OperationLifecycleLike;
 }
 
 /**
@@ -75,7 +82,12 @@ export class JobQueue<TPayload = unknown, TResult = unknown> {
     job.status = 'running';
     job.attempts += 1;
     try {
-      job.result = await this.worker(job.payload, job);
+      job.result = await withLifecycle(
+        this.options.lifecycle,
+        { family: 'job', operation: 'job', metadata: { jobId: job.id, attempt: job.attempts } },
+        {},
+        () => this.worker(job.payload, job),
+      );
       job.status = 'completed';
     } catch (error) {
       job.error = error instanceof Error ? error.message : String(error);

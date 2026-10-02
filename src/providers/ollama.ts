@@ -1,5 +1,4 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
-import { warnUnreadOption } from '../utils/deprecation.js';
 import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
 import type { OllamaProviderConfig } from '../types/config.js';
@@ -52,7 +51,6 @@ export class OllamaProvider extends BaseProvider {
   constructor(config: OllamaProviderConfig) {
     super();
     this.config = config;
-    warnUnreadOption(config.timeout !== undefined, 'NEXUS_DEP_OLLAMA_TIMEOUT', 'OllamaProviderConfig.timeout');
   }
 
   private async getClient(): Promise<OllamaClient> {

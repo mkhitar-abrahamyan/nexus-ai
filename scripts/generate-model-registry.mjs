@@ -20,7 +20,8 @@ const dataDir = path.join(repoRoot, 'data', 'models');
 const outputFile = path.join(repoRoot, 'src', 'models', 'generated.ts');
 
 const REQUIRED_FIELDS = [
-  'modalities',
+  'inputModalities',
+  'outputModalities',
   'streaming',
   'toolCalling',
   'maxContextTokens',

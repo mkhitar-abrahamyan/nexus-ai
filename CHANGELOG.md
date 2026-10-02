@@ -4,6 +4,89 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Consolidation. One lifecycle runs every call of every family, the root import holds the core client
+and nothing else, and the package installs with no required dependency. Everything removed here was
+deprecated in 1.x; [MIGRATING.md](./MIGRATING.md) covers each change with before-and-after code, and
+`nexus migrate` rewrites the imports.
+
+### Breaking
+
+- **The root import keeps only the core**: the client, its config builders, its types, the errors it
+  throws, the lifecycle, and the tool helpers. The 498 other names it re-exported are on their
+  subpaths; `nexus migrate` moves 1.x imports there. Importing the root costs 320 KB, down from 572 KB.
+- **`zod`, `ajv`, `ajv-formats`, and `@types/node` are optional peer dependencies.** A zod shape is
+  checked through its own `safeParse`; a JSON Schema response format loads ajv on its first check, and
+  says what to install when it is missing. A production install is 5.3 MB, the package alone, down
+  from 12.3 MB.
+- **A response's `estimatedCost` string is removed**, for the numeric `cost`. A plan's
+  `estimatedCost` object stays.
+- **Modalities say which way they flow.** `ModelCapabilities.inputModalities` and `outputModalities`
+  are required on every entry, bundled or registered; `modalities`, the `Modality` type, and the
+  `modalities` routing requirement are removed.
+- **Checkpoint schema version 2.** A checkpoint has its `version`, an `id`, its `tasks` always, and its
+  questions only in `interrupts`; `interrupt` is gone. Both checkpointers read version 1 for the whole
+  2.x line, so threads 1.x left waiting resume. A checkpointer's `get()` and `history()` return a
+  `StoredGraphCheckpoint` of either version.
+- **Options that were never read are removed**: `GoogleProviderConfig.projectId`,
+  `OllamaProviderConfig.timeout`, `MetricsConfig.prometheus`, `DensificationConfig.preserveMarkdown`,
+  `HealthConfig.latencyHalfLife`, `InjectionDetectionConfig.sensitivity`, and
+  `ToolPolicyConfig.requiresApproval`.
+- **`ImageManagerConfig` is removed**, for `ImageConfig`.
+- **`PipelineStepName` is a closed list.** A custom step is recorded as `customStep`, with its own name
+  in `PipelineTraceStep.custom`. The `auditLog` step is replaced by the lifecycle's `audit`.
+- **`ai.stream()` opens on its first read**, so authorization, rate-limit, guardrail, and budget errors
+  come out of the loop rather than from the call.
+- **What the lifecycle records changed**: metrics carry `family` and `operation` for every family, the
+  image family is labelled `image`, audit events carry `family` and `operation` and add an `error`
+  event, and `response.meta.requestId` is the operation's id.
+
+### Added
+
+- **One lifecycle for every operation.** Completions, streams, embeddings, voice, telephony, images,
+  realtime sessions, graphs, agents, queued jobs, and provider batches pass through the same stages:
+  validate, authorize, input policy, resolve assets, route, reserve budget, execute, output policy,
+  persist, reconcile cost, and audit. `lifecycle` on the client configures what they share: an
+  `authorize` callback that can refuse any call, a `budget` every family draws on, and `hooks` that see
+  each call start and finish, cache hits included. `ai.lifecycle` makes graphs, agents, workflows,
+  realtime sessions, job queues, and batches operations of the client too.
+- **A shared spend budget**: `budgetLedger()` on the new `nexus-ai-pro/lifecycle` holds each call's
+  estimate before it runs and charges what it cost after, per tenant and per period, so concurrent calls
+  cannot overshoot together. It keeps totals in memory or in any tenant usage store, Redis included.
+- **`ProviderCallContext`**, handed to every provider call of every family: the request id, the abort
+  signal, the deadline, trace headers, and the idempotency key. The OpenAI and Anthropic adapters send
+  the key and the headers on. Requests take `requestId`, `tenantId`, and `idempotencyKey`.
+- **Mixed text-and-asset content.** `toolOutput()` lets a tool return text, images, and asset
+  references, sent as the tool message itself instead of base64 JSON. An `asset` content part names an
+  asset by reference, an image part can carry an asset, and a model that produces images returns them
+  on `response.assets`.
+- **Typed pipelines**: `PipelineContext` and the runner are generic over the request and response, with
+  `PipelineShapes` for another family's types.
+- `toCheckpoint()` and `CheckpointDraft` for building a version 2 checkpoint by hand.
+- A `cache_hits` metric, and `routingDecision.provider` and `.model` on a response.
+
+### Changed
+
+- Provider adapters, and the agent, verification, evaluation, workflow, semantic-cache, image, and
+  embedding engines, load on first use, so importing the client never loads them.
+- A context-window summary is an operation of its own, authorized, budgeted, and audited.
+- `getCall()`, `listPhoneNumbers()`, and `updatePhoneNumber()` run through the lifecycle, so they are
+  rate-limited and audited like `createCall()`.
+- `nexus migrate` lists the options and model entries 2.0 removed, and keeps a single moved name on
+  one line.
+
+### Fixed
+
+- **Tool calls reach providers whole.** The OpenAI chat and Responses, Anthropic, and Google adapters
+  dropped a conversation's tool calls and the ids that link results to them, so a real tool loop could
+  fail on its second turn. Each now sends both the way its API expects, images in results included.
+- **Responses are priced on the model they were routed to.** A provider that echoed a dated snapshot
+  name priced the call at nothing; Groq, Mistral, and Cohere models filed under a prefix did too.
+- `resolveModel('google/gemini-2.5-flash')` found no capabilities for a provider-prefixed name. It now
+  finds the entry filed without the prefix, when that entry belongs to the same provider.
+- Streams honour the circuit breaker, the cost budget, audit, and metrics, as completions always did.
+- A cache hit is audited and counted.
+- The upload scanner's types no longer need Node's: `content` takes text or any `Uint8Array`.
+
 ## [1.25.0] - 2026-10-01
 
 The bridge to 2.0. Everything 2.0 removes is deprecated now, every capability has a subpath of its

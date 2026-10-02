@@ -1,4 +1,5 @@
 import type { CacheTtl, ReasoningEffort } from './providers.js';
+import type { AssetInput } from './images.js';
 
 declare global {
   namespace NodeJS {
@@ -41,12 +42,17 @@ export interface TextContent {
 export interface ImageContent {
   /** Discriminates this part in `ContentPart`. */
   type: 'image';
-  /** Where the image comes from: a file path, a URL, a buffer, or base64 text. */
+  /**
+   * Where the image comes from: a file path, a URL, a buffer, base64 text, or an asset, such as one
+   * an image operation produced. An asset held as bytes or at a URL is shown to the model; a stored
+   * asset is named by reference, since a provider cannot read the store.
+   */
   source:
     | { path: string }
     | { url: string }
     | { buffer: BinaryBuffer; mimeType?: string }
-    | { base64: string; mimeType?: string };
+    | { base64: string; mimeType?: string }
+    | { asset: AssetInput };
 }
 
 /**
@@ -79,8 +85,33 @@ export interface VideoContent {
   };
 }
 
+/**
+ * An asset passed by reference: an image or file a tool made or stored, named in the conversation by
+ * where it lives rather than carried as base64 text. Every adapter writes it as one short reference
+ * line the model can repeat back to another tool. Use an image part instead to show the image.
+ */
+export interface AssetContent {
+  /** Discriminates this part in `ContentPart`. */
+  type: 'asset';
+  /** The asset: where it lives, its MIME type, and optionally a file name. */
+  asset: AssetInput;
+}
+
 /** One part of a multimodal message. */
-export type ContentPart = TextContent | ImageContent | AudioContent | VideoContent;
+export type ContentPart = TextContent | ImageContent | AudioContent | VideoContent | AssetContent;
+
+/**
+ * What a tool returns when its result is content rather than a value to serialize: text, images,
+ * and asset references, in order. The agent loop sends the parts as the tool message itself, so an
+ * image a tool produced reaches the model as an image, or as a reference, instead of base64 JSON.
+ * `toolOutput()` builds one.
+ */
+export interface ToolOutput {
+  /** Marks the value as content. */
+  type: 'tool_output';
+  /** The parts, in order. */
+  content: ContentPart[];
+}
 
 // ── Tool Definitions ───────────────────────────────────────────────
 
@@ -260,6 +291,15 @@ export interface CompletionRequest {
   signal?: AbortSignal;
   /** End user the request is for, for rate limits, audit, and cache scoping. */
   userId?: string;
+  /** Tenant the request is for, so a shared budget can charge it to the right account. */
+  tenantId?: string;
+  /**
+   * The request's id, on the audit log, the provider call, and `response.meta.requestId`. Defaults to
+   * a generated one.
+   */
+  requestId?: string;
+  /** Carried to providers that deduplicate requests themselves, so a retried call is not billed twice. */
+  idempotencyKey?: string;
   /** Application data carried through hooks, traces, and audit events. */
   metadata?: Record<string, unknown>;
 }

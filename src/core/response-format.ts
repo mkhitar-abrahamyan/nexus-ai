@@ -1,6 +1,4 @@
-import { Ajv, type ErrorObject, type ValidateFunction } from 'ajv';
-import addFormatsModule, { type FormatsPlugin } from 'ajv-formats';
-import { z } from 'zod';
+import type { ErrorObject, ValidateFunction } from 'ajv';
 import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import type { ResponseFormatConfig } from '../types/config.js';
@@ -13,16 +11,31 @@ export class ResponseFormatError extends Error {
   }
 }
 
-const jsonSchemaValidator = new Ajv({
-  allErrors: true,
-  strict: true,
-  allowUnionTypes: true,
-});
-const addFormats = addFormatsModule as unknown as FormatsPlugin;
-addFormats(jsonSchemaValidator);
+/** The part of a zod schema this module calls. Any version with `safeParse` fits. */
+interface SafeParser {
+  safeParse(value: unknown): {
+    success: boolean;
+    error?: { issues?: Array<{ path?: Array<string | number>; message: string }>; message?: string };
+  };
+}
+
+/** What `compile()` needs from an ajv instance. */
+interface SchemaCompiler {
+  compile(schema: Record<string, unknown>): ValidateFunction;
+}
+
+let compiler: Promise<SchemaCompiler> | undefined;
 const compiledSchemas = new WeakMap<Record<string, unknown>, ValidateFunction>();
 
-export function applyResponseFormat(response: NexusResponse, config?: ResponseFormatConfig): NexusResponse {
+/**
+ * Checks a response against the requested format. A zod shape is checked through its own
+ * `safeParse`, so it needs nothing installed beyond the zod that built it; a JSON Schema loads `ajv`
+ * and `ajv-formats` on first use.
+ */
+export async function applyResponseFormat(
+  response: NexusResponse,
+  config?: ResponseFormatConfig,
+): Promise<NexusResponse> {
   if (!config || config.type === 'text') return response;
 
   let parsed: unknown;
@@ -34,13 +47,12 @@ export function applyResponseFormat(response: NexusResponse, config?: ResponseFo
 
   if (config.type === 'json_schema' && config.schema) {
     if (isZodShape(config.schema)) {
-      const schema = z.object(config.schema as Record<string, z.ZodTypeAny>).passthrough();
-      const result = schema.safeParse(parsed);
-      if (!result.success) {
-        throw new ResponseFormatError(`Model output failed JSON schema validation: ${result.error.message}`);
+      const problems = zodShapeProblems(config.schema as Record<string, unknown>, parsed);
+      if (problems.length > 0) {
+        throw new ResponseFormatError(`Model output failed JSON schema validation: ${problems.join('; ')}`);
       }
     } else {
-      const validate = compileJsonSchema(config.schema);
+      const validate = await compileJsonSchema(config.schema);
       if (!validate(parsed)) {
         throw new ResponseFormatError(
           `Model output failed JSON schema validation: ${formatJsonSchemaErrors(validate.errors)}`,
@@ -90,17 +102,60 @@ function isZodShape(schema: Record<string, unknown>): boolean {
   });
 }
 
-function compileJsonSchema(schema: Record<string, unknown>): ValidateFunction {
+/**
+ * Checks each field of a zod shape the way `z.object(shape).passthrough()` would: every declared
+ * field through its own schema, and any other field allowed.
+ */
+function zodShapeProblems(shape: Record<string, unknown>, value: unknown): string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return ['$ must be an object'];
+  const problems: string[] = [];
+  for (const [key, field] of Object.entries(shape)) {
+    if (!field || typeof (field as SafeParser).safeParse !== 'function') continue;
+    const result = (field as SafeParser).safeParse((value as Record<string, unknown>)[key]);
+    if (result.success) continue;
+    const issues = result.error?.issues ?? [{ message: result.error?.message ?? 'is invalid' }];
+    for (const issue of issues) {
+      const path = ['$', key, ...(issue.path ?? [])].join('.');
+      problems.push(`${path} ${issue.message}`);
+    }
+  }
+  return problems;
+}
+
+async function compileJsonSchema(schema: Record<string, unknown>): Promise<ValidateFunction> {
   const cached = compiledSchemas.get(schema);
   if (cached) return cached;
 
+  const ajv = await loadCompiler();
   try {
-    const validate = jsonSchemaValidator.compile(schema);
+    const validate = ajv.compile(schema);
     compiledSchemas.set(schema, validate);
     return validate;
   } catch (error) {
     throw new ResponseFormatError(`Invalid JSON schema: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/** Loads ajv and its formats once, the first time a JSON Schema has to be checked. */
+function loadCompiler(): Promise<SchemaCompiler> {
+  compiler ??= (async () => {
+    try {
+      const [ajvModule, formatsModule] = await Promise.all([import('ajv'), import('ajv-formats')]);
+      const Ajv = (ajvModule.default ?? ajvModule.Ajv) as unknown as new (
+        options: Record<string, unknown>,
+      ) => SchemaCompiler;
+      const addFormats = formatsModule.default as unknown as (ajv: SchemaCompiler) => void;
+      const ajv = new Ajv({ allErrors: true, strict: true, allowUnionTypes: true });
+      addFormats(ajv);
+      return ajv;
+    } catch (error) {
+      compiler = undefined;
+      throw new ResponseFormatError(
+        `Checking a response against a JSON Schema needs ajv and ajv-formats, which are optional: run "npm install ajv ajv-formats", or pass a zod shape instead (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+  })();
+  return compiler;
 }
 
 function formatJsonSchemaErrors(errors: ErrorObject[] | null | undefined): string {

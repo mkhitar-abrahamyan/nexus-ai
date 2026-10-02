@@ -239,8 +239,49 @@ function migrateCode(text: string, lineOffset: number): MigrationOutcome {
       message: "a response's `estimatedCost` string is removed in 2.0: read `cost.amount`, a number, and format it",
     });
   }
+  for (const { pattern, message } of REMOVED_OPTIONS) {
+    for (const match of text.matchAll(pattern)) notes.push({ line: at(match.index ?? 0), message });
+  }
   return { text: output, changes, notes };
 }
+
+/**
+ * Options and fields 2.0 removed, found by name. A name can belong to something else in the
+ * application, so each is reported for a person to check rather than deleted.
+ */
+const REMOVED_OPTIONS: ReadonlyArray<{ pattern: RegExp; message: string }> = [
+  {
+    pattern: /\bmodalities\s*:\s*\[[^\]]*['"](?:vision|pdf)['"]/g,
+    message:
+      '`modalities` is removed in 2.0: write `inputModalities` and `outputModalities`, where `vision` is an image in and `image` is an image out',
+  },
+  {
+    pattern: /\bprojectId\s*:/g,
+    message: 'if this is a Google provider config, `projectId` was never read and is removed in 2.0: delete it',
+  },
+  {
+    pattern: /\bpreserveMarkdown\s*:/g,
+    message: '`DensificationConfig.preserveMarkdown` was never read and is removed in 2.0: delete it',
+  },
+  {
+    pattern: /\blatencyHalfLife\s*:/g,
+    message: '`HealthConfig.latencyHalfLife` was never read and is removed in 2.0: delete it',
+  },
+  {
+    pattern: /\bprometheus\s*:\s*(?:true|false)\b/g,
+    message:
+      'if this is a metrics config, `prometheus` was never read and is removed in 2.0: delete it; `getPrometheusMetrics()` always works',
+  },
+  {
+    pattern: /\brequiresApproval\s*:/g,
+    message:
+      '`ToolPolicyConfig.requiresApproval` was never read and is removed in 2.0: require approval in the agent with `interruptOn`',
+  },
+  {
+    pattern: /\bsensitivity\s*:/g,
+    message: 'if this is injection detection, `sensitivity` was never read and is removed in 2.0: delete it',
+  },
+];
 
 /** The specifiers of `{ … }`, or nothing when the list holds something this does not understand. */
 function parseSpecifiers(body: string, destructuring: boolean): Specifier[] | undefined {
@@ -312,7 +353,8 @@ function braces(
         : item.name
       : `${item.type ? 'type ' : ''}${item.name}${item.alias ? ` as ${item.alias}` : ''}`,
   );
-  if (!multiline) return `{ ${items.join(', ')} }`;
+  // A group split off a long import keeps its layout only when it still lists several names.
+  if (!multiline || items.length === 1) return `{ ${items.join(', ')} }`;
   return `{${eol}${items.map((item) => `${indent}  ${item},`).join(eol)}${eol}${indent}}`;
 }
 

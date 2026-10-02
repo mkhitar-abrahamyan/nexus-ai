@@ -376,6 +376,7 @@ export class ContextWindowManager {
     if (part.type === 'image') return '[image content]';
     if (part.type === 'audio') return 'transcript' in part.source ? part.source.transcript : '[audio content]';
     if (part.type === 'video') return '[video content]';
+    if (part.type === 'asset') return `[asset ${part.asset.mimeType}]`;
     return '[content]';
   }
 }

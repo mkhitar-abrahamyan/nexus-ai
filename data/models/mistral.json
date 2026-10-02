@@ -4,7 +4,8 @@
     "mistral/ministral-3b": {
       "provider": "mistral",
       "family": "ministral-3b",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -28,7 +29,8 @@
     "mistral/ministral-8b": {
       "provider": "mistral",
       "family": "ministral-8b",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -52,7 +54,8 @@
     "mistral/pixtral-12b": {
       "provider": "mistral",
       "family": "pixtral-12b",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -76,7 +79,8 @@
     "mistral/pixtral-large-2411": {
       "provider": "mistral",
       "family": "pixtral-large-2411",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -100,7 +104,8 @@
     "mistral/mistral-medium-3-5": {
       "provider": "mistral",
       "family": "mistral-medium-3.5",
-      "modalities": ["text", "vision", "pdf"],
+      "inputModalities": ["text", "image", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -123,7 +128,8 @@
     "mistral/mistral-small-2603": {
       "provider": "mistral",
       "family": "mistral-small-4",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -147,7 +153,8 @@
     "mistral/mistral-large-2512": {
       "provider": "mistral",
       "family": "mistral-large-3",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -171,7 +178,8 @@
     "mistral/devstral-2512": {
       "provider": "mistral",
       "family": "devstral-2",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -195,7 +203,8 @@
     "mistral/codestral-2508": {
       "provider": "mistral",
       "family": "codestral",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -219,7 +228,8 @@
     "mistral/magistral-medium-2509": {
       "provider": "mistral",
       "family": "magistral-medium-1.2",
-      "modalities": ["text", "vision"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -243,7 +253,8 @@
     "mistral/mistral-moderation-2603": {
       "provider": "mistral",
       "family": "moderation",
-      "modalities": ["text"],
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,

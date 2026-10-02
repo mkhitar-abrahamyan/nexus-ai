@@ -33,6 +33,8 @@ export class Tokenizer {
         if (part.type === 'image') return total + 85;
         if (part.type === 'audio') return total + 120;
         if (part.type === 'video') return total + 250;
+        // An asset is sent as one reference line, never as its bytes.
+        if (part.type === 'asset') return total + 30;
         return total;
       }, 0)
     );

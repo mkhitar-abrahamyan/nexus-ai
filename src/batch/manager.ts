@@ -17,6 +17,8 @@ import { OperationRunner } from '../operations/runner.js';
 import { estimateCost } from '../optimizer/cost.js';
 import { DEFAULT_CURRENCY } from '../optimizer/cost.js';
 import { generateRequestId } from '../utils/ids.js';
+import { withLifecycle } from '../lifecycle/run.js';
+import type { OperationLifecycleLike } from '../types/lifecycle.js';
 import { BatchCapabilityError, BatchProviderNotFoundError, BatchValidationError } from './errors.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
@@ -30,6 +32,12 @@ export interface BatchManagerRuntime {
   operations?: OperationRunnerConfig<BatchJobResult>;
   /** Model registry used to price results. */
   config?: Pick<NexusAIConfig, 'models'>;
+  /**
+   * Runs every submission as one operation of a client's lifecycle, labelled `batch`: pass
+   * `ai.lifecycle`. It is authorized before the provider sees it, and its priced cost is reconciled
+   * against the budget when the batch is collected.
+   */
+  lifecycle?: OperationLifecycleLike;
 }
 
 /**
@@ -95,18 +103,35 @@ export class BatchManager {
 
     const requestId = generateRequestId();
     return this.runner.submit(
-      async (operation) => {
-        const context: BatchProviderCallContext = {
-          requestId,
-          signal: operation.signal,
-          idempotencyKey: request.idempotencyKey,
-          attempt: operation.attempt,
-        };
+      (operation) =>
+        withLifecycle(
+          this.runtime.lifecycle,
+          {
+            family: 'batch',
+            operation: 'batch.submit',
+            requestId,
+            provider: providerName,
+            metadata: { items: request.items.length },
+          },
+          {
+            signal: operation.signal,
+            ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+          },
+          async (ticket) => {
+            const context: BatchProviderCallContext = {
+              ...ticket?.context,
+              requestId,
+              signal: operation.signal,
+              idempotencyKey: request.idempotencyKey,
+              attempt: operation.attempt,
+            };
 
-        const ref = await provider.submit(request, context);
-        operation.report({ completed: 0, total: request.items.length, message: `submitted as ${ref.id}` });
-        return this.collect(provider, ref, request, operation, context);
-      },
+            const ref = await provider.submit(request, context);
+            operation.report({ completed: 0, total: request.items.length, message: `submitted as ${ref.id}` });
+            return this.collect(provider, ref, request, operation, context);
+          },
+          (result) => ({ cost: result.cost.amount }),
+        ),
       {
         kind: `batch.${providerName}`,
         idempotencyKey: request.idempotencyKey,

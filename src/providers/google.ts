@@ -1,11 +1,20 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
-import { warnUnreadOption } from '../utils/deprecation.js';
 import type { CompletionRequest, ContentPart, Message } from '../types/messages.js';
 import type { GoogleProviderConfig } from '../types/config.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
 import type { ReasoningEffort } from '../types/providers.js';
 import { buildMeta, type UsageInput } from '../core/usage.js';
 import { generateRequestId } from '../utils/ids.js';
+import type { AssetInput } from '../types/images.js';
+import {
+  assetReference,
+  imagePlaceholder,
+  imagesOf,
+  textOf,
+  toolArguments,
+  toolNameFor,
+  wireImage,
+} from './content.js';
 import { createProviderHttpError, toNexusProviderError } from './errors.js';
 
 interface GeminiContentPart {
@@ -19,6 +28,10 @@ interface GeminiContentPart {
   functionCall?: {
     name?: string;
     args?: unknown;
+  };
+  functionResponse?: {
+    name: string;
+    response: Record<string, unknown>;
   };
 }
 
@@ -80,7 +93,6 @@ export class GoogleProvider extends BaseProvider {
   constructor(config: GoogleProviderConfig) {
     super();
     this.config = config;
-    warnUnreadOption(config.projectId !== undefined, 'NEXUS_DEP_GOOGLE_PROJECT_ID', 'GoogleProviderConfig.projectId');
   }
 
   /** Runs one completion. */
@@ -94,11 +106,13 @@ export class GoogleProvider extends BaseProvider {
       const candidate = result.candidates?.[0];
       const content = this.extractText(candidate?.content);
       const toolCalls = this.extractToolCalls(candidate?.content);
+      const assets = this.extractAssets(candidate?.content);
 
       return {
         content,
         role: 'assistant',
         toolCalls: toolCalls.length ? toolCalls : undefined,
+        ...(assets.length ? { assets } : {}),
         finishReason: toolCalls.length ? 'tool_calls' : this.mapFinishReason(candidate?.finishReason),
         meta: buildMeta({
           provider: 'google',
@@ -267,8 +281,41 @@ export class GoogleProvider extends BaseProvider {
     const systemParts: GeminiContentPart[] = [];
     const contents: GeminiContent[] = [];
 
-    for (const message of messages) {
+    for (const [index, message] of messages.entries()) {
+      if (message.role === 'tool') {
+        // A result goes back under the name of the function that asked for it, with any images it
+        // returned beside it; results answering one turn share one user turn.
+        const parts: GeminiContentPart[] = [
+          {
+            functionResponse: {
+              name: toolNameFor(messages, index) ?? 'tool',
+              response: { result: textOf(message.content) },
+            },
+          },
+          ...this.formatParts(imagesOf(message.content)),
+        ];
+        const previous = contents.at(-1);
+        if (previous?.role === 'user' && previous.parts.every((part) => part.functionResponse || part.inlineData)) {
+          previous.parts.push(...parts);
+        } else {
+          contents.push({ role: 'user', parts });
+        }
+        continue;
+      }
+
       const parts = this.formatParts(message.content);
+      if (message.role === 'assistant' && message.toolCalls?.length) {
+        contents.push({
+          role: 'model',
+          parts: [
+            ...(textOf(message.content) ? parts.filter((part) => part.text) : []),
+            ...message.toolCalls.map((call) => ({
+              functionCall: { name: call.function.name, args: toolArguments(call) },
+            })),
+          ],
+        });
+        continue;
+      }
 
       if (message.role === 'system') {
         systemParts.push(...parts);
@@ -292,21 +339,12 @@ export class GoogleProvider extends BaseProvider {
 
     return content.map((part: ContentPart) => {
       if (part.type === 'text') return { text: part.text };
+      if (part.type === 'asset') return { text: assetReference(part.asset) };
       if (part.type === 'image') {
-        const source = part.source;
-        if ('base64' in source) {
-          return { inlineData: { mimeType: source.mimeType || 'image/png', data: source.base64 } };
-        }
-        if ('buffer' in source) {
-          return {
-            inlineData: {
-              mimeType: source.mimeType || 'image/png',
-              data: source.buffer.toString('base64'),
-            },
-          };
-        }
-        if ('url' in source) return { text: `[image url: ${source.url}]` };
-        return { text: '[image from path requires preprocessing]' };
+        const image = wireImage(part);
+        if (image?.kind === 'base64') return { inlineData: { mimeType: image.mimeType, data: image.data } };
+        if (image?.kind === 'url') return { text: `[image url: ${image.url}]` };
+        return { text: imagePlaceholder(part) };
       }
       if (part.type === 'audio' && 'transcript' in part.source) {
         return { text: part.source.transcript };
@@ -334,6 +372,16 @@ export class GoogleProvider extends BaseProvider {
       .filter((part) => typeof part.text === 'string' && !part.thought)
       .map((part) => part.text)
       .join('');
+  }
+
+  /** Images and other media the model produced, as assets held in memory. */
+  private extractAssets(content: GeminiContent | undefined): AssetInput[] {
+    return (content?.parts || [])
+      .filter((part) => part.inlineData?.data && !part.thought)
+      .map((part) => ({
+        location: { kind: 'bytes' as const, data: decodeBase64(part.inlineData?.data ?? '') },
+        mimeType: part.inlineData?.mimeType || 'application/octet-stream',
+      }));
   }
 
   private extractToolCalls(content: GeminiContent | undefined): ToolCall[] {
@@ -368,4 +416,14 @@ export class GoogleProvider extends BaseProvider {
   private compact<T extends Record<string, unknown>>(value: T): T {
     return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
   }
+}
+
+/** Decodes base64 text to bytes, with Node's Buffer when it is there and the web API otherwise. */
+function decodeBase64(data: string): Uint8Array {
+  const buffer = (globalThis as { Buffer?: { from(data: string, encoding: string): Uint8Array } }).Buffer;
+  if (buffer) return new Uint8Array(buffer.from(data, 'base64'));
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
 }

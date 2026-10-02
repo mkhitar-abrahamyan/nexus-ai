@@ -168,7 +168,7 @@ means unknown, not unsupported.
 | Type | Contents |
 | --- | --- |
 | `EmbeddingProviderRequest` | One batch, already split to fit and resolved to a concrete model. |
-| `EmbeddingProviderCallContext` | The request id, a signal, the attempt, the batch index, a deadline, the idempotency key, and trace headers. |
+| `EmbeddingProviderCallContext` | The `ProviderCallContext` every provider receives — request id, signal, deadline, idempotency key, and trace headers — with the attempt and the batch index. |
 | `EmbeddingProviderResult` | What you return: one vector per input in order, the model actually used, whether it truncated, and the raw payload. |
 | `EmbeddingProviderUsage` | Token counts, when the provider reports them. |
 
@@ -263,7 +263,7 @@ specific entry point that provides it.
 | `EmbeddingModelCapabilities` | interface | What the registry knows about an embedding model. |
 | `EmbeddingModelNotFoundError` | class | Raised when a model is not in the embeddings registry and no provider was named. |
 | `EmbeddingModelRegistryConfig` | interface | Embedding models and aliases that extend or replace the bundled registry. |
-| `EmbeddingProviderCallContext` | interface | What an adapter receives with every batch besides the request. |
+| `EmbeddingProviderCallContext` | interface | What an adapter receives with every batch besides the request: the context every family's provider receives, and where this batch sits in the request. |
 | `EmbeddingProviderCapabilities` | interface | What an adapter can do. |
 | `EmbeddingProviderError` | class | Raised when an embeddings provider fails. |
 | `EmbeddingProviderInfo` | interface | Identifies an embeddings adapter and what it supports. |

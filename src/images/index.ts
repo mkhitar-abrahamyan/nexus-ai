@@ -25,7 +25,6 @@ export type {
   ImageDimensions,
   ImageEditRequest,
   ImageGenerateRequest,
-  ImageManagerConfig,
   ImageMaskInput,
   ImageOperation,
   ImageOperationSubmission,

@@ -5,9 +5,10 @@ workflows that run branches in parallel and survive a restart, retrieval over an
 durable background operations, guardrails, cost control, images, voice, and evals — with a studio a
 team can share.
 
-Import the whole runtime, or one piece: every capability has its own entry point with a size budget
-CI enforces, and [the packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md) publishes what each one costs. A graph-only application loads 49 KB
-and installs no third-party package at all.
+Import only what you use. The root import is the client and nothing else, and every other capability
+has its own entry point with a size budget CI enforces; [the packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md)
+publishes what each one costs. The package has no required dependencies: a graph-only application
+loads 51 KB, and installs nothing but this package.
 
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
@@ -31,6 +32,14 @@ Install only the provider SDKs your app uses. The OpenAI SDK also powers OpenAI-
 ```bash
 npm install openai @anthropic-ai/sdk ollama
 ```
+
+Everything else is optional too. Add what your code needs:
+
+| Package | When |
+| --- | --- |
+| `@types/node` | A TypeScript project on Node. The client, graphs, and the lifecycle compile without it. |
+| `zod` | You write schemas with zod. The package uses the zod your schema came from. |
+| `ajv`, `ajv-formats` | A response format checks output against a JSON Schema object. |
 
 The Google Gemini provider uses Node.js `fetch`, so it does not need an extra SDK.
 Realtime transports use injected or platform WebRTC, WebSocket, and `fetch` interfaces and do not
@@ -105,6 +114,9 @@ You can still pass a plain `NexusAIConfig` to `new NexusAI(...)` when you want f
 - reach the providers' half-price asynchronous batch tier behind one operation handle
 - persist generated media to disk or S3 with tenant isolation, retention, and checksums
 - build persistent realtime voice agents with interruption, live tools, and normalized conversation state
+- authorize, budget, audit, and observe every call of every family in one place, with hooks that see
+  each one finish
+- pass images a tool made back to the model by reference, never as base64 text
 - keep TypeScript types around every request and response
 
 ## Guides
@@ -115,6 +127,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | Guide | Covers |
 | --- | --- |
 | [The client](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/core.md) | Requests, context windows, token optimization, cost checks, reasoning, prompt caching, streaming |
+| [The lifecycle](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/lifecycle.md) | Authorization, a shared budget, hooks, audit, and metrics for every call of every family |
 | [Providers and routing](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/providers.md) | The twelve completion providers, routing and failover, the model registry |
 | [Guardrails](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/security.md) | Injection, PII, secrets, schema validation, output redaction |
 | [Graphs](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/graphs.md) | Parallel branches, interrupts, checkpoints, time travel, subgraphs, caching, diagrams |

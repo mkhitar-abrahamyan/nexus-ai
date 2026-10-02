@@ -2,44 +2,48 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { test } from 'node:test';
 import {
-  BaseProvider,
-  EvalRunner,
-  FailoverExecutor,
-  LLMJudge,
-  MemoryCache,
   NexusAI,
   NexusProviderError,
   NexusSecurityError,
-  OpenAIProvider,
-  Router,
-  SecurityPipeline,
   collectStream,
-  completeWithSelfConsistency,
-  ContextWindowManager,
   createNexus,
   createNexusConfig,
   defineNexusConfig,
-  createCacheKey,
   createTextStream,
   normalizeCreateNexusConfig,
-  selectGraphFacts,
   tool,
-  withKnowledgeGraphContext,
-  type CreateCallRequest,
   type CompletionRequest,
   type NexusResponse,
   type NexusStream,
-  type SpeechRequest,
-  type SpeechResponse,
   type StreamChunk,
-  type TelephonyProvider,
-  type TelephonyResponseRequest,
-  type TelephonyWebhookValidationRequest,
-  type TranscriptionRequest,
-  type TranscriptionResponse,
-  type VoiceProvider,
-  type VoiceSessionToolStep,
 } from '../src/index.js';
+import { MemoryCache, createCacheKey } from '../src/cache/memory-cache.js';
+import { ContextWindowManager } from '../src/context/index.js';
+import { EvalRunner } from '../src/evals/index.js';
+import { LLMJudge } from '../src/evals/judge.js';
+import {
+  completeWithSelfConsistency,
+  selectGraphFacts,
+  withKnowledgeGraphContext,
+} from '../src/hallucination/index.js';
+import { BaseProvider } from '../src/providers/base.js';
+import { OpenAIProvider } from '../src/providers/openai.js';
+import { FailoverExecutor, Router } from '../src/router/index.js';
+import { SecurityPipeline } from '../src/security/index.js';
+import type {
+  CreateCallRequest,
+  TelephonyProvider,
+  TelephonyResponseRequest,
+  TelephonyWebhookValidationRequest,
+} from '../src/telephony/index.js';
+import type {
+  SpeechRequest,
+  SpeechResponse,
+  TranscriptionRequest,
+  TranscriptionResponse,
+  VoiceProvider,
+  VoiceSessionToolStep,
+} from '../src/voice/index.js';
 import { TwilioTelephonyProvider } from '../src/telephony/providers/twilio.js';
 import { ResponseFormatError, applyResponseFormat, withResponseFormat } from '../src/core/response-format.js';
 import { createProviderHttpError, toNexusProviderError } from '../src/providers/errors.js';
@@ -67,7 +71,6 @@ function response(content: string, model = 'mock/test'): NexusResponse {
       tokensInput: 1,
       tokensOutput: 1,
       tokensSaved: 0,
-      estimatedCost: '$0.00',
       cacheHit: false,
       guardrailsApplied: [],
     },
@@ -344,7 +347,8 @@ test('routing honors candidate allow and deny lists', () => {
       registry: {
         'fast/cheap': {
           provider: 'fast',
-          modalities: ['text'],
+          inputModalities: ['text'],
+          outputModalities: ['text'],
           streaming: true,
           toolCalling: false,
           maxContextTokens: 8000,
@@ -354,7 +358,8 @@ test('routing honors candidate allow and deny lists', () => {
         },
         'slow/good': {
           provider: 'slow',
-          modalities: ['text'],
+          inputModalities: ['text'],
+          outputModalities: ['text'],
           streaming: true,
           toolCalling: false,
           maxContextTokens: 8000,
@@ -407,7 +412,8 @@ test('routing health penalties can move traffic away from unhealthy providers', 
       registry: {
         'fast/healthy': {
           provider: 'fast',
-          modalities: ['text'],
+          inputModalities: ['text'],
+          outputModalities: ['text'],
           streaming: true,
           toolCalling: false,
           maxContextTokens: 8000,
@@ -417,7 +423,8 @@ test('routing health penalties can move traffic away from unhealthy providers', 
         },
         'slow/unhealthy': {
           provider: 'slow',
-          modalities: ['text'],
+          inputModalities: ['text'],
+          outputModalities: ['text'],
           streaming: true,
           toolCalling: false,
           maxContextTokens: 8000,
@@ -564,7 +571,7 @@ test('security output guard redacts secrets and records guardrails', () => {
   assert.ok(result.value.meta.guardrailsApplied.includes('output-pii-redaction'));
 });
 
-test('response-format validation accepts valid JSON and rejects schema mismatches', () => {
+test('response-format validation accepts valid JSON and rejects schema mismatches', async () => {
   const schema = {
     type: 'object',
     required: ['ok'],
@@ -573,8 +580,11 @@ test('response-format validation accepts valid JSON and rejects schema mismatche
     },
   };
 
-  assert.equal(applyResponseFormat(response('{"ok": true}'), { type: 'json_schema', schema }).content, '{"ok": true}');
-  assert.throws(
+  assert.equal(
+    (await applyResponseFormat(response('{"ok": true}'), { type: 'json_schema', schema })).content,
+    '{"ok": true}',
+  );
+  await assert.rejects(
     () => applyResponseFormat(response('{"ok": "yes"}'), { type: 'json_schema', schema }),
     ResponseFormatError,
   );
@@ -586,7 +596,7 @@ test('response-format validation accepts valid JSON and rejects schema mismatche
   assert.equal(formatted.messages[0].role, 'system');
 });
 
-test('response-format validation enforces standard JSON Schema keywords', () => {
+test('response-format validation enforces standard JSON Schema keywords', async () => {
   const schema = {
     type: 'object',
     additionalProperties: false,
@@ -599,13 +609,13 @@ test('response-format validation enforces standard JSON Schema keywords', () => 
     },
   };
 
-  assert.doesNotThrow(() =>
+  await assert.doesNotReject(() =>
     applyResponseFormat(response('{"status":"ok","score":8,"code":"ABC","contact":"team@example.com"}'), {
       type: 'json_schema',
       schema,
     }),
   );
-  assert.throws(
+  await assert.rejects(
     () =>
       applyResponseFormat(response('{"status":"bad","score":11,"code":"abc","contact":"not-an-email","extra":true}'), {
         type: 'json_schema',

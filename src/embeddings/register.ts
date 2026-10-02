@@ -7,6 +7,16 @@ import {
   OllamaEmbeddingProvider,
   OpenAIEmbeddingProvider,
 } from './adapters.js';
+import { configuredEmbeddingProviderNames } from './auto-providers.js';
+
+/** How each automatically registered adapter is built from the chat provider's credentials. */
+const FACTORIES: Record<string, (providers: ProvidersConfig) => EmbeddingsProvider> = {
+  openai: ({ openai }) => new OpenAIEmbeddingProvider({ apiKey: openai?.apiKey ?? '', baseUrl: openai?.baseUrl }),
+  google: ({ google }) => new GoogleEmbeddingProvider({ apiKey: google?.apiKey ?? '', baseUrl: google?.baseUrl }),
+  cohere: ({ cohere }) => new CohereEmbeddingProvider({ apiKey: cohere?.apiKey ?? '', baseUrl: cohere?.baseUrl }),
+  mistral: ({ mistral }) => new MistralEmbeddingProvider({ apiKey: mistral?.apiKey ?? '', baseUrl: mistral?.baseUrl }),
+  ollama: ({ ollama }) => new OllamaEmbeddingProvider({ baseUrl: ollama?.baseUrl }),
+};
 
 /**
  * Builds embedding adapters from credentials already present in `providers`.
@@ -16,35 +26,8 @@ import {
  * and an explicitly registered provider of the same name always wins.
  */
 export function createConfiguredEmbeddingProviders(providers: ProvidersConfig): Array<[string, EmbeddingsProvider]> {
-  const created: Array<[string, EmbeddingsProvider]> = [];
-
-  if (providers.openai?.apiKey) {
-    created.push([
-      'openai',
-      new OpenAIEmbeddingProvider({ apiKey: providers.openai.apiKey, baseUrl: providers.openai.baseUrl }),
-    ]);
-  }
-  if (providers.google?.apiKey) {
-    created.push([
-      'google',
-      new GoogleEmbeddingProvider({ apiKey: providers.google.apiKey, baseUrl: providers.google.baseUrl }),
-    ]);
-  }
-  if (providers.cohere?.apiKey) {
-    created.push([
-      'cohere',
-      new CohereEmbeddingProvider({ apiKey: providers.cohere.apiKey, baseUrl: providers.cohere.baseUrl }),
-    ]);
-  }
-  if (providers.mistral?.apiKey) {
-    created.push([
-      'mistral',
-      new MistralEmbeddingProvider({ apiKey: providers.mistral.apiKey, baseUrl: providers.mistral.baseUrl }),
-    ]);
-  }
-  if (providers.ollama) {
-    created.push(['ollama', new OllamaEmbeddingProvider({ baseUrl: providers.ollama.baseUrl })]);
-  }
-
-  return created;
+  return configuredEmbeddingProviderNames(providers).map((name) => [
+    name,
+    (FACTORIES[name] as (p: ProvidersConfig) => EmbeddingsProvider)(providers),
+  ]);
 }

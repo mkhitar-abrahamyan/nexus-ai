@@ -1,3 +1,4 @@
+import type { ProviderCallContext } from './lifecycle.js';
 import type { BinaryBuffer, CompletionRequest, Message, ToolDefinition } from './messages.js';
 import type { NexusResponse } from './response.js';
 
@@ -154,10 +155,10 @@ export interface SpeechResponse {
 export interface VoiceProvider {
   /** What the provider is and what it supports. */
   readonly info: VoiceProviderInfo;
-  /** Turns speech into text. */
-  transcribe?(request: TranscriptionRequest): Promise<TranscriptionResponse>;
-  /** Turns text into speech. */
-  speak?(request: SpeechRequest): Promise<SpeechResponse>;
+  /** Turns speech into text. `context` carries the operation's id, signal, deadline, and trace headers. */
+  transcribe?(request: TranscriptionRequest, context?: ProviderCallContext): Promise<TranscriptionResponse>;
+  /** Turns text into speech, with the same `context` as `transcribe()`. */
+  speak?(request: SpeechRequest, context?: ProviderCallContext): Promise<SpeechResponse>;
 }
 
 /** Voice providers available to a client. */

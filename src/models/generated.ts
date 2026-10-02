@@ -15,9 +15,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-3-5-haiku-20241022": {
     "provider": "anthropic",
     "family": "claude-haiku-3.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -56,9 +59,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-3-5-sonnet-20240620": {
     "provider": "anthropic",
     "family": "claude-3.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -97,9 +103,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-3-5-sonnet-20241022": {
     "provider": "anthropic",
     "family": "claude-3.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -138,9 +147,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-3-7-sonnet-20250219": {
     "provider": "anthropic",
     "family": "claude-3.7",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -190,9 +202,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-3-haiku-20240307": {
     "provider": "anthropic",
     "family": "claude-haiku-3",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -231,9 +246,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-fable-5-0": {
     "provider": "anthropic",
     "family": "claude-fable-5.0",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -283,9 +301,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-haiku-4-5-20251001": {
     "provider": "anthropic",
     "family": "claude-haiku-4.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -335,9 +356,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-haiku-5-0": {
     "provider": "anthropic",
     "family": "claude-haiku-5.0",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -387,9 +411,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-opus-4-1-20250805": {
     "provider": "anthropic",
     "family": "claude-opus-4.1",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -439,9 +466,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-opus-4-20250514": {
     "provider": "anthropic",
     "family": "claude-opus-4",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -491,9 +521,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-opus-4-5-20251101": {
     "provider": "anthropic",
     "family": "claude-opus-4.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -544,9 +577,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-opus-4-6": {
     "provider": "anthropic",
     "family": "claude-opus-4.6",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -597,9 +633,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-opus-4-7": {
     "provider": "anthropic",
     "family": "claude-opus-4.7",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -649,9 +688,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-opus-4-8": {
     "provider": "anthropic",
     "family": "claude-opus-4.8",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -701,9 +743,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-sonnet-4-20250514": {
     "provider": "anthropic",
     "family": "claude-sonnet-4",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -753,9 +798,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-sonnet-4-6": {
     "provider": "anthropic",
     "family": "claude-sonnet-4.6",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -805,9 +853,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "claude-sonnet-5-0": {
     "provider": "anthropic",
     "family": "claude-sonnet-5.0",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -857,7 +908,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/c4ai-aya-expanse-32b": {
     "provider": "cohere",
     "family": "aya-expanse",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": false,
@@ -881,9 +935,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/c4ai-aya-vision-32b": {
     "provider": "cohere",
     "family": "aya-vision",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": false,
     "toolCalling": true,
@@ -906,7 +963,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/command-a-03-2025": {
     "provider": "cohere",
     "family": "command-a",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": false,
@@ -930,7 +990,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/command-a-reasoning-08-2025": {
     "provider": "cohere",
     "family": "command-a-reasoning",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": false,
@@ -954,7 +1017,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/command-a-translate-08-2025": {
     "provider": "cohere",
     "family": "command-a-translate",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": false,
@@ -978,9 +1044,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/command-a-vision-07-2025": {
     "provider": "cohere",
     "family": "command-a-vision",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": false,
     "toolCalling": true,
@@ -1003,7 +1072,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/command-r": {
     "provider": "cohere",
     "family": "command-r",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": false,
@@ -1027,7 +1099,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/command-r-plus": {
     "provider": "cohere",
     "family": "command-r-plus",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": false,
@@ -1051,7 +1126,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/command-r7b-12-2024": {
     "provider": "cohere",
     "family": "command-r7b",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": false,
@@ -1075,7 +1153,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "cohere/tiny-aya-global": {
     "provider": "cohere",
     "family": "tiny-aya",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": false,
@@ -1099,7 +1180,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "deepseek/deepseek-chat": {
     "provider": "deepseek",
     "family": "deepseek-chat",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -1127,7 +1211,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "deepseek/deepseek-r1": {
     "provider": "deepseek",
     "family": "deepseek-r1",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -1155,7 +1242,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "deepseek/deepseek-reasoner": {
     "provider": "deepseek",
     "family": "deepseek-reasoner",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -1183,7 +1273,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "deepseek/deepseek-v3": {
     "provider": "deepseek",
     "family": "deepseek-v3",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -1211,12 +1304,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-1.5-flash": {
     "provider": "google",
     "family": "gemini-1.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1251,12 +1347,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-1.5-pro": {
     "provider": "google",
     "family": "gemini-1.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1291,12 +1390,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-2.0-flash": {
     "provider": "google",
     "family": "gemini-2.0",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1331,12 +1433,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-2.5-flash": {
     "provider": "google",
     "family": "gemini-2.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1371,12 +1476,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-2.5-flash-lite": {
     "provider": "google",
     "family": "gemini-2.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1411,12 +1519,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-2.5-flash-lite-preview-09-2025": {
     "provider": "google",
     "family": "gemini-2.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1451,12 +1562,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-2.5-pro": {
     "provider": "google",
     "family": "gemini-2.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1491,12 +1605,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-3-flash-preview": {
     "provider": "google",
     "family": "gemini-3",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1531,9 +1648,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-3-pro-image-preview": {
     "provider": "google",
     "family": "gemini-3-image",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image"
+    ],
+    "outputModalities": [
+      "text",
       "image"
     ],
     "streaming": true,
@@ -1569,12 +1689,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-3-pro-preview": {
     "provider": "google",
     "family": "gemini-3",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1610,12 +1733,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-3.1-flash-lite-preview": {
     "provider": "google",
     "family": "gemini-3.1",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1650,12 +1776,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-3.1-pro-preview": {
     "provider": "google",
     "family": "gemini-3.1",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1690,12 +1819,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-3.1-pro-preview-customtools": {
     "provider": "google",
     "family": "gemini-3.1",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1730,12 +1862,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-3.5-flash": {
     "provider": "google",
     "family": "gemini-3.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1770,12 +1905,15 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gemini-3.5-pro": {
     "provider": "google",
     "family": "gemini-3.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio",
       "video",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1810,9 +1948,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-4.1": {
     "provider": "openai",
     "family": "gpt-4.1",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1834,9 +1975,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-4.1-mini": {
     "provider": "openai",
     "family": "gpt-4.1",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1858,9 +2002,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-4.1-nano": {
     "provider": "openai",
     "family": "gpt-4.1",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1882,9 +2029,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-4.5-preview": {
     "provider": "openai",
     "family": "gpt-4.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1906,10 +2056,13 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-4o": {
     "provider": "openai",
     "family": "gpt-4o",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "audio"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1932,9 +2085,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-4o-mini": {
     "provider": "openai",
     "family": "gpt-4o",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -1956,9 +2112,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5": {
     "provider": "openai",
     "family": "gpt-5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2003,9 +2162,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5-chat-latest": {
     "provider": "openai",
     "family": "gpt-5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2050,9 +2212,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5-codex": {
     "provider": "openai",
     "family": "codex",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2096,9 +2261,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5-mini": {
     "provider": "openai",
     "family": "gpt-5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2143,9 +2311,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5-nano": {
     "provider": "openai",
     "family": "gpt-5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2190,9 +2361,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.1": {
     "provider": "openai",
     "family": "gpt-5.1",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2237,9 +2411,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.2": {
     "provider": "openai",
     "family": "gpt-5.2",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2284,9 +2461,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.2-codex": {
     "provider": "openai",
     "family": "codex",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2330,9 +2510,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.2-pro": {
     "provider": "openai",
     "family": "gpt-5.2",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2376,9 +2559,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.4": {
     "provider": "openai",
     "family": "gpt-5.4",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2423,9 +2609,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.4-mini": {
     "provider": "openai",
     "family": "gpt-5.4",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2470,9 +2659,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.4-nano": {
     "provider": "openai",
     "family": "gpt-5.4",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2517,9 +2709,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.4-pro": {
     "provider": "openai",
     "family": "gpt-5.4",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2563,9 +2758,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.5": {
     "provider": "openai",
     "family": "gpt-5.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2610,9 +2808,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.5-pro": {
     "provider": "openai",
     "family": "gpt-5.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2656,9 +2857,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.6-luna": {
     "provider": "openai",
     "family": "gpt-5.6",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2703,9 +2907,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.6-sol": {
     "provider": "openai",
     "family": "gpt-5.6",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2750,9 +2957,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-5.6-terra": {
     "provider": "openai",
     "family": "gpt-5.6",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2797,7 +3007,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-oss-120b": {
     "provider": "openai",
     "family": "gpt-oss",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -2815,7 +3028,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "gpt-oss-20b": {
     "provider": "openai",
     "family": "gpt-oss",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -2833,7 +3049,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/groq/compound": {
     "provider": "groq",
     "family": "compound",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -2861,7 +3080,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/groq/compound-mini": {
     "provider": "groq",
     "family": "compound",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -2889,7 +3111,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/llama-3.1-8b-instant": {
     "provider": "groq",
     "family": "llama-3.1",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -2916,7 +3141,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/llama-3.3-70b-versatile": {
     "provider": "groq",
     "family": "llama-3.3",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -2943,9 +3171,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/meta-llama/llama-4-scout-17b-16e-instruct": {
     "provider": "groq",
     "family": "llama-4",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -2971,7 +3202,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/meta-llama/llama-prompt-guard-2-22m": {
     "provider": "groq",
     "family": "prompt-guard",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -2998,7 +3232,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/meta-llama/llama-prompt-guard-2-86m": {
     "provider": "groq",
     "family": "prompt-guard",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3025,7 +3262,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/openai/gpt-oss-120b": {
     "provider": "groq",
     "family": "gpt-oss",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3052,7 +3292,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/openai/gpt-oss-20b": {
     "provider": "groq",
     "family": "gpt-oss",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3079,7 +3322,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/openai/gpt-oss-safeguard-20b": {
     "provider": "groq",
     "family": "safety",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3106,7 +3352,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "groq/qwen/qwen3-32b": {
     "provider": "groq",
     "family": "qwen3",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3133,7 +3382,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "llamacpp/local-model": {
     "provider": "llamacpp",
     "family": "local",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3161,7 +3413,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "lmstudio/local-model": {
     "provider": "lmstudio",
     "family": "local",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3189,7 +3444,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/codestral-2508": {
     "provider": "mistral",
     "family": "codestral",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3217,7 +3475,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/devstral-2512": {
     "provider": "mistral",
     "family": "devstral-2",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3245,9 +3506,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/magistral-medium-2509": {
     "provider": "mistral",
     "family": "magistral-medium-1.2",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -3274,7 +3538,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/ministral-3b": {
     "provider": "mistral",
     "family": "ministral-3b",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3302,7 +3569,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/ministral-8b": {
     "provider": "mistral",
     "family": "ministral-8b",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3330,9 +3600,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/mistral-large-2512": {
     "provider": "mistral",
     "family": "mistral-large-3",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -3359,10 +3632,13 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/mistral-medium-3-5": {
     "provider": "mistral",
     "family": "mistral-medium-3.5",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision",
+      "image",
       "pdf"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -3388,7 +3664,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/mistral-moderation-2603": {
     "provider": "mistral",
     "family": "moderation",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3416,9 +3695,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/mistral-small-2603": {
     "provider": "mistral",
     "family": "mistral-small-4",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -3445,9 +3727,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/pixtral-12b": {
     "provider": "mistral",
     "family": "pixtral-12b",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -3474,9 +3759,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "mistral/pixtral-large-2411": {
     "provider": "mistral",
     "family": "pixtral-large-2411",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -3503,9 +3791,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "o1": {
     "provider": "openai",
     "family": "o-series",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -3534,7 +3825,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "o1-mini": {
     "provider": "openai",
     "family": "o-series",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3564,9 +3858,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "o3": {
     "provider": "openai",
     "family": "o-series",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,
@@ -3595,7 +3892,10 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "o3-mini": {
     "provider": "openai",
     "family": "o-series",
-    "modalities": [
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
       "text"
     ],
     "streaming": true,
@@ -3625,9 +3925,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
   "o4-mini": {
     "provider": "openai",
     "family": "o-series",
-    "modalities": [
+    "inputModalities": [
       "text",
-      "vision"
+      "image"
+    ],
+    "outputModalities": [
+      "text"
     ],
     "streaming": true,
     "toolCalling": true,

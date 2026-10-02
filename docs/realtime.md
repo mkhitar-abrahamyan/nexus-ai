@@ -213,6 +213,7 @@ optional; the ones you will set first are the provider, the model, and the trans
 | Field | What it sets |
 | --- | --- |
 | `provider` | A `RealtimeProviderName`. Defaults to `openai`. |
+| `lifecycle` | `ai.lifecycle`, to run the session as one operation of a client: authorized when it first connects, finished with its estimated cost when it disconnects. |
 | `model` | The realtime model, such as `gpt-realtime`. |
 | `transport` | How the session connects: WebRTC, WebSocket, or the mock. |
 | `modalities` | Each a `RealtimeModality`: `audio`, `text`, or both. |

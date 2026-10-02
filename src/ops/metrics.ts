@@ -1,5 +1,4 @@
 import type { PipelineTraceStep } from '../pipeline/types.js';
-import { warnUnreadOption } from '../utils/deprecation.js';
 
 /** Where metrics go: counters, histograms, and gauges, labelled. */
 export interface MetricsSink {
@@ -22,12 +21,6 @@ export interface MetricsConfig {
   sink?: MetricsSink;
   /** Prefix for metric names. Defaults to `nexus_ai`. */
   prefix?: string;
-  /**
-   * Ignored: Prometheus text is always available from `getPrometheusMetrics()`.
-   *
-   * @deprecated Has never been read. It will be removed in 2.0.
-   */
-  prometheus?: boolean;
 }
 
 type MetricKey = string;
@@ -156,7 +149,11 @@ export class MetricsCollector {
   constructor(private config: MetricsConfig = {}) {
     this.sink = config.sink || this.memory;
     this.prefix = config.prefix || 'nexus_ai';
-    warnUnreadOption(config.prometheus !== undefined, 'NEXUS_DEP_METRICS_PROMETHEUS', 'MetricsConfig.prometheus');
+  }
+
+  /** Whether metrics are recorded at all. */
+  get enabled(): boolean {
+    return this.config.enabled === true;
   }
 
   /** Counts a request. */
@@ -179,11 +176,17 @@ export class MetricsCollector {
     if (cost !== undefined) await this.sink?.observe(`${this.prefix}.estimated_cost`, cost, labels);
   }
 
+  /** Counts an operation a cache answered without calling a provider. */
+  async recordCacheHit(labels: Record<string, string>): Promise<void> {
+    if (!this.config.enabled) return;
+    await this.sink?.increment(`${this.prefix}.cache_hits`, 1, labels);
+  }
+
   /** Records how long a pipeline stage took. */
   async recordStep(step: PipelineTraceStep): Promise<void> {
     if (!this.config.enabled) return;
     await this.sink?.observe(`${this.prefix}.pipeline_step_ms`, step.durationMs, {
-      step: String(step.name),
+      step: step.custom ?? step.name,
       ok: String(step.ok),
     });
   }

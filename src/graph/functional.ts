@@ -13,6 +13,9 @@
  * SQLite — stores a workflow, and `state()`, `history()`, and the studio read it.
  */
 import { MemoryGraphCheckpointer } from './checkpointer.js';
+import { withLifecycle } from '../lifecycle/run.js';
+import type { OperationLifecycleLike } from '../types/lifecycle.js';
+import { type CheckpointDraft, migrateCheckpoint, toCheckpoint } from './checkpoint-migration.js';
 import { GraphError, GraphNotInterruptedError, GraphThreadNotFoundError } from './errors.js';
 import type {
   GraphCheckpoint,
@@ -102,6 +105,11 @@ export interface WorkflowOptions {
   retry?: RetryPolicy;
   /** Steps that may run at once, for a workflow that starts many with `Promise.all`. Defaults to 16. */
   maxConcurrency?: number;
+  /**
+   * Runs every invocation as one operation of a client's lifecycle: pass `ai.lifecycle`. Model calls
+   * inside its steps are operations of their own.
+   */
+  lifecycle?: OperationLifecycleLike;
   /** Replaces the system clock, for tests. */
   now?: () => Date;
 }
@@ -243,7 +251,7 @@ export class Workflow<I = unknown, O = unknown> {
   resume(threadId: string, value: unknown, runOptions: WorkflowRunOptions = {}): AsyncIterable<WorkflowEvent<O>> {
     return this.execute(threadId, runOptions, async () => {
       const checkpoint = await this.waiting(threadId);
-      const first = (checkpoint.interrupts ?? [])[0] ?? checkpoint.interrupt;
+      const first = checkpoint.interrupts[0];
       return this.answered(checkpoint, first ? { [first.id]: value } : {});
     });
   }
@@ -276,12 +284,14 @@ export class Workflow<I = unknown, O = unknown> {
 
   /** The latest checkpoint, or the one at `step`. */
   async state(threadId: string, step?: number): Promise<GraphCheckpoint | undefined> {
-    return this.checkpointer()?.get(threadId, step);
+    const stored = await this.checkpointer()?.get(threadId, step);
+    return stored ? migrateCheckpoint(stored) : undefined;
   }
 
   /** Every checkpoint of a thread, newest first. */
   async history(threadId: string, limit?: number): Promise<GraphCheckpoint[]> {
-    return (await this.checkpointer()?.history(threadId, limit)) ?? [];
+    const stored = (await this.checkpointer()?.history(threadId, limit)) ?? [];
+    return stored.map((item) => migrateCheckpoint(item));
   }
 
   /** The workflow as a one-node graph, so diagrams and the studio can show it. */
@@ -302,10 +312,11 @@ export class Workflow<I = unknown, O = unknown> {
   }
 
   private async latest(threadId: string): Promise<GraphCheckpoint | undefined> {
-    return (await this.checkpointer()?.get(threadId)) as GraphCheckpoint | undefined;
+    const stored = await this.checkpointer()?.get(threadId);
+    return stored ? migrateCheckpoint(stored) : undefined;
   }
 
-  private fresh(threadId: string, input: I): GraphCheckpoint {
+  private fresh(threadId: string, input: I): CheckpointDraft {
     const state: WorkflowState<I, O> = { input, steps: {} };
     return {
       threadId,
@@ -348,10 +359,15 @@ export class Workflow<I = unknown, O = unknown> {
   private execute(
     threadId: string,
     runOptions: WorkflowRunOptions,
-    start: () => Promise<GraphCheckpoint>,
+    start: () => Promise<CheckpointDraft>,
   ): AsyncIterable<WorkflowEvent<O>> {
     const queue = new EventQueue<WorkflowEvent<O>>();
-    void this.run(threadId, runOptions, start, queue).then(
+    void withLifecycle(
+      this.options.lifecycle,
+      { family: 'graph', operation: `workflow.${this.name}`, metadata: { threadId, graph: this.name } },
+      runOptions.signal ? { signal: runOptions.signal } : {},
+      () => this.run(threadId, runOptions, start, queue),
+    ).then(
       () => queue.close(),
       (error: unknown) => queue.fail(error),
     );
@@ -361,7 +377,7 @@ export class Workflow<I = unknown, O = unknown> {
   private async run(
     threadId: string,
     runOptions: WorkflowRunOptions,
-    start: () => Promise<GraphCheckpoint>,
+    start: () => Promise<CheckpointDraft>,
     queue: EventQueue<WorkflowEvent<O>>,
   ): Promise<void> {
     const initial = await start();
@@ -374,16 +390,16 @@ export class Workflow<I = unknown, O = unknown> {
     let writes = Promise.resolve();
 
     // Checkpoints are written one at a time, in completion order, so parallel steps cannot interleave.
-    const persist = (checkpoint: Omit<GraphCheckpoint, 'threadId' | 'step' | 'createdAt'>): Promise<void> => {
+    const persist = (checkpoint: Omit<CheckpointDraft, 'threadId' | 'step' | 'createdAt'>): Promise<void> => {
       writes = writes.then(async () => {
         stepNumber += 1;
-        const written: GraphCheckpoint = {
+        const written = toCheckpoint({
           ...checkpoint,
           threadId,
           step: stepNumber,
           createdAt: this.now().toISOString(),
           metadata,
-        };
+        });
         if (checkpointer) await checkpointer.put(written);
         notify(runOptions, { type: 'checkpoint', step: stepNumber, status: written.status, next: written.next });
       });
@@ -495,7 +511,6 @@ export class Workflow<I = unknown, O = unknown> {
         state: state as never,
         next: [this.name],
         status: 'awaiting_input',
-        interrupt: suspended[0],
         interrupts: suspended,
         resolved,
       });

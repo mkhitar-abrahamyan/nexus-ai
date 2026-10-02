@@ -85,7 +85,8 @@ masking and redaction, the findings, and the guardrails that ran.
 
 Each one is a class you can use on its own:
 
-- `SchemaValidator` checks the request's shape.
+- `SchemaValidator` checks the request's shape: every field, by path. The checks are written out rather than
+  declared through a schema library, so the guardrails add no dependency to an install.
 - `InjectionDetector` matches instruction overrides, role jailbreaks, prompt exfiltration, and
   synthetic role tags, plus your `customPatterns`. `InjectionDetectionConfig.onDetection` blocks the
   request, records the finding, or, with `transform`, rewrites the attack phrases into inert markers

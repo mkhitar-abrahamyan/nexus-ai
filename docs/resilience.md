@@ -242,7 +242,11 @@ the counts, consecutive failures, average latency, last error, and score.
 `MetricsSink` takes counters (`increment()`), histograms (`observe()`), and optionally gauges.
 `InMemoryMetrics`, the default, keeps them for `getMetricsSnapshot()` and renders Prometheus text for
 `getPrometheusMetrics()`. `MetricsCollector` is what the client records through: requests,
-responses with latency and cost, errors, and each pipeline step.
+responses with latency and cost, errors, cache hits, and each pipeline step.
+
+Every family records through the same collector, under the same labels: `family`, `operation`, and
+the provider and model once routing chose them. So one query covers completions, embeddings, images,
+voice, calls, and graph runs alike. `cache_hits` counts operations a cache answered without a provider.
 
 OpenTelemetry is reached through structural interfaces, so no OpenTelemetry package is a dependency.
 
@@ -269,13 +273,19 @@ one. Values are redacted — secrets, tokens, credentials, and personal data —
 `includeSensitiveData` is set, and that is refused without an explicit sink, so raw data never lands
 on a console by accident.
 
+Every operation writes a `request` event when it is admitted. Then it writes one more: a `response`,
+a `blocked` when a check refused it, or an `error` when it failed after it started. A `blocked` event
+carries the guardrail findings that caused it.
+
 ## Other families
 
-`FamilyTelemetry` gives images, voice, and telephony the same rate limit, audit log, and metrics as
-completions. `run()` wraps one call described by a `FamilyCallDescriptor` — the operation, provider,
-model, user, request id, and metadata — and `FamilyRuntime` is the wiring the client hands down: its
-metrics collector, audit logger, rate limiter, and rate-limit settings. Cost is not recorded there,
-because media providers price per second, per image, or per character; each family records its own.
+`FamilyTelemetry` runs an image, voice, or telephony call through the client's
+[lifecycle](./lifecycle.md): its authorization, budget, hooks, rate limit, audit log, and metrics.
+`run()` takes a `FamilyCallDescriptor` — the operation, provider, model, user, tenant, request id,
+metadata, signal, idempotency key, and an estimate for the budget — and a function that receives the
+call's `ProviderCallContext`. `FamilyRuntime` is the wiring the client hands down: its lifecycle, or
+the collector, audit logger, rate limiter, and rate-limit settings to build one from. A family reports
+cost only when it can price the call in dollars.
 
 ## Limitations
 
@@ -297,9 +307,9 @@ specific entry point that provides it.
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `AuditLogger` | class | Writes audit events to the configured sink, redacting sensitive data unless told otherwise. |
-| `FamilyCallDescriptor` | interface | What one family call is, for metrics labels, the audit log, and the rate limit. |
+| `FamilyCallDescriptor` | interface | What one family call is, for authorization, metrics labels, the audit log, and the rate limit. |
 | `FamilyRuntime` | interface | Shared observability wiring handed to an operation family. |
-| `FamilyTelemetry` | class | Wraps one family call in the platform's rate limit, audit log, and metrics. |
+| `FamilyTelemetry` | class | Runs one family call through the client's lifecycle: authorization, the rate limit, the budget, the audit log, metrics, and hooks. |
 | `HealthConfig` | interface | Health tracking for providers, used to route around unhealthy ones. |
 | `InMemoryMetrics` | class | Keeps metrics in memory, for a snapshot or a Prometheus scrape. |
 | `MetricsCollector` | class | Records request, response, error, and pipeline-step metrics for a client, when metrics are enabled. |

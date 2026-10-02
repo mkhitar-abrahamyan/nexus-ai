@@ -13,6 +13,7 @@ import type {
 import type { NexusResponse } from '../types/response.js';
 import { VoiceCapabilityError, VoiceProviderError } from './errors.js';
 import { FamilyTelemetry, type FamilyRuntime } from '../ops/family-telemetry.js';
+import type { ProviderCallContext } from '../types/lifecycle.js';
 import { VoiceSession, type VoiceSessionCompletionClient } from './session.js';
 
 /** The part of a client a voice turn needs. */
@@ -64,18 +65,20 @@ export class VoiceManager {
     const transcribe = provider.transcribe;
     if (!transcribe) throw new VoiceCapabilityError(provider.info.name, 'transcription');
 
-    return this.telemetry.run({ operation: 'transcribe', provider: provider.info.name, model: request.model }, () =>
-      this.callTranscribe(provider.info.name, transcribe.bind(provider), request),
+    return this.telemetry.run(
+      { operation: 'transcribe', provider: provider.info.name, model: request.model, signal: request.signal },
+      (context) => this.callTranscribe(provider.info.name, transcribe.bind(provider), request, context),
     );
   }
 
   private async callTranscribe(
     providerName: string,
-    transcribe: (request: TranscriptionRequest) => Promise<TranscriptionResponse>,
+    transcribe: (request: TranscriptionRequest, context: ProviderCallContext) => Promise<TranscriptionResponse>,
     request: TranscriptionRequest,
+    context: ProviderCallContext,
   ): Promise<TranscriptionResponse> {
     try {
-      return await transcribe(request);
+      return await transcribe(request, context);
     } catch (error) {
       if (error instanceof VoiceProviderError) throw error;
       throw new VoiceProviderError(`Voice transcription failed for provider "${providerName}"`, providerName, error);
@@ -88,18 +91,20 @@ export class VoiceManager {
     const speak = provider.speak;
     if (!speak) throw new VoiceCapabilityError(provider.info.name, 'speech');
 
-    return this.telemetry.run({ operation: 'speak', provider: provider.info.name, model: request.model }, () =>
-      this.callSpeak(provider.info.name, speak.bind(provider), request),
+    return this.telemetry.run(
+      { operation: 'speak', provider: provider.info.name, model: request.model, signal: request.signal },
+      (context) => this.callSpeak(provider.info.name, speak.bind(provider), request, context),
     );
   }
 
   private async callSpeak(
     providerName: string,
-    speak: (request: SpeechRequest) => Promise<SpeechResponse>,
+    speak: (request: SpeechRequest, context: ProviderCallContext) => Promise<SpeechResponse>,
     request: SpeechRequest,
+    context: ProviderCallContext,
   ): Promise<SpeechResponse> {
     try {
-      return await speak(request);
+      return await speak(request, context);
     } catch (error) {
       if (error instanceof VoiceProviderError) throw error;
       throw new VoiceProviderError(

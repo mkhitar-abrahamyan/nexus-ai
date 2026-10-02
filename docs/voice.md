@@ -223,7 +223,9 @@ speech.
 
 ## Providers and the manager
 
-A `VoiceProvider` is `info` and two optional methods, `transcribe()` and `speak()`.
+A `VoiceProvider` is `info` and two optional methods, `transcribe()` and `speak()`. Each receives the
+call's `ProviderCallContext` as its second argument, since every transcription and every utterance
+runs through the client's [lifecycle](./lifecycle.md).
 `VoiceProviderInfo` gives its name, whether it runs locally, and `supports`, which operations it
 implements. `VoiceConfig` is the client's `voice` option: the default transcription and speech
 providers and the providers by name.

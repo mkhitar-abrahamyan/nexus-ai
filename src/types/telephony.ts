@@ -1,3 +1,4 @@
+import type { ProviderCallContext } from './lifecycle.js';
 /** Whether a call came in to one of your numbers or was placed by your application. */
 export type TelephonyCallDirection = 'inbound' | 'outbound';
 
@@ -499,8 +500,8 @@ export interface TelephonyOutboundAudioMessage {
 export interface TelephonyProvider {
   /** What the provider is and what it supports. */
   readonly info: TelephonyProviderInfo;
-  /** Places an outbound call. */
-  createCall?(request: CreateCallRequest): Promise<CreateCallResponse>;
+  /** Places an outbound call. `context` carries the operation's id, signal, deadline, and trace headers. */
+  createCall?(request: CreateCallRequest, context?: ProviderCallContext): Promise<CreateCallResponse>;
   /** Renders a webhook response in the provider's markup. */
   createWebhookResponse?(request: TelephonyResponseRequest): Promise<TelephonyWebhookResponse>;
   /** Checks a webhook request's signature. */
@@ -514,17 +515,17 @@ export interface TelephonyProvider {
     options?: { event?: 'media' | 'mark' | 'clear'; markName?: string },
   ): TelephonyOutboundAudioMessage;
   /** Looks up one call. */
-  getCall?(request: GetCallRequest): Promise<TelephonyCallDetails>;
+  getCall?(request: GetCallRequest, context?: ProviderCallContext): Promise<TelephonyCallDetails>;
   /** Ends a call. */
-  endCall?(request: EndCallRequest): Promise<TelephonyCallDetails>;
+  endCall?(request: EndCallRequest, context?: ProviderCallContext): Promise<TelephonyCallDetails>;
   /** Parses a status callback, or returns `undefined` for a body it does not recognize. */
   parseStatusCallback?(
     body: string | URLSearchParams | Record<string, string | number | boolean | undefined>,
   ): TelephonyStatusCallback | undefined;
   /** Lists the phone numbers you own. */
-  listPhoneNumbers?(request?: ListPhoneNumbersRequest): Promise<TelephonyPhoneNumber[]>;
+  listPhoneNumbers?(request?: ListPhoneNumbersRequest, context?: ProviderCallContext): Promise<TelephonyPhoneNumber[]>;
   /** Changes where a number sends calls and messages. */
-  updatePhoneNumber?(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber>;
+  updatePhoneNumber?(request: UpdatePhoneNumberRequest, context?: ProviderCallContext): Promise<TelephonyPhoneNumber>;
 }
 
 /** Telephony providers available to a client. */

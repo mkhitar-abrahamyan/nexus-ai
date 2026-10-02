@@ -7,8 +7,9 @@
 and handles what sits around each call: long conversations, token budgets, cost checks, reasoning and
 prompt-caching controls, options a model cannot honour, and streaming.
 
-Import it from the root, or from `nexus-ai-pro/core` and `nexus-ai-pro/config` to get the client
-without the rest of the root.
+Import it from the root. In 2.0 the root holds the client and nothing else: its config builders, its
+types, the errors it throws, and the lifecycle every call runs through. Every family is on a subpath
+of its own.
 
 ```ts
 import { createNexus } from 'nexus-ai-pro';
@@ -64,6 +65,7 @@ reference below links every name to its summary.
 | Structured output | `ResponseFormatConfig` | this guide |
 | Logging and audit | `LoggerConfig`, `AuditLogConfig` | below, and [Security](./security.md) |
 | Pipeline hooks | `PipelineConfig` | this guide |
+| Authorization, a shared budget, and hooks for every call | `LifecycleConfig` | [Lifecycle](./lifecycle.md) |
 
 `ProvidersConfig` has one typed entry per provider: `OpenAIProviderConfig`, `AnthropicProviderConfig`,
 `GoogleProviderConfig`, `AzureOpenAIProviderConfig`, `OllamaProviderConfig`, `GroqProviderConfig`,
@@ -83,6 +85,10 @@ reference below links every name to its summary.
 timestamp, structured data, and the error when there is one. Send them to your own sink, the console,
 or both.
 
+`AuditLogConfig` sends each `AuditLogEvent` to your sink. Every operation, in every family, writes a
+`request` event when it is admitted. It then writes a `response`, a `blocked` when a check refused
+it, or an `error`. Each event carries the operation's family, its name, and its request id.
+
 ## A request and its response
 
 `CompletionRequest` is the request every provider takes. It needs a `model` and `messages`; the rest
@@ -94,19 +100,36 @@ is what a provider may honour:
 | Length and time | `maxTokens`, `timeoutMs`, `signal` |
 | Tools | `tools`, and a `ToolChoice` |
 | Output | `responseFormat`, `reasoning`, `cache` |
+| Identity | `requestId`, `userId`, `tenantId`, `idempotencyKey` |
 | Application data | `metadata` |
+
+The identity fields follow the call everywhere. `requestId` is on the audit log, the provider call,
+and `response.meta.requestId`; one is generated when you set none. `tenantId` decides which budget
+the call is charged to. `idempotencyKey` goes to providers that deduplicate retried requests.
 
 Each tool is a `ToolDefinition`: a name, a description written for the model, and a JSON Schema for
 its arguments. It can also carry an `execute` function, for loops that run tools themselves, and a
 cache breakpoint.
 
-A `Message` has a `MessageRole`, and either text or a list of `ContentPart` values: `TextContent`,
-`ImageContent`, `AudioContent`, or `VideoContent`. `BinaryBuffer` stands in for Node's `Buffer`, so the
-types also compile for a browser.
+A `Message` has a `MessageRole`, and either text or a list of `ContentPart` values:
+
+| Part | What it carries |
+| --- | --- |
+| `TextContent` | Text. |
+| `ImageContent` | An image from a path, a URL, bytes, base64 text, or an asset. |
+| `AudioContent`, `VideoContent` | Audio or video, or a transcript standing in for the audio. |
+| `AssetContent` | An asset by reference: an image or file named by where it lives, never its bytes. |
+
+`AssetContent` is how a tool's image reaches the model without base64 text. Every adapter writes it
+as one short reference line, which the model can pass back to another tool. Use an image part when
+the model should see the image itself. A tool returns either kind as a `ToolOutput`, built with
+`toolOutput()`; the [agents guide](./agents.md) shows it. `BinaryBuffer` stands in for Node's `Buffer`,
+so the types also compile for a browser.
 
 `NexusResponse` comes back with:
 
 - the text, the `ToolCall` values the model made, and a `finishReason`;
+- `assets`, when a model whose output includes images returned some, as bytes;
 - `ResponseMeta`: which provider and model answered, the latency, `TokenUsage`, `ResponseCost`,
   whether it was a cache hit, the guardrails applied, and the `PipelineTrace` when tracing is on.
 
@@ -133,6 +156,15 @@ const response = await ai.complete({
   responseFormat: { type: 'json_schema', schema: { type: 'object', required: ['total'], properties: { total: { type: 'number' } } } },
 });
 ```
+
+The schema can be written two ways, and neither validator is installed with the package:
+
+| Schema | What checks it | What to install |
+| --- | --- | --- |
+| A zod shape, such as `{ total: z.number() }` | Each field's own `safeParse` | Nothing beyond the zod you wrote it with |
+| A JSON Schema object | ajv, loaded on the first check | `npm install ajv ajv-formats` |
+
+A JSON Schema without ajv installed fails with a `ResponseFormatError` that says what to install.
 
 ## Context windows
 
@@ -344,10 +376,14 @@ console.log(usage?.reasoningTokens);    // share of output spent on reasoning
 console.log(cost?.amount, cost?.currency, cost?.basis);
 ```
 
-`meta.tokensInput` keeps its original meaning of every prompt token, cached or not.
-`meta.estimatedCost` is deprecated in favor of `cost.amount`. Bundled prices are defaults, not
-financial truth; override them with `models.registry`, or adjust cache rates with
+`meta.tokensInput` keeps its original meaning of every prompt token, cached or not. Bundled prices
+are defaults, not financial truth; override them with `models.registry`, or adjust cache rates with
 `models.cachePricing`.
+
+The client prices each response on the model it routed the request to, as the registry names it.
+Providers often answer with another name, such as a dated snapshot of the model, which the registry
+does not file. Pricing on that echo would cost the call nothing. A charge the provider reports
+itself, with `basis: 'reported'`, is kept as it is.
 
 ## Counting and pricing tokens
 
@@ -431,6 +467,12 @@ All providers normalize streaming chunks to `text`, `reasoning`, `tool_call`, `d
 Reasoning summaries only arrive when the request asks for them, so a consumer that switches on
 `chunk.type` keeps receiving visible output only.
 
+A stream is an operation like a completion. It opens when you first read it: authorization, the rate
+limit, guardrails, routing, and the budget run then. So an error from any of them comes out of the
+`for await` loop, not out of the `stream()` call. The `done` chunk carries the request id and the
+cost of the usage the provider reported. The operation finishes with the stream; one you stop reading
+early finishes as cancelled.
+
 When security is enabled, output streams are correctness-first: Nexus buffers and validates the
 complete output before yielding any chunk, up to 1 MiB or 100,000 chunks. This prevents secrets,
 PII, and blocked phrases split across provider chunks from leaking partially, at the cost of
@@ -461,8 +503,18 @@ Every hook receives the `PipelineContext`:
 
 A hook may return a new context, a replacement request, a replacement response, or nothing.
 
-Each stage is timed into a `PipelineTrace` of `PipelineTraceStep` values, named by `PipelineStepName`.
-It is returned on `response.meta.pipeline` unless `includeTraceInResponse` is off.
+`PipelineContext` is generic over the request and the response, and both default to a completion's.
+That lets you run the same hooks over another family's types. Give `PipelineRunner` a
+`PipelineShapes` that says how to tell your request and response apart from a returned context.
+
+Each stage is timed into a `PipelineTrace` of `PipelineTraceStep` values. `PipelineStepName` names
+the stage, and the list is closed, so a `switch` over it can be exhaustive. It holds the hook points,
+the built-in stages, and the lifecycle's `authorize`, `reserveBudget`, `reconcileCost`, and `audit`.
+A step you add with `use()` is recorded as `customStep`, with its own name in the step's `custom`
+field. The trace is returned on `response.meta.pipeline` unless `includeTraceInResponse` is off.
+
+The pipeline is a completion's own stages. The [lifecycle](./lifecycle.md) around it is shared by
+every family: authorization, the budget, audit, metrics, and hooks that see every call.
 
 ## Serving a request from a framework
 
@@ -492,30 +544,31 @@ For a full HTTP surface — threads, background runs, resumable streams — see 
 - Guardrails reduce risk; keep server-side authorization and provider moderation around high-impact
   actions, as the [security guide](./security.md) says.
 
-## The registry, in passing
+## The registry's types, in passing
 
-The root also re-exports the model registry. The [providers guide](./providers.md) explains it:
+The root keeps the types a model entry is made of, which the [providers guide](./providers.md)
+explains: `ModelCapabilities`, `InputModality`, `OutputModality`, `ModelEndpoint`, `ModelStatus`,
+`AliasMetadata`, `AliasStage`, `ProviderCapabilities`, `PromptCachingCapability`, `CacheTtl`, and
+`CacheHint`. The registry data and its lookups are on `nexus-ai-pro/models`.
 
-- data: `KNOWN_MODELS`, `MODEL_ALIAS_METADATA`, `REGISTRY_PROVENANCE`;
-- lookup: `resolveProvider()`;
-- types: `ModelCapabilities`, `ModelEndpoint`, `ModelStatus`, `Modality`, `AliasMetadata`, `AliasStage`,
-  `ProviderCapabilities`, `PromptCachingCapability`, `CacheTtl`, and `CacheHint`.
+## The root import
 
-The types stay on the root. The data and the lookup move to `nexus-ai-pro/models` in 2.0.
+The root import is the core client and nothing else:
 
-## The root import, now and in 2.0
-
-The root import has always re-exported most of the package. In 2.0 it keeps only the core client:
-
-| Kept on the root | Examples |
+| On the root | Examples |
 | --- | --- |
 | The client and its config builders | `NexusAI`, `createNexus`, `createNexusConfig` |
-| Request helpers | `tool()`, the streaming helpers, the usage and pricing helpers |
+| Request helpers | `tool()`, `toolOutput()`, the streaming helpers, the usage and pricing helpers |
+| The lifecycle | `OperationLifecycle`, its errors, and its types |
 | Types of configuration, requests, and responses | `NexusAIConfig`, `CompletionRequest`, `NexusResponse` |
 | Errors the client throws | `NexusProviderError`, `NexusSecurityError`, `CostBudgetError` |
 
-Everything else is already on a subpath, and deprecated on the root since 1.25. Your editor strikes a
-deprecated import through and names the subpath. The command line moves them for you:
+Importing it costs about 320 KB, against 572 KB when the root re-exported most of the package.
+Provider adapters load on their first call, and so do the features that answer asynchronously: agents,
+evals, verification, the semantic cache, and the image and embedding engines.
+
+Code written for 1.x imported families from the root. The command line moves those imports to their
+subpaths:
 
 ```bash
 npx nexus migrate src --write
@@ -610,8 +663,9 @@ specific entry point that provides it.
 | `PipelineHooksConfig` | type | Hooks by point; several hooks at one point run in order. |
 | `PipelineMiddleware` | type | A hook: inspects the context, and may return a new context, a replacement request, a replacement response, or nothing to leave it unchanged. |
 | `PipelineRunner` | class | Runs the request pipeline's hooks and custom steps, and times each stage into the request's trace. |
+| `PipelineShapes` | interface | How a runner tells what a hook returned, for a family other than completions: a replacement request, a replacement response, or anything else, which is taken as a new context. |
 | `PipelineStep` | interface | A custom stage appended to the pipeline. |
-| `PipelineStepName` | type | A pipeline stage, as it appears in a trace: a hook point, one of the built-in stages, or a custom step's name. |
+| `PipelineStepName` | type | A pipeline stage, as it appears in a trace: a hook point, a built-in stage, a lifecycle stage, or `customStep` for a step added with `use()`, whose own name is in `PipelineTraceStep.custom`. |
 | `PipelineTrace` | interface | Every stage a request went through, with timings. |
 | `PipelineTraceStep` | interface | One timed stage of a request. |
 
@@ -628,8 +682,10 @@ specific entry point that provides it.
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `AnthropicProviderConfig` | interface | Configuration for Anthropic, or an Anthropic-compatible endpoint through `baseUrl`. |
+| `AssetContent` | interface | An asset passed by reference: an image or file a tool made or stored, named in the conversation by where it lives rather than carried as base64 text. |
 | `AudioContent` | interface | An audio part of a message, for audio-capable models, or a transcript standing in for the audio. |
 | `AuditLogConfig` | interface | What gets written to the audit log. |
+| `AuditLogEvent` | interface | One audit record. |
 | `AzureOpenAIProviderConfig` | interface | Configuration for Azure OpenAI deployment-scoped chat completions. |
 | `BinaryBuffer` | type | Node's `Buffer` when Node's type definitions are loaded, and `Uint8Array` otherwise, so the message types compile in a browser project as well as on a server. |
 | `BudgetConfig` | interface | A limit on how many input tokens a request may use. |
@@ -641,7 +697,7 @@ specific entry point that provides it.
 | `CohereProviderConfig` | interface | Configuration for Cohere. |
 | `CompletionRequest` | interface | A completion request: the model, the conversation, and every control over how it is answered. |
 | `ContentPart` | type | One part of a multimodal message. |
-| `costAmount` | function | Numeric cost for metrics and budgets, without parsing the formatted display string. |
+| `costAmount` | function | Numeric cost for metrics and budgets: the priced amount, or 0 when nothing priced the call. |
 | `CostBudgetConfig` | interface | Refuses or flags a request whose estimated cost exceeds a limit, before it is sent. |
 | `CostEstimate` | interface | What a request is estimated to cost, before it is sent. |
 | `createNexus` | function | Creates a `NexusAI` instance from either the full production config or a small beginner shorthand. |
@@ -694,6 +750,7 @@ specific entry point that provides it.
 | `ToolCallResult` | interface | What a tool returned, correlated with the call that asked for it. |
 | `ToolChoice` | type | How the model may use tools. |
 | `ToolDefinition` | interface | A tool the model may call. |
+| `ToolOutput` | interface | What a tool returns when its result is content rather than a value to serialize: text, images, and asset references, in order. |
 | `UsageInput` | interface | Token counts as a provider reported them, for `buildUsage()`. |
 | `VideoContent` | interface | A video part of a message. |
 <!-- reference:end -->

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 const imports = [
   {
     specifier: 'nexus-ai-pro',
-    exports: ['NexusAI', 'createNexus', 'createNexusConfig', 'BaseProvider', 'NexusProviderError', 'Router'],
+    exports: ['NexusAI', 'createNexus', 'createNexusConfig', 'NexusProviderError', 'OperationLifecycle', 'toolOutput'],
   },
+  { specifier: 'nexus-ai-pro/lifecycle', exports: ['budgetLedger', 'MemoryBudgetUsage', 'OperationLifecycle'] },
   { specifier: 'nexus-ai-pro/core', exports: ['NexusAI'] },
   { specifier: 'nexus-ai-pro/streaming', exports: ['collectStream', 'createTextStream'] },
   { specifier: 'nexus-ai-pro/config', exports: ['NexusConfigBuilder', 'createNexusConfig', 'defineNexusConfig'] },

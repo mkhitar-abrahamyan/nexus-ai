@@ -1,4 +1,6 @@
+import { OperationLifecycle } from '../core/lifecycle.js';
 import type { RateLimitConfig } from '../types/config.js';
+import type { OperationFamily, ProviderCallContext } from '../types/lifecycle.js';
 import type { AuditLogger } from './audit-logger.js';
 import type { MetricsCollector } from './metrics.js';
 import type { RateLimiter } from './rate-limiter.js';
@@ -6,9 +8,9 @@ import type { RateLimiter } from './rate-limiter.js';
 /**
  * Shared observability wiring handed to an operation family.
  *
- * Passed down from `NexusAI` so every family reports into the same collector, audit log, and rate
- * limiter. Each field is optional, so a family constructed standalone still works and simply
- * records nothing.
+ * Passed down from `NexusAI` so every family runs through the client's lifecycle: the same
+ * authorization, budget, hooks, collector, audit log, and rate limiter. Each field is optional, so a
+ * family constructed standalone still works and simply records nothing.
  */
 export interface FamilyRuntime {
   /** Where metrics go. */
@@ -19,9 +21,14 @@ export interface FamilyRuntime {
   rateLimiter?: RateLimiter;
   /** The rate-limit policy. */
   rateLimit?: RateLimitConfig;
+  /**
+   * The client's lifecycle. When it is set, every call runs through it and the fields above are
+   * ignored; otherwise a lifecycle is built from them.
+   */
+  lifecycle?: OperationLifecycle;
 }
 
-/** What one family call is, for metrics labels, the audit log, and the rate limit. */
+/** What one family call is, for authorization, metrics labels, the audit log, and the rate limit. */
 export interface FamilyCallDescriptor {
   /** Operation name recorded as a metric label, such as `transcribe` or `images.generate`. */
   operation: string;
@@ -31,88 +38,77 @@ export interface FamilyCallDescriptor {
   model?: string;
   /** The user it is for, for per-user rate limits. */
   userId?: string;
-  /** The request id, for the audit log. */
+  /** The tenant it is for, for per-tenant budgets. */
+  tenantId?: string;
+  /** The request id, for the audit log and the provider. */
   requestId?: string;
   /** Extra fields for the audit event. Never include raw media or credentials. */
   metadata?: Record<string, unknown>;
+  /** Cancels the call. */
+  signal?: AbortSignal;
+  /** Carried to providers that deduplicate requests themselves. */
+  idempotencyKey?: string;
+  /** What the call is expected to cost in US dollars, held against the lifecycle's budget. */
+  estimate?: number;
 }
 
 /**
- * Wraps one family call in the platform's rate limit, audit log, and metrics.
+ * Runs one family call through the client's lifecycle: authorization, the rate limit, the budget,
+ * the audit log, metrics, and hooks.
  *
- * Extracted rather than repeated in each manager: images, voice, and telephony need the same five
- * steps in the same order, and three hand-written copies would drift. Keeping it in one place also
- * means a family added later inherits the behavior by using this instead of remembering the order.
+ * Extracted rather than repeated in each manager: images, voice, and telephony need the same steps in
+ * the same order, and hand-written copies would drift. A family added later inherits the behavior by
+ * using this instead of remembering the order.
  *
- * Cost is deliberately not recorded here. Media and telephony providers price per second, per
- * image, or per minute, and inventing a number for a metric named after tokens would be worse than
- * reporting none.
+ * Cost is reported only when the family can price the call. Media and telephony providers price per
+ * second, per image, or per minute, and inventing a number would be worse than reporting none.
  */
 export class FamilyTelemetry {
-  private readonly metrics?: MetricsCollector;
-  private readonly auditLogger?: AuditLogger;
-  private readonly rateLimiter?: RateLimiter;
-  private readonly rateLimit?: RateLimitConfig;
+  private readonly lifecycle: OperationLifecycle;
 
   constructor(
     private readonly family: string,
     runtime: FamilyRuntime = {},
   ) {
-    this.metrics = runtime.metrics;
-    this.auditLogger = runtime.auditLogger;
-    this.rateLimiter = runtime.rateLimiter;
-    this.rateLimit = runtime.rateLimit;
+    this.lifecycle = runtime.lifecycle ?? new OperationLifecycle(runtime);
   }
 
   /** True when nothing is wired, so a caller can skip the wrapper entirely. */
   get inert(): boolean {
-    return !this.metrics && !this.auditLogger && !this.rateLimiter;
+    return this.lifecycle.inert;
   }
 
-  /** Runs a call inside the rate limit, audit log, and metrics. */
-  async run<T>(call: FamilyCallDescriptor, fn: () => Promise<T>): Promise<T> {
-    const labels = this.labels(call);
-    const startedAt = Date.now();
-
-    try {
-      await this.metrics?.recordRequest(labels);
-      await this.checkRateLimit(call);
-      await this.audit('request', call);
-
-      const result = await fn();
-
-      await this.audit('response', call);
-      await this.metrics?.recordResponse(labels, Date.now() - startedAt);
-      return result;
-    } catch (error) {
-      await this.metrics?.recordError(labels);
-      throw error;
-    }
+  /** Runs a call inside the lifecycle. `fn` receives the context to hand the provider. */
+  run<T>(
+    call: FamilyCallDescriptor,
+    fn: (context: ProviderCallContext) => Promise<T>,
+    settle?: (result: T) => { cost?: number },
+  ): Promise<T> {
+    return this.lifecycle.run(
+      {
+        family: familyOf(this.family),
+        operation: call.operation,
+        ...(call.requestId ? { requestId: call.requestId } : {}),
+        ...(call.provider ? { provider: call.provider } : {}),
+        ...(call.model ? { model: call.model } : {}),
+        ...(call.userId ? { userId: call.userId } : {}),
+        ...(call.tenantId ? { tenantId: call.tenantId } : {}),
+        ...(call.metadata ? { metadata: call.metadata } : {}),
+      },
+      {
+        estimate: () => call.estimate,
+        execute: fn,
+        ...(settle ? { settle } : {}),
+      },
+      {
+        ...(call.signal ? { signal: call.signal } : {}),
+        ...(call.idempotencyKey ? { idempotencyKey: call.idempotencyKey } : {}),
+      },
+    );
   }
+}
 
-  private async checkRateLimit(call: FamilyCallDescriptor): Promise<void> {
-    if (!this.rateLimiter || !this.rateLimit?.enabled) return;
-    const request = { model: call.model ?? `${this.family}:${call.operation}`, userId: call.userId };
-    if (this.rateLimit.store) await this.rateLimiter.checkAsync(request, this.rateLimit);
-    else this.rateLimiter.check(request, this.rateLimit);
-  }
-
-  private async audit(type: 'request' | 'response', call: FamilyCallDescriptor): Promise<void> {
-    await this.auditLogger?.log({
-      type,
-      requestId: call.requestId,
-      userId: call.userId,
-      model: call.model,
-      provider: call.provider,
-      timestamp: new Date().toISOString(),
-      metadata: { family: this.family, operation: call.operation, ...call.metadata },
-    });
-  }
-
-  private labels(call: FamilyCallDescriptor): Record<string, string> {
-    const labels: Record<string, string> = { family: this.family, operation: call.operation };
-    if (call.provider) labels.provider = call.provider;
-    if (call.model) labels.model = call.model;
-    return labels;
-  }
+/** The family a manager names, as the lifecycle spells it. */
+function familyOf(name: string): OperationFamily {
+  return (name === 'images' ? 'image' : name === 'embeddings' ? 'embedding' : name) as OperationFamily;
 }

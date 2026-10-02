@@ -1,9 +1,10 @@
 import type { NexusAIConfig } from '../types/config.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { ContextSummaryInput, ContextWindowResult } from '../types/context-window.js';
-import type { NexusPlan } from '../types/planning.js';
-import type { NexusResponse, NexusStream } from '../types/response.js';
+import type { CostEstimate, NexusPlan } from '../types/planning.js';
+import type { NexusResponse, NexusStream, ResponseMeta, StreamChunk } from '../types/response.js';
 import type { AgentConfig, AgentResult } from '../types/agent.js';
+import type { OperationDescriptor, OperationStartOptions, OperationTicket } from '../types/lifecycle.js';
 import type {
   SpeechRequest,
   SpeechResponse,
@@ -33,50 +34,42 @@ import type {
   TelephonyWebhookValidationRequest,
   UpdatePhoneNumberRequest,
 } from '../types/telephony.js';
-import type { PipelineStep } from '../pipeline/types.js';
+import type { PipelineContext, PipelineStep, PipelineStepName } from '../pipeline/types.js';
 import type { BaseProvider } from '../providers/base.js';
-import { OpenAIProvider } from '../providers/openai.js';
-import { AnthropicProvider } from '../providers/anthropic.js';
-import { GoogleProvider } from '../providers/google.js';
-import { OllamaProvider } from '../providers/ollama.js';
-import { OpenRouterProvider } from '../providers/openrouter.js';
-import { GroqProvider } from '../providers/groq.js';
-import { MistralProvider } from '../providers/mistral.js';
-import { CohereProvider } from '../providers/cohere.js';
-import { DeepSeekProvider } from '../providers/deepseek.js';
-import { AzureOpenAIProvider } from '../providers/azure-openai.js';
-import { LMStudioProvider } from '../providers/lmstudio.js';
-import { LlamaCppProvider } from '../providers/llamacpp.js';
+import { configuredProviders } from '../providers/lazy.js';
+import type { RouteDecision } from '../router/types.js';
 import { Router, FailoverExecutor } from '../router/index.js';
+import type { ExecutionOptions } from '../router/failover.js';
 import { Logger } from '../utils/logger.js';
 import { SecurityPipeline } from '../security/index.js';
 import { ContextWindowManager } from '../context/index.js';
-import { VoiceManager, type VoiceSession } from '../voice/index.js';
+import { VoiceManager } from '../voice/manager.js';
+import type { VoiceSession } from '../voice/session.js';
 import { ImageManager } from '../images/manager.js';
 import { EmbeddingManager } from '../embeddings/manager.js';
-import { TelephonyManager } from '../telephony/index.js';
+import { TelephonyManager } from '../telephony/manager.js';
 import { TokenOptimizer } from '../optimizer/index.js';
-import { AgentLoop } from '../agent/loop.js';
 import { resolveModel } from '../models/registry.js';
 import { createCacheKey, MemoryCache } from '../cache/memory-cache.js';
+import type { SemanticCache } from '../cache/semantic-cache.js';
 import { applyResponseFormat, withResponseFormat } from './response-format.js';
 import { protectStreamOutput } from './secure-stream.js';
 import { AuditLogger } from '../ops/audit-logger.js';
 import { RateLimiter } from '../ops/rate-limiter.js';
-import { completeVerified, type VerificationOptions } from '../hallucination/verification.js';
-import { completeWithSelfConsistency, type SelfConsistencyOptions } from '../hallucination/consistency.js';
+import type { VerificationOptions } from '../hallucination/verification.js';
+import type { SelfConsistencyOptions } from '../hallucination/consistency.js';
 import { assertWithinCostBudget, estimateCost } from '../optimizer/cost.js';
 import { negotiateCompletionRequest } from '../capabilities/negotiate.js';
-import { costAmount, ensureUsageAndCost } from './usage.js';
+import { buildUsage, costAmount, priceUsage } from './usage.js';
 import { PipelineRunner, createPipelineContext } from '../pipeline/pipeline.js';
 import { MetricsCollector } from '../ops/metrics.js';
 import { ProviderHealthMonitor } from '../ops/health.js';
 import { CircuitBreaker } from '../ops/circuit-breaker.js';
-import { SemanticCache } from '../cache/semantic-cache.js';
 import { runBatch, type BatchOptions, type BatchItemResult } from '../jobs/batch.js';
 import { JobQueue, type QueueOptions } from '../jobs/queue.js';
-import { EvalRunner, type EvalCase, type EvalRunResult } from '../evals/runner.js';
-import { summarizeVerifyFormat, type SummarizeVerifyFormatOptions, type WorkflowResult } from '../workflow/chains.js';
+import type { EvalCase, EvalRunResult } from '../evals/runner.js';
+import type { SummarizeVerifyFormatOptions, WorkflowResult } from '../workflow/chains.js';
+import { OperationLifecycle } from './lifecycle.js';
 
 /**
  * Main runtime facade for provider routing, security, optimization, evals, voice, jobs, and observability.
@@ -86,6 +79,13 @@ import { summarizeVerifyFormat, type SummarizeVerifyFormatOptions, type Workflow
 export class NexusAI {
   /** Provider-neutral image generation and editing operations. */
   readonly images: ImageManager;
+
+  /**
+   * What every operation of this client runs through: authorization, the rate limit, the budget,
+   * hooks, audit, and metrics. Hand it to a graph, an agent, or a realtime session so its runs are
+   * operations of this client too.
+   */
+  readonly lifecycle: OperationLifecycle;
 
   private config: NexusAIConfig;
   private embeddingManager?: EmbeddingManager;
@@ -120,12 +120,15 @@ export class NexusAI {
       this.circuitBreaker.recordFailure(providerName, error);
     },
   };
-  private semanticCache: SemanticCache;
+  /** Loaded on the first semantic lookup, so a client without one never imports it. */
+  private semanticCache?: SemanticCache;
+  private semanticCacheLoading?: Promise<SemanticCache>;
 
   /**
    * Creates a configured Nexus runtime.
    *
-   * Provider SDKs are loaded lazily by each provider adapter, so unused providers do not add runtime work.
+   * Provider adapters and their SDKs load on each provider's first call, so unused providers add no
+   * import cost and no runtime work.
    */
   constructor(config: NexusAIConfig) {
     this.config = {
@@ -138,13 +141,21 @@ export class NexusAI {
     this.contextWindow = new ContextWindowManager(this.config.contextWindow || {});
     this.auditLogger = new AuditLogger(this.config.auditLog);
     this.metrics = new MetricsCollector(this.config.metrics || {});
-    // Built before the families so every one of them shares this runtime's collector, audit log,
-    // and rate limiter rather than reporting into instances nobody can read.
+    this.lifecycle = new OperationLifecycle({
+      metrics: this.metrics,
+      auditLogger: this.auditLogger,
+      rateLimiter: this.rateLimiter,
+      rateLimit: this.config.rateLimit,
+      config: this.config.lifecycle,
+    });
+    // Built before the families so every one of them runs through this client's lifecycle rather
+    // than reporting into instances nobody can read.
     const familyRuntime = {
       metrics: this.metrics,
       auditLogger: this.auditLogger,
       rateLimiter: this.rateLimiter,
       rateLimit: this.config.rateLimit,
+      lifecycle: this.lifecycle,
     };
     this.voiceManager = new VoiceManager(this.config.voice || {}, familyRuntime);
     this.images = new ImageManager(this.config.images || {}, familyRuntime);
@@ -154,15 +165,7 @@ export class NexusAI {
     this.pipeline = new PipelineRunner(this.config.pipeline || {});
     this.health = new ProviderHealthMonitor(this.config.health || {});
     this.circuitBreaker = new CircuitBreaker(this.config.circuitBreaker || {});
-    this.semanticCache = new SemanticCache({
-      enabled:
-        this.config.cache?.enabled &&
-        (this.config.cache.strategy === 'semantic' || this.config.cache.strategy === 'hybrid'),
-      maxEntries: this.config.cache?.maxEntries,
-      ttlSeconds: this.config.cache?.ttlSeconds,
-      ...this.config.cache?.semantic,
-    });
-    this.registerConfiguredProviders();
+    for (const [name, provider] of configuredProviders(this.config.providers)) this.providers.set(name, provider);
   }
 
   /**
@@ -170,26 +173,11 @@ export class NexusAI {
    */
   async complete(request: CompletionRequest): Promise<NexusResponse> {
     let context = createPipelineContext(request);
+    const ticket = await this.lifecycleStep(context, 'authorize', () =>
+      this.lifecycle.start(this.describe(request, 'complete'), this.startOptions(request)),
+    );
 
     try {
-      await this.metrics.recordRequest({ model: request.model });
-      // The synchronous path stays the default so a request without a distributed store pays no
-      // extra microtask for the limiter.
-      if (this.config.rateLimit?.store) await this.rateLimiter.checkAsync(request, this.config.rateLimit);
-      else this.rateLimiter.check(request, this.config.rateLimit);
-
-      if (this.isAuditLogEnabled()) {
-        await this.pipeline.trace(context, 'auditLog', () =>
-          this.auditLogger.log({
-            type: 'request',
-            userId: request.userId,
-            model: request.model,
-            timestamp: new Date().toISOString(),
-            metadata: this.config.auditLog?.includeInput ? { request } : undefined,
-          }),
-        );
-      }
-
       context = await this.pipeline.runHook('beforeInput', context);
       context = await this.pipeline.runCustomSteps(context);
 
@@ -225,21 +213,8 @@ export class NexusAI {
         context.request = securityResult.value;
         context.securityFindings.push(...securityResult.findings);
         context.guardrailsApplied.push(...securityResult.guardrailsApplied);
-
-        try {
-          this.security.assertSafe(securityResult);
-        } catch (error) {
-          if (this.isAuditLogEnabled()) {
-            await this.auditLogger.log({
-              type: 'blocked',
-              userId: request.userId,
-              model: request.model,
-              timestamp: new Date().toISOString(),
-              metadata: { findings: securityResult.findings },
-            });
-          }
-          throw error;
-        }
+        // A block is audited by the lifecycle, with the findings that caused it.
+        this.security.assertSafe(securityResult);
       }
 
       context = await this.pipeline.runHook('afterSecurity', context);
@@ -261,6 +236,8 @@ export class NexusAI {
       // run inline and only traced when it actually altered the request.
       const routedModel = resolveModel(decision.model, this.config);
       context.request = { ...context.request, model: routedModel.model };
+      ticket.descriptor.provider = decision.providerName;
+      ticket.descriptor.model = routedModel.model;
       const negotiation = negotiateCompletionRequest(context.request, routedModel.capabilities, {
         policy: this.config.capabilities?.policy,
         provider: routedModel.providerName || undefined,
@@ -273,15 +250,11 @@ export class NexusAI {
         });
       }
 
-      if (this.isCostBudgetEnabled(context.request)) {
-        await this.pipeline.trace(context, 'costBudget', () => {
-          this.enforceCostBudget(context.request);
-        });
-      }
+      await this.applyBudgets(context, ticket);
 
       const responseFormat = context.request.responseFormat || this.config.responseFormat;
-      const cacheKey = createCacheKey({ request: context.request, responseFormat });
-      if (this.isCacheEnabled()) {
+      const cacheKey = this.isCacheEnabled() ? createCacheKey({ request: context.request, responseFormat }) : undefined;
+      if (cacheKey) {
         const cached = await this.pipeline.trace(context, 'cacheLookup', () =>
           this.getCachedResponse(cacheKey, context.request),
         );
@@ -289,7 +262,7 @@ export class NexusAI {
           let cachedResponse = this.attachTrace(
             {
               ...cached,
-              meta: { ...cached.meta, cacheHit: true },
+              meta: { ...cached.meta, requestId: ticket.descriptor.requestId, cacheHit: true },
             },
             this.pipeline.finish(context),
           );
@@ -300,6 +273,13 @@ export class NexusAI {
             cachedResponse = outputResult.value;
             this.security.assertOutputSafe(outputResult);
           }
+          // A cache hit is still an operation: it is audited, counted, and costs the budget nothing.
+          await ticket.succeed({
+            cacheHit: true,
+            cost: 0,
+            provider: cachedResponse.meta.providerUsed,
+            model: cachedResponse.meta.modelUsed,
+          });
           return cachedResponse;
         }
       }
@@ -307,11 +287,7 @@ export class NexusAI {
       context = await this.pipeline.runHook('beforeProvider', context);
 
       const response = await this.pipeline.trace(context, 'providerCall', () => {
-        return this.failover.complete(context.request, decision, this.providers, {
-          timeoutMs: this.config.timeout,
-          retry: this.config.retry,
-          ...this.attemptHooks,
-        });
+        return this.failover.complete(context.request, decision, this.providers, this.executionOptions(ticket.context));
       });
       context.response = response;
       context = await this.pipeline.runHook('afterProvider', context);
@@ -320,21 +296,23 @@ export class NexusAI {
       if (!providerResponse) {
         throw new Error('The afterProvider pipeline hook removed the provider response.');
       }
+      providerResponse.meta.requestId = ticket.descriptor.requestId;
       providerResponse.meta.guardrailsApplied.push(...context.guardrailsApplied);
       providerResponse.meta.tokensSaved += optimizationResult.usage.savedTokens;
-      // A custom provider may not populate the structured fields, so they are filled in here and
-      // every response carries the same usage and cost shape.
-      ensureUsageAndCost(providerResponse.meta, this.config);
       if (negotiation.warnings.length) {
         providerResponse.meta.capabilityWarnings = negotiation.warnings;
       }
       if (context.contextWindow) {
         providerResponse.meta.contextWindow = context.contextWindow.usage;
       }
-      providerResponse.meta.routingDecision = {
+      providerResponse.meta.routingDecision ??= {
         reason: decision.reason,
         fallbacksConsidered: decision.fallbacks.length,
       };
+      const requestForCost = context.request;
+      await this.pipeline.trace(context, 'reconcileCost', () =>
+        this.reconcileCost(providerResponse.meta, requestForCost),
+      );
 
       if (this.isSecurityEnabled()) {
         const outputResult = await this.pipeline.trace(context, 'outputSecurity', () => {
@@ -357,7 +335,7 @@ export class NexusAI {
         context.response = formattedResponse;
       }
 
-      if (this.isCacheEnabled()) {
+      if (cacheKey) {
         const responseToCache = context.response;
         if (!responseToCache) {
           throw new Error('Cannot cache an empty response.');
@@ -392,27 +370,13 @@ export class NexusAI {
       const finalContext = this.pipeline.finish(context);
       const finalResponse = this.attachTrace(responseToReturn, finalContext);
 
-      if (this.isAuditLogEnabled()) {
-        await this.pipeline.trace(finalContext, 'auditLog', () =>
-          this.auditLogger.log({
-            type: 'response',
-            requestId: finalResponse.meta.requestId,
-            userId: request.userId,
-            model: finalResponse.meta.modelUsed,
-            provider: finalResponse.meta.providerUsed,
-            timestamp: new Date().toISOString(),
-            metadata: this.config.auditLog?.includeOutput ? { response: finalResponse } : undefined,
-          }),
-        );
-      }
-
-      await this.metrics.recordResponse(
-        {
+      await this.lifecycleStep(finalContext, 'audit', () =>
+        ticket.succeed({
+          cost: costAmount(finalResponse.meta),
           provider: finalResponse.meta.providerUsed,
           model: finalResponse.meta.modelUsed,
-        },
-        finalResponse.meta.latencyMs,
-        costAmount(finalResponse.meta),
+          ...(this.config.auditLog?.includeOutput ? { metadata: { response: finalResponse } } : {}),
+        }),
       );
       for (const step of finalResponse.meta.pipeline?.steps || []) {
         await this.metrics.recordStep(step);
@@ -420,7 +384,7 @@ export class NexusAI {
 
       return finalResponse;
     } catch (error) {
-      await this.metrics.recordError({ model: request.model });
+      await ticket.fail(error);
       throw error;
     }
   }
@@ -429,6 +393,7 @@ export class NexusAI {
    * Completes a request and verifies generated claims against provided context.
    */
   async completeVerified(request: CompletionRequest, options: VerificationOptions): Promise<NexusResponse> {
+    const { completeVerified } = await import('../hallucination/verification.js');
     return completeVerified(this, request, options);
   }
 
@@ -436,6 +401,7 @@ export class NexusAI {
    * Samples multiple completions and returns the most self-consistent answer.
    */
   async completeConsistent(request: CompletionRequest, options: SelfConsistencyOptions = {}): Promise<NexusResponse> {
+    const { completeWithSelfConsistency } = await import('../hallucination/consistency.js');
     return completeWithSelfConsistency(this, request, options);
   }
 
@@ -515,47 +481,90 @@ export class NexusAI {
 
   /**
    * Streams a completion through the configured pipeline using normalized stream chunks.
+   *
+   * The stream opens on its first read: authorization, the rate limit, guardrails, routing, and the
+   * budget run then, so an error from any of them surfaces from the iterator rather than from this
+   * call. The operation finishes when the stream does, with the cost of the usage the provider
+   * reported.
    */
   stream(request: CompletionRequest): NexusStream {
-    if (this.isContextWindowEnabled()) {
-      return this.streamWithContextWindow(request);
-    }
+    const self = this;
+    let inner: NexusStream | undefined;
+    let aborted = false;
 
-    this.rateLimiter.check(request, this.config.rateLimit);
-    const formattedRequest = this.hasResponseFormat(request)
-      ? withResponseFormat(request, this.config.responseFormat)
-      : request;
-    const optimizationResult = this.optimizer.optimize(formattedRequest);
-    const securityResult = this.isSecurityEnabled()
-      ? this.security.protectInput(optimizationResult.value)
-      : { ok: true, value: optimizationResult.value, findings: [], guardrailsApplied: [] };
-    if (this.isSecurityEnabled()) this.security.assertSafe(securityResult);
+    return {
+      async *[Symbol.asyncIterator](): AsyncGenerator<StreamChunk> {
+        if (aborted) return;
+        const ticket = await self.lifecycle.start(self.describe(request, 'stream'), self.startOptions(request));
+        let opened: OpenedStream;
+        try {
+          opened = await self.openStream(request, ticket);
+        } catch (error) {
+          await ticket.fail(error);
+          throw error;
+        }
+        inner = opened.stream;
+        if (aborted) {
+          inner.abort();
+          await ticket.fail(streamStopped());
+          return;
+        }
 
-    const decision = this.router.route(securityResult.value, this.config, this.providers, this.health.snapshot());
-    this.logger.info('stream route decision', {
-      ...(decision as unknown as Record<string, unknown>),
-      tokensSaved: optimizationResult.usage.savedTokens,
-    });
-    const routedModel = resolveModel(decision.model, this.config);
-    const routedRequest = negotiateCompletionRequest(
-      { ...securityResult.value, model: routedModel.model },
-      routedModel.capabilities,
-      { policy: this.config.capabilities?.policy, provider: routedModel.providerName || undefined },
-    ).value;
-    const stream = this.failover.stream(routedRequest, decision, this.providers, {
-      timeoutMs: this.config.timeout,
-      retry: this.config.retry,
-      ...this.attemptHooks,
-    });
-    return this.isSecurityEnabled() ? protectStreamOutput(stream, this.security, routedRequest.signal) : stream;
+        let failure: string | undefined;
+        let doneMeta: Partial<ResponseMeta> | undefined;
+        let settled = false;
+        try {
+          for await (const chunk of inner) {
+            if (aborted) break;
+            if (chunk.type === 'error') failure = chunk.error || 'stream error';
+            if (chunk.type === 'done') {
+              doneMeta = self.finishStreamMeta(chunk.meta ?? {}, ticket, opened);
+              yield { ...chunk, meta: doneMeta };
+              continue;
+            }
+            yield chunk;
+          }
+          settled = true;
+          if (failure !== undefined) await ticket.fail(new Error(failure));
+          else if (aborted) await ticket.fail(streamStopped());
+          else {
+            await ticket.succeed({
+              cost: doneMeta?.cost?.amount,
+              provider: doneMeta?.providerUsed,
+              model: doneMeta?.modelUsed,
+            });
+          }
+        } catch (error) {
+          settled = true;
+          await ticket.fail(error);
+          throw error;
+        } finally {
+          // The consumer stopped reading before the stream ended.
+          if (!settled) await ticket.fail(streamStopped());
+        }
+      },
+      abort() {
+        aborted = true;
+        inner?.abort();
+      },
+    };
   }
 
   /**
-   * Runs an agent loop with registered tools and iteration limits.
+   * Runs an agent loop with registered tools and iteration limits, as one operation of this
+   * client whose model calls are operations of their own.
    */
   async agent(config: AgentConfig): Promise<AgentResult> {
-    const loop = new AgentLoop(this);
-    return loop.run(config);
+    const { AgentLoop } = await import('../agent/loop.js');
+    return this.lifecycle.run(
+      {
+        family: 'agent',
+        operation: 'agent',
+        model: config.model,
+        ...(config.metadata ? { metadata: config.metadata } : {}),
+      },
+      { execute: () => new AgentLoop(this).run(config) },
+    );
   }
 
   /**
@@ -672,7 +681,8 @@ export class NexusAI {
   }
 
   /**
-   * Provider-neutral embeddings, sharing this runtime's metrics, audit log, and rate limiter.
+   * Provider-neutral embeddings, sharing this runtime's lifecycle, metrics, audit log, and rate
+   * limiter.
    *
    * Built on first access, so a runtime that never embeds pays nothing for the family. Adapters are
    * derived from the provider credentials already in `providers`, which makes `ai.embed('text')`
@@ -685,6 +695,7 @@ export class NexusAI {
         auditLogger: this.auditLogger,
         rateLimiter: this.rateLimiter,
         providers: this.config.providers,
+        lifecycle: this.config.lifecycle,
       });
     }
     return this.embeddingManager;
@@ -816,7 +827,8 @@ export class NexusAI {
   }
 
   /**
-   * Creates an in-process job queue for completion requests.
+   * Creates an in-process job queue for completion requests. Each job is one completion, and so one
+   * operation of this client's lifecycle.
    */
   createQueue(options: QueueOptions = {}): JobQueue<CompletionRequest, NexusResponse> {
     return new JobQueue<CompletionRequest, NexusResponse>((payload) => this.complete(payload), options);
@@ -825,18 +837,17 @@ export class NexusAI {
   /**
    * Runs eval cases against this Nexus instance.
    */
-  runEvals(cases: EvalCase<NexusResponse>[]): Promise<EvalRunResult<NexusResponse>> {
+  async runEvals(cases: EvalCase<NexusResponse>[]): Promise<EvalRunResult<NexusResponse>> {
+    const { EvalRunner } = await import('../evals/runner.js');
     return new EvalRunner<NexusResponse>(this).run(cases);
   }
 
   /** Runs the summarize, verify, and format workflow on this client. */
-  summarizeVerifyFormat(options: SummarizeVerifyFormatOptions): Promise<WorkflowResult> {
+  async summarizeVerifyFormat(options: SummarizeVerifyFormatOptions): Promise<WorkflowResult> {
+    const { summarizeVerifyFormat } = await import('../workflow/chains.js');
     return summarizeVerifyFormat(this, options);
   }
 
-  /**
-   * Returns current provider health snapshots.
-   */
   /** Circuit state per provider, for a health endpoint or dashboard. */
   getCircuitBreakerStatus() {
     return this.circuitBreaker.snapshot();
@@ -904,7 +915,7 @@ export class NexusAI {
    */
   clearCache(): void {
     this.cache.clear();
-    this.semanticCache.clear();
+    this.semanticCache?.clear();
   }
 
   /** Removes expired response-cache entries, returning how many went. */
@@ -917,8 +928,88 @@ export class NexusAI {
     return this.cache.stats();
   }
 
-  private isAuditLogEnabled(): boolean {
-    return this.config.auditLog?.enabled === true;
+  /** A completion as the lifecycle sees it. */
+  private describe(
+    request: CompletionRequest,
+    operation: string,
+  ): Omit<OperationDescriptor, 'requestId'> & { requestId?: string } {
+    return {
+      family: 'completion',
+      operation,
+      model: request.model,
+      ...(request.requestId ? { requestId: request.requestId } : {}),
+      ...(request.userId ? { userId: request.userId } : {}),
+      ...(request.tenantId ? { tenantId: request.tenantId } : {}),
+      ...(request.metadata ? { metadata: request.metadata } : {}),
+    };
+  }
+
+  private startOptions(request: CompletionRequest): OperationStartOptions & { audit?: Record<string, unknown> } {
+    return {
+      ...(request.signal ? { signal: request.signal } : {}),
+      ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+      ...(this.config.auditLog?.includeInput ? { audit: { request } } : {}),
+    };
+  }
+
+  /** How failover runs the provider calls of one operation, with the context each attempt hands on. */
+  private executionOptions(
+    context: Pick<OperationTicket['context'], 'requestId' | 'traceContext' | 'idempotencyKey'>,
+  ): ExecutionOptions {
+    const { requestId, traceContext, idempotencyKey } = context;
+    return {
+      timeoutMs: this.config.timeout,
+      retry: this.config.retry,
+      ...this.attemptHooks,
+      callContext: {
+        requestId,
+        ...(traceContext ? { traceContext } : {}),
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      },
+    };
+  }
+
+  /**
+   * Times a lifecycle stage into the trace when the lifecycle has work to do, so a client with
+   * nothing configured keeps the trace it always had.
+   */
+  private lifecycleStep<T>(context: PipelineContext, name: PipelineStepName, fn: () => Promise<T>): Promise<T> {
+    return this.lifecycle.inert ? fn() : this.pipeline.trace(context, name, fn);
+  }
+
+  /**
+   * Applies the per-request cost limit and holds the estimate against the shared budget. The
+   * estimate is priced once for both.
+   */
+  private async applyBudgets(context: PipelineContext, ticket: OperationTicket): Promise<void> {
+    const request = context.request;
+    const perRequest = this.isCostBudgetEnabled(request);
+    const shared = Boolean(this.config.lifecycle?.budget);
+    if (!perRequest && !shared) return;
+    const estimate = this.estimateRequestCost(request);
+    if (perRequest) {
+      await this.pipeline.trace(context, 'costBudget', () => {
+        this.enforceCostBudget(estimate, request);
+      });
+    }
+    if (shared) {
+      await this.pipeline.trace(context, 'reserveBudget', () => ticket.reserve(estimate.totalCost));
+    }
+  }
+
+  /**
+   * Prices a response on the model the request was routed to, as the registry names it, unless the
+   * provider reported an authoritative charge. A provider echoes back names such as a dated snapshot
+   * that the registry does not file, so its own pricing can miss.
+   */
+  private reconcileCost(meta: Partial<ResponseMeta>, request: CompletionRequest): void {
+    const usage = meta.usage ?? buildUsage({ inputTokens: meta.tokensInput, outputTokens: meta.tokensOutput });
+    meta.usage = usage;
+    if (meta.cost?.basis === 'reported') return;
+    const model = meta.routingDecision?.model ?? request.model;
+    if (resolveModel(model, this.config).capabilities || !meta.cost) {
+      meta.cost = priceUsage({ model, usage, cacheTtl: request.cache?.ttl, config: this.config });
+    }
   }
 
   private isCacheEnabled(): boolean {
@@ -951,94 +1042,78 @@ export class NexusAI {
     return Boolean(responseFormat && responseFormat.type !== 'text');
   }
 
-  private streamWithContextWindow(request: CompletionRequest): NexusStream {
-    this.rateLimiter.check(request, this.config.rateLimit);
+  /** Every stage of a stream before the provider: guardrails, routing, and the budget. */
+  private async openStream(request: CompletionRequest, ticket: OperationTicket): Promise<OpenedStream> {
+    const formattedRequest = this.hasResponseFormat(request)
+      ? withResponseFormat(request, this.config.responseFormat)
+      : request;
+    const contextWindowResult = this.isContextWindowEnabled()
+      ? await this.contextWindow.optimize(formattedRequest, { summarizer: (input) => this.summarizeContext(input) })
+      : undefined;
+    const optimizationResult = this.optimizer.optimize(contextWindowResult?.value ?? formattedRequest);
+    const securityResult = this.isSecurityEnabled()
+      ? this.security.protectInput(optimizationResult.value)
+      : { ok: true, value: optimizationResult.value, findings: [], guardrailsApplied: [] };
+    if (this.isSecurityEnabled()) this.security.assertSafe(securityResult);
 
-    let inner: NexusStream | undefined;
-    let aborted = false;
+    const decision = this.router.route(
+      securityResult.value,
+      this.config,
+      this.providers,
+      this.health.snapshot(),
+      this.circuitBreaker.openProviders(),
+    );
+    this.logger.info('stream route decision', {
+      ...(decision as unknown as Record<string, unknown>),
+      tokensSaved: optimizationResult.usage.savedTokens,
+      ...(contextWindowResult ? { contextWindow: contextWindowResult.usage } : {}),
+    });
+    const routedModel = resolveModel(decision.model, this.config);
+    const routedRequest = negotiateCompletionRequest(
+      { ...securityResult.value, model: routedModel.model },
+      routedModel.capabilities,
+      { policy: this.config.capabilities?.policy, provider: routedModel.providerName || undefined },
+    ).value;
+    ticket.descriptor.provider = decision.providerName;
+    ticket.descriptor.model = routedModel.model;
 
-    const create = async (): Promise<NexusStream> => {
-      const formattedRequest = this.hasResponseFormat(request)
-        ? withResponseFormat(request, this.config.responseFormat)
-        : request;
-      const contextWindowResult = await this.contextWindow.optimize(formattedRequest, {
-        summarizer: (input) => this.summarizeContext(input),
-      });
-      const optimizationResult = this.optimizer.optimize(contextWindowResult.value);
-      const securityResult = this.isSecurityEnabled()
-        ? this.security.protectInput(optimizationResult.value)
-        : { ok: true, value: optimizationResult.value, findings: [], guardrailsApplied: [] };
-      if (this.isSecurityEnabled()) this.security.assertSafe(securityResult);
+    const perRequest = this.isCostBudgetEnabled(routedRequest);
+    const shared = Boolean(this.config.lifecycle?.budget);
+    if (perRequest || shared) {
+      const estimate = this.estimateRequestCost(routedRequest);
+      if (perRequest) this.enforceCostBudget(estimate, routedRequest);
+      if (shared) await ticket.reserve(estimate.totalCost);
+    }
 
-      const decision = this.router.route(securityResult.value, this.config, this.providers, this.health.snapshot());
-      this.logger.info('stream route decision', {
-        ...(decision as unknown as Record<string, unknown>),
-        tokensSaved: optimizationResult.usage.savedTokens,
-        contextWindow: contextWindowResult.usage,
-      });
-      const routedRequest = { ...securityResult.value, model: resolveModel(decision.model, this.config).model };
-      const stream = this.failover.stream(routedRequest, decision, this.providers, {
-        timeoutMs: this.config.timeout,
-        retry: this.config.retry,
-        onAttemptSuccess: (providerName, latencyMs) => this.health.recordSuccess(providerName, latencyMs),
-        onAttemptFailure: (providerName, error) => this.health.recordFailure(providerName, error),
-      });
-      const securedStream = this.isSecurityEnabled()
-        ? protectStreamOutput(stream, this.security, routedRequest.signal)
-        : stream;
-      return this.attachContextWindowToStream(securedStream, contextWindowResult);
-    };
-
+    const stream = this.failover.stream(routedRequest, decision, this.providers, this.executionOptions(ticket.context));
     return {
-      async *[Symbol.asyncIterator]() {
-        if (aborted) return;
-        inner = inner || (await create());
-        if (aborted) {
-          inner.abort();
-          return;
-        }
-        for await (const chunk of inner) {
-          if (aborted) return;
-          yield chunk;
-        }
-      },
-      abort() {
-        aborted = true;
-        inner?.abort();
-      },
+      stream: this.isSecurityEnabled() ? protectStreamOutput(stream, this.security, routedRequest.signal) : stream,
+      request: routedRequest,
+      decision,
+      contextWindow: contextWindowResult,
     };
   }
 
-  private attachContextWindowToStream(
-    stream: NexusStream,
-    result: ContextWindowResult<CompletionRequest>,
-  ): NexusStream {
-    let aborted = false;
-
-    return {
-      async *[Symbol.asyncIterator]() {
-        for await (const chunk of stream) {
-          if (aborted) return;
-          if (chunk.type === 'done') {
-            yield {
-              ...chunk,
-              meta: {
-                ...chunk.meta,
-                contextWindow: result.usage,
-              },
-            };
-            continue;
-          }
-          yield chunk;
-        }
-      },
-      abort() {
-        aborted = true;
-        stream.abort();
-      },
+  /** The final chunk's metadata: the operation's id, the context-window usage, and the reconciled cost. */
+  private finishStreamMeta(
+    meta: Partial<ResponseMeta>,
+    ticket: OperationTicket,
+    opened: OpenedStream,
+  ): Partial<ResponseMeta> {
+    const finished: Partial<ResponseMeta> = {
+      ...meta,
+      requestId: ticket.descriptor.requestId,
+      ...(opened.contextWindow ? { contextWindow: opened.contextWindow.usage } : {}),
     };
+    // Only usage the provider reported is priced; a stream that reported none stays unpriced.
+    if (finished.usage) this.reconcileCost(finished, opened.request);
+    return finished;
   }
 
+  /**
+   * Summarizes earlier turns for the context window. The summary is a paid model call, so it runs
+   * as an operation of its own: authorized, budgeted, and audited like any other.
+   */
   private async summarizeContext(input: ContextSummaryInput): Promise<string> {
     const model = input.model || input.request.model;
     const summaryRequest: CompletionRequest = {
@@ -1060,6 +1135,7 @@ export class NexusAI {
       temperature: input.temperature ?? 0.2,
       signal: input.request.signal,
       userId: input.request.userId,
+      tenantId: input.request.tenantId,
       metadata: {
         ...input.request.metadata,
         contextWindowSummary: true,
@@ -1067,94 +1143,20 @@ export class NexusAI {
     };
     const decision = this.router.route(summaryRequest, this.config, this.providers, this.health.snapshot());
     const routedRequest = { ...summaryRequest, model: resolveModel(decision.model, this.config).model };
-    const response = await this.failover.complete(routedRequest, decision, this.providers, {
-      timeoutMs: this.config.timeout,
-      retry: this.config.retry,
-      ...this.attemptHooks,
-    });
+    const response = await this.lifecycle.run(
+      { ...this.describe(routedRequest, 'summarize'), provider: decision.providerName },
+      {
+        execute: (callContext) =>
+          this.failover.complete(routedRequest, decision, this.providers, this.executionOptions(callContext)),
+        settle: (result) => {
+          this.reconcileCost(result.meta, routedRequest);
+          return { cost: costAmount(result.meta), provider: result.meta.providerUsed, model: result.meta.modelUsed };
+        },
+      },
+      this.startOptions(routedRequest),
+    );
 
     return response.content.trim();
-  }
-
-  private registerConfiguredProviders(): void {
-    const providers = this.config.providers;
-
-    if (providers.openai) {
-      this.providers.set('openai', new OpenAIProvider(providers.openai));
-    }
-
-    if (providers.anthropic) {
-      this.providers.set('anthropic', new AnthropicProvider(providers.anthropic));
-    }
-
-    if (providers.google) {
-      this.providers.set('google', new GoogleProvider(providers.google));
-    }
-
-    if (providers.ollama) {
-      this.providers.set('ollama', new OllamaProvider(providers.ollama));
-    }
-
-    if (providers.openrouter) {
-      this.providers.set('openrouter', new OpenRouterProvider(providers.openrouter));
-    }
-
-    if (providers.deepseek) {
-      this.providers.set('deepseek', new DeepSeekProvider(providers.deepseek));
-    }
-
-    if (providers.azureOpenAI) {
-      this.providers.set('azure-openai', new AzureOpenAIProvider(providers.azureOpenAI));
-    }
-
-    if (providers.lmstudio) {
-      this.providers.set('lmstudio', new LMStudioProvider(providers.lmstudio));
-    }
-
-    if (providers.llamaCpp) {
-      this.providers.set('llamacpp', new LlamaCppProvider(providers.llamaCpp));
-    }
-
-    if (providers.groq) {
-      this.providers.set('groq', new GroqProvider(providers.groq));
-    }
-
-    if (providers.mistral) {
-      this.providers.set('mistral', new MistralProvider(providers.mistral));
-    }
-
-    if (providers.cohere) {
-      this.providers.set('cohere', new CohereProvider(providers.cohere));
-    }
-
-    for (const custom of providers.custom || []) {
-      if (custom.format === 'anthropic') {
-        this.providers.set(
-          custom.name,
-          new AnthropicProvider({
-            apiKey: custom.apiKey || 'custom',
-            baseUrl: custom.baseUrl,
-            providerName: custom.name,
-            modelPrefix: custom.modelPrefix || custom.name,
-            isLocal: custom.isLocal,
-          }),
-        );
-        continue;
-      }
-
-      this.providers.set(
-        custom.name,
-        new OpenAIProvider({
-          apiKey: custom.apiKey || 'custom',
-          baseUrl: custom.baseUrl,
-          defaultHeaders: custom.headers,
-          defaultQuery: custom.query,
-          providerName: custom.name,
-          modelPrefix: custom.modelPrefix || custom.name,
-          isLocal: custom.isLocal,
-        }),
-      );
-    }
   }
 
   private attachTrace(response: NexusResponse, context: ReturnType<PipelineRunner['finish']>): NexusResponse {
@@ -1169,10 +1171,29 @@ export class NexusAI {
     };
   }
 
+  private usesSemanticCache(): boolean {
+    const strategy = this.config.cache?.strategy;
+    return strategy === 'semantic' || strategy === 'hybrid';
+  }
+
+  private loadSemanticCache(): Promise<SemanticCache> {
+    this.semanticCacheLoading ??= import('../cache/semantic-cache.js').then(({ SemanticCache }) => {
+      const cache = new SemanticCache({
+        enabled: this.config.cache?.enabled && this.usesSemanticCache(),
+        maxEntries: this.config.cache?.maxEntries,
+        ttlSeconds: this.config.cache?.ttlSeconds,
+        ...this.config.cache?.semantic,
+      });
+      this.semanticCache = cache;
+      return cache;
+    });
+    return this.semanticCacheLoading;
+  }
+
   private async getCachedResponse(cacheKey: string, request: CompletionRequest): Promise<NexusResponse | undefined> {
     if (!this.config.cache?.enabled) return undefined;
-    if (this.config.cache.strategy === 'semantic' || this.config.cache.strategy === 'hybrid') {
-      const semantic = await this.semanticCache.get(request);
+    if (this.usesSemanticCache()) {
+      const semantic = await (await this.loadSemanticCache()).get(request);
       if (semantic) return semantic;
     }
 
@@ -1191,8 +1212,8 @@ export class NexusAI {
     if (!this.config.cache?.enabled) return;
     const ttl = this.config.cache.ttlSeconds || 300;
 
-    if (this.config.cache.strategy === 'semantic' || this.config.cache.strategy === 'hybrid') {
-      await this.semanticCache.set(cacheKey, request, response);
+    if (this.usesSemanticCache()) {
+      await (await this.loadSemanticCache()).set(cacheKey, request, response);
     }
 
     if (this.config.cache.strategy === 'semantic') return;
@@ -1203,16 +1224,18 @@ export class NexusAI {
     this.cache.set(cacheKey, response, ttl);
   }
 
-  private enforceCostBudget(request: CompletionRequest): void {
-    const maxEstimatedCost = request.maxEstimatedCost ?? this.config.costBudget?.maxEstimatedCost;
-    if (maxEstimatedCost === undefined) return;
-
-    const estimate = estimateCost({
+  private estimateRequestCost(request: CompletionRequest): CostEstimate {
+    return estimateCost({
       model: request.model,
       inputTokens: this.optimizer.optimize(request).usage.afterTokens,
       outputTokens: this.estimatedOutputTokens(request),
       config: this.config,
     });
+  }
+
+  private enforceCostBudget(estimate: CostEstimate, request: CompletionRequest): void {
+    const maxEstimatedCost = request.maxEstimatedCost ?? this.config.costBudget?.maxEstimatedCost;
+    if (maxEstimatedCost === undefined) return;
 
     try {
       assertWithinCostBudget(estimate, maxEstimatedCost);
@@ -1228,4 +1251,19 @@ export class NexusAI {
   private estimatedOutputTokens(request: CompletionRequest): number {
     return request.estimatedOutputTokens ?? this.config.costBudget?.estimatedOutputTokens ?? request.maxTokens ?? 1000;
   }
+}
+
+/** A stream past its pre-provider stages, with what its final chunk needs. */
+interface OpenedStream {
+  stream: NexusStream;
+  request: CompletionRequest;
+  decision: RouteDecision;
+  contextWindow?: ContextWindowResult<CompletionRequest>;
+}
+
+/** The error a stream's operation finishes with when it was stopped before it ended. */
+function streamStopped(): Error {
+  const error = new Error('The stream was stopped before it finished');
+  error.name = 'AbortError';
+  return error;
 }

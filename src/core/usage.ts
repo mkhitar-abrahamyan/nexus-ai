@@ -1,7 +1,7 @@
 import type { NexusAIConfig } from '../types/config.js';
 import type { CacheTtl } from '../types/providers.js';
 import type { ResponseCost, ResponseMeta, TokenUsage } from '../types/response.js';
-import { DEFAULT_CURRENCY, estimateCost, formatCost } from '../optimizer/cost.js';
+import { DEFAULT_CURRENCY, estimateCost } from '../optimizer/cost.js';
 import { generateRequestId } from '../utils/ids.js';
 
 /** Token counts as a provider reported them, for `buildUsage()`. */
@@ -104,8 +104,8 @@ export interface BuildMetaOptions extends UsageInput {
 /**
  * Builds a complete `ResponseMeta` from provider token counts.
  *
- * Every adapter shares this so pricing, cached-token accounting, and the deprecated formatted
- * string stay consistent instead of being re-derived per provider.
+ * Every adapter shares this so pricing and cached-token accounting stay consistent instead of being
+ * re-derived per provider.
  */
 export function buildMeta(options: BuildMetaOptions): ResponseMeta {
   const usage = buildUsage(options);
@@ -125,7 +125,6 @@ export function buildMeta(options: BuildMetaOptions): ResponseMeta {
     tokensInput: usage.inputTokens + (usage.cachedReadTokens ?? 0) + (usage.cachedWriteTokens ?? 0),
     tokensOutput: usage.outputTokens,
     tokensSaved: 0,
-    estimatedCost: formatCost(cost.amount),
     usage,
     cost,
     cacheHit: false,
@@ -149,9 +148,7 @@ export function ensureUsageAndCost(meta: ResponseMeta, config?: Pick<NexusAIConf
   return meta;
 }
 
-/** Numeric cost for metrics and budgets, without parsing the formatted display string. */
+/** Numeric cost for metrics and budgets: the priced amount, or 0 when nothing priced the call. */
 export function costAmount(meta: ResponseMeta): number {
-  if (meta.cost) return meta.cost.amount;
-  const parsed = Number.parseFloat(meta.estimatedCost.replace('$', ''));
-  return Number.isFinite(parsed) ? parsed : 0;
+  return meta.cost?.amount ?? 0;
 }

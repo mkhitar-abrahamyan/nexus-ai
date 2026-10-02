@@ -1,5 +1,6 @@
 import { OpenAIProvider } from './openai.js';
 import type { OpenRouterProviderConfig } from '../types/config.js';
+import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse, NexusStream } from '../types/response.js';
 
@@ -16,13 +17,13 @@ export class OpenRouterProvider extends OpenAIProvider {
   }
 
   /** Runs one completion. */
-  async complete(request: CompletionRequest): Promise<NexusResponse> {
-    return super.complete({ ...request, model: this.stripPrefix(request.model) });
+  async complete(request: CompletionRequest, context?: ProviderCallContext): Promise<NexusResponse> {
+    return super.complete({ ...request, model: this.stripPrefix(request.model) }, context);
   }
 
   /** Streams one completion. */
-  stream(request: CompletionRequest): NexusStream {
-    return super.stream({ ...request, model: this.stripPrefix(request.model) });
+  stream(request: CompletionRequest, context?: ProviderCallContext): NexusStream {
+    return super.stream({ ...request, model: this.stripPrefix(request.model) }, context);
   }
 
   private stripPrefix(model: string): string {

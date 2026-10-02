@@ -91,7 +91,9 @@ guards every one of these. See the [deployments guide](./deployments.md) for wha
 
 ## Migrating to 2.0
 
-`nexus migrate` rewrites a codebase for the 2.0 root import, which keeps only the core client:
+`nexus migrate` moves a 1.x codebase onto 2.0. Most of what changes is where names are imported
+from: the 2.0 root keeps only the core client, so a family imported from the root moves to its
+subpath.
 
 ```bash
 npx nexus migrate src            # reports what would change
@@ -107,7 +109,8 @@ build output, and version control.
 | `import`, `import type`, and `export … from` of the root | A namespace import of the root |
 | A destructured `require()` of the root | A dynamic `import()` or a whole `require()` of the root |
 | A name that moved under another name, keeping your local name | A read of a response's `estimatedCost` |
-| A deprecated alias, such as `ImageManagerConfig` | |
+| A removed alias, such as `ImageManagerConfig` | An option 2.0 removed, such as `projectId` or `latencyHalfLife` |
+| | A model entry that still lists `modalities` |
 
 A second run changes nothing. Comments inside an import list that it splits are not kept. It works on
 text, so an import statement inside a string is rewritten too. The

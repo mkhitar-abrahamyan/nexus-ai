@@ -1,5 +1,5 @@
 export { AgentLoop, type AgentModelClient as AgentLoopModelClient } from './loop.js';
-export { tool, ToolExecutor } from './tool.js';
+export { isToolOutput, tool, ToolExecutor, toolMessageContent, toolOutput } from './tool.js';
 export {
   limitToolCalls,
   redactMessages,

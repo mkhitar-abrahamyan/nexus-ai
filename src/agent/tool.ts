@@ -1,4 +1,4 @@
-import type { ToolDefinition } from '../types/messages.js';
+import type { ContentPart, Message, ToolDefinition, ToolOutput } from '../types/messages.js';
 import type { ToolExecutionResult } from '../types/agent.js';
 
 /** Defines a tool the model can call, typing its arguments. */
@@ -14,6 +14,37 @@ export function tool<TArgs extends Record<string, unknown> = Record<string, unkn
     parameters: definition.parameters,
     execute: async (args) => definition.execute(args as TArgs),
   };
+}
+
+/**
+ * Builds a tool's result as content: text, images, and asset references, in order. A string becomes
+ * a text part. Returned from `execute`, it is sent as the tool message itself, so an image a tool
+ * produced reaches the model as an image or as a reference rather than as base64 JSON.
+ */
+export function toolOutput(...content: Array<ContentPart | string>): ToolOutput {
+  return {
+    type: 'tool_output',
+    content: content.map((part) => (typeof part === 'string' ? { type: 'text', text: part } : part)),
+  };
+}
+
+/** True for a result built with `toolOutput()`. */
+export function isToolOutput(value: unknown): value is ToolOutput {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { type?: unknown }).type === 'tool_output' &&
+    Array.isArray((value as { content?: unknown }).content)
+  );
+}
+
+/**
+ * What the model reads for a tool's result: the parts of a `toolOutput()`, or anything else as JSON.
+ * An error is always JSON, as `{ error }`.
+ */
+export function toolMessageContent(result: ToolExecutionResult): Message['content'] {
+  if (result.ok && isToolOutput(result.result)) return result.result.content;
+  return JSON.stringify(result.ok ? (result.result ?? null) : { error: result.error });
 }
 
 /** Runs tool calls by name, reporting failures as results rather than throwing. */

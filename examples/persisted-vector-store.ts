@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { MemoryVectorStore, createOpenAIEmbeddingProvider, ingestDocuments, type VectorDocument } from 'nexus-ai-pro';
+import { createOpenAIEmbeddingProvider } from 'nexus-ai-pro/embeddings';
+import { MemoryVectorStore, ingestDocuments, type VectorDocument } from 'nexus-ai-pro/rag';
 
 const path = './vector-store.json';
 

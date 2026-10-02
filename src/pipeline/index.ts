@@ -10,6 +10,7 @@ export type {
   PipelineHookName,
   PipelineHooksConfig,
   PipelineMiddleware,
+  PipelineShapes,
   PipelineStep,
   PipelineStepName,
   PipelineTrace,

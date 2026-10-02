@@ -92,7 +92,7 @@ test('a failing call records an error and rethrows', async () => {
     () => telemetry.run({ operation: 'generate' }, async () => Promise.reject(new Error('provider down'))),
     /provider down/,
   );
-  assert.ok(counters().some((key) => key.includes('errors') && key.includes('family=images')));
+  assert.ok(counters().some((key) => key.includes('errors') && key.includes('family=image')));
 });
 
 test('a call writes request and response audit events', async () => {
@@ -106,19 +106,20 @@ test('a call writes request and response audit events', async () => {
     ['request', 'response'],
   );
   assert.equal(events[0]?.userId, 'u1');
-  assert.equal(events[0]?.metadata?.family, 'telephony');
-  assert.equal(events[0]?.metadata?.operation, 'createCall');
+  assert.equal(events[0]?.family, 'telephony');
+  assert.equal(events[0]?.operation, 'createCall');
 });
 
-test('a failing call writes the request event but no response event', async () => {
+test('a failing call writes the request event and an error event, never a response', async () => {
   const { auditLogger, events } = auditing();
   const telemetry = new FamilyTelemetry('images', { auditLogger });
 
   await assert.rejects(() => telemetry.run({ operation: 'generate' }, async () => Promise.reject(new Error('no'))));
   assert.deepEqual(
     events.map((event) => event.type),
-    ['request'],
+    ['request', 'error'],
   );
+  assert.deepEqual(events[1]?.metadata?.error, { name: 'Error', message: 'no' });
 });
 
 test('the rate limit applies to a family call', async () => {
@@ -169,7 +170,7 @@ test('image generation reports metrics and audit events', async () => {
 
   await manager.generate({ prompt: 'a blue square' });
 
-  assert.ok(counters().some((key) => key.includes('family=images') && key.includes('operation=images.generate')));
+  assert.ok(counters().some((key) => key.includes('family=image') && key.includes('operation=images.generate')));
   assert.equal(events.length, 2);
 });
 
@@ -241,7 +242,7 @@ test('every family reports into one collector reachable from the runtime', async
   const snapshot = ai.getMetricsSnapshot() as { counters: Record<string, number> };
   const keys = Object.keys(snapshot.counters);
   assert.ok(
-    keys.some((key) => key.includes('family=images')),
+    keys.some((key) => key.includes('family=image')),
     `expected image metrics, got ${keys.join(', ')}`,
   );
   assert.ok(

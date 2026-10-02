@@ -3,7 +3,6 @@ import type { OptimizationResult, TokenOptimizerConfig } from '../types/optimize
 import { Tokenizer } from '../utils/tokenizer.js';
 import { PromptDensifier } from './densifier.js';
 import { BudgetEnforcer } from './budget.js';
-import { warnUnreadOption } from '../utils/deprecation.js';
 
 /** Applies densification and the token budget to a request, reporting what each did. */
 export class TokenOptimizer {
@@ -11,13 +10,7 @@ export class TokenOptimizer {
   private densifier = new PromptDensifier();
   private budget = new BudgetEnforcer(this.tokenizer);
 
-  constructor(private config: TokenOptimizerConfig = {}) {
-    warnUnreadOption(
-      config.densification?.preserveMarkdown !== undefined,
-      'NEXUS_DEP_DENSIFICATION_PRESERVE_MARKDOWN',
-      'DensificationConfig.preserveMarkdown',
-    );
-  }
+  constructor(private config: TokenOptimizerConfig = {}) {}
 
   /** Optimizes a request. */
   optimize(request: CompletionRequest): OptimizationResult<CompletionRequest> {

@@ -4,7 +4,8 @@
     "gemini-3.5-pro": {
       "provider": "google",
       "family": "gemini-3.5",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -33,7 +34,8 @@
     "gemini-3.5-flash": {
       "provider": "google",
       "family": "gemini-3.5",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -62,7 +64,8 @@
     "gemini-3.1-pro-preview": {
       "provider": "google",
       "family": "gemini-3.1",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -91,7 +94,8 @@
     "gemini-3.1-pro-preview-customtools": {
       "provider": "google",
       "family": "gemini-3.1",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -120,7 +124,8 @@
     "gemini-3.1-flash-lite-preview": {
       "provider": "google",
       "family": "gemini-3.1",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -149,7 +154,8 @@
     "gemini-3-pro-preview": {
       "provider": "google",
       "family": "gemini-3",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -179,7 +185,8 @@
     "gemini-3-flash-preview": {
       "provider": "google",
       "family": "gemini-3",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -208,7 +215,8 @@
     "gemini-3-pro-image-preview": {
       "provider": "google",
       "family": "gemini-3-image",
-      "modalities": ["text", "vision", "image"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text", "image"],
       "streaming": true,
       "toolCalling": false,
       "structuredOutputs": true,
@@ -237,7 +245,8 @@
     "gemini-2.5-pro": {
       "provider": "google",
       "family": "gemini-2.5",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -266,7 +275,8 @@
     "gemini-2.5-flash": {
       "provider": "google",
       "family": "gemini-2.5",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -295,7 +305,8 @@
     "gemini-2.5-flash-lite": {
       "provider": "google",
       "family": "gemini-2.5",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -324,7 +335,8 @@
     "gemini-2.5-flash-lite-preview-09-2025": {
       "provider": "google",
       "family": "gemini-2.5",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -353,7 +365,8 @@
     "gemini-2.0-flash": {
       "provider": "google",
       "family": "gemini-2.0",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -382,7 +395,8 @@
     "gemini-1.5-pro": {
       "provider": "google",
       "family": "gemini-1.5",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
@@ -411,7 +425,8 @@
     "gemini-1.5-flash": {
       "provider": "google",
       "family": "gemini-1.5",
-      "modalities": ["text", "vision", "audio", "video", "pdf"],
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
       "streaming": true,
       "toolCalling": true,
       "structuredOutputs": true,
