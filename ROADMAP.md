@@ -560,7 +560,7 @@ be large to get there. Three rules apply to every item below.
 | 1.23.0 | Team engineering platform | Shared studio with roles, a context hub, insights with proposed fixes, evaluation caching | A seeded regression found, clustered, and answered with an evaluated fix |
 | 1.24.0 | Deployment at scale, self-managed | Revisions, canaries, autoscaling signals, Helm, tenant quotas | A canary rolled back on a regression; workers scaling on queue depth |
 | 1.25.0 | The bridge to 2.0 | Every capability on its own subpath; everything 2.0 removes deprecated | A migrated consumer compiles; a codemod and a migration guide |
-| 2.0.0 | Consolidation | One lifecycle, slim root, optional validators, stable surfaces | Migration guide and codemod; install-footprint targets met |
+| 2.0.0 | Consolidation | One lifecycle, slim root, optional validators, stable surfaces | One authorize, audit, and budget across ten families; a migrated consumer compiles; a 5.3 MB install with no optional peer |
 
 ---
 
@@ -1343,55 +1343,69 @@ deprecated and nothing else, and every guide's examples already use the 2.0 impo
 
 ---
 
-## 26. 2.0.0: consolidation
+## 26. Shipped in 2.0.0 — consolidation
 
-2.0.0 ships once 1.11.0 through 1.25.0 are released, each experimental surface has had at least one
-minor release to settle, and every removal below has been deprecated in a 1.x release.
+**One lifecycle for every operation.** Completions, streams, embeddings, voice, telephony, images,
+realtime sessions, graphs, agents, queued jobs, and provider batches pass through the same stages,
+from validation to audit. They share one `authorize` callback, one spend budget, hooks, audit, and
+metrics, cache hits included. Every provider call gets a `ProviderCallContext` with the request id,
+the abort signal, the deadline, trace headers, and the idempotency key.
 
-**Breaking changes.**
-- **One lifecycle for every operation:**
-  `validate → authorize → input policy → resolve assets → route → reserve budget → execute →`
-  `output policy → persist → reconcile cost → audit`
-  - Completions, streams, embeddings, voice, realtime, telephony, images, jobs, graphs, and agents
-    share authorization, budgets, hooks, audit, metrics, tracing, and finalization, including cache
-    hits.
-  - Every family gets a shared `ProviderCallContext` carrying the abort signal, deadline, request id,
-    trace context, and idempotency key.
-- `PipelineContext` becomes generic over request and response, and `PipelineStepName` loses its
-  `| string` escape.
-- The deprecated `estimatedCost` string is removed in favour of the numeric `cost` object.
-- The registry splits `inputModalities` from `outputModalities`, ending the overlap between
-  `vision`, `image`, and `pdf`.
-- True mixed text-and-asset outputs, so a tool result can pass asset references instead of base64
-  JSON.
-- **A slim root import.** The root exports the core client, config builders, types, and errors, and
-  every family is reached through its subpath. Target: at most 250 KB, down from 572 KB.
-- **Optional validators and types.**
-  - `zod`, `ajv`, and `ajv-formats` become optional peer dependencies, needed only when a caller
-    passes a schema.
-  - `@types/node` becomes an optional peer.
-  - Target: a graph-only consumer installs at most 3.5 MB, down from about 10.4 MB.
-- **Checkpoint schema v2.**
-  - Task and checkpoint ids become required.
-  - `interrupt` gives way to `interrupts`.
-  - `migrateCheckpoint()` reads v1, and both checkpointers keep reading v1 for the whole 2.x line.
-- Deprecated aliases are removed, including `ImageManagerConfig`. The full list is audited when the
-  2.0 branch opens.
-- Options that were accepted but never read are removed: `GoogleProviderConfig.projectId`,
-  `OllamaProviderConfig.timeout`, `MetricsConfig.prometheus`, `DensificationConfig.preserveMarkdown`,
-  and `HealthConfig.latencyHalfLife`, deprecated in 1.16.0; and `InjectionDetectionConfig.sensitivity`
-  and `ToolPolicyConfig.requiresApproval`, deprecated in 1.19.0.
+**A shared budget.** `budgetLedger()` on `nexus-ai-pro/lifecycle` holds a call's estimate before it
+runs and charges what it cost after. It keeps totals per tenant and per period, in memory or in any
+tenant usage store, Redis included.
 
-**Promotions to stable.** Advanced graph APIs, the store, agents, tracing, evaluation, prompts, and
-the server. Images too, if live conformance has passed.
+**A slim root, and no required dependencies.** The root exports the core client and costs 323 KB,
+down from 572 KB. Provider adapters and engines load on first use. `zod`, `ajv`, `ajv-formats`, and
+`@types/node` are optional peers.
 
-**Migration.**
-- `MIGRATING.md` covers every breaking item, with before-and-after code.
-- `nexus migrate` rewrites import paths.
-- The last 1.x minor release logs each deprecated call once per process.
+**The 2.0 shapes.** The registry says which way each modality flows. Checkpoints are schema version 2,
+and version 1 is still read. Pipeline step names are a closed list, with typed contexts. A tool can
+return text and asset references, and a model that makes images returns them on `response.assets`.
+Everything 1.x deprecated is removed.
 
-**Runtime.** Node 22 reaches end of life in April 2027. If 2.0.0 ships after that, the engine floor
-moves to Node 24.
+**What the redesign fixed.** Tool calls reach the OpenAI, Anthropic, and Google adapters whole.
+Responses are priced on the model they were routed to. Streams honour the circuit breaker, the
+budget, audit, and metrics.
+
+**A current model registry.** Every provider was re-checked on 2026-10-02. New models are in, models
+their providers shut down are out, and so are four names no provider served. Announced shutdowns are
+marked deprecated. Claude 4.6 onward get adaptive thinking and an effort level, which they require.
+`nexus migrate` reports each dropped model name with its replacement.
+
+**`llms.txt` and `llms-full.txt`.** An index of the guides for AI assistants, and the guides in one
+file, both generated from the documentation and checked in CI.
+
+**Promotions to stable.** Graphs with their advanced APIs and functional workflows, the store,
+agents, tracing, evaluation, prompts, and the agent server.
+
+**Proof.** In `tests/lifecycle.test.ts`, one authorize, audit, and hooks setup covers ten families, a
+refused call never reaches a provider, and concurrent calls cannot overshoot a budget together. A
+version 1 thread resumes on both checkpointers. A clean install with no optional peer is 5.3 MB, and
+the type consumer migrates its own code with the codemod and compiles against the packed package.
+
+**Runtime.** 2.0.0 shipped before Node 22's end of life in April 2027, so the engine floor stays at
+Node 22.
+
+### What did not land, and where it went
+
+- **The root is 323 KB, not the 250 KB target.** The client itself carries routing, the registry data,
+  default guardrails, the context window, and the synchronous parts of voice, telephony, and images.
+- **A graph-only install is 5.3 MB, not 3.5 MB.** It installs no third-party package, but the package
+  ships two builds, each with fully documented declarations. Shipping the declarations once, or one
+  build, is a major release of its own.
+- **Images stay experimental**, until recorded live conformance passes on all three backends. So do
+  deployments, tenant limits, the worker queue, the context hub, insights, the studio's accounts, the
+  loaders, the newer vector stores, the retrievers, the MCP registry, and SQLite.
+- **`plan()` is not an operation.** The agent server admits runs through tenancy rather than the
+  client lifecycle, and pipeline hooks stay completion-only.
+- **Mixed content is partial.** Only Google maps the images a model makes to `response.assets`.
+  Stored assets reach chat providers as references, and OpenAI chat puts tool images in a following
+  user message. Cohere, Ollama, and Google ignore idempotency keys and trace headers.
+- **The codemod finds removed options and model names by name**, so it reports them for a person to
+  check rather than rewriting them.
+- **Some registry data is not verified:** the effort levels of GPT-5 through 5.5, the knowledge
+  cutoffs of Gemini 3.x, Mistral's output limits, and whether Claude takes structured outputs.
 
 ---
 

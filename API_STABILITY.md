@@ -41,7 +41,7 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
-## 2.0 stage (Unreleased)
+## 2.0 stage (2.0.0)
 
 2.0 removes what 1.x deprecated and promotes the surfaces that have settled.
 

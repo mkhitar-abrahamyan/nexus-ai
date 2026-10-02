@@ -240,12 +240,15 @@ Shipped so far:
 - self-managed deployment at scale: revisions and canaries with automatic rollback, a worker queue
   that autoscales on Kubernetes, and per-tenant limits;
 - the bridge to 2.0: every capability on a subpath of its own, everything 2.0 removes deprecated, and
-  a codemod that moves your imports.
+  a codemod that moves your imports;
+- 2.0 consolidation: one lifecycle for every call of every family, a shared spend budget, a root
+  import that holds only the client, no required dependencies, and a model registry checked against
+  every provider.
 
-Next: 2.0.0 consolidates. It slims the root import to the core client; `npx nexus migrate src --write`
-moves your imports today, and [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md)
-covers the rest. The image family leaves experimental once recorded live
-conformance passes on all three backends.
+Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
+[MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
+Next, the image family leaves experimental once recorded live conformance passes on all three
+backends.
 
 ## Before Production
 

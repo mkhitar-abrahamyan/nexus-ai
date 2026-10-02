@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-02
+
 Consolidation. One lifecycle runs every call of every family, the root import holds the core client
 and nothing else, and the package installs with no required dependency. Everything removed here was
 deprecated in 1.x; [MIGRATING.md](./MIGRATING.md) covers each change with before-and-after code, and
@@ -1371,7 +1373,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.25.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.25.0...v2.0.0
 [1.25.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.24.0...v1.25.0
 [1.24.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.23.0...v1.24.0
 [1.23.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.22.0...v1.23.0
