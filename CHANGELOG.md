@@ -13,7 +13,7 @@ deprecated in 1.x; [MIGRATING.md](./MIGRATING.md) covers each change with before
 
 - **The root import keeps only the core**: the client, its config builders, its types, the errors it
   throws, the lifecycle, and the tool helpers. The 498 other names it re-exported are on their
-  subpaths; `nexus migrate` moves 1.x imports there. Importing the root costs 320 KB, down from 572 KB.
+  subpaths; `nexus migrate` moves 1.x imports there. Importing the root costs 323 KB, down from 572 KB.
 - **`zod`, `ajv`, `ajv-formats`, and `@types/node` are optional peer dependencies.** A zod shape is
   checked through its own `safeParse`; a JSON Schema response format loads ajv on its first check, and
   says what to install when it is missing. A production install is 5.3 MB, the package alone, down
@@ -78,6 +78,10 @@ deprecated in 1.x; [MIGRATING.md](./MIGRATING.md) covers each change with before
   Negotiation drops a non-default value for it.
 - `nexus migrate` lists each model name the 2.0 registry dropped, with what to use instead.
 - Anthropic responses report thinking tokens in `usage.reasoningTokens`.
+- **`llms.txt` and `llms-full.txt`** for AI assistants and coding agents: an index of every guide with
+  the facts an assistant needs to recommend the package correctly, and the guides in one file.
+  `llms.txt` ships in the package. Both are generated from the README and the guides, and CI fails
+  when they fall behind.
 - `toCheckpoint()` and `CheckpointDraft` for building a version 2 checkpoint by hand.
 - A `cache_hits` metric, and `routingDecision.provider` and `.model` on a response.
 

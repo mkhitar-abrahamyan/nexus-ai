@@ -69,7 +69,7 @@ It cannot split a namespace import (`import * as nexus from 'nexus-ai-pro'`) or 
 so it lists them. Import each name you use from its subpath instead. Every subpath, and what it costs,
 is in the [packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md).
 
-The root import now costs about 320 KB, down from 572 KB.
+The root import now costs about 323 KB, down from 572 KB.
 
 ## Validators and Node types are optional
 

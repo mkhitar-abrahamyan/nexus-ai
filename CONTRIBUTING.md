@@ -35,6 +35,17 @@ npm run test:vectors:live
 
 Never commit provider keys, user data, generated tarballs, or local environment files.
 
+## Generated files
+
+These files are generated and committed. CI fails when one no longer matches its source, so
+regenerate it in the change that edits the source.
+
+| File | Generated from | Command |
+| --- | --- | --- |
+| `src/models/generated.ts` | `data/models/*.json` | `npm run registry:generate` |
+| The reference at the end of each guide | The doc comments | `npm run docs:update` |
+| `llms.txt` and `llms-full.txt` | The README and the guides | `npm run llms:generate`, which `docs:update` also runs |
+
 
 ## Running real-provider tests
 

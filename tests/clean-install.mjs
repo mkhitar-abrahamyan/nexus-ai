@@ -141,6 +141,7 @@ try {
     'README.md',
     'SECURITY.md',
     'API_STABILITY.md',
+    'llms.txt',
     'CHANGELOG.md',
     'dist/index.js',
     'dist/index.d.ts',

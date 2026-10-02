@@ -14,6 +14,7 @@ loads 51 KB, and installs nothing but this package.
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
 - Contributing, testing, and release procedure: [CONTRIBUTING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/CONTRIBUTING.md)
 - Delivered work and what is planned next: [ROADMAP.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md)
+- For AI assistants: [llms.txt](https://raw.githubusercontent.com/mkhitar-abrahamyan/nexus-ai/main/llms.txt) indexes every guide, and [llms-full.txt](https://raw.githubusercontent.com/mkhitar-abrahamyan/nexus-ai/main/llms-full.txt) holds them all in one file
 
 ## Install
 
