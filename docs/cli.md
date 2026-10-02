@@ -111,6 +111,7 @@ build output, and version control.
 | A name that moved under another name, keeping your local name | A read of a response's `estimatedCost` |
 | A removed alias, such as `ImageManagerConfig` | An option 2.0 removed, such as `projectId` or `latencyHalfLife` |
 | | A model entry that still lists `modalities` |
+| | A model name the 2.0 registry dropped, such as `deepseek/deepseek-chat`, with what to use instead |
 
 A second run changes nothing. Comments inside an import list that it splits are not kept. It works on
 text, so an import statement inside a string is rewritten too. The

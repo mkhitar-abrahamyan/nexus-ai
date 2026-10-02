@@ -230,18 +230,18 @@ test('createNexus supports beginner shorthand and env-style normalization', () =
   const normalized = normalizeCreateNexusConfig({
     provider: 'deepseek',
     apiKey: 'test-key',
-    model: 'deepseek/deepseek-chat',
+    model: 'deepseek/deepseek-flash',
     security: 'off',
   });
 
   assert.equal(normalized.providers.deepseek?.apiKey, 'test-key');
-  assert.equal(normalized.defaultModel, 'deepseek/deepseek-chat');
+  assert.equal(normalized.defaultModel, 'deepseek/deepseek-flash');
   assert.equal(normalized.routing?.mode, 'direct');
 
   const ai = createNexus({
     provider: 'deepseek',
     apiKey: 'test-key',
-    model: 'deepseek/deepseek-chat',
+    model: 'deepseek/deepseek-flash',
     security: 'off',
   });
   assert.deepEqual(ai.listProviders(), ['deepseek']);

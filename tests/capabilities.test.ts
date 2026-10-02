@@ -18,6 +18,7 @@ import { estimateCost } from '../src/optimizer/cost.js';
 import { AnthropicProvider } from '../src/providers/anthropic.js';
 import { BaseProvider } from '../src/providers/base.js';
 import { OpenAIProvider } from '../src/providers/openai.js';
+import { KNOWN_MODELS } from '../src/types/providers.js';
 
 function request(overrides: Partial<CompletionRequest> = {}): CompletionRequest {
   return {
@@ -164,14 +165,14 @@ test('tool options are removed together when the model cannot call tools', () =>
 
 test('cached reads and writes are priced separately from standard input', () => {
   const estimate = estimateCost({
-    model: 'claude-sonnet-5-0',
+    model: 'claude-sonnet-5-5',
     inputTokens: 1000,
     outputTokens: 1000,
     cachedReadTokens: 10000,
     cachedWriteTokens: 2000,
   });
 
-  const model = describeModel('claude-sonnet-5-0').capabilities;
+  const model = describeModel('claude-sonnet-5-5').capabilities;
   assert.ok(model);
   assert.equal(estimate.inputCost, model.costPer1kInput);
   assert.equal(estimate.outputCost, model.costPer1kOutput);
@@ -185,9 +186,9 @@ test('cached reads and writes are priced separately from standard input', () => 
 });
 
 test('a long-lived cache write costs more than a short-lived one', () => {
-  const short = estimateCost({ model: 'claude-sonnet-5-0', inputTokens: 0, cachedWriteTokens: 1000 });
+  const short = estimateCost({ model: 'claude-sonnet-5-5', inputTokens: 0, cachedWriteTokens: 1000 });
   const long = estimateCost({
-    model: 'claude-sonnet-5-0',
+    model: 'claude-sonnet-5-5',
     inputTokens: 0,
     cachedWriteTokens: 1000,
     cacheTtl: '1h',
@@ -198,7 +199,7 @@ test('a long-lived cache write costs more than a short-lived one', () => {
 
 test('cache pricing multipliers can be overridden per application', () => {
   const estimate = estimateCost({
-    model: 'claude-sonnet-5-0',
+    model: 'claude-sonnet-5-5',
     inputTokens: 0,
     cachedReadTokens: 1000,
     config: { models: { cachePricing: { read: 0 } } },
@@ -210,7 +211,7 @@ test('cache pricing multipliers can be overridden per application', () => {
 test('buildMeta reports uncached input separately while the legacy field keeps the full prompt', () => {
   const meta = buildMeta({
     provider: 'anthropic',
-    model: 'claude-sonnet-5-0',
+    model: 'claude-sonnet-5-5',
     latencyMs: 12,
     inputTokens: 100,
     outputTokens: 50,
@@ -270,7 +271,7 @@ test('costAmount reads the priced amount, and 0 for a response nothing priced', 
 
 test('model provenance reports an alias stage and a verification date', () => {
   const floating = describeModel('anthropic/best');
-  assert.equal(floating.model, 'claude-opus-4-8');
+  assert.equal(floating.model, 'claude-fable-5-1');
   assert.equal(floating.alias?.stage, 'stable');
   assert.equal(floating.alias?.floating, true, 'intent aliases can change target between releases');
   assert.match(floating.verifiedAt, /^\d{4}-\d{2}-\d{2}$/);
@@ -406,7 +407,7 @@ test('Anthropic places cache breakpoints and caps them at the provider limit', a
       async create(params: Record<string, unknown>) {
         captured = params;
         return {
-          model: 'claude-sonnet-5-0',
+          model: 'claude-sonnet-5-5',
           content: [{ type: 'text', text: 'ok' }],
           stop_reason: 'end_turn',
           usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2000, cache_creation_input_tokens: 40 },
@@ -416,7 +417,7 @@ test('Anthropic places cache breakpoints and caps them at the provider limit', a
   };
 
   const response = await provider.complete({
-    model: 'claude-sonnet-5-0',
+    model: 'claude-sonnet-5-5',
     cache: { mode: 'explicit', ttl: '1h' },
     tools: [{ name: 'lookup', description: 'x', parameters: {}, cache: true }],
     messages: [
@@ -450,34 +451,95 @@ test('Anthropic places cache breakpoints and caps them at the provider limit', a
   assert.ok(response.meta.cost.amount > 0, 'pricing now comes from the registry instead of a hardcoded rate');
 });
 
-test('every Claude release from 3.7 onward is declared as a reasoning model', () => {
-  for (const model of ['claude-sonnet-5-0', 'claude-haiku-5-0', 'claude-opus-4-8', 'claude-3-7-sonnet-20250219']) {
-    assert.notEqual(describeModel(model).capabilities?.reasoning, false, `${model} supports extended thinking`);
+test('every bundled Claude model is declared as a reasoning model, with the efforts it takes', () => {
+  for (const [name, capabilities] of Object.entries(KNOWN_MODELS)) {
+    if (capabilities.provider !== 'anthropic') continue;
+    assert.notEqual(capabilities.reasoning, false, `${name} thinks`);
   }
-  for (const model of ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307']) {
-    assert.equal(describeModel(model).capabilities?.reasoning, false, `${model} predates extended thinking`);
-  }
+  const efforts = (model: string) => {
+    const reasoning = describeModel(model).capabilities?.reasoning;
+    return typeof reasoning === 'object' ? reasoning.efforts : undefined;
+  };
+  assert.deepEqual(efforts('claude-opus-5-5'), ['low', 'medium', 'high', 'xhigh', 'max'], 'always thinks');
+  assert.deepEqual(efforts('claude-sonnet-4-6'), ['none', 'low', 'medium', 'high', 'max'], 'no xhigh before 4.7');
+  assert.equal(describeModel('claude-opus-5-5').capabilities?.sampling, false);
+  assert.equal(describeModel('claude-sonnet-4-6').capabilities?.sampling, undefined);
 });
 
-test('Anthropic enables extended thinking with room for visible output', async () => {
+/** An Anthropic provider that records the parameters of its one call. */
+function capturingAnthropic(): { provider: AnthropicProvider; sent: () => Record<string, unknown> } {
   const provider = new AnthropicProvider({ apiKey: 'test' });
   let captured: Record<string, unknown> = {};
   (provider as unknown as { client: unknown }).client = {
     messages: {
       async create(params: Record<string, unknown>) {
         captured = params;
-        return { model: 'claude-sonnet-5-0', content: [], stop_reason: 'end_turn' };
+        return { model: String(params.model), content: [], stop_reason: 'end_turn' };
       },
     },
   };
+  return { provider, sent: () => captured };
+}
 
+test('Anthropic gives a model before 4.6 a thinking budget with room for visible output', async () => {
+  const { provider, sent } = capturingAnthropic();
   await provider.complete(
-    request({ model: 'claude-sonnet-5-0', maxTokens: 1000, temperature: 0.7, reasoning: { effort: 'high' } }),
+    request({ model: 'claude-haiku-4-5-20251001', maxTokens: 1000, temperature: 0.7, reasoning: { effort: 'high' } }),
   );
 
-  assert.deepEqual(captured.thinking, { type: 'enabled', budget_tokens: 16384 });
-  assert.equal(captured.max_tokens, 16384 + 1024);
-  assert.equal(captured.temperature, undefined, 'Anthropic rejects temperature while thinking is enabled');
+  assert.deepEqual(sent().thinking, { type: 'enabled', budget_tokens: 16384 });
+  assert.equal(sent().max_tokens, 16384 + 1024);
+  assert.equal(sent().temperature, undefined, 'Anthropic rejects temperature while thinking is enabled');
+  assert.equal(sent().output_config, undefined);
+});
+
+test('Anthropic steers the 4.6 generation onward with adaptive thinking and an effort', async () => {
+  const { provider, sent } = capturingAnthropic();
+
+  await provider.complete(request({ model: 'claude-opus-4-6', maxTokens: 1000, reasoning: { effort: 'xhigh' } }));
+  assert.deepEqual(sent().thinking, { type: 'adaptive' });
+  assert.deepEqual(sent().output_config, { effort: 'high' }, '4.6 has no xhigh');
+  assert.equal(sent().max_tokens, 1000, 'a caller limit is kept: adaptive thinking takes no budget');
+
+  await provider.complete(request({ model: 'claude-sonnet-5-5', reasoning: { maxTokens: 6000, summary: 'auto' } }));
+  assert.deepEqual(sent().thinking, { type: 'adaptive', display: 'summarized' }, 'summaries are asked for');
+  assert.deepEqual(sent().output_config, { effort: 'medium' }, 'a budget becomes the effort that covers it');
+  assert.equal(sent().max_tokens, 8192 + 1024, 'without a caller limit, room is left for the thinking');
+
+  await provider.complete(request({ model: 'claude-opus-4-8', temperature: 0.2, topP: 0.9 }));
+  assert.equal(sent().thinking, undefined, 'nothing is sent when nothing is asked');
+  assert.equal(sent().temperature, undefined, 'from 4.7 on, only default sampling is accepted');
+  assert.equal(sent().top_p, undefined);
+});
+
+test('Anthropic turns thinking off the way each model allows', async () => {
+  const { provider, sent } = capturingAnthropic();
+  const off = (model: string) => provider.complete(request({ model, reasoning: { effort: 'none' } }));
+
+  await off('claude-opus-4-7');
+  assert.deepEqual(sent().thinking, { type: 'disabled' });
+  await off('claude-sonnet-5-5');
+  assert.deepEqual(sent().thinking, { type: 'between_tools' }, 'Sonnet 5.5 rejects disabled');
+  await off('claude-opus-5-5');
+  assert.equal(sent().thinking, undefined, 'Opus 5.5 always thinks');
+  assert.deepEqual(sent().output_config, { effort: 'low' }, 'so it thinks as little as it can');
+  await off('anthropic.claude-fable-5-1');
+  assert.deepEqual(sent().output_config, { effort: 'low' }, 'platform model names are read too');
+  await off('claude-haiku-4-5-20251001');
+  assert.equal(sent().thinking, undefined, 'a budget model is off by default');
+});
+
+test('a model that cannot be forced to call a tool still takes auto and none', () => {
+  const capabilities = describeModel('claude-opus-5-5').capabilities;
+  const forced = negotiateCompletionRequest(
+    request({ model: 'claude-opus-5-5', toolChoice: 'required' }),
+    capabilities,
+  );
+  assert.equal(forced.value.toolChoice, undefined);
+  assert.equal(forced.warnings[0]?.feature, 'toolChoice');
+  const none = negotiateCompletionRequest(request({ model: 'claude-opus-5-5', toolChoice: 'none' }), capabilities);
+  assert.equal(none.value.toolChoice, 'none');
+  assert.deepEqual(none.warnings, []);
 });
 
 test('Anthropic streams thinking deltas as reasoning chunks with final usage', async () => {
@@ -497,7 +559,7 @@ test('Anthropic streams thinking deltas as reasoning chunks with final usage', a
   };
 
   const chunks: StreamChunk[] = [];
-  for await (const chunk of provider.stream(request({ model: 'claude-sonnet-5-0' }))) {
+  for await (const chunk of provider.stream(request({ model: 'claude-sonnet-5-5' }))) {
     chunks.push(chunk);
   }
 
@@ -548,11 +610,11 @@ test('NexusAI negotiates against the routed model and reports the outcome on the
   ai.registerProvider('anthropic', provider);
 
   const response = await ai.complete(
-    request({ model: 'claude-sonnet-5-0', reasoning: { effort: 'high' }, maxTokens: 999_999 }),
+    request({ model: 'claude-sonnet-5-5', reasoning: { effort: 'high' }, maxTokens: 999_999 }),
   );
 
-  assert.equal(provider.lastRequest?.maxTokens, 64000, 'the output limit is clamped before the provider call');
-  assert.equal(provider.lastRequest?.reasoning?.effort, 'high', 'Claude 5 supports extended thinking');
+  assert.equal(provider.lastRequest?.maxTokens, 128000, 'the output limit is clamped before the provider call');
+  assert.equal(provider.lastRequest?.reasoning?.effort, 'high', 'Claude Sonnet 5.5 takes an effort');
   assert.equal(response.meta.capabilityWarnings?.length, 1);
   assert.equal(response.meta.capabilityWarnings?.[0].feature, 'maxTokens');
   assert.ok(response.meta.usage, 'a provider that omits structured usage still gets it filled in');
@@ -570,7 +632,7 @@ test('a strict capability policy fails the request instead of silently changing 
   ai.registerProvider('anthropic', new RecordingProvider());
 
   await assert.rejects(
-    () => ai.complete(request({ model: 'claude-sonnet-5-0', responseFormat: { type: 'json' } })),
+    () => ai.complete(request({ model: 'claude-sonnet-5-5', responseFormat: { type: 'json' } })),
     NexusCapabilityError,
   );
 });
@@ -579,7 +641,7 @@ test('plan reports capability problems before a provider is called', () => {
   const ai = new NexusAI({ providers: {}, routing: { mode: 'direct' }, security: 'off' });
   ai.registerProvider('anthropic', new RecordingProvider());
 
-  const plan = ai.plan(request({ model: 'claude-sonnet-5-0', maxTokens: 999_999 }));
+  const plan = ai.plan(request({ model: 'claude-sonnet-5-5', maxTokens: 999_999 }));
 
   assert.ok(plan.warnings.some((warning) => warning.includes('maxTokens was adjusted')));
 });

@@ -242,8 +242,79 @@ function migrateCode(text: string, lineOffset: number): MigrationOutcome {
   for (const { pattern, message } of REMOVED_OPTIONS) {
     for (const match of text.matchAll(pattern)) notes.push({ line: at(match.index ?? 0), message });
   }
+  for (const match of text.matchAll(/(['"`])([\w./-]+)\1/g)) {
+    const name = match[2] as string;
+    const replacement = Object.hasOwn(REMOVED_MODELS, name) ? REMOVED_MODELS[name] : undefined;
+    if (replacement) {
+      notes.push({
+        line: at(match.index ?? 0),
+        message: `the model \`${name}\` is not in the 2.0 registry, because its provider shut it down or never served that name: use \`${replacement}\``,
+      });
+    }
+  }
   return { text: output, changes, notes };
 }
+
+/**
+ * Model names and aliases the 2.0 registry dropped, with what to use instead. They are reported
+ * rather than rewritten, since a different model changes behavior and cost.
+ */
+const REMOVED_MODELS: Readonly<Record<string, string>> = {
+  'gpt-4.5-preview': 'gpt-4.1',
+  'o1-mini': 'o4-mini',
+  'gpt-5-codex': 'gpt-5.3-codex',
+  'gpt-5-chat-latest': 'gpt-5.6-sol',
+  'claude-sonnet-5-0': 'claude-sonnet-5-5',
+  'claude-haiku-5-0': 'claude-haiku-4-5',
+  'claude-fable-5-0': 'claude-fable-5-1',
+  'claude-opus-4-1-20250805': 'claude-opus-5-5',
+  'claude-opus-4.1': 'claude-opus-5-5',
+  'claude-opus-4-1': 'claude-opus-5-5',
+  'claude-opus-4-20250514': 'claude-opus-5-5',
+  'claude-opus-4': 'claude-opus-5-5',
+  'claude-opus-4-0': 'claude-opus-5-5',
+  'claude-sonnet-4-20250514': 'claude-sonnet-5-5',
+  'claude-sonnet-4': 'claude-sonnet-5-5',
+  'claude-sonnet-4-0': 'claude-sonnet-5-5',
+  'claude-3-7-sonnet-20250219': 'claude-sonnet-5-5',
+  'claude-sonnet-3.7': 'claude-sonnet-5-5',
+  'claude-3-7-sonnet-latest': 'claude-sonnet-5-5',
+  'claude-3-5-sonnet-20241022': 'claude-sonnet-5-5',
+  'claude-3-5-sonnet-20240620': 'claude-sonnet-5-5',
+  'claude-sonnet-3.5': 'claude-sonnet-5-5',
+  'claude-3-5-sonnet-latest': 'claude-sonnet-5-5',
+  'claude-3-5-haiku-20241022': 'claude-haiku-4-5',
+  'claude-haiku-3.5': 'claude-haiku-4-5',
+  'claude-3-5-haiku-latest': 'claude-haiku-4-5',
+  'claude-3-haiku-20240307': 'claude-haiku-4-5',
+  'gemini-3.5-pro': 'gemini-3.1-pro-preview',
+  'gemini-3-pro-preview': 'gemini-3.1-pro-preview',
+  'gemini-3.1-flash-lite-preview': 'gemini-3.5-flash-lite',
+  'gemini-3-pro-image-preview': 'gemini-3-pro-image',
+  'gemini-2.5-flash-lite-preview-09-2025': 'gemini-3.5-flash-lite',
+  'gemini-2.0-flash': 'gemini-3.6-flash',
+  'gemini-1.5-pro': 'gemini-3.1-pro-preview',
+  'gemini-1.5-flash': 'gemini-3.5-flash',
+  'groq/compound': 'groq/openai/gpt-oss-120b',
+  'groq/groq/compound': 'groq/openai/gpt-oss-120b',
+  'groq/groq/compound-mini': 'groq/openai/gpt-oss-20b',
+  'groq/meta-llama/llama-4-scout-17b-16e-instruct': 'groq/openai/gpt-oss-120b',
+  'groq/qwen/qwen3-32b': 'groq/qwen/qwen3.8-27b',
+  'mistral/ministral-3b': 'mistral/ministral-3b-2512',
+  'mistral/ministral-8b': 'mistral/ministral-8b-2512',
+  'mistral/pixtral-12b': 'mistral/ministral-14b-2512',
+  'mistral/pixtral-large-2411': 'mistral/mistral-medium-2604',
+  'mistral/mistral-medium-3-5': 'mistral/mistral-medium-2604',
+  'mistral/devstral-2512': 'mistral/mistral-medium-2604',
+  'mistral/devstral-2': 'mistral/mistral-medium-2604',
+  'mistral/magistral-medium-2509': 'mistral/mistral-medium-2604',
+  'deepseek/deepseek-v3': 'deepseek/deepseek-flash',
+  'deepseek/deepseek-chat': 'deepseek/deepseek-flash',
+  'deepseek/deepseek-r1': 'deepseek/deepseek-v4-pro',
+  'deepseek/deepseek-reasoner': 'deepseek/deepseek-v4-pro',
+  'cohere/command-r-plus': 'cohere/command-r-plus-08-2024',
+  'cohere/command-r': 'cohere/command-r-08-2024',
+};
 
 /**
  * Options and fields 2.0 removed, found by name. A name can belong to something else in the

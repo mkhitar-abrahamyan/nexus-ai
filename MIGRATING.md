@@ -27,6 +27,8 @@ upgrade, and work through the table.
 | [Streams open on their first read](#streams-open-on-their-first-read) | — | Catch errors around the loop |
 | [Every call runs through the lifecycle](#every-call-runs-through-the-lifecycle) | — | Check dashboards, audit sinks, and rate limits |
 | [Responses are priced on the routed model](#responses-are-priced-on-the-routed-model) | — | Expect costs that were 0 to be priced |
+| [The model registry is current](#the-model-registry-is-current) | Lists each dropped model name, with its replacement | Choose the replacement; check what your aliases resolve to |
+| [Claude 4.6 onward think adaptively](#claude-46-onward-think-adaptively) | — | Nothing |
 | [Tool calls reach providers whole](#tool-calls-reach-providers-whole) | — | Nothing |
 
 ## The root import keeps only the core
@@ -249,6 +251,31 @@ it. Providers often answer with a dated snapshot name the registry does not file
 that echo cost the call nothing, so OpenAI responses could show a cost of 0, and so could Groq, Mistral,
 DeepSeek, and Cohere models filed under a prefix. Expect those costs to be priced in 2.0, and budgets
 to count them. A charge the provider reports, with `basis: 'reported'`, is kept as it is.
+
+## The model registry is current
+
+The bundled registry was checked against each provider's documentation on 2026-10-02.
+
+- **Shut-down models are gone.** So are four names 1.x invented that no provider served:
+  `claude-sonnet-5-0`, `claude-haiku-5-0`, `claude-fable-5-0`, and `gemini-3.5-pro`. The codemod lists
+  each one it finds, with what to use instead.
+- **Models with an announced shutdown stay,** marked `deprecated`. Their notes give the date and the
+  replacement, and an alias that resolves to one is deprecated too.
+- **Intent aliases point at current models.** For example, `anthropic/best` is `claude-fable-5-1`,
+  `openai/fast` is `gpt-6-luna`, and `deepseek/best` is `deepseek/deepseek-v4-pro`. Pin the resolved
+  model when a run must be reproducible.
+- **Prices moved both ways.** GPT-5.6 and Mistral Large 3 cost less. Gemini 3.5 Flash costs more than
+  1.x said, and the Gemini 3.6 to 3.8 Flash prices double on 2027-01-01.
+
+`describeModel()` shows what a name resolves to and when its entry was verified.
+
+## Claude 4.6 onward think adaptively
+
+From the 4.6 generation on, Claude takes adaptive thinking and an effort level, not a thinking budget.
+After 4.6 a budget is rejected, so 1.x requests with `reasoning` failed on those models. 2.0 sends what
+each model accepts, and the [core guide](docs/core.md#reasoning) has the details. Nothing changes in
+your code. From 4.7 on, Claude also rejects a non-default `temperature` or `topP`, so the client
+drops one and records a capability warning.
 
 ## Tool calls reach providers whole
 

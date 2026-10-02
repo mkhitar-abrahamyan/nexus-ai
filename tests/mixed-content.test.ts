@@ -121,7 +121,7 @@ test('Anthropic sends tool_use blocks and every result of a turn in one tool_res
       async create(sent: Record<string, unknown>) {
         params = sent;
         return {
-          model: 'claude-sonnet-5-0',
+          model: 'claude-sonnet-5-5',
           content: [{ type: 'text', text: 'done' }],
           stop_reason: 'end_turn',
           usage: {},
@@ -129,7 +129,7 @@ test('Anthropic sends tool_use blocks and every result of a turn in one tool_res
       },
     },
   };
-  await provider.complete(request('claude-sonnet-5-0'));
+  await provider.complete(request('claude-sonnet-5-5'));
 
   const messages = params.messages as Array<{ role: string; content: Array<Record<string, unknown>> | string }>;
   assert.deepEqual(
@@ -178,7 +178,7 @@ test('Google sends functionCall and named functionResponse parts, and returns im
   }) as typeof fetch;
   let response: NexusResponse;
   try {
-    response = await new GoogleProvider({ apiKey: 'test' }).complete(request('gemini-3-pro-image-preview'));
+    response = await new GoogleProvider({ apiKey: 'test' }).complete(request('gemini-3-pro-image'));
   } finally {
     globalThis.fetch = original;
   }

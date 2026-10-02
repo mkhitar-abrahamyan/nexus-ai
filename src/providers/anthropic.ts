@@ -95,6 +95,110 @@ function thinkingBudget(reasoning: ReasoningConfig | undefined): number | undefi
   return THINKING_BUDGETS[reasoning.effort] || undefined;
 }
 
+/**
+ * How a Claude model takes reasoning controls, read from its name.
+ *
+ * From the 4.6 generation on, Claude thinks adaptively and is steered by `output_config.effort`. A
+ * thinking budget is deprecated on 4.6 and rejected after it, so only earlier models get one.
+ */
+interface ClaudeThinkingRules {
+  /** `adaptive` takes an effort, `budget` a token budget. */
+  mode: 'adaptive' | 'budget';
+  /** Whether the model thinks when a request does not say. */
+  thinksByDefault: boolean;
+  /** How thinking is turned off, or undefined when the model always thinks. */
+  off?: 'disabled' | 'between_tools';
+  /** Whether the model has the `xhigh` effort level. */
+  xhigh: boolean;
+  /** Whether temperature, top-p, and top-k must stay at their defaults on every request. */
+  fixedSampling: boolean;
+}
+
+const BUDGET_RULES: ClaudeThinkingRules = {
+  mode: 'budget',
+  thinksByDefault: false,
+  xhigh: false,
+  fixedSampling: false,
+};
+
+/**
+ * The family and version in a Claude model name: `opus` and 4.6 for `claude-opus-4-6`, also with a
+ * date, a platform prefix, or a platform suffix. Names from before the 4 generation give undefined.
+ */
+function claudeModel(model: string): { family: string; version: number } | undefined {
+  const match = model.match(/claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?=$|[-@:.])/);
+  if (!match) return undefined;
+  return { family: match[1], version: Number(`${match[2]}.${match[3] ?? '0'}`) };
+}
+
+/** The reasoning rules of one Claude model. */
+function thinkingRules(model: string): ClaudeThinkingRules {
+  const parsed = claudeModel(model);
+  if (!parsed || parsed.version < 4.6) return BUDGET_RULES;
+  const { family, version } = parsed;
+  const alwaysOn = family === 'fable' || family === 'mythos' || (family === 'opus' && version >= 5.5);
+  return {
+    mode: 'adaptive',
+    thinksByDefault: version >= 5 || family === 'fable' || family === 'mythos',
+    off: alwaysOn ? undefined : family === 'sonnet' && version >= 5.5 ? 'between_tools' : 'disabled',
+    xhigh: version >= 4.7,
+    fixedSampling: version >= 4.7,
+  };
+}
+
+/**
+ * The effort an adaptive model is asked for: the request's effort, or the smallest level whose
+ * budget covers a requested `reasoning.maxTokens`, since adaptive models take no budget.
+ */
+function requestedEffort(reasoning: ReasoningConfig | undefined): ReasoningEffort | undefined {
+  if (!reasoning) return undefined;
+  if (reasoning.effort) return reasoning.effort;
+  if (reasoning.maxTokens === undefined) return undefined;
+  if (reasoning.maxTokens <= 0) return 'none';
+  const levels: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+  return levels.find((level) => THINKING_BUDGETS[level] >= (reasoning.maxTokens ?? 0)) ?? 'max';
+}
+
+/** The wire effort for a portable one, on a model with or without `xhigh`. */
+function wireEffort(effort: Exclude<ReasoningEffort, 'none'>, rules: ClaudeThinkingRules): AnthropicEffort {
+  if (effort === 'minimal') return 'low';
+  if (effort === 'xhigh' && !rules.xhigh) return 'high';
+  return effort;
+}
+
+/**
+ * Applies a request's reasoning to an adaptive model, and returns whether the model will think.
+ *
+ * Effort `none` turns thinking off where the model allows it; a model that always thinks gets the
+ * lowest effort instead. A request that asks for reasoning summaries gets them displayed, since
+ * the newest models omit thinking text unless asked.
+ */
+function applyAdaptiveThinking(
+  params: AnthropicMessageCreateParams,
+  reasoning: ReasoningConfig | undefined,
+  rules: ClaudeThinkingRules,
+): { thinks: boolean; effort?: AnthropicEffort } {
+  const effort = requestedEffort(reasoning);
+  const summary = reasoning?.summary;
+  if (effort === 'none') {
+    if (rules.off) {
+      params.thinking = { type: rules.off };
+      return { thinks: false };
+    }
+    params.output_config = { effort: 'low' };
+    return { thinks: true, effort: 'low' };
+  }
+  const wire = effort ? wireEffort(effort, rules) : undefined;
+  if (wire || (summary && summary !== 'none')) {
+    params.thinking = summary
+      ? { type: 'adaptive', display: summary === 'none' ? 'omitted' : 'summarized' }
+      : { type: 'adaptive' };
+    if (wire) params.output_config = { effort: wire };
+    return { thinks: true, effort: wire };
+  }
+  return { thinks: rules.thinksByDefault };
+}
+
 function mapToolChoice(request: CompletionRequest): AnthropicToolChoice | undefined {
   const choice = request.toolChoice;
   const disableParallel = request.parallelToolCalls === false ? true : undefined;
@@ -118,6 +222,7 @@ function anthropicUsage(usage: AnthropicUsage | undefined): UsageInput {
     outputTokens: usage.output_tokens || 0,
     cachedReadTokens: usage.cache_read_input_tokens,
     cachedWriteTokens: usage.cache_creation_input_tokens,
+    reasoningTokens: usage.output_tokens_details?.thinking_tokens,
   };
 }
 
@@ -148,9 +253,20 @@ interface AnthropicMessageCreateParams {
   system?: string | AnthropicTextBlock[];
   tools?: AnthropicToolParam[];
   tool_choice?: AnthropicToolChoice;
-  thinking?: { type: 'enabled'; budget_tokens: number };
+  thinking?: AnthropicThinking;
+  output_config?: { effort: AnthropicEffort };
   stream?: boolean;
 }
+
+/** The thinking setting of one request: a budget, adaptive, off, or off before the first tool call. */
+type AnthropicThinking =
+  | { type: 'enabled'; budget_tokens: number }
+  | { type: 'adaptive'; display?: 'summarized' | 'omitted' }
+  | { type: 'disabled' }
+  | { type: 'between_tools' };
+
+/** Effort levels the Messages API takes. The portable `minimal` is sent as `low`. */
+type AnthropicEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 interface AnthropicToolChoice {
   type: 'auto' | 'any' | 'tool' | 'none';
@@ -212,6 +328,7 @@ interface AnthropicUsage {
   output_tokens?: number;
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
+  output_tokens_details?: { thinking_tokens?: number };
 }
 
 interface AnthropicMessageResponse {
@@ -460,7 +577,12 @@ export class AnthropicProvider extends BaseProvider {
 
           if (event.type === 'message_delta') {
             const eventUsage = getRecord(event, 'usage');
-            if (eventUsage) usage.outputTokens = getNumber(eventUsage, 'output_tokens', usage.outputTokens || 0);
+            if (eventUsage) {
+              usage.outputTokens = getNumber(eventUsage, 'output_tokens', usage.outputTokens || 0);
+              // The thinking share of the output arrives only on the final delta.
+              const details = getRecord(eventUsage, 'output_tokens_details');
+              if (details) usage.reasoningTokens = getNumber(details, 'thinking_tokens', 0);
+            }
           }
 
           if (event.type === 'message_stop') {
@@ -485,7 +607,6 @@ export class AnthropicProvider extends BaseProvider {
   private createParams(request: CompletionRequest): AnthropicMessageCreateParams {
     const plan = planCache(request);
     const { system, messages } = this.formatMessages(request.messages, plan);
-    const budget = thinkingBudget(request.reasoning);
     const params: AnthropicMessageCreateParams = {
       model: request.model,
       messages,
@@ -496,11 +617,29 @@ export class AnthropicProvider extends BaseProvider {
       stop_sequences: request.stop ? (Array.isArray(request.stop) ? request.stop : [request.stop]) : undefined,
     };
 
-    if (budget) {
-      params.thinking = { type: 'enabled', budget_tokens: budget };
-      // The output limit has to leave room for visible text beyond the thinking budget, and
-      // Anthropic rejects temperature and top-p sampling while thinking is enabled.
-      params.max_tokens = Math.max(params.max_tokens, budget + THINKING_OUTPUT_HEADROOM);
+    const rules = thinkingRules(request.model);
+    let thinks = false;
+    if (rules.mode === 'adaptive') {
+      const applied = applyAdaptiveThinking(params, request.reasoning, rules);
+      thinks = applied.thinks;
+      // Thinking counts toward max_tokens. Without a caller limit, leave room for the thinking
+      // the effort asks for, so a hard request is not cut off before its answer.
+      if (thinks && request.maxTokens === undefined) {
+        const effort = applied.effort ?? 'high';
+        params.max_tokens = Math.max(params.max_tokens, THINKING_BUDGETS[effort] + THINKING_OUTPUT_HEADROOM);
+      }
+    } else {
+      const budget = thinkingBudget(request.reasoning);
+      if (budget) {
+        params.thinking = { type: 'enabled', budget_tokens: budget };
+        // The output limit has to leave room for visible text beyond the thinking budget.
+        params.max_tokens = Math.max(params.max_tokens, budget + THINKING_OUTPUT_HEADROOM);
+        thinks = true;
+      }
+    }
+
+    // Sampling controls conflict with thinking, and from 4.7 on any non-default value is rejected.
+    if (thinks || rules.fixedSampling) {
       params.temperature = undefined;
       params.top_p = undefined;
       params.top_k = undefined;

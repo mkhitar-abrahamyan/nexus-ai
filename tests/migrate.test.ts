@@ -108,6 +108,23 @@ test('options and fields 2.0 removed are reported for a person to check', () => 
   assert.ok(notes.some((note) => /inputModalities/.test(note.message)));
 });
 
+test('model names the 2.0 registry dropped are reported with their replacement', () => {
+  const source = [
+    "const a = await ai.complete({ model: 'claude-3-5-sonnet-20241022', messages });",
+    'const b = { defaultModel: "deepseek/deepseek-chat" };',
+    "const c = { model: 'claude-sonnet-5-5' };",
+    "const d = { model: 'deepseek/deepseek-chat-v2' };",
+  ].join('\n');
+  const { text, notes } = migrate(source);
+  assert.equal(text, source, 'a different model changes behavior, so nothing is rewritten');
+  assert.deepEqual(
+    notes.map((note) => note.line),
+    [1, 2],
+  );
+  assert.match(notes[0]?.message ?? '', /`claude-sonnet-5-5`/);
+  assert.match(notes[1]?.message ?? '', /`deepseek\/deepseek-flash`/);
+});
+
 test('Markdown is migrated inside code blocks only, with lines counted from the top of the file', () => {
   const source = [
     '# Guide',

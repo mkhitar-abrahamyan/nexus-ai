@@ -48,11 +48,11 @@ export interface ProviderConformanceOptions {
 
 /** Default conformance cases for each bundled chat provider, keyed by provider name. */
 export const PROVIDER_CONFORMANCE_FIXTURES: Record<string, ProviderConformanceCase[]> = {
-  openai: baseFixtures('gpt-5.4-mini'),
-  anthropic: baseFixtures('claude-sonnet-4'),
-  google: baseFixtures('gemini-2.5-flash'),
+  openai: baseFixtures('gpt-6-luna'),
+  anthropic: baseFixtures('claude-haiku-4-5'),
+  google: baseFixtures('gemini-3.5-flash-lite'),
   groq: baseFixtures('groq/openai/gpt-oss-20b'),
-  mistral: baseFixtures('mistral/mistral-small-2603'),
+  mistral: baseFixtures('mistral/ministral-8b-2512'),
   cohere: baseFixtures('cohere/command-r7b-12-2024'),
   ollama: baseFixtures('ollama/llama3.2'),
   openrouter: baseFixtures('openrouter/openai/gpt-5.4-mini'),

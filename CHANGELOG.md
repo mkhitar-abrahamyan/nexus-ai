@@ -39,6 +39,13 @@ deprecated in 1.x; [MIGRATING.md](./MIGRATING.md) covers each change with before
 - **What the lifecycle records changed**: metrics carry `family` and `operation` for every family, the
   image family is labelled `image`, audit events carry `family` and `operation` and add an `error`
   event, and `response.meta.requestId` is the operation's id.
+- **The model registry is current as of 2026-10-02.** Models their providers shut down are removed:
+  Claude 3.x and 4.0 to 4.1, `gpt-4.5-preview`, `o1-mini`, `gpt-5-codex`, Gemini 1.5 and 2.0 and the
+  shut-down 3.x previews, Groq Compound, Llama 4 Scout, and Qwen3 32B, Mistral's 2024 models, Devstral,
+  and Magistral, and DeepSeek's `deepseek-chat`, `deepseek-reasoner`, V3, and R1. Four names no
+  provider served are gone too: `claude-sonnet-5-0`, `claude-haiku-5-0`, `claude-fable-5-0`, and
+  `gemini-3.5-pro`. Cohere's `command-r` and `command-r-plus` are filed under their dated names, and
+  `mistral-medium-3-5` under `mistral-medium-2604`. Every intent alias points at a current model.
 
 ### Added
 
@@ -61,6 +68,16 @@ deprecated in 1.x; [MIGRATING.md](./MIGRATING.md) covers each change with before
   on `response.assets`.
 - **Typed pipelines**: `PipelineContext` and the runner are generic over the request and response, with
   `PipelineShapes` for another family's types.
+- **New models**: OpenAI GPT-6 Astra, GPT-6.1 Sol, GPT-6 Sol, GPT-6 Luna, GPT-5 Pro, o3-pro, and
+  GPT-5.3 Codex; Claude Fable 5.1, Opus 5.5, Sonnet 5.5, Fable 5, Opus 5, Sonnet 5, and Sonnet 4.5;
+  Gemini 3.8, 3.7, and 3.6 Flash, 3.5 Flash-Lite, 3.1 Flash-Lite, 3 Pro Image, and 3.1 Flash Image;
+  Groq's Qwen3.8 27B and MiniMax M2.7; Mistral Medium 3.5 and Ministral 3 14B, 8B, and 3B; DeepSeek
+  Flash and V4 Pro; and Cohere Command A Plus, North Mini Code, North Small Translate, and three Tiny
+  Aya models.
+- `ModelCapabilities.sampling`, false for a model that accepts only its default temperature and top-p.
+  Negotiation drops a non-default value for it.
+- `nexus migrate` lists each model name the 2.0 registry dropped, with what to use instead.
+- Anthropic responses report thinking tokens in `usage.reasoningTokens`.
 - `toCheckpoint()` and `CheckpointDraft` for building a version 2 checkpoint by hand.
 - A `cache_hits` metric, and `routingDecision.provider` and `.model` on a response.
 
@@ -73,9 +90,21 @@ deprecated in 1.x; [MIGRATING.md](./MIGRATING.md) covers each change with before
   rate-limited and audited like `createCall()`.
 - `nexus migrate` lists the options and model entries 2.0 removed, and keeps a single moved name on
   one line.
+- **Prices and limits follow the providers.** GPT-5.6, GPT-5.2 Pro, Mistral Large 3, and Mistral
+  Small 4 cost less. Gemini 3.5 Flash costs $1.50 and $9 per million tokens, not $0.10 and $0.40.
+  Claude Opus 4.5 has a 200K context and 64K output, not 1M and 128K, and Codestral a 128K context.
+  Models with an announced shutdown are `deprecated`, with the date and the replacement in their
+  notes, and an alias that resolves to one is deprecated too.
+- `toolChoice: false` now means a call cannot be forced: negotiation drops `required` or a named tool
+  and lets `auto` and `none` through.
 
 ### Fixed
 
+- **Claude 4.6 onward get adaptive thinking.** The Anthropic adapter sent every model a thinking
+  budget, which Claude rejects after 4.6, so a request with `reasoning` failed on current models. It
+  now sends adaptive thinking and `output_config.effort` from 4.6 on, and turns thinking off the way
+  each model allows. It drops sampling values that Claude 4.7 and later reject, and leaves room for
+  thinking when no output limit is set.
 - **Tool calls reach providers whole.** The OpenAI chat and Responses, Anthropic, and Google adapters
   dropped a conversation's tool calls and the ids that link results to them, so a real tool loop could
   fail on its second turn. Each now sends both the way its API expects, images in results included.

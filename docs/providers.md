@@ -61,7 +61,7 @@ Each adapter has its own entry point, so an application that uses one provider l
 | Adapter | Entry point | Notes |
 | --- | --- | --- |
 | `OpenAIProvider` | `/providers/openai` | Chat Completions and the Responses API; the base of the OpenAI-compatible adapters below |
-| `AnthropicProvider` | `/providers/anthropic` | Messages API, with extended thinking mapped from `reasoning.effort` and explicit cache breakpoints |
+| `AnthropicProvider` | `/providers/anthropic` | Messages API, with explicit cache breakpoints. `reasoning.effort` becomes adaptive thinking and an effort from Claude 4.6 on, and a thinking budget before it |
 | `GoogleProvider` | `/providers/google` | Gemini, with thinking budgets mapped from effort and cached tokens separated out of the prompt count |
 | `AzureOpenAIProvider` | `/providers/azure-openai` | OpenAI on an Azure endpoint and deployment |
 | `OpenRouterProvider` | `/providers/openrouter` | Many vendors' models through one OpenAI-compatible API |
@@ -210,7 +210,7 @@ nothing reads. Both live in the repository, where a diff is what you want.
 | Modalities | What it accepts and what it produces. See below. |
 | Features | Streaming, tool calling, structured output and JSON mode, reasoning and the efforts it takes. |
 | Caching | A `PromptCachingCapability`: whether it takes caller-placed breakpoints, which `CacheTtl` lifetimes, the minimum prefix, and how many breakpoints. |
-| Options honoured | Tool choice, parallel tool calls, seed, top-k, penalties. |
+| Options honoured | Forced tool choice, parallel tool calls, non-default sampling (temperature and top-p), seed, top-k, penalties. |
 | Limits and cost | Context and output limits, prices, quality and speed scores. |
 | Serving | The `ModelEndpoint` values it is served on. |
 | Provenance | When and where the entry was verified. |
@@ -228,7 +228,7 @@ the two, in one call:
 ```ts
 import { getModelCapabilities, modalitiesOf } from 'nexus-ai-pro/models';
 
-const { input, output } = modalitiesOf(getModelCapabilities('gemini-3-pro-image-preview')!);
+const { input, output } = modalitiesOf(getModelCapabilities('gemini-3-pro-image')!);
 // input: ['text', 'image'], output: ['text', 'image']
 ```
 
@@ -244,7 +244,7 @@ data came from and when it was verified. `resolveProvider()` names the provider 
 
 `/models` reads the registry through your configuration. A model you register with `models.registry`,
 or an alias with `models.aliases`, is seen like a bundled one. A name with a provider prefix, such as
-`google/gemini-2.5-flash`, finds the entry filed without it, but only when that entry belongs to the
+`google/gemini-3.5-flash`, finds the entry filed without it, but only when that entry belongs to the
 provider the prefix names.
 
 `DEFAULT_CACHE_PRICING` holds each provider's cache rates, as multiples of its standard input price.

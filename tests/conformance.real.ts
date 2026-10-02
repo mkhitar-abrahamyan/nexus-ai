@@ -36,7 +36,7 @@ if (process.env.OPENAI_API_KEY) {
 if (process.env.ANTHROPIC_API_KEY) {
   providers.push({
     name: 'anthropic',
-    model: process.env.ANTHROPIC_CONFORMANCE_MODEL || 'claude-sonnet-4',
+    model: process.env.ANTHROPIC_CONFORMANCE_MODEL || 'claude-haiku-4-5',
     provider: new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY }),
     testJson: process.env.ANTHROPIC_CONFORMANCE_JSON === 'true',
     testTools: true,

@@ -319,10 +319,21 @@ console.log(response.meta.usage?.reasoningTokens);
 
 `ReasoningConfig` has three fields, and leaving it unset keeps the model's own default. `effort` is
 the portable control, a `ReasoningEffort` from `none` through `minimal`, `low`, `medium`, `high`, and
-`xhigh` to `max`. It maps to OpenAI `reasoning_effort` and the Responses `reasoning` field, Anthropic
-extended thinking, and Gemini `thinkingConfig`. Use `reasoning.maxTokens` when you want to set a
-thinking budget directly instead of by level, and `summary` (`none`, `auto`, or `detailed`) to stream
+`xhigh` to `max`. It maps to OpenAI `reasoning_effort` and the Responses `reasoning` field, Claude
+thinking, and Gemini `thinkingConfig`. Use `reasoning.maxTokens` when you want to set a thinking
+budget directly instead of by level, and `summary` (`none`, `auto`, or `detailed`) to stream
 reasoning summaries.
+
+Claude takes reasoning two ways, and the Anthropic adapter picks by model:
+
+| Claude models | What is sent | `effort: 'none'` |
+| --- | --- | --- |
+| 4.6 onward | Adaptive thinking and `output_config.effort`. A `maxTokens` becomes the smallest effort whose budget covers it. | Turns thinking off. Sonnet 5.5 can only skip up-front thinking. Opus 5.5 and Fable always think, so they get effort `low`. |
+| Before 4.6 | A thinking budget, from `maxTokens` or the effort. | Sends no thinking. |
+
+Thinking counts toward the output limit. When you set no `maxTokens`, the adapter leaves room for
+the thinking the effort asks for. Your own `maxTokens` is always kept as the hard cap. The newest
+Claude models hide thinking text unless asked, so a `summary` also asks them to show it.
 
 Requesting a summary emits `reasoning` stream chunks, which stay separate from visible output:
 
@@ -420,6 +431,11 @@ console.log(response.meta.capabilityWarnings);
 - `strict` throws a `NexusCapabilityError` before spending anything.
 - `warn` drops or clamps the option and records it on `meta.capabilityWarnings`.
 - `off` sends the request exactly as written.
+
+Some models take only part of an option. Claude 4.7 and later accept only the default temperature
+and top-p (`sampling: false`), so a `temperature` sent to them is dropped. Opus 5.5, Sonnet 5.5, and
+Fable 5.1 cannot be forced to call a tool (`toolChoice: false`). For them, `required` or a named tool
+is dropped, while `auto` and `none` still pass.
 
 Those are the three `CapabilityPolicy` values. Each `CapabilityWarning` names the option by its
 dotted path, such as `reasoning.effort`, with the model and provider, the value requested, the

@@ -7,7 +7,7 @@ import { OllamaProvider } from '../src/providers/ollama.js';
 
 function request(overrides: Partial<CompletionRequest> = {}): CompletionRequest {
   return {
-    model: 'gemini-3.5-pro',
+    model: 'gemini-3.8-flash',
     messages: [{ role: 'user', content: 'hello' }],
     ...overrides,
   };
@@ -305,7 +305,7 @@ test('Cohere streams the buffered answer and reports an error chunk on failure',
     })) as typeof globalThis.fetch;
   try {
     const chunks: StreamChunk[] = [];
-    for await (const chunk of okProvider.stream(request({ model: 'cohere/command-r' }))) chunks.push(chunk);
+    for await (const chunk of okProvider.stream(request({ model: 'cohere/command-r-08-2024' }))) chunks.push(chunk);
     assert.deepEqual(
       chunks.map((chunk) => chunk.type),
       ['text', 'done'],
@@ -318,7 +318,9 @@ test('Cohere streams the buffered answer and reports an error chunk on failure',
   globalThis.fetch = (async () => new Response('denied', { status: 401 })) as typeof globalThis.fetch;
   try {
     const chunks: StreamChunk[] = [];
-    for await (const chunk of new CohereProvider({ apiKey: 'bad' }).stream(request({ model: 'cohere/command-r' }))) {
+    for await (const chunk of new CohereProvider({ apiKey: 'bad' }).stream(
+      request({ model: 'cohere/command-r-08-2024' }),
+    )) {
       chunks.push(chunk);
     }
     assert.equal(chunks.at(-1)?.type, 'error');

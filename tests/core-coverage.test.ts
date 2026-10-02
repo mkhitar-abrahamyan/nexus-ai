@@ -220,8 +220,8 @@ test('rules routing resolves an alias and reports what matched', () => {
   });
 
   assert.equal(decision.providerName, 'anthropic');
-  assert.equal(decision.model, 'claude-opus-4-8');
-  assert.match(decision.reason, /matched routing rule -> anthropic\/best resolved to claude-opus-4-8/);
+  assert.equal(decision.model, 'claude-fable-5-1');
+  assert.match(decision.reason, /matched routing rule -> anthropic\/best resolved to claude-fable-5-1/);
 });
 
 test('rules routing supports comparison, membership, and wildcard conditions', () => {
@@ -234,13 +234,13 @@ test('rules routing supports comparison, membership, and wildcard conditions', (
   const long = routeWith(routerConfig(rules), {
     messages: Array.from({ length: 6 }, () => ({ role: 'user' as const, content: 'x' })),
   });
-  assert.equal(long.model, 'claude-opus-4-8');
+  assert.equal(long.model, 'claude-fable-5-1');
 
   const support = routeWith(routerConfig(rules), { metadata: { taskType: 'support' } });
-  assert.equal(support.model, 'claude-haiku-5-0');
+  assert.equal(support.model, 'claude-haiku-4-5-20251001');
 
   const fallback = routeWith(routerConfig(rules), {});
-  assert.equal(fallback.model, 'claude-sonnet-5-0');
+  assert.equal(fallback.model, 'claude-sonnet-5-5');
 });
 
 test('rules routing matches on tool presence and user identity', () => {
@@ -252,7 +252,7 @@ test('rules routing matches on tool presence and user identity', () => {
     { userId: 'u-1', tools: [{ name: 'x', description: 'x', parameters: {} }] },
   );
 
-  assert.equal(decision.model, 'claude-opus-4-8');
+  assert.equal(decision.model, 'claude-fable-5-1');
 
   const otherUser = routeWith(
     routerConfig([
@@ -262,7 +262,7 @@ test('rules routing matches on tool presence and user identity', () => {
     { userId: 'u-2', tools: [{ name: 'x', description: 'x', parameters: {} }] },
   );
 
-  assert.equal(otherUser.model, 'claude-haiku-5-0');
+  assert.equal(otherUser.model, 'claude-haiku-4-5-20251001');
 });
 
 test('a rule pointing at an unregistered provider is skipped rather than routed to', () => {

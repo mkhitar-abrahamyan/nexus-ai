@@ -183,7 +183,7 @@ export class AutoRouter {
     if (providerName === 'openrouter') {
       return [
         { providerName, model: 'openrouter/openai/gpt-5.4-mini', weight: 0 },
-        { providerName, model: 'openrouter/anthropic/claude-sonnet-4', weight: 0 },
+        { providerName, model: 'openrouter/anthropic/claude-haiku-4.5', weight: 0 },
         { providerName, model: 'openrouter/google/gemini-2.5-flash', weight: 0 },
         { providerName, model: 'openrouter/meta-llama/llama-3.3-70b-instruct', weight: 0 },
       ];
@@ -191,8 +191,8 @@ export class AutoRouter {
 
     if (providerName === 'deepseek') {
       return [
-        { providerName, model: 'deepseek/deepseek-reasoner', weight: 0 },
-        { providerName, model: 'deepseek/deepseek-chat', weight: 0 },
+        { providerName, model: 'deepseek/deepseek-v4-pro', weight: 0 },
+        { providerName, model: 'deepseek/deepseek-flash', weight: 0 },
       ];
     }
 

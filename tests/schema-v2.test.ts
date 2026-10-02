@@ -22,7 +22,7 @@ test('every registry entry declares what it accepts and what it produces', () =>
     assert.ok(capabilities.outputModalities.length > 0, `${name} produces something`);
     assert.equal('modalities' in capabilities, false, `${name} has no undirected list`);
   }
-  assert.deepEqual(KNOWN_MODELS['gemini-3-pro-image-preview']?.outputModalities, ['text', 'image']);
+  assert.deepEqual(KNOWN_MODELS['gemini-3-pro-image']?.outputModalities, ['text', 'image']);
   assert.ok(KNOWN_MODELS['gemini-2.5-flash']?.inputModalities.includes('pdf'));
 });
 
@@ -60,7 +60,7 @@ test('routing can require what a model accepts and what it produces', () => {
         routing: {
           mode: 'auto',
           strategy: 'quality',
-          candidateModels: ['gemini-2.5-flash', 'gemini-3-pro-image-preview'],
+          candidateModels: ['gemini-3.5-flash', 'gemini-3-pro-image'],
           requiredCapabilities,
         },
       } as NexusAIConfig,
@@ -68,8 +68,8 @@ test('routing can require what a model accepts and what it produces', () => {
       [],
       [],
     );
-  assert.equal(route({ outputModalities: ['image'] }).model, 'gemini-3-pro-image-preview');
-  assert.equal(route({ inputModalities: ['pdf'] }).model, 'gemini-2.5-flash', 'only the general model takes PDFs');
+  assert.equal(route({ outputModalities: ['image'] }).model, 'gemini-3-pro-image');
+  assert.equal(route({ inputModalities: ['pdf'] }).model, 'gemini-3.5-flash', 'only the general model takes PDFs');
 });
 
 test('a provider-prefixed model name finds its registry entry', () => {

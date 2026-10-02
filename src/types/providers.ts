@@ -67,10 +67,12 @@ export interface ModelCapabilities {
   reasoning?: boolean | { efforts?: ReasoningEffort[]; maxTokens?: number };
   /** How it supports prompt caching. */
   promptCaching?: boolean | PromptCachingCapability;
-  /** Whether a specific tool can be forced. */
+  /** Whether a tool call can be forced, with `required` or a named tool. `auto` and `none` always pass. */
   toolChoice?: boolean;
   /** Whether it can make several tool calls at once. */
   parallelToolCalls?: boolean;
+  /** Whether it accepts a temperature or top-p other than the provider default. */
+  sampling?: boolean;
   /** Whether it honors a sampling seed. */
   seed?: boolean;
   /** Whether it accepts top-k sampling. */
@@ -133,7 +135,7 @@ export interface AliasMetadata {
  * `models.registry` when exact numbers matter.
  */
 export const REGISTRY_PROVENANCE = {
-  verifiedAt: '2026-08-25',
+  verifiedAt: '2026-10-02',
   source: 'provider documentation',
 } as const;
 
@@ -211,13 +213,25 @@ const gpt5 = (
 const anthropicEfforts: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
- * Every Claude release from 3.7 onward supports extended thinking.
+ * The version at the end of a Claude family name, such as 4.6 for `claude-opus-4.6`.
  *
- * The version is read from the end of the family name rather than matched by substring, which
- * previously reported the Claude 5 line as non-reasoning because its name contains no "4".
+ * It is read from the end rather than matched by substring, which once reported the Claude 5 line
+ * as non-reasoning because its name contains no "4".
  */
-const claudeSupportsThinking = (family: string): boolean =>
-  Number.parseFloat(family.match(/(\d+(?:\.\d+)?)$/)?.[1] || '0') >= 3.7;
+const claudeVersion = (family: string): number => Number.parseFloat(family.match(/(\d+(?:\.\d+)?)$/)?.[1] || '0');
+
+/** Every Claude release from 3.7 onward supports extended thinking. */
+const claudeSupportsThinking = (family: string): boolean => claudeVersion(family) >= 3.7;
+
+/** Effort levels of the Claude models that think adaptively, by what each can reach and turn off. */
+const ADAPTIVE_EFFORTS = {
+  /** Thinking can be turned off, and every level up to `max` is available. */
+  full: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+  /** Thinking is always on. */
+  alwaysOn: ['low', 'medium', 'high', 'xhigh', 'max'],
+  /** The 4.6 generation, which has no `xhigh`. */
+  noXhigh: ['none', 'low', 'medium', 'high', 'max'],
+} satisfies Record<string, ReasoningEffort[]>;
 
 const claude = (
   family: string,
@@ -264,6 +278,41 @@ const claude = (
     endpoints: ['messages'],
   });
 
+/**
+ * A Claude model that thinks adaptively, steered by effort: the 4.6 generation onward, all with a
+ * 1M-token context.
+ *
+ * These models take no thinking budget, so no `reasoning.maxTokens` is declared. From 4.7 on, a
+ * temperature, top-p, or top-k other than the default is rejected on every request.
+ */
+const claudeAdaptive = (
+  family: string,
+  inputPerMillion: number,
+  outputPerMillion: number,
+  qualityScore: number,
+  speedScore: number,
+  maxOutputTokens: number,
+  release: string,
+  knowledgeCutoff: string,
+  efforts: ReasoningEffort[],
+  cacheReadMultiple = 0.1,
+): ModelCapabilities => ({
+  ...claude(
+    family,
+    inputPerMillion,
+    outputPerMillion,
+    qualityScore,
+    speedScore,
+    maxOutputTokens,
+    release,
+    knowledgeCutoff,
+    1000000,
+  ),
+  reasoning: { efforts },
+  costPer1kCachedInput: (inputPerMillion * cacheReadMultiple) / 1000,
+  ...(claudeVersion(family) >= 4.7 ? { topK: false, sampling: false } : {}),
+});
+
 const gemini = (
   family: string,
   maxContextTokens: number,
@@ -272,7 +321,7 @@ const gemini = (
   qualityScore: number,
   speedScore: number,
   release: string,
-  knowledgeCutoff: string,
+  knowledgeCutoff: string | undefined,
   status: ModelStatus = 'stable',
 ): ModelCapabilities =>
   model({
@@ -384,85 +433,117 @@ const cohere = (
 /**
  * The bundled model registry: capabilities and prices for every model the package knows by name.
  * Defaults, not financial truth; override entries through `models.registry`.
+ *
+ * Models a provider has shut down are not listed. Models with an announced shutdown are marked
+ * `deprecated`, and their notes give the date and the replacement.
  */
 export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
-  // OpenAI - current GPT-5.6 family
-  'gpt-5.6-sol': {
-    ...gpt5('gpt-5.6', 1050000, 5, 30, 100, 78, '2026-07', '2026-02-16'),
+  // OpenAI - current GPT-6 family. Prompts over 272K input tokens cost 2x input and 1.5x output.
+  'gpt-6-astra': {
+    ...gpt5('gpt-6', 1050000, 10, 50, 100, 70, '2026', '2026-04-30'),
+    reasoning: { efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    costPer1kCacheWrite: 0.0125,
     endpoints: ['responses'],
-    notes: 'OpenAI flagship model for complex reasoning and coding.',
+    notes: 'OpenAI flagship for the hardest reasoning and agentic work.',
   },
-  'gpt-5.6-terra': {
-    ...gpt5('gpt-5.6', 1050000, 2.5, 15, 98, 86, '2026-07', '2026-02-16'),
+  'gpt-6.1-sol': {
+    ...gpt5('gpt-6.1', 1050000, 2, 10, 99, 84, '2026', '2026-04-30'),
+    reasoning: { efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    costPer1kCachedInput: 0.0001,
     endpoints: ['responses'],
-    notes: 'OpenAI GPT-5.6 model balanced for intelligence and cost.',
+    notes: 'Near-Astra quality for coding, computer use, and professional work, at a lower price.',
   },
-  'gpt-5.6-luna': {
-    ...gpt5('gpt-5.6', 1050000, 1, 6, 94, 96, '2026-07', '2026-02-16'),
+  'gpt-6-sol': {
+    ...gpt5('gpt-6', 1050000, 2, 10, 98, 84, '2026', '2026-04-20'),
     endpoints: ['responses'],
-    notes: 'OpenAI GPT-5.6 model optimized for cost-sensitive, high-volume workloads.',
+    notes: 'Superseded by gpt-6.1-sol.',
+  },
+  'gpt-6-luna': {
+    ...gpt5('gpt-6', 1050000, 0.1, 0.5, 90, 99, '2026', '2026-05-18'),
+    endpoints: ['responses'],
+    notes:
+      'OpenAI model for high-volume, cost-sensitive work. Chat Completions calls tools only at reasoning effort none, so it is sent through Responses.',
   },
 
-  // OpenAI - GPT-5 family
-  'gpt-5.5': gpt5('gpt-5.5', 1000000, 5, 30, 99, 82, '2026', '2025-12-01'),
+  // OpenAI - GPT-5.6 family
+  'gpt-5.6-sol': {
+    ...gpt5('gpt-5.6', 1050000, 4, 20, 97, 78, '2026-07', '2026-02-16'),
+    endpoints: ['responses'],
+  },
+  'gpt-5.6-terra': {
+    ...gpt5('gpt-5.6', 1050000, 2, 12, 94, 86, '2026-07', '2026-02-16'),
+    endpoints: ['responses'],
+  },
+  'gpt-5.6-luna': {
+    ...gpt5('gpt-5.6', 1050000, 0.2, 1.2, 88, 96, '2026-07', '2026-02-16'),
+    endpoints: ['responses'],
+  },
+
+  // OpenAI - earlier GPT-5 releases
+  'gpt-5.5': gpt5('gpt-5.5', 1000000, 5, 30, 96, 82, '2026', '2025-12-01'),
   'gpt-5.5-pro': {
-    ...gpt5('gpt-5.5', 1050000, 30, 180, 100, 55, '2026', '2025-12-01'),
+    ...gpt5('gpt-5.5', 1050000, 30, 180, 97, 55, '2026', '2025-12-01'),
     structuredOutputs: false,
     endpoints: ['responses'],
   },
-  'gpt-5.4': gpt5('gpt-5.4', 1050000, 2.5, 15, 97, 85, '2026-03', '2025-08-31'),
+  'gpt-5.4': gpt5('gpt-5.4', 1050000, 2.5, 15, 93, 85, '2026-03', '2025-08-31'),
   'gpt-5.4-pro': {
-    ...gpt5('gpt-5.4', 1050000, 30, 180, 99, 55, '2026-03', '2025-08-31'),
+    ...gpt5('gpt-5.4', 1050000, 30, 180, 95, 55, '2026-03', '2025-08-31'),
     structuredOutputs: false,
     endpoints: ['responses'],
   },
-  'gpt-5.4-mini': gpt5('gpt-5.4', 400000, 0.75, 4.5, 92, 94, '2026-03', '2025-08-31'),
-  'gpt-5.4-nano': gpt5('gpt-5.4', 400000, 0.2, 1.25, 84, 98, '2026-03', '2025-08-31'),
-  'gpt-5.2': gpt5('gpt-5.2', 400000, 1.75, 14, 96, 82, '2025', '2025-08-31'),
+  'gpt-5.4-mini': gpt5('gpt-5.4', 400000, 0.75, 4.5, 90, 94, '2026-03', '2025-08-31'),
+  'gpt-5.4-nano': {
+    ...gpt5('gpt-5.4', 400000, 0.2, 1.25, 82, 98, '2026-03', '2025-08-31'),
+    status: 'deprecated',
+    notes: 'OpenAI shuts it down on 2027-04-01; migrate to gpt-6-luna.',
+  },
+  'gpt-5.3-codex': {
+    ...gpt5('gpt-5.3', 400000, 1.75, 14, 95, 78, '2026', '2025-08-31'),
+    family: 'codex',
+    reasoning: { efforts: ['low', 'medium', 'high', 'xhigh'] },
+    status: 'deprecated',
+    endpoints: ['responses'],
+    notes: 'OpenAI shuts it down on 2027-04-01; migrate to gpt-6-sol.',
+  },
+  'gpt-5.2': gpt5('gpt-5.2', 400000, 1.75, 14, 92, 82, '2025', '2025-08-31'),
   'gpt-5.2-pro': {
-    ...gpt5('gpt-5.2', 400000, 30, 180, 98, 55, '2025', '2025-08-31'),
+    ...gpt5('gpt-5.2', 400000, 21, 168, 94, 55, '2025', '2025-08-31'),
     endpoints: ['responses'],
   },
   'gpt-5.2-codex': {
-    ...gpt5('gpt-5.2', 400000, 1.75, 14, 96, 78, '2025', '2025-08-31'),
+    ...gpt5('gpt-5.2', 400000, 1.75, 14, 93, 78, '2025', '2025-08-31'),
     family: 'codex',
+    reasoning: { efforts: ['low', 'medium', 'high', 'xhigh'] },
     endpoints: ['responses'],
   },
-  'gpt-5.1': gpt5('gpt-5.1', 400000, 1.25, 10, 94, 82, '2025', '2024-09-30'),
-  'gpt-5': gpt5('gpt-5', 400000, 1.25, 10, 92, 80, '2025', '2024-09-30'),
-  'gpt-5-mini': gpt5('gpt-5', 400000, 0.25, 2, 88, 94, '2025', '2024-05-31'),
-  'gpt-5-nano': gpt5('gpt-5', 400000, 0.05, 0.4, 78, 99, '2025', '2024-05-31'),
-  'gpt-5-codex': {
-    ...gpt5('gpt-5', 400000, 1.25, 10, 93, 78, '2025', '2024-09-30'),
-    family: 'codex',
+  'gpt-5.1': {
+    ...gpt5('gpt-5.1', 400000, 1.25, 10, 90, 82, '2025', '2024-09-30'),
+    status: 'deprecated',
+    notes: 'OpenAI shuts it down on 2027-04-01; migrate to gpt-6-sol.',
+  },
+  'gpt-5': {
+    ...gpt5('gpt-5', 400000, 1.25, 10, 88, 80, '2025', '2024-09-30'),
+    status: 'deprecated',
+    notes: 'OpenAI shuts it down on 2026-12-11; migrate to gpt-5.6-sol.',
+  },
+  'gpt-5-pro': {
+    ...gpt5('gpt-5', 400000, 15, 120, 90, 50, '2025', '2024-09-30'),
+    structuredOutputs: false,
     endpoints: ['responses'],
   },
-  'gpt-5-chat-latest': {
-    ...gpt5('gpt-5', 128000, 1.25, 10, 90, 82, 'latest', '2024-09-30'),
-    maxOutputTokens: 16384,
-    status: 'latest',
+  'gpt-5-mini': {
+    ...gpt5('gpt-5', 400000, 0.25, 2, 84, 94, '2025', '2024-05-31'),
+    status: 'deprecated',
+    notes: 'OpenAI shuts it down on 2026-12-11; migrate to gpt-5.6-terra.',
+  },
+  'gpt-5-nano': {
+    ...gpt5('gpt-5', 400000, 0.05, 0.4, 76, 99, '2025', '2024-05-31'),
+    status: 'deprecated',
+    notes: 'OpenAI shuts it down on 2026-12-11; migrate to gpt-5.6-luna.',
   },
 
-  // OpenAI - GPT-4 / reasoning legacy still commonly deployed
-  'gpt-4.5-preview': model({
-    provider: 'openai',
-    family: 'gpt-4.5',
-    inputModalities: ['text', 'image'],
-    outputModalities: ['text'],
-    streaming: true,
-    toolCalling: true,
-    structuredOutputs: true,
-    jsonMode: true,
-    maxContextTokens: 128000,
-    maxOutputTokens: 16384,
-    costPer1kInput: 0.075,
-    costPer1kOutput: 0.15,
-    qualityScore: 92,
-    speedScore: 78,
-    release: '2025',
-    status: 'preview',
-    endpoints: ['chat', 'responses'],
-  }),
+  // OpenAI - GPT-4 and o-series, still deployed
   o1: model({
     provider: 'openai',
     family: 'o-series',
@@ -477,28 +558,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     maxOutputTokens: 100000,
     costPer1kInput: 0.015,
     costPer1kOutput: 0.06,
-    qualityScore: 88,
+    qualityScore: 80,
     speedScore: 60,
-    release: '2024',
-    status: 'stable',
-    endpoints: ['chat', 'responses'],
-  }),
-  'o1-mini': model({
-    provider: 'openai',
-    family: 'o-series',
-    inputModalities: ['text'],
-    outputModalities: ['text'],
-    streaming: true,
-    toolCalling: true,
-    structuredOutputs: true,
-    jsonMode: true,
-    reasoning: { efforts: ['low', 'medium', 'high'] },
-    maxContextTokens: 128000,
-    maxOutputTokens: 65536,
-    costPer1kInput: 0.003,
-    costPer1kOutput: 0.012,
-    qualityScore: 82,
-    speedScore: 80,
     release: '2024',
     status: 'stable',
     endpoints: ['chat', 'responses'],
@@ -516,7 +577,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     maxOutputTokens: 32768,
     costPer1kInput: 0.002,
     costPer1kOutput: 0.008,
-    qualityScore: 88,
+    costPer1kCachedInput: 0.0005,
+    qualityScore: 82,
     speedScore: 80,
     release: '2025',
     status: 'stable',
@@ -535,7 +597,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     maxOutputTokens: 32768,
     costPer1kInput: 0.0004,
     costPer1kOutput: 0.0016,
-    qualityScore: 82,
+    costPer1kCachedInput: 0.0001,
+    qualityScore: 78,
     speedScore: 94,
     release: '2025',
     status: 'stable',
@@ -554,7 +617,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     maxOutputTokens: 32768,
     costPer1kInput: 0.0001,
     costPer1kOutput: 0.0004,
-    qualityScore: 74,
+    costPer1kCachedInput: 0.000025,
+    qualityScore: 70,
     speedScore: 98,
     release: '2025',
     status: 'stable',
@@ -573,7 +637,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     maxOutputTokens: 16384,
     costPer1kInput: 0.0025,
     costPer1kOutput: 0.01,
-    qualityScore: 84,
+    costPer1kCachedInput: 0.00125,
+    qualityScore: 78,
     speedScore: 84,
     release: '2024',
     status: 'stable',
@@ -592,7 +657,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     maxOutputTokens: 16384,
     costPer1kInput: 0.00015,
     costPer1kOutput: 0.0006,
-    qualityScore: 76,
+    costPer1kCachedInput: 0.000075,
+    qualityScore: 72,
     speedScore: 96,
     release: '2024',
     status: 'stable',
@@ -612,11 +678,32 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     maxOutputTokens: 100000,
     costPer1kInput: 0.002,
     costPer1kOutput: 0.008,
-    qualityScore: 90,
+    costPer1kCachedInput: 0.0005,
+    qualityScore: 84,
     speedScore: 66,
     release: '2025',
     status: 'stable',
     endpoints: ['chat', 'responses'],
+  }),
+  'o3-pro': model({
+    provider: 'openai',
+    family: 'o-series',
+    inputModalities: ['text', 'image'],
+    outputModalities: ['text'],
+    streaming: false,
+    toolCalling: true,
+    structuredOutputs: true,
+    jsonMode: true,
+    reasoning: { efforts: ['low', 'medium', 'high'] },
+    maxContextTokens: 200000,
+    maxOutputTokens: 100000,
+    costPer1kInput: 0.02,
+    costPer1kOutput: 0.08,
+    qualityScore: 86,
+    speedScore: 40,
+    release: '2025',
+    status: 'stable',
+    endpoints: ['responses'],
   }),
   'o3-mini': model({
     provider: 'openai',
@@ -632,11 +719,13 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     maxOutputTokens: 100000,
     costPer1kInput: 0.0011,
     costPer1kOutput: 0.0044,
-    qualityScore: 84,
+    costPer1kCachedInput: 0.00055,
+    qualityScore: 78,
     speedScore: 82,
     release: '2025',
-    status: 'stable',
+    status: 'deprecated',
     endpoints: ['chat', 'responses'],
+    notes: 'OpenAI shuts it down on 2026-10-23; migrate to gpt-5.6-sol.',
   }),
   'o4-mini': model({
     provider: 'openai',
@@ -652,7 +741,8 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     maxOutputTokens: 100000,
     costPer1kInput: 0.0011,
     costPer1kOutput: 0.0044,
-    qualityScore: 86,
+    costPer1kCachedInput: 0.000275,
+    qualityScore: 80,
     speedScore: 88,
     release: '2025',
     status: 'stable',
@@ -693,78 +783,181 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     endpoints: [],
   }),
 
-  // Anthropic
-  'claude-sonnet-5-0': claude('claude-sonnet-5.0', 3, 15, 96, 88, 64000, '2026', '2026-06', 200000),
-  'claude-haiku-5-0': claude('claude-haiku-5.0', 1, 5, 88, 98, 64000, '2026', '2026-06', 200000),
-  'claude-opus-4-8': claude('claude-opus-4.8', 5, 25, 99, 74, 128000, '2026', '2026-06', 1000000),
-  'claude-fable-5-0': claude('claude-fable-5.0', 3, 15, 96, 92, 64000, '2026', '2026-06', 1000000),
-  'claude-opus-4-7': claude('claude-opus-4.7', 5, 25, 99, 72, 128000, '2026', '2026-01', 1000000),
-  'claude-opus-4-6': {
-    ...claude('claude-opus-4.6', 5, 25, 98, 72, 128000, '2026', '2026-01', 1000000),
-    notes:
-      'Anthropic docs reference claude-opus-4-6 for Claude Code and batch beta usage; verify account and platform availability.',
+  // Anthropic - current
+  'claude-fable-5-1': {
+    ...claudeAdaptive(
+      'claude-fable-5.1',
+      10,
+      50,
+      100,
+      62,
+      128000,
+      '2026-09-01',
+      '2026-06',
+      ADAPTIVE_EFFORTS.alwaysOn,
+      0.025,
+    ),
+    toolChoice: false,
+    notes: 'Thinking is always on. Rejects forced tool choice.',
   },
-  'claude-opus-4-5-20251101': {
-    ...claude('claude-opus-4.5', 5, 25, 97, 72, 128000, '2025-11-01', '2025-08', 1000000),
-    notes:
-      'Anthropic Claude Code Bedrock docs reference this Opus 4.5 snapshot; verify direct Claude API availability before production use.',
+  'claude-opus-5-5': {
+    ...claudeAdaptive(
+      'claude-opus-5.5',
+      4,
+      20,
+      99,
+      76,
+      128000,
+      '2026-09-22',
+      '2026-06',
+      ADAPTIVE_EFFORTS.alwaysOn,
+      0.05,
+    ),
+    toolChoice: false,
+    notes: 'Thinking is always on, at effort medium by default. Rejects forced tool choice.',
   },
-  'claude-sonnet-4-6': claude('claude-sonnet-4.6', 3, 15, 96, 88, 64000, '2026', '2025-08', 1000000),
+  'claude-sonnet-5-5': {
+    ...claudeAdaptive('claude-sonnet-5.5', 2, 10, 97, 88, 128000, '2026-09-28', '2026-06', ADAPTIVE_EFFORTS.full),
+    toolChoice: false,
+    notes: 'Effort none turns off up-front thinking only, at effort high or below. Rejects forced tool choice.',
+  },
   'claude-haiku-4-5-20251001': claude('claude-haiku-4.5', 1, 5, 86, 98, 64000, '2025-10-01', '2025-02'),
-  'claude-opus-4-1-20250805': claude('claude-opus-4.1', 15, 75, 97, 70, 32000, '2025-08-05', '2025-03'),
-  'claude-opus-4-20250514': claude('claude-opus-4', 15, 75, 95, 70, 32000, '2025-05-14', '2025-03'),
-  'claude-sonnet-4-20250514': claude('claude-sonnet-4', 3, 15, 92, 86, 64000, '2025-05-14', '2025-03'),
-  'claude-3-7-sonnet-20250219': claude('claude-3.7', 3, 15, 89, 84, 64000, '2025-02-19', '2024-10'),
-  'claude-3-5-sonnet-20241022': claude('claude-3.5', 3, 15, 86, 84, 8192, '2024-10-22', '2024-04'),
-  'claude-3-5-sonnet-20240620': claude('claude-3.5', 3, 15, 84, 82, 8192, '2024-06-20', '2024-04'),
-  'claude-3-5-haiku-20241022': claude('claude-haiku-3.5', 0.8, 4, 78, 96, 8192, '2024-10-22', '2024-07'),
-  'claude-3-haiku-20240307': claude('claude-haiku-3', 0.25, 1.25, 68, 94, 4096, '2024-03-07', '2023-08'),
 
-  // Google Gemini
-  'gemini-3.5-pro': gemini('gemini-3.5', 2000000, 1.25, 5, 98, 76, '2026', '2025-10', 'stable'),
-  'gemini-3.5-flash': gemini('gemini-3.5', 1048576, 0.1, 0.4, 90, 96, '2026', '2025-10', 'stable'),
-  'gemini-3.1-pro-preview': gemini('gemini-3.1', 1048576, 2, 12, 97, 76, '2026-02', '2025-01', 'preview'),
-  'gemini-3.1-pro-preview-customtools': gemini('gemini-3.1', 1048576, 2, 12, 97, 74, '2026-02', '2025-01', 'preview'),
-  'gemini-3.1-flash-lite-preview': gemini('gemini-3.1', 1048576, 0.1, 0.4, 86, 98, '2026', '2025-01', 'preview'),
-  'gemini-3-pro-preview': {
-    ...gemini('gemini-3', 1048576, 2, 12, 96, 76, '2025-11', '2025-01', 'preview'),
-    status: 'deprecated',
-    notes: 'Deprecated and shut down by Google on 2026-03-09; migrate to gemini-3.1-pro-preview.',
+  // Anthropic - legacy, still served
+  'claude-fable-5': {
+    ...claudeAdaptive('claude-fable-5', 10, 50, 98, 62, 128000, '2026-06-09', '2026-01', ADAPTIVE_EFFORTS.alwaysOn),
+    notes: 'Thinking is always on.',
   },
-  'gemini-3-flash-preview': gemini('gemini-3', 1048576, 0.5, 3, 90, 94, '2025-12', '2025-01', 'preview'),
-  'gemini-3-pro-image-preview': {
-    ...gemini('gemini-3-image', 65536, 2, 12, 88, 70, '2025-11', '2025-01', 'preview'),
+  'claude-opus-5': {
+    ...claudeAdaptive('claude-opus-5', 5, 25, 98, 74, 128000, '2026-07-24', '2026-05', ADAPTIVE_EFFORTS.full),
+    notes: 'Thinking turns off only at effort high or below.',
+  },
+  'claude-sonnet-5': claudeAdaptive(
+    'claude-sonnet-5',
+    2,
+    10,
+    95,
+    88,
+    128000,
+    '2026-06-30',
+    '2026-01',
+    ADAPTIVE_EFFORTS.full,
+  ),
+  'claude-opus-4-8': claudeAdaptive('claude-opus-4.8', 5, 25, 96, 74, 128000, '2026', '2026-06', ADAPTIVE_EFFORTS.full),
+  'claude-opus-4-7': claudeAdaptive('claude-opus-4.7', 5, 25, 95, 72, 128000, '2026', '2026-01', ADAPTIVE_EFFORTS.full),
+  'claude-opus-4-6': claudeAdaptive(
+    'claude-opus-4.6',
+    5,
+    25,
+    94,
+    72,
+    128000,
+    '2026',
+    '2026-01',
+    ADAPTIVE_EFFORTS.noXhigh,
+  ),
+  'claude-sonnet-4-6': claudeAdaptive(
+    'claude-sonnet-4.6',
+    3,
+    15,
+    92,
+    88,
+    64000,
+    '2026',
+    '2025-08',
+    ADAPTIVE_EFFORTS.noXhigh,
+  ),
+  'claude-opus-4-5-20251101': claude('claude-opus-4.5', 5, 25, 92, 72, 64000, '2025-11-24', '2025-05'),
+  'claude-sonnet-4-5-20250929': {
+    ...claude('claude-sonnet-4.5', 3, 15, 90, 86, 64000, '2025-09-29', '2025-01'),
+    status: 'deprecated',
+    notes: 'Anthropic retires it on 2026-11-30; migrate to claude-sonnet-5-5.',
+  },
+
+  // Google Gemini - the 3.6 to 3.8 Flash prices double on 2027-01-01.
+  'gemini-3.8-flash': {
+    ...gemini('gemini-3.8', 1048576, 0.75, 3.75, 95, 94, '2026-09', undefined),
+    notes: 'Prices double on 2027-01-01, to $1.50 input and $7.50 output per million tokens.',
+  },
+  'gemini-3.7-flash': {
+    ...gemini('gemini-3.7', 1048576, 0.75, 3.75, 93, 94, '2026', undefined),
+    notes: 'Prices double on 2027-01-01, to $1.50 input and $7.50 output per million tokens.',
+  },
+  'gemini-3.6-flash': {
+    ...gemini('gemini-3.6', 1048576, 0.75, 3.75, 91, 94, '2026', undefined),
+    notes: 'Prices double on 2027-01-01, to $1.50 input and $7.50 output per million tokens.',
+  },
+  'gemini-3.5-flash': gemini('gemini-3.5', 1048576, 1.5, 9, 90, 94, '2026-05', undefined),
+  'gemini-3.5-flash-lite': gemini('gemini-3.5', 1048576, 0.3, 2.5, 84, 97, '2026-07', undefined),
+  'gemini-3.1-flash-lite': {
+    ...gemini('gemini-3.1', 1048576, 0.25, 1.5, 82, 98, '2026', undefined),
+    status: 'deprecated',
+    notes: 'Google shuts it down on 2027-05-07; migrate to gemini-3.5-flash-lite.',
+  },
+  'gemini-3.1-pro-preview': gemini('gemini-3.1', 1048576, 2, 12, 97, 76, '2026-02', undefined, 'preview'),
+  'gemini-3.1-pro-preview-customtools': gemini('gemini-3.1', 1048576, 2, 12, 97, 74, '2026-02', undefined, 'preview'),
+  'gemini-3-flash-preview': {
+    ...gemini('gemini-3', 1048576, 0.5, 3, 88, 94, '2025-12', undefined, 'preview'),
+    notes: 'Google names gemini-3.6-flash as its replacement.',
+  },
+  'gemini-3-pro-image': {
+    ...gemini('gemini-3-image', 65536, 2, 120, 88, 70, '2025-11', undefined),
     inputModalities: ['text', 'image'],
     outputModalities: ['text', 'image'],
     toolCalling: false,
+    structuredOutputs: false,
+    maxOutputTokens: 32768,
+    notes: 'The output price is the image rate; text output costs less.',
   },
-  'gemini-2.5-pro': gemini('gemini-2.5', 1048576, 1.25, 10, 92, 76, '2025-06', '2025-01'),
-  'gemini-2.5-flash': gemini('gemini-2.5', 1048576, 0.3, 2.5, 86, 94, '2025', '2025-01'),
-  'gemini-2.5-flash-lite': gemini('gemini-2.5', 1048576, 0.1, 0.4, 76, 98, '2025', '2025-01'),
-  'gemini-2.5-flash-lite-preview-09-2025': gemini(
-    'gemini-2.5',
-    1048576,
-    0.1,
-    0.4,
-    76,
-    98,
-    '2025-09',
-    '2025-01',
-    'preview',
-  ),
-  'gemini-2.0-flash': gemini('gemini-2.0', 1048576, 0.1, 0.4, 78, 94, '2025-02', '2024-08'),
-  'gemini-1.5-pro': {
-    ...gemini('gemini-1.5', 2000000, 1.25, 5, 80, 70, '2024', '2024'),
-    status: 'deprecated',
+  'gemini-3.1-flash-image': {
+    ...gemini('gemini-3.1-image', 131072, 0.5, 60, 84, 86, '2026-02', undefined),
+    inputModalities: ['text', 'image', 'video', 'pdf'],
+    outputModalities: ['text', 'image'],
+    toolCalling: false,
+    structuredOutputs: false,
+    maxOutputTokens: 32768,
+    notes: 'The output price is the image rate; text output costs less.',
   },
-  'gemini-1.5-flash': {
-    ...gemini('gemini-1.5', 1000000, 0.075, 0.3, 72, 90, '2024', '2024'),
+  'gemini-2.5-pro': {
+    ...gemini('gemini-2.5', 1048576, 1.25, 10, 86, 76, '2025-06', '2025-01'),
     status: 'deprecated',
+    notes: 'Google limits it to existing users and recommends Gemini 3 for new work.',
+  },
+  'gemini-2.5-flash': {
+    ...gemini('gemini-2.5', 1048576, 0.3, 2.5, 80, 94, '2025', '2025-01'),
+    status: 'deprecated',
+    notes: 'Google limits it to existing users and recommends Gemini 3 for new work.',
+  },
+  'gemini-2.5-flash-lite': {
+    ...gemini('gemini-2.5', 1048576, 0.1, 0.4, 72, 98, '2025', '2025-01'),
+    status: 'deprecated',
+    notes: 'Google limits it to existing users and recommends Gemini 3 for new work.',
   },
 
-  // Groq hosted models and systems
+  // Groq hosted models
   'groq/openai/gpt-oss-120b': openAiCompatible('groq', 'gpt-oss', ['text'], 131072, 65536, 0.15, 0.6, 86, 96, '2025'),
   'groq/openai/gpt-oss-20b': openAiCompatible('groq', 'gpt-oss', ['text'], 131072, 65536, 0.075, 0.3, 78, 100, '2025'),
+  'groq/qwen/qwen3.8-27b': {
+    ...openAiCompatible('groq', 'qwen3.8', ['text'], 131072, 16384, 0.8, 4, 84, 90, '2026', 'preview'),
+    reasoning: true,
+  },
+  'groq/minimaxai/minimax-m2.7': {
+    ...openAiCompatible(
+      'groq',
+      'minimax-m2',
+      ['text'],
+      196608,
+      131072,
+      0,
+      0,
+      86,
+      88,
+      '2026',
+      'preview',
+      'Groq prices it through sales; override costs in models.registry.',
+    ),
+    reasoning: true,
+  },
   'groq/llama-3.3-70b-versatile': openAiCompatible(
     'groq',
     'llama-3.3',
@@ -773,9 +966,11 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     32768,
     0.59,
     0.79,
-    80,
+    76,
     92,
     '2024',
+    'deprecated',
+    'Groq ended on-demand access on 2026-08-16 and offers it through sales; migrate to groq/openai/gpt-oss-120b.',
   ),
   'groq/llama-3.1-8b-instant': openAiCompatible(
     'groq',
@@ -785,63 +980,11 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     131072,
     0.05,
     0.08,
-    68,
+    64,
     98,
     '2024',
-  ),
-  'groq/groq/compound': openAiCompatible(
-    'groq',
-    'compound',
-    ['text'],
-    131072,
-    8192,
-    0,
-    0,
-    82,
-    94,
-    '2026',
-    'stable',
-    'Groq Compound is a hosted agentic system with built-in tools; pricing is not token-metered in the model table.',
-  ),
-  'groq/groq/compound-mini': openAiCompatible(
-    'groq',
-    'compound',
-    ['text'],
-    131072,
-    8192,
-    0,
-    0,
-    76,
-    96,
-    '2026',
-    'stable',
-    'Groq Compound Mini is a hosted agentic system with built-in tools; pricing is not token-metered in the model table.',
-  ),
-  'groq/meta-llama/llama-4-scout-17b-16e-instruct': openAiCompatible(
-    'groq',
-    'llama-4',
-    ['text', 'image'],
-    131072,
-    8192,
-    0.11,
-    0.34,
-    78,
-    97,
-    '2026',
-    'preview',
-  ),
-  'groq/qwen/qwen3-32b': openAiCompatible(
-    'groq',
-    'qwen3',
-    ['text'],
-    131072,
-    40960,
-    0.29,
-    0.59,
-    76,
-    90,
-    '2026',
-    'preview',
+    'deprecated',
+    'Groq ended on-demand access on 2026-08-16 and offers it through sales; migrate to groq/openai/gpt-oss-20b.',
   ),
   'groq/openai/gpt-oss-safeguard-20b': openAiCompatible(
     'groq',
@@ -884,121 +1027,67 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   ),
 
   // Mistral AI
-  'mistral/ministral-3b': openAiCompatible(
-    'mistral',
-    'ministral-3b',
-    ['text'],
-    128000,
-    8192,
-    0.04,
-    0.04,
-    75,
-    96,
-    '2024-10',
-    'stable',
-    'Pricing varies by deployment; override costs in models.registry if needed.',
-  ),
-  'mistral/ministral-8b': openAiCompatible(
-    'mistral',
-    'ministral-8b',
-    ['text'],
-    128000,
-    8192,
-    0.1,
-    0.1,
-    80,
-    94,
-    '2024-10',
-    'stable',
-    'Pricing varies by deployment; override costs in models.registry if needed.',
-  ),
-  'mistral/pixtral-12b': openAiCompatible(
-    'mistral',
-    'pixtral-12b',
-    ['text', 'image'],
-    128000,
-    8192,
-    0.15,
-    0.15,
-    82,
-    92,
-    '2024-09',
-    'stable',
-    'Pricing varies by deployment; override costs in models.registry if needed.',
-  ),
-  'mistral/pixtral-large-2411': openAiCompatible(
-    'mistral',
-    'pixtral-large-2411',
-    ['text', 'image'],
-    128000,
-    8192,
-    2,
-    6,
-    88,
-    76,
-    '2024-11',
-    'stable',
-    'Pricing varies by deployment; override costs in models.registry if needed.',
-  ),
-  'mistral/mistral-medium-3-5': openAiCompatible(
-    'mistral',
-    'mistral-medium-3.5',
-    ['text', 'image', 'pdf'],
-    256000,
-    8192,
-    1.5,
-    7.5,
-    90,
-    78,
-    '2026-04',
-  ),
-  'mistral/mistral-small-2603': openAiCompatible(
-    'mistral',
-    'mistral-small-4',
-    ['text', 'image'],
-    256000,
-    8192,
-    0.2,
-    0.6,
-    82,
-    92,
-    '2026-03',
-    'stable',
-    'Pricing varies by deployment; override costs in models.registry if needed.',
-  ),
+  'mistral/mistral-medium-2604': {
+    ...openAiCompatible('mistral', 'mistral-medium-3.5', ['text', 'image'], 262144, 8192, 1.5, 7.5, 92, 78, '2026-04'),
+    reasoning: true,
+  },
+  'mistral/mistral-small-2603': {
+    ...openAiCompatible('mistral', 'mistral-small-4', ['text', 'image'], 262144, 8192, 0.15, 0.6, 84, 92, '2026-03'),
+    reasoning: true,
+  },
   'mistral/mistral-large-2512': openAiCompatible(
     'mistral',
     'mistral-large-3',
     ['text', 'image'],
-    256000,
+    262144,
     8192,
-    2,
-    6,
+    0.5,
+    1.5,
     88,
-    76,
+    80,
     '2025-12',
-    'stable',
-    'Pricing varies by deployment; override costs in models.registry if needed.',
   ),
-  'mistral/devstral-2512': openAiCompatible(
+  'mistral/ministral-14b-2512': openAiCompatible(
     'mistral',
-    'devstral-2',
-    ['text'],
-    256000,
+    'ministral-3',
+    ['text', 'image'],
+    262144,
     8192,
-    0.4,
-    2,
-    86,
-    84,
+    0.2,
+    0.2,
+    80,
+    92,
     '2025-12',
-    'stable',
-    'Code-agent model.',
+  ),
+  'mistral/ministral-8b-2512': openAiCompatible(
+    'mistral',
+    'ministral-3',
+    ['text', 'image'],
+    262144,
+    8192,
+    0.15,
+    0.15,
+    76,
+    95,
+    '2025-12',
+  ),
+  'mistral/ministral-3b-2512': openAiCompatible(
+    'mistral',
+    'ministral-3',
+    ['text', 'image'],
+    262144,
+    8192,
+    0.1,
+    0.1,
+    70,
+    97,
+    '2025-12',
   ),
   'mistral/codestral-2508': openAiCompatible(
     'mistral',
     'codestral',
     ['text'],
-    256000,
+    128000,
     8192,
     0.3,
     0.9,
@@ -1006,21 +1095,7 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     86,
     '2025-08',
     'stable',
-    'Code model. Pricing varies by deployment; override costs in models.registry if needed.',
-  ),
-  'mistral/magistral-medium-2509': openAiCompatible(
-    'mistral',
-    'magistral-medium-1.2',
-    ['text', 'image'],
-    128000,
-    8192,
-    2,
-    5,
-    88,
-    70,
-    '2025-09',
-    'stable',
-    'Reasoning model. Pricing varies by deployment; override costs in models.registry if needed.',
+    'Code model for fill-in-the-middle and code generation.',
   ),
   'mistral/mistral-moderation-2603': openAiCompatible(
     'mistral',
@@ -1037,68 +1112,42 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
     'Moderation model, not intended for normal chat completions.',
   ),
 
-  // DeepSeek
-  'deepseek/deepseek-v3': openAiCompatible(
-    'deepseek',
-    'deepseek-v3',
-    ['text'],
-    64000,
-    8192,
-    0.14,
-    0.28,
-    88,
-    86,
-    'stable',
-    'stable',
-    'Pricing and limits vary by DeepSeek account; override costs in models.registry for exact estimates.',
-  ),
-  'deepseek/deepseek-r1': {
+  // DeepSeek - prices are the peak rate; off-peak hours cost half.
+  'deepseek/deepseek-flash': {
     ...openAiCompatible(
       'deepseek',
-      'deepseek-r1',
-      ['text'],
-      64000,
-      8192,
-      0.55,
-      2.19,
+      'deepseek-v4.1-flash',
+      ['text', 'image'],
+      1000000,
+      384000,
+      0.3,
+      1.2,
+      88,
       90,
-      72,
+      '2026',
       'stable',
-      'stable',
-      'Reasoning model. Override costs in models.registry for exact estimates.',
+      'Thinks by default. Peak price; off-peak hours (outside 01:00-04:00 and 06:00-10:00 UTC on weekdays) cost half.',
     ),
     reasoning: true,
+    costPer1kCachedInput: 0.000006,
   },
-  'deepseek/deepseek-chat': openAiCompatible(
-    'deepseek',
-    'deepseek-chat',
-    ['text'],
-    64000,
-    8192,
-    0,
-    0,
-    82,
-    84,
-    'stable',
-    'stable',
-    'Pricing and limits vary by DeepSeek account; override costs in models.registry for exact estimates.',
-  ),
-  'deepseek/deepseek-reasoner': {
+  'deepseek/deepseek-v4-pro': {
     ...openAiCompatible(
       'deepseek',
-      'deepseek-reasoner',
+      'deepseek-v4-pro',
       ['text'],
-      64000,
-      8192,
-      0,
-      0,
-      86,
-      70,
+      1000000,
+      384000,
+      1.32,
+      3.96,
+      93,
+      74,
+      '2026-08',
       'stable',
-      'stable',
-      'Reasoning model. Override costs in models.registry for exact estimates.',
+      'Thinks by default. Peak price; off-peak hours (outside 01:00-04:00 and 06:00-10:00 UTC on weekdays) cost half.',
     ),
     reasoning: true,
+    costPer1kCachedInput: 0.000044,
   },
 
   // Local OpenAI-compatible servers
@@ -1132,55 +1181,71 @@ export const KNOWN_MODELS: Record<string, ModelCapabilities> = {
   ),
 
   // Cohere
-  'cohere/command-r-plus': cohere('command-r-plus', ['text'], 128000, 4000, 84, 82, '2024'),
-  'cohere/command-r': cohere('command-r', ['text'], 128000, 4000, 78, 92, '2024'),
+  'cohere/command-a-plus-05-2026': {
+    ...cohere('command-a-plus', ['text', 'image'], 128000, 64000, 90, 74, '2026-05'),
+    reasoning: true,
+  },
   'cohere/command-a-03-2025': cohere('command-a', ['text'], 256000, 8000, 86, 80, '2025-03'),
   'cohere/command-a-reasoning-08-2025': cohere('command-a-reasoning', ['text'], 256000, 32000, 88, 68, '2025-08'),
   'cohere/command-a-vision-07-2025': cohere('command-a-vision', ['text', 'image'], 128000, 8000, 84, 78, '2025-07'),
   'cohere/command-a-translate-08-2025': cohere('command-a-translate', ['text'], 8000, 8000, 84, 82, '2025-08'),
+  'cohere/command-r-plus-08-2024': cohere('command-r-plus', ['text'], 128000, 4000, 80, 82, '2024-08'),
+  'cohere/command-r-08-2024': cohere('command-r', ['text'], 128000, 4000, 76, 92, '2024-08'),
   'cohere/command-r7b-12-2024': cohere('command-r7b', ['text'], 128000, 4000, 74, 94, '2024-12'),
+  'cohere/north-mini-code-1-0': cohere('north-mini-code', ['text'], 256000, 64000, 84, 86, '2026'),
+  'cohere/north-small-translate-1-0': cohere('north-small-translate', ['text'], 16000, 16000, 80, 92, '2026'),
   'cohere/c4ai-aya-expanse-32b': cohere('aya-expanse', ['text'], 128000, 4000, 76, 84, '2024'),
   'cohere/c4ai-aya-vision-32b': cohere('aya-vision', ['text', 'image'], 16000, 4000, 78, 78, '2024'),
   'cohere/tiny-aya-global': cohere('tiny-aya', ['text'], 8000, 8000, 62, 98, '2026'),
+  'cohere/tiny-aya-earth': cohere('tiny-aya', ['text'], 8000, 8000, 62, 98, '2026'),
+  'cohere/tiny-aya-fire': cohere('tiny-aya', ['text'], 8000, 8000, 62, 98, '2026'),
+  'cohere/tiny-aya-water': cohere('tiny-aya', ['text'], 8000, 8000, 62, 98, '2026'),
 };
 
 export const MODEL_ALIASES: Record<string, string> = {
   'gpt-5.6': 'gpt-5.6-sol',
-  'openai/best': 'gpt-5.6-sol',
+  'openai/best': 'gpt-6-astra',
   'openai/pro': 'gpt-5.5-pro',
-  'openai/balanced': 'gpt-5.6-terra',
-  'openai/fast': 'gpt-5.6-luna',
-  'openai/cheap': 'gpt-5.6-luna',
-  'openai/coding': 'gpt-5.6-sol',
-  'openai/codex': 'gpt-5-codex',
-  'anthropic/best': 'claude-opus-4-8',
-  'anthropic/balanced': 'claude-sonnet-5-0',
-  'anthropic/fast': 'claude-haiku-5-0',
-  'google/best': 'gemini-3.5-pro',
-  'google/balanced': 'gemini-3.5-pro',
-  'google/fast': 'gemini-3.5-flash',
-  'google/cheap': 'gemini-3.5-flash',
+  'openai/balanced': 'gpt-6.1-sol',
+  'openai/fast': 'gpt-6-luna',
+  'openai/cheap': 'gpt-6-luna',
+  'openai/coding': 'gpt-6.1-sol',
+  'openai/codex': 'gpt-5.3-codex',
+  'anthropic/best': 'claude-fable-5-1',
+  'anthropic/balanced': 'claude-sonnet-5-5',
+  'anthropic/fast': 'claude-haiku-4-5-20251001',
+  'google/best': 'gemini-3.1-pro-preview',
+  'google/balanced': 'gemini-3.8-flash',
+  'google/fast': 'gemini-3.5-flash-lite',
+  'google/cheap': 'gemini-3.5-flash-lite',
   'groq/best': 'groq/openai/gpt-oss-120b',
   'groq/fast': 'groq/openai/gpt-oss-20b',
-  'groq/cheap': 'groq/llama-3.1-8b-instant',
-  'groq/compound': 'groq/groq/compound',
-  'mistral/best': 'mistral/pixtral-large-2411',
-  'mistral/balanced': 'mistral/ministral-8b',
-  'mistral/fast': 'mistral/ministral-3b',
-  'mistral/coding': 'mistral/pixtral-12b',
+  'groq/cheap': 'groq/openai/gpt-oss-20b',
+  'mistral/best': 'mistral/mistral-medium-2604',
+  'mistral/balanced': 'mistral/mistral-small-2603',
+  'mistral/fast': 'mistral/ministral-8b-2512',
+  'mistral/cheap': 'mistral/ministral-3b-2512',
+  'mistral/coding': 'mistral/codestral-2508',
+  'mistral/mistral-medium-3.5': 'mistral/mistral-medium-2604',
   'mistral/mistral-small-4': 'mistral/mistral-small-2603',
   'mistral/mistral-large-3': 'mistral/mistral-large-2512',
-  'mistral/devstral-2': 'mistral/devstral-2512',
-  'deepseek/best': 'deepseek/deepseek-reasoner',
-  'deepseek/balanced': 'deepseek/deepseek-chat',
-  'deepseek/fast': 'deepseek/deepseek-chat',
-  'cohere/best': 'cohere/command-a-03-2025',
+  'deepseek/best': 'deepseek/deepseek-v4-pro',
+  'deepseek/balanced': 'deepseek/deepseek-flash',
+  'deepseek/fast': 'deepseek/deepseek-flash',
+  'deepseek/cheap': 'deepseek/deepseek-flash',
+  'deepseek/deepseek-v4-flash': 'deepseek/deepseek-flash',
+  'cohere/best': 'cohere/command-a-plus-05-2026',
   'cohere/reasoning': 'cohere/command-a-reasoning-08-2025',
   'cohere/vision': 'cohere/command-a-vision-07-2025',
+  'cohere/coding': 'cohere/north-mini-code-1-0',
   'cohere/fast': 'cohere/command-r7b-12-2024',
+  'claude-fable-5.1': 'claude-fable-5-1',
+  'claude-opus-5.5': 'claude-opus-5-5',
+  'claude-sonnet-5.5': 'claude-sonnet-5-5',
+  'claude-fable-5.0': 'claude-fable-5',
+  'claude-opus-5.0': 'claude-opus-5',
+  'claude-sonnet-5.0': 'claude-sonnet-5',
   'claude-opus-4.8': 'claude-opus-4-8',
-  'claude-fable-5.0': 'claude-fable-5-0',
-  'claude-fable-5': 'claude-fable-5-0',
   'claude-opus-4.7': 'claude-opus-4-7',
   'claude-opus-4-7-latest': 'claude-opus-4-7',
   'claude-opus-4.6': 'claude-opus-4-6',
@@ -1190,24 +1255,14 @@ export const MODEL_ALIASES: Record<string, string> = {
   'claude-opus-4-5-latest': 'claude-opus-4-5-20251101',
   'claude-sonnet-4.6': 'claude-sonnet-4-6',
   'claude-sonnet-4-6-latest': 'claude-sonnet-4-6',
+  'claude-sonnet-4.5': 'claude-sonnet-4-5-20250929',
+  'claude-sonnet-4-5': 'claude-sonnet-4-5-20250929',
   'claude-haiku-4.5': 'claude-haiku-4-5-20251001',
   'claude-haiku-4-5': 'claude-haiku-4-5-20251001',
   'claude-haiku-4-5-latest': 'claude-haiku-4-5-20251001',
-  'claude-opus-4.1': 'claude-opus-4-1-20250805',
-  'claude-opus-4-1': 'claude-opus-4-1-20250805',
-  'claude-opus-4': 'claude-opus-4-20250514',
-  'claude-opus-4-0': 'claude-opus-4-20250514',
-  'claude-sonnet-4': 'claude-sonnet-4-20250514',
-  'claude-sonnet-4-0': 'claude-sonnet-4-20250514',
-  'claude-sonnet-3.7': 'claude-3-7-sonnet-20250219',
-  'claude-3-7-sonnet-latest': 'claude-3-7-sonnet-20250219',
-  'claude-sonnet-3.5': 'claude-3-5-sonnet-20241022',
-  'claude-3-5-sonnet-latest': 'claude-3-5-sonnet-20241022',
-  'claude-haiku-3.5': 'claude-3-5-haiku-20241022',
-  'claude-3-5-haiku-latest': 'claude-3-5-haiku-20241022',
   'gemini-pro-latest': 'gemini-3.1-pro-preview',
-  'gemini-flash-latest': 'gemini-3-flash-preview',
-  'gemini-flash-lite-latest': 'gemini-3.1-flash-lite-preview',
+  'gemini-flash-latest': 'gemini-3.8-flash',
+  'gemini-flash-lite-latest': 'gemini-3.5-flash-lite',
 };
 
 /**
@@ -1227,15 +1282,20 @@ const FLOATING_ALIAS_SUFFIXES = [
   '/compound',
 ];
 
+/** An alias is in preview or deprecated when the model it resolves to is. */
+function aliasStage(target: string): AliasStage {
+  const status = KNOWN_MODELS[target]?.status;
+  return status === 'preview' || status === 'deprecated' ? status : 'stable';
+}
+
 /**
  * Stage and provenance for every bundled alias, derived from its target so the two cannot drift.
- * An alias resolving to a preview model is itself preview.
  */
 export const MODEL_ALIAS_METADATA: Record<string, AliasMetadata> = Object.fromEntries(
   Object.entries(MODEL_ALIASES).map(([alias, target]) => [
     alias,
     {
-      stage: KNOWN_MODELS[target]?.status === 'preview' ? 'preview' : 'stable',
+      stage: aliasStage(target),
       floating: alias.endsWith('-latest') || FLOATING_ALIAS_SUFFIXES.some((suffix) => alias.endsWith(suffix)),
       verifiedAt: REGISTRY_PROVENANCE.verifiedAt,
     } satisfies AliasMetadata,

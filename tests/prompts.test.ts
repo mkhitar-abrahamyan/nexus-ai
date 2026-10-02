@@ -84,9 +84,9 @@ test('a prompt renders variables, dot paths, partials, defaults, placeholders, a
 
 test('overrides replace configuration, and objects render as JSON', () => {
   const prompt = definePrompt({ name: 'json', messages: [{ role: 'user', content: 'Data: {{data}}' }] });
-  const request = prompt.render({ data: { a: 1 } }, { overrides: { model: 'claude-sonnet-4', maxTokens: 10 } });
+  const request = prompt.render({ data: { a: 1 } }, { overrides: { model: 'claude-sonnet-5-5', maxTokens: 10 } });
   assert.equal(request.messages[0]?.content, 'Data: {"a":1}');
-  assert.equal(request.model, 'claude-sonnet-4');
+  assert.equal(request.model, 'claude-sonnet-5-5');
   assert.equal(request.maxTokens, 10);
   assert.equal(prompt.render({ data: 1 }).model, 'auto');
   assert.equal(prompt.render({ data: 1 }, { model: 'm' }).model, 'm');

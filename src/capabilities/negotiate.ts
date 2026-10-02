@@ -110,10 +110,24 @@ export function negotiateCompletionRequest(
     });
   }
 
-  if (request.toolChoice !== undefined && capabilities.toolChoice === false) {
-    refuse('toolChoice', request.toolChoice, 'the model does not support tool-choice control', (target) => {
+  // `auto` and `none` never force a call, so only a forced choice can be refused.
+  const forcesTool = request.toolChoice === 'required' || typeof request.toolChoice === 'object';
+  if (forcesTool && capabilities.toolChoice === false) {
+    refuse('toolChoice', request.toolChoice, 'the model cannot be forced to call a tool', (target) => {
       target.toolChoice = undefined;
     });
+  }
+
+  if ((request.temperature !== undefined || request.topP !== undefined) && capabilities.sampling === false) {
+    refuse(
+      'sampling',
+      { temperature: request.temperature, topP: request.topP },
+      'the model accepts only its default temperature and top-p',
+      (target) => {
+        target.temperature = undefined;
+        target.topP = undefined;
+      },
+    );
   }
 
   if (request.parallelToolCalls !== undefined && capabilities.parallelToolCalls === false) {
