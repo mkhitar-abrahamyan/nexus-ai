@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-04
+
 Fault-tolerant graphs and crash-safe observability. A graph now chooses when its checkpoints are
 written, recovers from a node whose retries ran out, tells a hung task from a slow one, and stops
 cleanly when its worker has to go. Traces survive the process that wrote them and reach any
@@ -1492,7 +1494,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.25.0...v2.0.0
 [1.25.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.24.0...v1.25.0
 [1.24.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.23.0...v1.24.0

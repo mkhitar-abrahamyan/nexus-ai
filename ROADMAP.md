@@ -3,13 +3,13 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **2.0.0**. 135 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.1.0**. 138 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, and 98 completion
-registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 776
-unit tests pass; coverage sits at **94.1% lines / 79.7% branches / 89.5% functions** against gates of
+registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 819
+unit tests pass; coverage sits at **94.3% lines / 80.0% branches / 89.6% functions** against gates of
 82/67/73. CI verifies lint, format, build, tests, coverage, registry drift, `llms.txt` drift,
-per-subpath size, documentation and guide coverage, the root import, a graph benchmark, mock
-conformance, packed-package smoke, API contract, consumer type resolution, and clean install on
+per-subpath size, documentation and guide coverage, the root import, a graph benchmark with a
+durability budget, crash injection on five checkpointers, mock conformance, packed-package smoke, API contract, consumer type resolution, and clean install on
 Node 22 and 24.
 
 ---
@@ -562,12 +562,11 @@ be large to get there. Three rules apply to every item below.
 | 1.24.0 | Deployment at scale, self-managed | Revisions, canaries, autoscaling signals, Helm, tenant quotas | A canary rolled back on a regression; workers scaling on queue depth |
 | 1.25.0 | The bridge to 2.0 | Every capability on its own subpath; everything 2.0 removes deprecated | A migrated consumer compiles; a codemod and a migration guide |
 | 2.0.0 | Consolidation | One lifecycle, slim root, optional validators, stable surfaces | One authorize, audit, and budget across ten families; a migrated consumer compiles; a 5.3 MB install with no optional peer |
-| 2.1.0 | Fault-tolerant graphs | Async durability, recovery after retries, idle timeouts, cooperative drain | Crash injection at every durable boundary; a saga that resumes into the same compensation |
-| 2.2.0 | Crash-safe observability | Incremental traces, one event stream, OTel conventions, dashboard rollups | A crashed run leaves an `incomplete` trace; flat memory under a slow subscriber |
-| 2.3.0 | Persistence and scale | Versioned migrations, indexed dispatch, distributed resilience, one tenant model | A 2.0 database upgrades in place; ten racing workers keep every invariant |
-| 2.4.0 | Agents that act safely | A middleware catalog, capabilities and permissions, a sandbox contract, auth adapters | Fewer tokens at equal quality over 150 tools; a refused out-of-bounds write |
-| 2.5.0 | Production retrieval, graduation | Sparse search and rerank contracts, durable ingestion, measured graduation | A resumed 100,000-document ingestion; each graduated surface with its evidence |
-| 2.6.0 | Protocols and portability | Agent protocols beyond MCP, a portable kernel | An A2A round trip; the kernel passing on Node, Deno, Bun, and an edge runtime |
+| 2.1.0 | Fault tolerance, crash-safe observability | Async durability, recovery after retries, idle timeouts, drain, incremental traces, one event stream, OTel export, rollups | Crash injection on five backends; one OTLP trace across a server and a worker; a reader 100 times too slow holds its buffer |
+| 2.2.0 | Persistence and scale | Versioned migrations, indexed dispatch, distributed resilience, one tenant model | A 2.0 database upgrades in place; ten racing workers keep every invariant |
+| 2.3.0 | Agents that act safely | A middleware catalog, capabilities and permissions, a sandbox contract, auth adapters | Fewer tokens at equal quality over 150 tools; a refused out-of-bounds write |
+| 2.4.0 | Production retrieval, graduation | Sparse search and rerank contracts, durable ingestion, measured graduation | A resumed 100,000-document ingestion; each graduated surface with its evidence |
+| 2.5.0 | Protocols and portability | Agent protocols beyond MCP, a portable kernel | An A2A round trip; the kernel passing on Node, Deno, Bun, and an edge runtime |
 
 ---
 
@@ -1429,27 +1428,27 @@ written down in a guide's limitations today:
 
 | Gap in 2.0.0 | Where it shows | Closed in |
 | --- | --- | --- |
-| Checkpoint writes block the graph; every superstep waits for a database round trip | `src/graph/graph.ts` awaits each save | 2.1 |
-| A node that exhausts its retries fails the graph; no recovery or compensation path | graph guide | 2.1 |
-| Node timeouts are wall-clock only; a long task cannot prove it is still making progress | `timeoutMs` | 2.1 |
-| No cooperative drain inside a graph run; a stopped worker aborts mid-superstep | graph guide | 2.1 |
-| A trace is written when its root finishes, so a crashed run leaves no trace | tracing guide | 2.2 |
-| Streams carry supersteps and custom events; model tokens and tool progress need wiring by hand | graph guide | 2.2 |
-| A recorded stream replays as one chunk | testing guide | 2.2 |
-| Studio dashboards query up to 100,000 runs per chart | `studio/src/api.ts` | 2.2 |
-| A Postgres migration creates what is missing but never alters an existing table | Postgres guide | 2.3 |
-| The Redis operation store scans every record to find queued work | deployments guide | 2.3 |
-| Circuit-breaker failure counts stay per worker even with a shared store | resilience guide | 2.3 |
-| The rate limiter counts fixed windows, so a burst at a boundary doubles the limit | resilience guide | 2.3 |
-| Provider health only moves with real traffic, so an idle provider keeps a stale score | resilience guide | 2.3 |
-| The auto-router ranks every candidate on every request | providers guide | 2.3 |
-| Three agent middleware ship: summarize, redact, and limit tool calls | agents guide | 2.4 |
-| Tool safety is by tool name; there are no capabilities, permissions, or sandbox contract | security guide | 2.4 |
-| The server's `auth` hook has no standard implementations | server guide | 2.4 |
-| Keyword search is an in-memory index; reranking means an LLM call | retrieval guide | 2.5 |
-| Ingestion has no versions, hashes, incremental refresh, or resume | loaders guide | 2.5 |
-| Ten surfaces are experimental in production readiness with no measurable way out | API stability | 2.5 |
-| The client pipeline is Node-only; no agent protocol beyond MCP | README | 2.6 |
+| Checkpoint writes block the graph; every superstep waits for a database round trip | `src/graph/graph.ts` awaits each save | 2.1, shipped |
+| A node that exhausts its retries fails the graph; no recovery or compensation path | graph guide | 2.1, shipped |
+| Node timeouts are wall-clock only; a long task cannot prove it is still making progress | `timeoutMs` | 2.1, shipped |
+| No cooperative drain inside a graph run; a stopped worker aborts mid-superstep | graph guide | 2.1, shipped |
+| A trace is written when its root finishes, so a crashed run leaves no trace | tracing guide | 2.1, shipped |
+| Streams carry supersteps and custom events; model tokens and tool progress need wiring by hand | graph guide | 2.1, shipped |
+| A recorded stream replays as one chunk | testing guide | 2.1, shipped |
+| Studio dashboards query up to 100,000 runs per chart | `studio/src/api.ts` | 2.1, shipped |
+| A Postgres migration creates what is missing but never alters an existing table | Postgres guide | 2.2 |
+| The Redis operation store scans every record to find queued work | deployments guide | 2.2 |
+| Circuit-breaker failure counts stay per worker even with a shared store | resilience guide | 2.2 |
+| The rate limiter counts fixed windows, so a burst at a boundary doubles the limit | resilience guide | 2.1, shipped |
+| Provider health only moves with real traffic, so an idle provider keeps a stale score | resilience guide | 2.1, shipped |
+| The auto-router ranks every candidate on every request | providers guide | 2.2 |
+| Three agent middleware ship: summarize, redact, and limit tool calls | agents guide | 2.3 |
+| Tool safety is by tool name; there are no capabilities, permissions, or sandbox contract | security guide | 2.3 |
+| The server's `auth` hook has no standard implementations | server guide | 2.3 |
+| Keyword search is an in-memory index; reranking means an LLM call | retrieval guide | 2.4 |
+| Ingestion has no versions, hashes, incremental refresh, or resume | loaders guide | 2.4 |
+| Ten surfaces are experimental in production readiness with no measurable way out | API stability | 2.4 |
+| The client pipeline is Node-only; no agent protocol beyond MCP | README | 2.5 |
 
 **What 2.x protects.** These are the reasons to choose the package, and no release trades them away:
 
@@ -1476,118 +1475,97 @@ repeat after a crash, what is durable, and what a side effect must do.
 
 ---
 
-## 28. 2.1.0: fault-tolerant graphs
+## 28. Shipped in 2.1.0 — fault-tolerant graphs and crash-safe observability
 
-Graph primitives are complete. This release makes them survive real failure without the
-application wiring recovery by hand.
+2.1.0 shipped what this plan first split across 2.1 and 2.2, and two items planned for the next
+release. Every new behaviour is opt-in; every default keeps its 2.0 meaning.
 
-**Durability modes.** `compile({ durability })` takes `sync`, `async`, or `exit`:
+**Graphs that survive failure.** `compile({ durability })` writes checkpoints `sync` (the default),
+`async` in the background with bounded writes in flight, or only at `exit`. A node's `onError`
+decides what happens once its retries run out, such as a route to a refund, and that decision is
+checkpointed before anything it routes to runs. `timeout: { runMs, idleMs }` tells a hung task from a
+slow one, refreshed by `context.heartbeat()`, and a `Send` can override it. A `RunControl` drains a
+run after its current superstep, and the agent server drains its graph runs that way, so a scale-down
+hands them off at once. `nexus graph lint` finds static cycles, unsafe retries, and an in-process
+checkpointer under a deployment. An operation's heartbeat details survive into its next attempt.
 
-| Mode | Behaviour | For |
-| --- | --- | --- |
-| `sync` (default) | Each checkpoint is persisted before the next superstep | Payments and anything with side effects that must line up with state |
-| `async` | Checkpoints are written in the background while the graph runs | Most agents |
-| `exit` | State is persisted at interrupts, completion, drain, and failure | Short, high-throughput jobs |
+**Traces that survive the process.** An `incremental` tracer writes each run as it starts and ends, so
+a crash leaves every finished run readable, and `closeAbandonedRuns()` closes the rest. A trace
+crosses processes through a W3C `traceparent`. `OtlpTraceExporter` sends runs to any OpenTelemetry
+collector with the GenAI semantic conventions, with no SDK to install.
 
-`async` flushes before an interrupt, completion, a drain, or a fatal error, and on an explicit
-`flush()`. Its queue is bounded: when the store falls behind, the graph waits rather than holding
-unbounded state in memory.
+**One event stream.** `graph.events()` delivers state, updates, model tokens, tool calls, tasks,
+checkpoints, and custom events, together or one projection at a time. Agents report their tokens and
+tool calls on it with no wiring, and the tracer and the server read it too. Every reader has a
+bounded buffer, and the run waits for its slowest reader between supersteps.
 
-**Recovery after retries.** A node takes `onError`, called once its retries are exhausted. It
-receives a `NodeFailure`: the node, task id, attempt count, first and last attempt times, the error,
-the timeout that fired if one did, and the thread and run ids. It returns a state update or a
-`Command`, so a failed charge can route to a refund node. The failure and the decision are
-checkpointed before the graph moves on, so a crash between them resumes into the same path, not a
-different one. Graph-wide node defaults set retries, timeouts, and `onError` once.
+**Dashboards that stay fast.** Hourly rollups keep a dashboard's sums without its traces, and the
+studio's costs view reads them.
 
-**Run and idle timeouts.** `timeout: { runMs, idleMs }` separates "may never run longer than ten
-minutes" from "must show progress every thirty seconds". Emitting an event, writing a checkpoint,
-streaming a model token, reporting tool progress, or calling `ctx.heartbeat()` refreshes the idle
-timer. A `Send` can override the timeout of the task it creates.
+**Testing and evaluation.** A recorded stream replays at its original pace, scaled, or step by step.
+An experiment records each evaluator's name, version, judge model, prompt version, and rubric, and the
+framework version that ran it.
 
-**Cooperative drain.** A `RunControl` passed to `invoke()` or `stream()` can `drain(reason)`. The
-current superstep finishes, its checkpoint is persisted, and the run ends with `GraphDrainedError`
-carrying the thread id, so another worker resumes it. The agent server's drain uses it.
+**Early from the next release.** A GCRA rate limiter, with no window edge to burst across, in memory
+and atomically through Redis; and provider health that expires, so an idle provider is `unknown`
+rather than judged by an old failure or an old success.
 
-**Progress that survives a retry.** An operation's `ctx.heartbeat(progress)` keeps its last payload,
-and the next attempt reads it as `ctx.previousHeartbeat`, so a crashed import resumes at row 82,331
-instead of row one. Idempotency helpers sit beside it. Neither pretends a side effect runs exactly
-once.
-
-**`nexus graph lint`.** It reads a compiled graph and reports designs that fail in production: a
-retried node with no idempotency key, an unbounded cycle, a `Send` with no fan-out bound, a memory
-checkpointer under the server, a side effect before an interrupt, or a sensitive tool with no
-approval.
-
-**Semantics table.** The graph guide gets the table for every execution primitive: graph node,
-functional step, interrupt prelude, cached node, and operation attempt. It states what repeats after
-a crash, what is durable, and what a side effect must do.
-
-**Live provider matrix.** A scheduled workflow runs minimal real requests against every completion
-provider (completion, stream, tools, structured output, embeddings, batch where supported) when its
-repository secrets are set, and opens an issue when a provider breaks. It does not run on pull
-requests.
+**Fixed.** A manual operation heartbeat stranded the operation's result. `continue()` on a finished
+thread marked it running again. A run whose parent was in another process was never written.
 
 **Proof.**
-- A crash-injection suite kills a run at every durable boundary (before, during, and after a
-  checkpoint, during a tool call, after a side effect, after a lease) and checks the resumed state
-  equals an uninterrupted run, on the memory, SQLite, Redis, and Postgres checkpointers.
-- A saga test: a payment node exhausts its retries, `onError` routes to compensation, the process
-  dies, and the resumed run takes the same compensation path.
-- The graph benchmark adds 50 supersteps on Postgres. `async` must cut wall time by at least the
-  round trips it no longer waits for, with identical final state.
-- A property test generates random graphs with branches, `Send`, interrupts, retries, and forks, and
-  checks that replay from any checkpoint reduces to the same state.
+- Crash injection kills a run before, during, and after every checkpoint write, and inside nodes
+  before and after their side effects, in `sync` and `async` mode, on the memory, operation-store,
+  SQLite, Postgres, and Redis checkpointers. A fresh process always reaches the state of an
+  uninterrupted run.
+- A saga: a charge exhausts its retries, `onError` routes to a refund, the process dies during the
+  refund, and the resumed run refunds without charging again.
+- A property test replays 40 generated graphs from every checkpoint of their history to the same
+  state.
+- 50 supersteps against an 8 ms store take about 1.6 s with `sync` and 0.8 s with `async`, in the same
+  state; CI fails if `async` stops beating `sync` by a quarter.
+- A long agent's process dies at step fourteen, and a second process reads every finished step.
+- A server and a worker export to a local OTLP collector, which receives one trace with the worker's
+  run under the server's and the GenAI attributes on the model call.
+- A reader a hundred times slower than a node streaming 100,000 chunks never holds more than its
+  buffer, under every overflow policy.
+- The studio's costs view answers over a month of a million runs in under 200 ms.
+- Around a window's edge, fixed windows pass 199 calls of a 100-call limit and GCRA passes 100.
+
+### What did not land, and where it went
+
+- **`async` writes still go one at a time.** A checkpointer replaces anything at a later step, so
+  writes must land in order. The gain is that the graph stops waiting between steps, not that the
+  round trips disappear: a run still waits for its writes before it returns.
+- **The durability benchmark uses a simulated 8 ms store**, not a live Postgres in CI.
+- **The linter reads the graph's shape.** It cannot see a side effect before an interrupt, a `Send`
+  fan-out too wide for its services, or a tool that should need approval; those need run-time
+  information, and arrive with capabilities in section 31.
+- **Functional workflow steps keep `timeoutMs` alone:** no idle timeout, `onError`, or drain yet.
+- **A drain reaches graphs served through `graphAssistant()`.** A function assistant still waits for
+  the drain's timeout.
+- **`events()` streams what nodes report.** A node that calls a model directly, without
+  `context.message()`, streams no tokens; `createAgent()` reports both tokens and tools.
+- **Rollups come only as `MemoryRollupStore`,** and OTLP export only as HTTP JSON. A database rollup
+  store, and gRPC, are left to an application's own implementation.
+- **An incremental tracer writes each run twice,** and a run a dead process left stays `running`
+  until `closeAbandonedRuns()` closes it.
+- **Recording with timing still reads a whole response** before handing it to the caller.
+- **The live provider workflow needs repository secrets,** which the repository owner sets.
+- **The graph entry point grew from 51 KB to 73 KB** with durability, recovery, timeouts, and the event
+  stream; the root grew by 2 KB, to 325 KB.
 
 ---
 
-## 29. 2.2.0: crash-safe observability and one event stream
+## 29. 2.2.0 as planned: shipped in 2.1.0
 
-The package records a great deal, but it records most of it at the end. This release records as it
-goes, and gives every consumer the same events.
-
-**Incremental traces.** A `TraceSink` takes `start`, `event`, and `finish` as they happen instead of a
-finished tree. A run that dies stays in the store with status `incomplete`, every finished span
-intact. Studio shows it, and can follow a live run. Sampling moves to the root's start, with an
-optional tail decision that keeps errors.
-
-**One event stream.** Graphs, agents, the server's SSE, Studio, and the tracer read one canonical
-event stream, with projections: `messages` (model tokens), `tools` (start, progress, result, error),
-`values`, `updates`, `tasks`, `subgraphs`, and `custom`. Model and tool events arrive without
-`ctx.emit()`. One iterator can take several projections, or each has its own.
-
-**Backpressure everywhere.** Every pipe between a provider and a browser declares what it does when
-the reader is slower: block the producer, coalesce updates, drop low-value events, disconnect, or
-spool to the durable event log. Queue depths are metrics. No path pushes to an unbounded array.
-
-**OpenTelemetry as the interchange.** Spans carry the GenAI semantic conventions
-(`gen_ai.operation.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.*`) and
-standard resource attributes, with a `nexus.*` namespace only for what is Nexus-specific: graph node
-and step, routing strategy, failover count. Trace context propagates through the server, operations,
-and remote graphs, so a trace spans processes and any OTLP backend reads it without glue.
-
-**Rollups for dashboards.** Hourly metric rollups per tenant, assistant, model, and provider: runs,
-errors, tokens, cost, and latency percentiles. Studio's cost and health charts read 24 rows instead
-of 100,000 traces. Traces stay the forensic record.
-
-**Timed replay.** The recorder can keep chunk timing. Replay runs instantly, at the original pace,
-scaled, or step by step, so idle timeouts, cancellation, and streaming UIs can be tested.
-
-**Evaluator provenance.** An experiment records each evaluator's version, judge model, judge prompt
-version, rubric, and the framework version, so a score can be traced to what produced it.
-
-**Proof.**
-- A process killed at minute 14 of a 15-minute agent run leaves a readable trace marked
-  `incomplete`, with every span that finished.
-- A slow-subscriber test: a browser reading 100 times slower than the model holds memory flat under
-  each backpressure policy.
-- An OTLP collector in CI receives a graph run's spans with the GenAI attributes and one trace id
-  across the server and a worker.
-- Studio's cost view answers over a million stored runs within its latency budget.
+Crash-safe traces, the event stream, OpenTelemetry conventions, rollups, timed replay, and evaluator
+provenance all shipped in 2.1.0; section 28 has them. What follows is renumbered: the release planned
+as 2.3.0 is now 2.2.0, and so on.
 
 ---
 
-## 30. 2.3.0: persistence and scale
+## 30. 2.2.0: persistence and scale
 
 This release removes the scaling cliffs that are documented today, and makes upgrades safe.
 
@@ -1601,12 +1579,9 @@ and removed only in a major.
 claims it atomically, so a claim costs O(log N) instead of a scan. The operation store stays the
 source of truth; the dispatch index only says what is ready.
 
-**Distributed resilience.**
-- Circuit-breaker observations move into the shared store as a rolling window, so nine failures
-  across three workers count as nine.
-- The rate limiter adds token bucket and GCRA, which have no window boundary to burst across.
-- Health observations expire after `observationTtlMs`. A provider with no recent traffic is
-  `unknown`, not healthy or unhealthy, and an optional active probe refreshes it.
+**A distributed breaker.** Circuit-breaker observations move into the shared store as a rolling
+window, so nine failures across three workers count as nine. (GCRA rate limiting and health that
+expires, planned here, shipped in 2.1.0.)
 
 **A routing index.** Capability requirements become a bitmask, and the candidate shortlist for a
 normalized set of requirements is cached. Only health, budget, price overrides, and latency are
@@ -1629,7 +1604,7 @@ SSE fan-out, operation claims, and cache lookups. Long-running tests watch for l
 `AbortController`, and closure retention over 100,000 checkpoints and 10,000 threads.
 
 **Proof.**
-- A database created by 2.0.0 upgrades to 2.3.0 with `nexus db migrate`, and a 2.2 worker and a 2.3
+- A database created by 2.0.0 upgrades to 2.2.0 with `nexus db migrate`, and a 2.1 worker and a 2.2
   worker run side by side during the rollout.
 - Ten workers race the same thread, operation, tenant budget, and circuit, and every invariant
   holds.
@@ -1640,7 +1615,7 @@ SSE fan-out, operation claims, and cache lookups. Long-running tests watch for l
 
 ---
 
-## 31. 2.4.0: agents that act safely
+## 31. 2.3.0: agents that act safely
 
 Agents can do a lot; this release gives them a complete middleware kit and a real security
 boundary, without growing `createAgent()`.
@@ -1678,7 +1653,7 @@ traces, budgets, tools, the store, audit, and deployments.
 
 ---
 
-## 32. 2.5.0: production retrieval and graduation
+## 32. 2.4.0: production retrieval and graduation
 
 Retrieval works at prototype scale. This release makes it work at production scale, and moves the
 experimental surfaces out of experimental with evidence.
@@ -1721,14 +1696,14 @@ built and verified without entering this repository.
 
 ---
 
-## 33. 2.6.0: protocols and portability
+## 33. 2.5.0: protocols and portability
 
 Interoperability comes after the core is hardened, because a protocol adapter is only as reliable
 as what it exposes.
 
 **Agent protocols**, each on its own subpath and out of the root:
 
-- `nexus-ai-pro/protocols/ag-ui`: the server's canonical event stream (section 29) as a
+- `nexus-ai-pro/protocols/ag-ui`: the server's canonical event stream (section 28) as a
   frontend-neutral protocol;
 - `nexus-ai-pro/protocols/a2a`: a Nexus agent calling, and serving, remote agents;
 - `nexus-ai-pro/protocols/acp`: when coding-agent interoperability is a target.
