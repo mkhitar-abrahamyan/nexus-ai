@@ -194,6 +194,11 @@ const imports = [
     exports: ['Tracer', 'MemoryTraceStore', 'JsonlTraceStore', 'traceGraph', 'AlertEvaluator', 'compareTraces'],
   },
   { specifier: 'nexus-ai-pro/batch', exports: ['BatchManager', 'MockBatchProvider', 'BatchValidationError'] },
+  { specifier: 'nexus-ai-pro/tracing/otlp', exports: ['OtlpTraceExporter', 'runToOtlpSpan'] },
+  {
+    specifier: 'nexus-ai-pro/tracing/rollups',
+    exports: ['MemoryRollupStore', 'rollupTraceStore', 'rollupPercentile', 'sumRollups'],
+  },
   { specifier: 'nexus-ai-pro/batch/openai', exports: ['OpenAIBatchProvider'] },
   { specifier: 'nexus-ai-pro/batch/anthropic', exports: ['AnthropicBatchProvider'] },
   { specifier: 'nexus-ai-pro/batch/mock', exports: ['MockBatchProvider'] },

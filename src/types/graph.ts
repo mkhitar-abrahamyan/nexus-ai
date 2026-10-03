@@ -417,10 +417,21 @@ export interface NodeContext<S extends ChannelSchema> {
    */
   heartbeat(): void;
   /**
-   * Sends anything to the run's `onEvent` listener as a `custom` event: model tokens as they stream,
-   * intermediate results, a status line. Nothing is written to state or checkpointed.
+   * Sends anything to the run's `onEvent` listener as a `custom` event: intermediate results, a
+   * status line. Nothing is written to state or checkpointed. Refreshes an idle timeout.
    */
   emit(data: unknown): void;
+  /**
+   * Streams a piece of model output as a `message` event, which `events()` delivers on its
+   * `messages` projection. `createAgent()` sends its model's output this way. Refreshes an idle
+   * timeout.
+   */
+  message(chunk: GraphMessageChunk): void;
+  /**
+   * Reports a tool call as a `tool` event, which `events()` delivers on its `tools` projection.
+   * `createAgent()` reports every tool it runs this way. Refreshes an idle timeout.
+   */
+  tool(event: GraphToolEvent): void;
 }
 
 /** A node: reads state from its context and returns an update, a `Command`, or nothing. */
@@ -589,6 +600,11 @@ export interface GraphRunOptions {
   /** Overrides the compiled `durability` for this run. */
   durability?: DurabilityMode;
   /**
+   * Also delivers the events of subgraphs run through `asNode()` to `onEvent`, each with the
+   * `namespace` of nodes it came through. Defaults to false.
+   */
+  subgraphEvents?: boolean;
+  /**
    * Lets the caller stop the run at the end of its current superstep: pass a `RunControl` and call
    * `drain()`, on SIGTERM for example. The run writes its checkpoint and ends with
    * `GraphDrainedError`, and `continue()` resumes it, on this worker or another.
@@ -619,7 +635,7 @@ export interface GraphResult<S extends ChannelSchema, O extends keyof S = keyof 
 }
 
 /** Fine-grained events delivered to `GraphRunOptions.onEvent`. */
-export type GraphEvent =
+export type GraphEvent = (
   | { type: 'task_start'; step: number; taskId: string; node: string; attempt: number }
   | { type: 'task_retry'; step: number; taskId: string; node: string; attempt: number; error: string }
   | {
@@ -643,7 +659,102 @@ export type GraphEvent =
       cached?: boolean;
     }
   | { type: 'checkpoint'; step: number; status: GraphStatus; next: string[] }
-  | { type: 'custom'; step: number; taskId: string; node: string; data: unknown };
+  | { type: 'custom'; step: number; taskId: string; node: string; data: unknown }
+  | { type: 'message'; step: number; taskId: string; node: string; chunk: GraphMessageChunk }
+  | { type: 'tool'; step: number; taskId: string; node: string; tool: GraphToolEvent }
+) & {
+  /**
+   * The nodes a subgraph event came through, outermost first: `['review']` for an event of a graph
+   * that runs as the parent's `review` node. Absent for the graph's own events.
+   */
+  namespace?: string[];
+};
+
+/** A piece of a model's output, as a node streams it: text, or a reasoning summary. */
+export interface GraphMessageChunk {
+  /** `text` for visible output, `reasoning` for a reasoning summary. Defaults to `text`. */
+  kind?: 'text' | 'reasoning';
+  /** The text. */
+  content: string;
+  /** Identifies the message the chunk belongs to, when a node streams more than one. */
+  messageId?: string;
+}
+
+/** A tool call's progress, as a node reports it. */
+export interface GraphToolEvent {
+  /** `start` when it is called, `progress` while it runs, then `result` or `error`. */
+  phase: 'start' | 'progress' | 'result' | 'error';
+  /** The call's id, matching the model's. */
+  id: string;
+  /** The tool's name. */
+  name: string;
+  /** The arguments, on `start`. */
+  args?: unknown;
+  /** Anything the tool reported, on `progress`. */
+  progress?: unknown;
+  /** What it returned, on `result`. */
+  result?: unknown;
+  /** Why it failed, on `error`. */
+  error?: string;
+}
+
+/**
+ * What `events()` can include. `values` is the state after each superstep; `updates` each task's
+ * write; `messages` model output as nodes stream it; `tools` tool calls; `tasks` each task
+ * starting, retrying, failing, and ending; `checkpoints` each write; `custom` what nodes emit.
+ */
+export type GraphStreamProjection = 'values' | 'updates' | 'messages' | 'tools' | 'tasks' | 'checkpoints' | 'custom';
+
+/** One event of `events()`, tagged by its projection. */
+export type GraphStreamEvent<S extends ChannelSchema = ChannelSchema> = (
+  | { type: 'values'; step: number; status: GraphStatus; state: StateOf<S> }
+  | { type: 'updates'; step: number; node: string; taskId: string; update: unknown }
+  | { type: 'messages'; step: number; node: string; taskId: string; chunk: GraphMessageChunk }
+  | { type: 'tools'; step: number; node: string; taskId: string; tool: GraphToolEvent }
+  | {
+      type: 'tasks';
+      event: Extract<GraphEvent, { type: 'task_start' | 'task_retry' | 'task_failed' | 'task_end' }>;
+    }
+  | { type: 'checkpoints'; step: number; status: GraphStatus; next: string[] }
+  | { type: 'custom'; step: number; node: string; taskId: string; data: unknown }
+) & {
+  /** The subgraph nodes it came through, outermost first. Empty for the graph's own events. */
+  namespace: string[];
+};
+
+/**
+ * What an event stream does when a reader falls behind within a superstep. At the end of each
+ * superstep the run waits for its slowest reader, whatever the policy, so a slow reader slows the
+ * graph down rather than filling memory.
+ *
+ * - `coalesce` (the default) merges a model chunk into the one before it from the same task, and a
+ *   state snapshot into the one before it; when nothing can merge, the oldest event goes.
+ * - `drop-oldest` and `drop-newest` lose events, and count them.
+ * - `error` ends the stream with `GraphStreamOverflowError` and stops the run.
+ */
+export type GraphStreamOverflow = 'coalesce' | 'drop-oldest' | 'drop-newest' | 'error';
+
+/** Options for `events()`: the run's own options, what to include, and how much to buffer. */
+export interface GraphEventsOptions extends GraphRunOptions {
+  /** Projections to include. Defaults to `values`, `updates`, `messages`, `tools`, and `custom`. */
+  include?: GraphStreamProjection[];
+  /** Includes the events of subgraphs, with their `namespace`. Defaults to false. */
+  subgraphs?: boolean;
+  /** Events each reader holds before `overflow` applies. Defaults to 1,000. */
+  maxBuffered?: number;
+  /** What happens when a reader's buffer is full. Defaults to `coalesce`. */
+  overflow?: GraphStreamOverflow;
+}
+
+/** What an event stream did to keep up with its slowest reader. */
+export interface GraphStreamStats {
+  /** The most events any reader held at once. */
+  peak: number;
+  /** Events merged into another. */
+  coalesced: number;
+  /** Events lost. */
+  dropped: number;
+}
 
 /** One superstep, as seen by `stream()`. */
 export interface GraphStepEvent<S extends ChannelSchema> {

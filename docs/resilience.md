@@ -210,13 +210,30 @@ stale change can briefly win; it heals after one cooldown.
 
 ## Rate limits in detail
 
-`RateLimiter` counts calls in fixed windows, keyed per user, per model, or globally as the client's
-`rateLimit.key` says, from a `RateLimitedRequest` (the model and user). `check()` counts in memory,
-synchronously; `checkAsync()` counts through the configured store. Both throw `NexusRateLimitError`
-once a bucket is full.
+`RateLimiter` counts calls keyed per user, per model, or globally as the client's `rateLimit.key`
+says, from a `RateLimitedRequest` (the model and user). `check()` counts in memory, synchronously;
+`checkAsync()` counts through the configured store. Both throw `NexusRateLimitError` once a bucket
+is full, with `resetAt` set to when a call would pass again.
 
-A `RateLimitStore` has one method, `hit(key, windowMs)`. It returns a `RateLimitHit`: the count in the
-current window, and when the window resets.
+`rateLimit.algorithm` decides how calls are counted:
+
+| Algorithm | Counts | At a window's edge |
+| --- | --- | --- |
+| `fixed-window` (the default) | Calls per window of `windowMs` | A burst at the end of one window and another at the start of the next pass nearly twice the limit in a moment |
+| `gcra` | The token-bucket algorithm, kept as one timestamp per key: `maxRequests` per `windowMs` on average, and at most `burst` at once | There is no edge: two milliseconds earn back a fifth of a call at 100 a second |
+
+```ts
+rateLimit: { enabled: true, maxRequests: 100, windowMs: 1_000, algorithm: 'gcra', burst: 20, store }
+```
+
+`burst` defaults to `maxRequests`. With a store, GCRA needs the store's `gcra()`, which returns a
+`RateLimitDecision`: whether the call may go, and from when a refused one would. Both bundled stores
+have it. `RedisRateLimitStore` runs it as one Lua script on Redis's own clock, so every worker agrees
+on the time and two cannot both take the last slot; it needs a client with `eval`. `gcraDecide()` is
+the arithmetic on its own, for a store of your own.
+
+A `RateLimitStore` has `hit(key, windowMs)`, which returns a `RateLimitHit`: the count in the current
+window, and when the window resets. It may also have `reset()`, and `gcra()` for the GCRA algorithm.
 
 - `MemoryRateLimitStore` keeps counters in the process, with `reset()` and `clear()`.
 - `RedisRateLimitStore` shares them between processes. It takes a `RedisRateLimitLikeClient` (`incr`,
@@ -233,8 +250,20 @@ The score starts at 100. It loses 20 per consecutive failure, up to 60, and 1 pe
 latency, up to 30.
 
 `ProviderHealthMonitor` does the tracking. `recordSuccess()` takes a latency and `recordFailure()` the
-error; `score()`, `isHealthy()`, and `snapshot()` read the result. Each `ProviderHealthSnapshot` has
-the counts, consecutive failures, average latency, last error, and score.
+error; `score()`, `isHealthy()`, `isUnknown()`, and `snapshot()` read the result. Each
+`ProviderHealthSnapshot` has the counts, consecutive failures, average latency, last error, score, a
+`status`, and whether it is `stale`.
+
+A `ProviderHealthStatus` is `unknown` with nothing recent to judge by, `unhealthy` past the failure
+threshold or under the minimum score, `degraded` when calls fail or are slow but not enough to stop
+routing to it, and `healthy` otherwise.
+
+**Health that expires.** Health moves only with traffic. Without a limit, a provider that failed on
+Monday and got no calls since is still unhealthy on Wednesday, and one that worked last week is still
+healthy after it broke. `observationTtlMs` bounds how long an outcome counts. A provider whose last
+call is older is `unknown` and `stale`, and is routed to as a provider never seen, with its last error
+still on record. `ai.checkProviders({ staleOnly: true })` runs the health check of every unknown
+provider; run it on a schedule to keep an idle provider current.
 
 ## Metrics and export
 
@@ -291,9 +320,10 @@ cost only when it can price the call in dollars.
 
 - The breaker's failure counts are per worker even with a shared store; only open, closed, and who
   may probe are shared.
-- The rate limiter uses fixed windows, so a burst straddling a window boundary can reach twice the
-  limit for a moment.
-- Health scores come from real calls; a provider that receives no traffic keeps its last score.
+- The default fixed windows let a burst straddling a window boundary reach twice the limit for a
+  moment; `algorithm: 'gcra'` does not. GCRA through Redis needs `eval`.
+- Health comes from calls. Without `observationTtlMs`, a provider that receives no traffic keeps its last
+  score; with it, an idle provider is `unknown` until a call or `checkProviders()` says more.
 - rate limiting
 
 <!-- reference:start -->
@@ -323,8 +353,9 @@ specific entry point that provides it.
 | `OpenTelemetryTraceExporter` | class | Exports pipeline traces as OpenTelemetry spans: one for the pipeline and one per step. |
 | `ProviderHealthMonitor` | class | Tracks provider health from call outcomes and scores each provider for routing. |
 | `ProviderHealthSnapshot` | interface | One provider's health, as tracked from real calls. |
+| `ProviderHealthStatus` | type | Where a provider stands, by what its recent calls say. |
 | `RateLimitedRequest` | interface | The parts of a request the limiter buckets on. |
-| `RateLimiter` | class | Fixed-window rate limiting, per user, per model, or globally, in memory or through a shared store. |
+| `RateLimiter` | class | Rate limiting per user, per model, or globally, in memory or through a shared store, by fixed windows or by GCRA. |
 
 ### `nexus-ai-pro/ops/circuit-breaker`
 
@@ -351,7 +382,9 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `gcraDecide` | function | GCRA on one key's theoretical arrival time: the time the key would be idle again at the allowed rate. |
 | `MemoryRateLimitStore` | class | Process-local counters. |
+| `RateLimitDecision` | interface | The verdict on one call under GCRA. |
 | `RateLimitHit` | interface | A rate-limit window after counting one call. |
 | `RateLimitStore` | interface | Where rate-limit counters live. |
 | `RedisRateLimitLikeClient` | interface | The Redis commands the rate-limit store needs. |

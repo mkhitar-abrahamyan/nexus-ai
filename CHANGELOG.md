@@ -4,9 +4,15 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-Fault-tolerant graphs. A graph now chooses when its checkpoints are written, recovers from a node
-whose retries ran out, tells a hung task from a slow one, and stops cleanly when its worker has to
-go. Nothing changes until a graph opts in: the defaults keep their 2.0 meaning.
+Fault-tolerant graphs and crash-safe observability. A graph now chooses when its checkpoints are
+written, recovers from a node whose retries ran out, tells a hung task from a slow one, and stops
+cleanly when its worker has to go. Traces survive the process that wrote them and reach any
+OpenTelemetry backend, every consumer of a run reads one event stream, and dashboards read hourly
+totals instead of every trace. Nothing changes until it is opted into: the defaults keep their 2.0
+meaning.
+
+Two pieces planned for 2.3 come early: a rate limiter with no window edge to burst across, and
+provider health that expires.
 
 ### Added
 
@@ -36,6 +42,51 @@ go. Nothing changes until a graph opts in: the defaults keep their 2.0 meaning.
   `heartbeatDetails`, and the next attempt reads them as `context.previousHeartbeat`.
 - A `task_failed` graph event, and a semantics table in the graph guide that says what each
   execution primitive repeats after a crash.
+- **Crash-safe traces.** `new Tracer({ incremental: true })` writes each run when it starts and when it
+  ends, so a crashed run stays in the store with every run beneath it that finished, and a live run
+  can be watched. Sampling is decided at the root's start, and an unsampled trace is still kept whole
+  when tail sampling wants it. `closeAbandonedRuns()` closes what a dead process left running, as a
+  `RunAbandoned` error. `tracer.flush()` waits for writes and exports.
+- **Traces across processes.** `handle.traceparent()` and `StartRunOptions.traceparent` carry a trace
+  through a W3C `traceparent` header: an operation's `traceContext`, a remote call, any OpenTelemetry
+  service. `w3cTraceId()` and `w3cSpanId()` give the ids every process derives alike.
+- **OpenTelemetry export**, on the new `nexus-ai-pro/tracing/otlp`. `TracerOptions.exporters` takes any
+  `TraceExporter`, and `OtlpTraceExporter` sends runs to a collector as OTLP/HTTP JSON with no SDK:
+  model calls as `chat <model>` client spans with the GenAI semantic conventions, tools, agents, and
+  graph nodes with theirs, and Nexus-only facts under `nexus.*`. `runToOtlpSpan()` is the conversion.
+- **One event stream.** `graph.events()`, `resumeEvents()`, and `continueEvents()` run a graph as
+  typed events with projections — `values`, `updates`, `messages`, `tools`, `tasks`, `checkpoints`,
+  `custom` — read together or one at a time through `messages()`, `tools()`, `values()`, and
+  `updates()`, with `result` for the outcome. Nodes stream model output with `context.message()`
+  and report tool calls with `context.tool()`. Subgraph events come through with a `namespace` when
+  asked, and `GraphRunOptions.subgraphEvents` does the same for `onEvent`.
+- **Bounded readers.** Every reader of a stream has its own buffer (`maxBuffered`, 1,000), and the run
+  waits for the slowest at each superstep. Within a step, `overflow` coalesces model chunks and state
+  snapshots (the default), drops the oldest or newest, or fails with `GraphStreamOverflowError`.
+  `streamStats()` reports the peak and what was merged or dropped.
+- **Agents stream.** `createAgent()` reports its model's output and every tool call on the stream,
+  token by token with `streamTokens` and a client with `stream()`. `traceGraph()` records the tool
+  calls as `tool` runs inside their node. `graphAssistant(graph, { events })` records chosen
+  projections on each server run.
+- **Rollups**, on the new `nexus-ai-pro/tracing/rollups`: `rollupTraceStore()` adds every finished run
+  to hourly rows per kind, model, provider, and tenant, in `MemoryRollupStore` or any `RollupStore`,
+  with latency buckets for `rollupPercentile()` and `sumRollups()` to total them. The studio's costs
+  view reads them when given `rollups`.
+- **Timed replay.** `recordingFetch({ timing: true })` keeps each chunk of a response and when it came,
+  and `replayFetch({ pace })` replays it at once, at the original pace, scaled, or released chunk by
+  chunk by a function.
+- **GCRA rate limiting.** `rateLimit.algorithm: 'gcra'` spreads calls at `maxRequests` per `windowMs`
+  with at most `burst` at once, so a burst across a window edge can no longer pass twice the limit.
+  Both stores decide it through `gcra()`; `RedisRateLimitStore` runs it as one Lua script on Redis's
+  clock. `gcraDecide()` is the arithmetic, for a store of your own.
+- **Health that expires.** `health.observationTtlMs` makes a provider with no recent calls `unknown`,
+  routed to as one never seen instead of kept down by an old failure or up by an old success.
+  Snapshots carry a `status` (`healthy`, `degraded`, `unhealthy`, `unknown`) and `stale`, and
+  `ai.checkProviders({ staleOnly: true })` refreshes the unknown ones.
+- **Evaluator provenance.** An experiment records each evaluator's position, name, the score keys it
+  produced, and what `withProvenance()` declared — version, judge model, prompt version, temperature,
+  and rubric — and the framework version that ran it. `LLMJudge.asEvaluator()` brings the judge to
+  `evaluate()`, declaring its own provenance.
 - A weekly `live-providers` workflow runs real conformance against every provider with a key in the
   repository's secrets, DeepSeek included, and opens an issue when one breaks.
 
@@ -46,6 +97,8 @@ go. Nothing changes until a graph opts in: the defaults keep their 2.0 meaning.
   successful result was not saved. Heartbeats now go through the runner, one at a time.
 - `continue()` on a finished thread left it marked `running` with an empty result. It now leaves it
   completed and returns its state.
+- A run started under a parent from another tracer, or another process, was never written: its trace
+  waited for a root that was not there. It is now written as its trace's root in this process.
 
 ### Proof
 
@@ -59,6 +112,16 @@ go. Nothing changes until a graph opts in: the defaults keep their 2.0 meaning.
   replays each from every checkpoint of its history to the same state.
 - The graph benchmark runs 50 supersteps against an 8 ms store: `async` finishes in about half the
   time of `sync`, in the same state, and CI fails if it stops beating it by a quarter.
+- A long agent's process dies at its fourteenth step: a second process reads every finished step from
+  the same JSONL store, and `closeAbandonedRuns()` closes the rest.
+- A server and a worker each export to a local OTLP collector, and the collector receives one trace,
+  the worker's run under the server's, with the GenAI attributes on the model call.
+- A reader a hundred times slower than a node that streams 100,000 chunks never holds more than its
+  buffer, under every overflow policy, and coalescing loses no text.
+- The studio's costs view answers over a month of a million runs, held as rollups, in under 200 ms,
+  reading the traces once.
+- In the two milliseconds around a window's edge, fixed windows pass 199 calls of a 100-call limit and
+  GCRA passes 100. A provider down on Monday and idle since is `unknown`, and routed to, on Wednesday.
 
 ## [2.0.0] - 2026-10-02
 

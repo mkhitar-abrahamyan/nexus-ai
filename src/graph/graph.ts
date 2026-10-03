@@ -9,6 +9,7 @@ import type {
   GraphCheckpointer,
   GraphDescription,
   GraphEvent,
+  GraphEventsOptions,
   GraphInput,
   GraphProgress,
   GraphResult,
@@ -32,6 +33,7 @@ import { Command, END, Send, START } from '../types/graph.js';
 import { MemoryGraphCheckpointer } from './checkpointer.js';
 import { type CheckpointDraft, migrateCheckpoint, toCheckpoint } from './checkpoint-migration.js';
 import { CheckpointWriter } from './durability.js';
+import { GraphEventStream, streamSettings } from './event-stream.js';
 import type { NodeCache } from './node-cache.js';
 import {
   GraphDrainedError,
@@ -65,6 +67,9 @@ type RouteRecord = string | { node: string; input?: unknown; timeout?: NodeTimeo
 
 /** Marks the function `asNode()` returns, so `describe()` can draw the graph inside it. */
 const SUBGRAPH = Symbol('nexus.graph.subgraph');
+
+/** Hands a subgraph's events to the run of the node that runs it, under that node's namespace. */
+const FORWARD_EVENT = Symbol('nexus.graph.forwardEvent');
 
 /**
  * Further updates carried by a Command, reduced after its own `update`. Used when a subgraph hands
@@ -272,6 +277,52 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   }
 
   /**
+   * Runs the graph as one stream of typed events: the state after each superstep, each task's write,
+   * model output as nodes stream it, tool calls, task progress, checkpoints, and custom events.
+   *
+   * Iterate it for everything included, or read one projection with `messages()`, `tools()`,
+   * `values()`, or `updates()`. Each reader has its own bounded buffer, and the run waits for the
+   * slowest at the end of every superstep, so a slow reader slows the graph rather than filling
+   * memory. `result` resolves with the run's result.
+   */
+  events(input: GraphInput<S, I> = {}, options: GraphEventsOptions = {}): GraphEventStream<S, O> {
+    const threadId = resolveThreadId(options.threadId);
+    return this.eventStream(threadId, options, (runOptions) => this.stream(input, runOptions));
+  }
+
+  /** Like `events()`, answering the question a paused thread is waiting on. */
+  resumeEvents(threadId: string, value: unknown, options: GraphEventsOptions = {}): GraphEventStream<S, O> {
+    return this.eventStream(threadId, options, (runOptions) => this.resume(threadId, value, runOptions));
+  }
+
+  /** Like `events()`, carrying a thread on from a breakpoint, a drain, or a failure. */
+  continueEvents(threadId: string, options: GraphEventsOptions = {}): GraphEventStream<S, O> {
+    return this.eventStream(threadId, options, (runOptions) => this.continue(threadId, runOptions));
+  }
+
+  private eventStream(
+    threadId: string,
+    options: GraphEventsOptions,
+    run: (runOptions: GraphRunOptions) => AsyncIterable<GraphStepEvent<S>>,
+  ): GraphEventStream<S, O> {
+    return new GraphEventStream<S, O>(
+      (onEvent, signal) =>
+        run({
+          ...options,
+          threadId,
+          signal: options.signal ? AbortSignal.any([options.signal, signal]) : signal,
+          ...(options.subgraphs ? { subgraphEvents: true } : {}),
+          onEvent: (event) => {
+            options.onEvent?.(event);
+            onEvent(event);
+          },
+        }),
+      (last) => this.toResult(threadId, last),
+      streamSettings(options),
+    );
+  }
+
+  /**
    * Supplies the value a node asked for and continues.
    *
    * The interrupted node runs again from the top; `context.interrupt()` returns `value` this time
@@ -390,9 +441,11 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   asNode<P extends ChannelSchema>(): NodeFn<P> {
     const node: NodeFn<P> = async (context) => {
       // Keyed by task, not node, so parallel Send copies of one subgraph node never share a thread.
+      const forward = (context as { [FORWARD_EVENT]?: (event: GraphEvent) => void })[FORWARD_EVENT];
       const runOptions: GraphRunOptions = {
         threadId: `${context.threadId}:${context.taskId}`,
         signal: context.signal,
+        ...(forward ? { onEvent: forward, subgraphEvents: true } : {}),
       };
       const paused = await this.state(runOptions.threadId as string);
       let result: GraphResult<S, O>;
@@ -1137,6 +1190,14 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
         notify(runOptions, { type: 'custom', step, taskId: task.id, node, data });
       },
       heartbeat: touch,
+      message: (chunk) => {
+        touch();
+        notify(runOptions, { type: 'message', step, taskId: task.id, node, chunk });
+      },
+      tool: (event) => {
+        touch();
+        notify(runOptions, { type: 'tool', step, taskId: task.id, node, tool: event });
+      },
       report: (progress) => {
         touch();
         if (!runOptions.onProgress) return;
@@ -1148,6 +1209,13 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       },
     };
 
+    // Only when asked for, so a listener written for 2.0 sees exactly the events it did. Not
+    // enumerable, so a node that spreads its context does not carry it along.
+    if (runOptions.subgraphEvents) {
+      Object.defineProperty(context, FORWARD_EVENT, {
+        value: (event: GraphEvent) => notify(runOptions, { ...event, namespace: [node, ...(event.namespace ?? [])] }),
+      });
+    }
     const result = await fn(context);
     const interrupted = interruptIndex > 0;
     if (result instanceof Command) {

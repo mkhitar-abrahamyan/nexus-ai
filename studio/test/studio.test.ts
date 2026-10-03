@@ -353,6 +353,65 @@ test('costs count model runs once, by day and by model, against budgets', async 
   assert.equal((await get('/api/costs?days=0')).status, 400);
 });
 
+test('with rollups, the costs view answers over a million runs without reading them', async () => {
+  // A month of hourly rows for three models, a million runs in all.
+  const models = ['gpt-6-luna', 'claude-sonnet-5-5', 'gemini-3.8-flash'];
+  const start = Date.parse('2026-09-04T00:00:00.000Z');
+  const rows = Array.from({ length: 720 * 3 }, (_, index) => ({
+    hour: new Date(start + Math.floor(index / 3) * 3_600_000).toISOString(),
+    kind: 'model',
+    name: '',
+    model: models[index % 3] as string,
+    provider: '',
+    tenant: '',
+    runs: index < 1_000_000 % 2_160 ? Math.ceil(1_000_000 / 2_160) : Math.floor(1_000_000 / 2_160),
+    errors: 0,
+    cost: 0.5,
+  }));
+  let traceReads = 0;
+  const studio = createStudio(
+    {
+      rollups: {
+        query: ({ since, until }) =>
+          rows.filter((row) => (!since || row.hour >= since.slice(0, 13)) && (!until || row.hour <= until)),
+      },
+      traces: {
+        save() {},
+        get: () => undefined,
+        tree: () => undefined,
+        query: () => {
+          traceReads += 1;
+          return [];
+        },
+      },
+      budgets: [{ name: 'monthly', limit: 2_000, period: 'month', filter: { model: 'gpt-6-luna' } }],
+    },
+    { token: 'test-token', now: () => new Date('2026-10-04T00:00:00.000Z') },
+  );
+  const started = performance.now();
+  const response = await studio.handle(
+    new Request(`${ORIGIN}/api/costs?days=30`, { headers: { 'x-studio-token': 'test-token' } }),
+  );
+  const elapsed = performance.now() - started;
+  const report = await json<{
+    total: number;
+    byDay: Array<{ runs: number }>;
+    byModel: Array<{ model: string; runs: number }>;
+    budgets: Array<{ spent: number }>;
+  }>(response);
+
+  assert.equal(
+    report.byDay.reduce((sum, day) => sum + day.runs, 0),
+    1_000_000,
+    'every one of the million runs is counted',
+  );
+  assert.equal(report.byModel.length, 3);
+  assert.ok(Math.abs(report.total - 0.5 * 2_160) < 1e-6);
+  assert.ok((report.budgets[0]?.spent ?? 0) > 0, 'a budget on a model reads the rows too');
+  assert.equal(traceReads, 1, 'the traces are read once, for the costliest recent runs, not scanned');
+  assert.ok(elapsed < 200, `answered in ${Math.round(elapsed)} ms`);
+});
+
 test('health and the operation queue report what the sources know', async () => {
   const health = await json<{ providers: Array<{ providerName: string }>; circuits: Array<{ state: string }> }>(
     get('/api/health'),

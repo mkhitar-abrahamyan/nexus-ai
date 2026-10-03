@@ -70,3 +70,4 @@ export type {
   MetricSummary,
   SummaryEvaluator,
 } from '../types/evaluate.js';
+export { withProvenance } from './provenance.js';

@@ -1,9 +1,21 @@
+import { gcraDecide } from './rate-limiter.js';
+
+export { gcraDecide };
+
 /** A rate-limit window after counting one call. */
 export interface RateLimitHit {
   /** Calls counted in the current window, including this one. */
   count: number;
   /** Epoch milliseconds when the window resets. */
   resetAt: number;
+}
+
+/** The verdict on one call under GCRA. */
+export interface RateLimitDecision {
+  /** Whether the call may go. */
+  allowed: boolean;
+  /** Epoch milliseconds from which a refused call would be allowed. */
+  retryAt: number;
 }
 
 /**
@@ -17,11 +29,17 @@ export interface RateLimitStore {
   hit(key: string, windowMs: number): Promise<RateLimitHit> | RateLimitHit;
   /** Resets a key's window. */
   reset?(key: string): Promise<void> | void;
+  /**
+   * Decides one call under GCRA: one call per `emissionMs` on average, with up to `burst` at once,
+   * atomically. Needed for `algorithm: 'gcra'`; both bundled stores have it.
+   */
+  gcra?(key: string, emissionMs: number, burst: number): Promise<RateLimitDecision> | RateLimitDecision;
 }
 
 /** Process-local counters. The default, and equivalent to the limiter's built-in behavior. */
 export class MemoryRateLimitStore implements RateLimitStore {
   private readonly buckets = new Map<string, RateLimitHit>();
+  private readonly arrivals = new Map<string, number>();
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
@@ -40,14 +58,23 @@ export class MemoryRateLimitStore implements RateLimitStore {
     return bucket;
   }
 
+  /** Decides one call under GCRA. */
+  gcra(key: string, emissionMs: number, burst: number): RateLimitDecision {
+    const decided = gcraDecide(this.arrivals.get(key), this.now(), emissionMs, burst);
+    if (decided.allowed) this.arrivals.set(key, decided.tat);
+    return { allowed: decided.allowed, retryAt: decided.retryAt };
+  }
+
   /** Resets a key's window. */
   reset(key: string): void {
     this.buckets.delete(key);
+    this.arrivals.delete(key);
   }
 
   /** Resets every window. */
   clear(): void {
     this.buckets.clear();
+    this.arrivals.clear();
   }
 }
 
@@ -83,6 +110,22 @@ end
 return {count, ttl}
 `;
 
+// GCRA in one atomic step, on the server's clock so every worker agrees on the time. Returns
+// {allowed, wait in ms}.
+const GCRA_SCRIPT = `
+local time = redis.call('TIME')
+local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+local emission = tonumber(ARGV[1])
+local burst = tonumber(ARGV[2])
+local tat = tonumber(redis.call('GET', KEYS[1]) or now)
+if tat < now then tat = now end
+local next = tat + emission
+local allowAt = next - burst * emission
+if allowAt > now then return {0, allowAt - now} end
+redis.call('SET', KEYS[1], next, 'PX', math.max(1, math.ceil(next - now)))
+return {1, 0}
+`;
+
 /** Options for the Redis rate-limit store. */
 export interface RedisRateLimitStoreOptions {
   /** Key prefix. Defaults to `nexus-ai-pro:ratelimit:`. */
@@ -107,7 +150,7 @@ export class RedisRateLimitStore implements RateLimitStore {
 
   constructor(
     private readonly client: RedisRateLimitLikeClient,
-    options: RedisRateLimitStoreOptions = {},
+    private readonly options: RedisRateLimitStoreOptions = {},
   ) {
     this.prefix = options.prefix ?? 'nexus-ai-pro:ratelimit:';
     this.useEval = options.useEval !== false && typeof client.eval === 'function';
@@ -139,6 +182,25 @@ export class RedisRateLimitStore implements RateLimitStore {
       return { count, resetAt: Date.now() + windowMs };
     }
     return { count, resetAt: Date.now() + ttl };
+  }
+
+  /**
+   * Decides one call under GCRA, atomically, on Redis's own clock. Needs a client with `eval`: the
+   * read and the write cannot be split without letting two workers both take the last slot.
+   */
+  async gcra(key: string, emissionMs: number, burst: number): Promise<RateLimitDecision> {
+    if (!this.client.eval || this.options.useEval === false) {
+      throw new Error('GCRA rate limiting through Redis needs a client with eval');
+    }
+    const raw = (await this.client.eval(
+      GCRA_SCRIPT,
+      1,
+      `${this.prefix}gcra:${key}`,
+      String(emissionMs),
+      String(burst),
+    )) as [number | string, number | string];
+    const allowed = Number(raw?.[0]) === 1;
+    return { allowed, retryAt: Date.now() + Math.max(0, Number(raw?.[1] ?? 0)) };
   }
 
   /** Resets a key's window. Does nothing when the client has no `del`. */

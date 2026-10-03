@@ -19,6 +19,8 @@ export {
 export {
   applyQuery,
   assembleTree,
+  closeAbandonedRuns,
+  type CloseAbandonedRunsOptions,
   JsonlTraceStore,
   type JsonlTraceStoreOptions,
   MemoryTraceStore,
@@ -31,6 +33,8 @@ export {
   stripFields,
   Tracer,
   type TracerOptions,
+  w3cSpanId,
+  w3cTraceId,
 } from './tracer.js';
 export type {
   RedactionPolicy,
@@ -41,5 +45,6 @@ export type {
   RunStatus,
   RunTree,
   SamplingPolicy,
+  TraceExporter,
   TraceStore,
 } from '../types/tracing.js';

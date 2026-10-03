@@ -105,6 +105,13 @@ it as they are:
 The costs view counts model runs, which is where the tracer records cost, so a parent run that sums
 its children is not counted twice. `StudioCostReport` is the shape it returns.
 
+`rollups`, a `StudioRollups`, makes the costs view read hourly totals instead of traces: give it the
+rollup store behind `rollupTraceStore()` from `nexus-ai-pro/tracing/rollups`. Each `StudioRollupRow`
+is an hour of one kind, model, provider, and tenant. A month of a million runs is a few thousand rows,
+so the view answers in milliseconds however large the trace store grows. The costliest runs still come
+from the traces, from the most recent 1,000 in the window, and a budget whose filter needs more than a
+model, provider, kind, or name still reads the traces.
+
 ## Access and safety
 
 The studio can change things — answer an interrupt, edit a thread, promote a prompt — so it is
@@ -212,7 +219,7 @@ up — cycles — are marked, so they can be drawn around the side.
 - The studio is experimental: it is new, and its views will gain detail.
 - It reads what the stores can list. An operation store without `list()` hides the queue, and a
   graph given without a way to list threads can only open a thread by id.
-- The costs view reads up to 100,000 runs in its window. Point it at a long window on a very large
-  trace store and it will be slow; narrow the window instead.
+- Without `rollups`, the costs view reads up to 100,000 runs in its window, which is slow on a very
+  large trace store. Give it rollups.
 - Accounts come from an authenticator you configure; the studio does not run a sign-in flow of its
   own. For people in a browser, put a signing-in proxy in front, or give each person a link.

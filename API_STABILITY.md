@@ -51,7 +51,22 @@ Everything 2.1 adds is stable from the start and additive: no default changes me
 - `lintGraph()` and its finding types (`nexus-ai-pro/graph/lint`). New rules may be added in a minor
   release; a rule's code and severity do not change within 2.x;
 - `OperationContext.previousHeartbeat` and `OperationRecord.heartbeatDetails`;
-- `AssistantRunContext.control`.
+- `AssistantRunContext.control`;
+- the graph event stream: `events()`, `resumeEvents()`, `continueEvents()`, `GraphEventStream`, its
+  event and option types, `GraphStreamOverflowError`, `context.message()` and `context.tool()`, and
+  `subgraphEvents`. New projections may be added in a minor release;
+- `TracerOptions.incremental` and `exporters`, `TraceExporter`, `traceparent` in and out, `flush()`,
+  `closeAbandonedRuns()`, `w3cTraceId()` and `w3cSpanId()` (`nexus-ai-pro/tracing`);
+- `OtlpTraceExporter` and `runToOtlpSpan()` (`nexus-ai-pro/tracing/otlp`). Attributes may be added as
+  the GenAI conventions settle; the ones listed in the tracing guide stay;
+- rollups (`nexus-ai-pro/tracing/rollups`), timed replay (`timing`, `pace`), evaluator provenance
+  (`withProvenance()`, `Experiment.evaluators` and `framework`, `LLMJudge.asEvaluator()`),
+  `createAgent({ streamTokens })`, and `graphAssistant(graph, { events })`;
+- `rateLimit.algorithm` and `burst`, `RateLimitStore.gcra()`, `RateLimitDecision`, and `gcraDecide()`;
+  `health.observationTtlMs`, `ProviderHealthStatus`, a snapshot's `status` and `stale`, and
+  `checkProviders({ staleOnly })`.
+
+The studio's `rollups` source follows the studio's experimental label.
 
 ## 2.0 stage (2.0.0)
 

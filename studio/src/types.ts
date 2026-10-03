@@ -179,10 +179,44 @@ export interface StudioBudget {
   filter?: RunQuery;
 }
 
+/** One hourly row of totals, as a rollup store returns it. */
+export interface StudioRollupRow {
+  /** The hour, ISO-8601. */
+  hour: string;
+  /** The run kind. */
+  kind: string;
+  /** The root run's name, or empty. */
+  name: string;
+  /** The model, or empty. */
+  model: string;
+  /** The provider, or empty. */
+  provider: string;
+  /** The tenant, or empty. */
+  tenant: string;
+  /** Runs counted. */
+  runs: number;
+  /** Runs that failed. */
+  errors: number;
+  /** Their cost, in US dollars. */
+  cost: number;
+}
+
+/** The part of a rollup store the studio reads. */
+export interface StudioRollups {
+  /** Rows from `since` to `until`, by hour. */
+  query(query: { since?: string; until?: string }): Promise<StudioRollupRow[]> | StudioRollupRow[];
+}
+
 /** Everything the studio can show. Give it what you have; the rest is hidden. */
 export interface StudioSources {
   /** Traces, for the traces and costs views. */
   traces?: TraceStore;
+  /**
+   * Hourly totals, such as a `MemoryRollupStore` behind `rollupTraceStore()` from
+   * `nexus-ai-pro/tracing/rollups`. With them, the costs view reads a few rows per hour instead of
+   * every trace in the window, which keeps it fast however many runs there are.
+   */
+  rollups?: StudioRollups;
   /** Graphs whose threads the studio browses, edits, forks, and resumes, by name. */
   graphs?: Record<string, StudioGraphSource | StudioGraphLike>;
   /** Annotation queues, for the inbox, by name. */

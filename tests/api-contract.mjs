@@ -104,6 +104,8 @@ const expectedSubpaths = [
   './insights',
   './mcp/registry',
   './tracing',
+  './tracing/otlp',
+  './tracing/rollups',
   './evaluate',
   './postgres',
   './postgres/operations',

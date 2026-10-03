@@ -32,6 +32,7 @@ export {
   interruptKey,
 } from './errors.js';
 export { RunControl } from './run-control.js';
+export { GraphEventStream, GraphStreamOverflowError } from './event-stream.js';
 export { Command, END, Send, START } from '../types/graph.js';
 export type {
   Channel,
@@ -46,6 +47,7 @@ export type {
   GraphCheckpointer,
   GraphDescription,
   GraphEvent,
+  GraphEventsOptions,
   GraphInput,
   GraphProgress,
   GraphResult,
@@ -53,6 +55,12 @@ export type {
   GraphRouteTarget,
   GraphStatus,
   GraphStepEvent,
+  GraphMessageChunk,
+  GraphStreamEvent,
+  GraphStreamOverflow,
+  GraphStreamProjection,
+  GraphStreamStats,
+  GraphToolEvent,
   GraphTask,
   InterruptRequest,
   NodeCacheEntry,

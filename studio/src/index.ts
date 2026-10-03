@@ -54,6 +54,8 @@ export type {
   StudioPromptRegistry,
   StudioProposalInbox,
   StudioReviewQueue,
+  StudioRollupRow,
+  StudioRollups,
   StudioSources,
   StudioTenants,
 } from './types.js';

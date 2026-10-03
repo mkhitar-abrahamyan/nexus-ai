@@ -580,6 +580,26 @@
         "default": "./dist-cjs/tracing/index.js"
       }
     },
+    "./tracing/otlp": {
+      "import": {
+        "types": "./dist/tracing/otlp.d.ts",
+        "default": "./dist/tracing/otlp.js"
+      },
+      "require": {
+        "types": "./dist-cjs/tracing/otlp.d.ts",
+        "default": "./dist-cjs/tracing/otlp.js"
+      }
+    },
+    "./tracing/rollups": {
+      "import": {
+        "types": "./dist/tracing/rollups.d.ts",
+        "default": "./dist/tracing/rollups.js"
+      },
+      "require": {
+        "types": "./dist-cjs/tracing/rollups.d.ts",
+        "default": "./dist-cjs/tracing/rollups.js"
+      }
+    },
     "./evaluate": {
       "import": {
         "types": "./dist/evaluate/index.d.ts",
@@ -1749,6 +1769,12 @@
       ],
       "tracing": [
         "dist-cjs/tracing/index.d.ts"
+      ],
+      "tracing/otlp": [
+        "dist-cjs/tracing/otlp.d.ts"
+      ],
+      "tracing/rollups": [
+        "dist-cjs/tracing/rollups.d.ts"
       ],
       "evaluate": [
         "dist-cjs/evaluate/index.d.ts"

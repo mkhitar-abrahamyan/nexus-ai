@@ -6,7 +6,12 @@
  */
 export { AuditLogger } from './audit-logger.js';
 export { type FamilyCallDescriptor, type FamilyRuntime, FamilyTelemetry } from './family-telemetry.js';
-export { type HealthConfig, ProviderHealthMonitor, type ProviderHealthSnapshot } from './health.js';
+export {
+  type HealthConfig,
+  ProviderHealthMonitor,
+  type ProviderHealthSnapshot,
+  type ProviderHealthStatus,
+} from './health.js';
 export {
   InMemoryMetrics,
   type MetricsConfig,

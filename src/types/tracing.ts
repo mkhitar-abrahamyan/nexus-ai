@@ -144,6 +144,18 @@ export interface TraceStore {
 }
 
 /**
+ * Receives every finished run a tracer keeps, after redaction, to send somewhere else: an
+ * OpenTelemetry collector, a log pipeline, a metrics rollup. An exporter that throws or rejects is
+ * reported through the tracer's `onError` and never fails the run.
+ */
+export interface TraceExporter {
+  /** Takes one finished run. */
+  export(run: Run): Promise<void> | void;
+  /** Sends anything batched. `Tracer.flush()` calls it. */
+  flush?(): Promise<void> | void;
+}
+
+/**
  * What is removed from runs before they are stored, so a hidden field is never written anywhere.
  */
 export interface RedactionPolicy {

@@ -38,6 +38,43 @@ export interface RecordedResponse {
   body: string;
   /** How `body` is encoded. */
   bodyEncoding: 'utf8' | 'base64';
+  /**
+   * The body as it arrived, chunk by chunk, with when each came, when recorded with `timing`. A
+   * paced replay sends these; an instant one sends `body`, which holds the same bytes.
+   */
+  chunks?: RecordedChunk[];
+}
+
+/** One piece of a streamed response, and when it arrived. */
+export interface RecordedChunk {
+  /** Milliseconds after the response started. */
+  atMs: number;
+  /** The bytes, as text or base64. */
+  body: string;
+  /** How `body` is encoded. */
+  bodyEncoding: 'utf8' | 'base64';
+}
+
+/**
+ * How a replayed stream is paced, for a recording made with `timing`.
+ *
+ * - `instant` (the default) sends the whole body at once, as a recording without timing does.
+ * - `original` sends each chunk when it arrived, relative to the first.
+ * - A number scales the gaps: `0.1` is ten times faster, `2` twice as slow.
+ * - A function is awaited before each chunk, so a test can release them one at a time.
+ */
+export type ReplayPace = 'instant' | 'original' | number | ((chunk: ReplayChunkInfo) => Promise<void> | void);
+
+/** What a pacing function is told about the chunk it releases. */
+export interface ReplayChunkInfo {
+  /** Its position, from 0. */
+  index: number;
+  /** How many chunks the response has. */
+  count: number;
+  /** When it arrived when recorded, in milliseconds after the response started. */
+  atMs: number;
+  /** The recorded gap since the chunk before it, in milliseconds. */
+  delayMs: number;
 }
 
 /** One request and the response it got, as written to a fixture file. */
@@ -96,6 +133,12 @@ export interface RecordOptions extends FixtureOptions {
   redact?: (exchange: RecordedExchange) => RecordedExchange;
   /** Replaces the system clock, for `recordedAt`. */
   now?: () => Date;
+  /**
+   * Keeps each chunk of a response and when it arrived, so a replay can reproduce a stream's pace
+   * as well as its bytes: for testing idle timeouts, cancellation, backpressure, and streaming UIs.
+   * Defaults to false.
+   */
+  timing?: boolean;
 }
 
 /** Options for replaying. */
@@ -107,6 +150,8 @@ export interface ReplayOptions extends FixtureOptions {
   onMissing?: 'throw' | 'live';
   /** The real fetch, for `onMissing: 'live'`. */
   fetch?: typeof globalThis.fetch;
+  /** How a stream recorded with `timing` is paced. Defaults to `instant`. */
+  pace?: ReplayPace;
 }
 
 /** A fetch that also lets a test wait for every fixture it has written. */
@@ -150,7 +195,10 @@ export function recordingFetch(options: RecordOptions): RecordingFetch {
     const real = options.fetch ?? globalThis.fetch;
     const response = await real(input, init);
 
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    const { bytes, chunks } = options.timing
+      ? await readTimed(response)
+      : { bytes: new Uint8Array(await response.arrayBuffer()), chunks: undefined };
+    const contentType = response.headers.get('content-type');
     const index = counters.get(captured.key) ?? 0;
     counters.set(captured.key, index + 1);
 
@@ -162,7 +210,10 @@ export function recordingFetch(options: RecordOptions): RecordingFetch {
         status: response.status,
         ...(response.statusText ? { statusText: response.statusText } : {}),
         headers: withoutTransportHeaders(redactHeaders(response.headers, options.redactHeaders)),
-        ...encodeBody(bytes, response.headers.get('content-type')),
+        ...encodeBody(bytes, contentType),
+        ...(chunks
+          ? { chunks: chunks.map((chunk) => ({ atMs: chunk.atMs, ...encodeBody(chunk.bytes, contentType) })) }
+          : {}),
       },
       recordedAt: now().toISOString(),
     };
@@ -207,10 +258,14 @@ export function replayFetch(options: ReplayOptions): typeof globalThis.fetch {
     const position = served.get(captured.key) ?? 0;
     served.set(captured.key, position + 1);
     const exchange = recordings[Math.min(position, recordings.length - 1)] as RecordedExchange;
+    const pace = options.pace ?? 'instant';
+    const chunks = exchange.response.chunks;
     const body =
-      exchange.response.bodyEncoding === 'base64'
-        ? Buffer.from(exchange.response.body, 'base64')
-        : exchange.response.body;
+      pace !== 'instant' && chunks?.length
+        ? pacedBody(chunks, pace, request.signal)
+        : exchange.response.bodyEncoding === 'base64'
+          ? Buffer.from(exchange.response.body, 'base64')
+          : exchange.response.body;
     return new Response(isNullBodyStatus(exchange.response.status) ? null : body, {
       status: exchange.response.status,
       statusText: exchange.response.statusText ?? '',
@@ -349,6 +404,56 @@ function encodeBody(bytes: Uint8Array, contentType: string | null): { body: stri
     if (Buffer.from(decoded, 'utf8').equals(Buffer.from(bytes))) return { body: decoded, bodyEncoding: 'utf8' };
   }
   return { body: Buffer.from(bytes).toString('base64'), bodyEncoding: 'base64' };
+}
+
+/** Reads a response body chunk by chunk, noting when each arrived. */
+async function readTimed(
+  response: Response,
+): Promise<{ bytes: Uint8Array; chunks: Array<{ atMs: number; bytes: Uint8Array }> }> {
+  const chunks: Array<{ atMs: number; bytes: Uint8Array }> = [];
+  if (!response.body) return { bytes: new Uint8Array(), chunks };
+  const started = performance.now();
+  const reader = response.body.getReader();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    chunks.push({ atMs: Math.round(performance.now() - started), bytes: value });
+  }
+  const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.bytes.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk.bytes, offset);
+    offset += chunk.bytes.length;
+  }
+  return { bytes, chunks };
+}
+
+/** A body that sends recorded chunks at the pace asked for, and stops when the request is aborted. */
+function pacedBody(
+  chunks: readonly RecordedChunk[],
+  pace: Exclude<ReplayPace, 'instant'>,
+  signal: AbortSignal,
+): ReadableStream<Uint8Array> {
+  let index = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const chunk = chunks[index];
+      if (!chunk || signal.aborted) {
+        controller.close();
+        return;
+      }
+      const delayMs = Math.max(0, chunk.atMs - (index === 0 ? chunk.atMs : (chunks[index - 1] as RecordedChunk).atMs));
+      if (typeof pace === 'function') await pace({ index, count: chunks.length, atMs: chunk.atMs, delayMs });
+      else {
+        const wait = pace === 'original' ? delayMs : delayMs * pace;
+        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+      index += 1;
+      controller.enqueue(
+        chunk.bodyEncoding === 'base64' ? Buffer.from(chunk.body, 'base64') : new TextEncoder().encode(chunk.body),
+      );
+    },
+  });
 }
 
 function isNullBodyStatus(status: number): boolean {

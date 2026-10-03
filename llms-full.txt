@@ -20,7 +20,7 @@ team can share.
 Import only what you use. The root import is the client and nothing else, and every other capability
 has its own entry point with a size budget CI enforces; [the packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md)
 publishes what each one costs. The package has no required dependencies: a graph-only application
-loads 51 KB, and installs nothing but this package.
+loads 73 KB, and installs nothing but this package.
 
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
@@ -260,8 +260,9 @@ Shipped so far:
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
 Next, the 2.x line hardens what exists rather than adding families. 2.1 makes graphs survive real
-failure: background checkpoint writes, recovery after retries, idle timeouts, and cooperative
-drain. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
+failure — background checkpoint writes, recovery after retries, idle timeouts, cooperative drain —
+and makes what they record survive too: crash-safe traces, OpenTelemetry export, one event stream,
+and dashboard rollups. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
 releases after it.
 
 ## Before Production
@@ -861,7 +862,7 @@ The root import is the core client and nothing else:
 | Types of configuration, requests, and responses | `NexusAIConfig`, `CompletionRequest`, `NexusResponse` |
 | Errors the client throws | `NexusProviderError`, `NexusSecurityError`, `CostBudgetError` |
 
-Importing it costs about 323 KB, against 572 KB when the root re-exported most of the package.
+Importing it costs about 325 KB, against 572 KB when the root re-exported most of the package.
 Provider adapters load on their first call, and so do the features that answer asynchronously: agents,
 evals, verification, the semantic cache, and the image and embedding engines.
 
@@ -1958,6 +1959,61 @@ was asked.
 `interruptKey()` is the stable key an answer is stored under: task, step, and index. That is how
 several `Send` tasks of one node keep their own answers.
 
+## Streaming events
+
+`stream()` yields one event per superstep. A chat window, a progress view, or a live trace needs more
+than that: model output as it is written, tool calls as they start and finish. `events()` runs the
+graph as one stream of typed events instead, and every part of the package that follows a run reads
+the same one.
+
+```ts
+const run = agent.events(agentInput('What changed in the contract?'), { threadId });
+
+for await (const { chunk } of run.messages()) process.stdout.write(chunk.content);
+const result = await run.result;
+```
+
+Each event is a `GraphStreamEvent`, tagged by its `GraphStreamProjection`:
+
+| Projection | What it carries |
+| --- | --- |
+| `values` | The state and status after each superstep |
+| `updates` | Each task's write, with its node |
+| `messages` | A `GraphMessageChunk` of model output: its text, `text` or `reasoning`, and an optional message id |
+| `tools` | A `GraphToolEvent`: a call starting with its arguments, its progress, then its result or error |
+| `tasks` | Each task starting, retrying, failing, and ending |
+| `checkpoints` | Each checkpoint written |
+| `custom` | What nodes pass to `emit()` |
+
+`GraphEventsOptions` are the run's own options plus `include`, which defaults to `values`, `updates`,
+`messages`, `tools`, and `custom`. `resumeEvents()` and `continueEvents()` do the same for an
+answer to an interrupt and for a thread carried on. A node streams model output with
+`context.message()` and reports tool calls with `context.tool()`; `createAgent()` does both for you.
+
+The returned `GraphEventStream` can be iterated for everything included, or read one projection at a
+time through `messages()`, `tools()`, `values()`, and `updates()`. Create every reader before
+reading any: the run starts at the first read, and stops once every reader has stopped. `result`
+resolves with the run's result.
+
+**Subgraphs.** A graph used as a node keeps its events to itself by default. With `subgraphs: true`
+they come through too, each with a `namespace` naming the nodes it came through, such as
+`['review']`. `GraphRunOptions.subgraphEvents` does the same for `onEvent`.
+
+**Slow readers.** Every reader has its own buffer of `maxBuffered` events (1,000). At the end of each
+superstep the run waits for its slowest reader, so a reader that falls behind slows the graph rather
+than filling memory. Within a superstep, a node can still write faster than a reader reads, and
+`overflow`, a `GraphStreamOverflow`, decides what happens when a buffer is full:
+
+| Policy | When the buffer is full |
+| --- | --- |
+| `coalesce` (the default) | A model chunk is merged into the one before it from the same task, and a state snapshot replaces the older one, so no text is lost. When nothing can merge, the oldest event goes. |
+| `drop-oldest`, `drop-newest` | Events are lost, and counted. |
+| `error` | The stream ends with `GraphStreamOverflowError` and the run stops. |
+
+`streamStats()` returns `GraphStreamStats`: the most any reader held at once, and how many events were
+merged or dropped. A reader a hundred times slower than a node that streams 100,000 chunks still holds
+no more than its buffer.
+
 ## State and checkpoints
 
 A `GraphCheckpoint` is everything needed to resume a thread elsewhere:
@@ -2309,6 +2365,8 @@ like a graph.
   its store gains little: the run still waits for the writes before it returns.
 - A drain is honoured between supersteps. A superstep that runs for an hour finishes first; an abort
   signal is the way to stop one sooner.
+- `events()` streams what nodes report: a node that calls a model without `context.message()`, or a
+  tool without `context.tool()`, streams no tokens or tool events. `createAgent()` reports both.
 - The linter reads the graph's shape. It cannot see a side effect before an interrupt, a `Send`
   fan-out too wide for its services, or a tool that should need approval.
 - The in-process checkpointer loses threads on restart; use an operation store for durability.
@@ -2426,6 +2484,21 @@ if (run.status === 'awaiting_input') {
 ```
 
 Because it is a checkpoint, the approval can arrive days later, from another process.
+
+**Its output streams as it is written.** An agent reports what its model says and every tool it
+calls on the graph's event stream, with nothing to wire in its nodes. With `streamTokens: true` and a
+client that has `stream()`, as `AgentModelClient` allows, the answer arrives token by token; without
+it, each answer arrives as one message once the model returns. Middleware sees the assembled response
+either way.
+
+```ts
+const agent = createAgent({ client: ai, tools, streamTokens: true });
+const run = agent.events(agentInput('Refund order 1182'), { threadId });
+
+const tokens = run.messages();
+const calls = run.tools();
+// Read both; each has its own buffer. See "Streaming events" in the graph guide.
+```
 
 **An agent is an operation of its client.** Pass `lifecycle: ai.lifecycle`, and every run is
 authorized, counted, and audited as an `agent` operation, alongside the model calls it makes.
@@ -2927,9 +3000,48 @@ provider. A `parentId` or `traceId` attaches the run somewhere explicit.
 `FinishRunOptions` give the outputs, usage, cost, metadata to merge, and the model and provider that
 actually ran. Passing an `error` marks the run failed.
 
+### Writing as it runs
+
+By default a trace is written when its root finishes. That lets sampling decide with the whole trace
+in hand, but a process that dies mid-run takes its trace with it — the trace you most needed.
+`TracerOptions.incremental` writes each run when it starts and again when it ends instead:
+
+```ts
+const tracer = new Tracer({ store, incremental: true });
+```
+
+A crash then leaves the run in the store with every run beneath it that finished, and a run in
+progress can be watched while it goes. Each trace's writes are chained, so a run's end never lands
+before its start. Sampling is decided when the root starts. A trace not sampled is still held in
+memory and written at the end when tail sampling keeps it, so `keepErrors` still shows every
+failure.
+
+A run a dead process left behind stays `running` until something closes it. `closeAbandonedRuns()`
+does that: every run still running after `olderThanMs` (`CloseAbandonedRunsOptions`) is saved as an
+error named `RunAbandoned`, with `metadata.abandoned`, keeping what it recorded. Call it when a worker
+starts, or on a schedule. `tracer.flush()` waits for every write and export handed over so far.
+
+### Across processes
+
+A run can continue a trace another process started. `handle.traceparent()` returns the run as a W3C
+`traceparent` header, and `StartRunOptions.traceparent` joins it on the other side:
+
+```ts
+// On the server, when it queues work:
+await runner.submit(work, { traceContext: { traceparent: request.traceparent() } });
+
+// In the worker:
+const job = tracer.startRun({ name: 'summarize', traceparent: context.traceContext?.traceparent });
+```
+
+The run joins the trace under the span the header names, and keeps its sampling decision. The same
+header works with any OpenTelemetry service. `w3cTraceId()` and `w3cSpanId()` turn a tracer's ids
+into the 32 and 16 hex digits W3C and OpenTelemetry use, the same way in every process.
+
 ### Sampling and redaction
 
-A trace is written when its root finishes, so sampling decides with the whole trace in hand.
+Without `incremental`, a trace is written when its root finishes, so sampling decides with the whole
+trace in hand.
 `SamplingPolicy.rate` keeps that share of traces. Three options keep a trace whatever the rate:
 `keepErrors`, `keepSlowerThanMs`, and `keepCostlierThan`.
 
@@ -2953,6 +3065,80 @@ every call becomes a `model` run. The run records the request, the content and t
 cost, finish reason, the model and provider that answered, and the prompt version when the request came
 from a registry. Its `parent` option decides where the call hangs: `() => tracing.runFor('model')`
 nests it inside the node that made it.
+
+A tool call an agent reports — `createAgent()` reports every one — becomes a `tool` run inside the
+node that made it, with the arguments as inputs and the result or the error.
+
+## Exporting to OpenTelemetry
+
+`TracerOptions.exporters` hands every finished run the tracer keeps, after redaction, to each
+`TraceExporter`: an object with `export(run)` and an optional `flush()`. An exporter that fails is
+reported through `onError` and never fails the run.
+
+`OtlpTraceExporter` from `nexus-ai-pro/tracing/otlp` sends runs to any OpenTelemetry collector as
+OTLP/HTTP JSON, with no SDK to install:
+
+```ts
+import { OtlpTraceExporter } from 'nexus-ai-pro/tracing/otlp';
+
+const tracer = new Tracer({
+  store,
+  exporters: [new OtlpTraceExporter({ endpoint: 'http://localhost:4318', serviceName: 'support-agent' })],
+});
+```
+
+`OtlpTraceExporterOptions` sets the collector's base URL (spans go to `/v1/traces`), headers such as an
+API key, the `service.name`, more resource attributes, the batch size (100) and how long a span waits
+to batch (2 seconds), a `fetch` of your own, and an `onError`. A batch that cannot be sent is dropped.
+
+Each run becomes an `OtlpSpan` with the GenAI semantic conventions, so Grafana Tempo, Jaeger,
+Honeycomb, Datadog, New Relic, or any OTLP backend reads it like the rest of the application:
+
+| Run | Span |
+| --- | --- |
+| `model` | A client span named `chat <model>`, with `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` (`metadata.requestedModel` when routing chose), `gen_ai.response.model`, and `gen_ai.usage.input_tokens` and `output_tokens` |
+| `embedding` | The same, with the `embeddings` operation |
+| `tool` | `execute_tool <name>`, with `gen_ai.tool.name` |
+| `agent` | `invoke_agent <name>`, with `gen_ai.agent.name` |
+| `node` | `nexus.graph.node` and `nexus.graph.step` |
+| Any | `nexus.run.kind`, `nexus.run.id`, `nexus.cost.usd`, a `nexus.tag.*` per tag, and `error.type` and an error status when it failed |
+
+Span and trace ids are the W3C ids `traceparent()` propagates, so a trace that crossed processes
+arrives as one trace. `runToOtlpSpan()` is the conversion on its own.
+
+## Rollups for dashboards
+
+A trace is the forensic record of one run. A chart of a week's cost needs none of that, only sums,
+and reading every trace in the window to draw it is how a dashboard slows down as the service grows.
+`nexus-ai-pro/tracing/rollups` keeps hourly totals instead.
+
+```ts
+import { MemoryRollupStore, rollupTraceStore, sumRollups } from 'nexus-ai-pro/tracing/rollups';
+
+const rollups = new MemoryRollupStore();
+const tracer = new Tracer({ store: rollupTraceStore(traceStore, rollups) });
+
+const week = sumRollups(await rollups.query({ since: weekAgo }));
+```
+
+`rollupTraceStore()` wraps any trace store. Reads go to it unchanged; every run saved finished is also
+added to a rollup. A run is counted once: a save of a run still running is not counted, and neither is
+feedback. `RollupTraceStoreOptions.include` picks what counts, by default root runs and every model
+and embedding run.
+
+| Piece | What it is |
+| --- | --- |
+| `RollupKey` | What a row is counted by: the hour, kind, root name, model, provider, and `metadata.tenantId`. `rollupKeyOf()` reads it from a run. |
+| `RollupTotals` | Runs, errors, cost, input and output tokens, and latency counts per bucket. |
+| `RollupRow` | A key and its totals. |
+| `RollupQuery` | An hour range, kinds, a model, a provider, a tenant, or a name. |
+| `RollupStore` | `add()` and `query()`. `MemoryRollupStore` keeps rows in memory; any database can implement it. |
+| `ROLLUP_LATENCY_BOUNDS_MS` | The latency buckets, from 10 ms to 10 minutes. |
+| `rollupPercentile()` | A percentile from the buckets, exact to the bucket. |
+| `sumRollups()` | Rows summed into one total. |
+
+A million runs a month for three models is about two thousand rows. The [studio](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md) reads
+them for its cost view when you give it `rollups`.
 
 ## Storing and querying
 
@@ -3019,7 +3205,12 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
 
 ## Limitations
 
-- Traces are written when the root finishes, so a process that dies mid-run loses that trace.
+- Without `incremental`, traces are written when the root finishes, so a process that dies mid-run
+  loses that trace.
+- With `incremental`, a run is written twice, so a store pays twice the writes. A run left by a dead
+  process stays `running` until `closeAbandonedRuns()` closes it.
+- `OtlpTraceExporter` speaks OTLP/HTTP JSON, not gRPC or protobuf; every collector accepts JSON on port
+  4318. Rollups come only as `MemoryRollupStore`; a database rollup is a `RollupStore` of your own.
 - An alert measures up to 1,000 runs in its window unless its filter sets a larger `limit`.
 - Cost alerts sum every run in the window, so give a `filter` such as `{ kind: 'model' }` when
   parent runs also record cost.
@@ -3205,7 +3396,28 @@ An `Experiment` records:
 - every `ExampleResult`: the example id, repetition, output or error, latency, cost, and scores;
 - a `MetricSummary` per metric: count, mean, standard deviation, minimum, maximum, and the pass rate
   when the evaluator reported passes;
-- the summary scores, and metadata.
+- the summary scores, and metadata;
+- `evaluators`: an `EvaluatorProvenance` for each evaluator, in order — its position, name, the
+  score keys it produced, and what it declared;
+- `framework`: the package name and version that ran it.
+
+A score means little without what produced it. `withProvenance()` marks an evaluator with its name,
+version, the judge model and prompt version behind it, and its rubric, and the experiment records
+them. It returns the same evaluator, which runs exactly as before:
+
+```ts
+import { withProvenance } from 'nexus-ai-pro/evaluate';
+
+const grounded = withProvenance(groundedness, {
+  name: 'groundedness',
+  version: '3',
+  judge: { model: 'claude-sonnet-5-5', promptVersion: 'grounded-v3', temperature: 0 },
+  rubric: 'Every claim is supported by a cited passage.',
+});
+```
+
+An evaluator with no provenance is recorded by its function's name, or as `evaluator-<position>`, with
+the keys it produced, so two experiments can still be checked for using the same scorers.
 
 | Function | What it does |
 | --- | --- |
@@ -3325,6 +3537,16 @@ const run = await ai.runEvals([
     judge: judge.asEvalJudge(),
   },
 ]);
+```
+
+`judge.asEvaluator()` is the same judge as an evaluator for `evaluate()`. It scores each output under
+`key` (`judge` by default); `input` maps an evaluation context to what the judge sees, and defaults to
+the output as the answer, the expected output as the reference, and the inputs as the question. The
+experiment records the judge's model, temperature, rubric, and a hash of its instructions:
+
+```ts
+const experiment = await evaluate(target, dataset, [judge.asEvaluator({ key: 'quality' })]);
+experiment.evaluators?.[0]?.judge; // { model, promptVersion, temperature }
 ```
 
 ## Eval cases in detail
@@ -4781,13 +5003,30 @@ stale change can briefly win; it heals after one cooldown.
 
 ## Rate limits in detail
 
-`RateLimiter` counts calls in fixed windows, keyed per user, per model, or globally as the client's
-`rateLimit.key` says, from a `RateLimitedRequest` (the model and user). `check()` counts in memory,
-synchronously; `checkAsync()` counts through the configured store. Both throw `NexusRateLimitError`
-once a bucket is full.
+`RateLimiter` counts calls keyed per user, per model, or globally as the client's `rateLimit.key`
+says, from a `RateLimitedRequest` (the model and user). `check()` counts in memory, synchronously;
+`checkAsync()` counts through the configured store. Both throw `NexusRateLimitError` once a bucket
+is full, with `resetAt` set to when a call would pass again.
 
-A `RateLimitStore` has one method, `hit(key, windowMs)`. It returns a `RateLimitHit`: the count in the
-current window, and when the window resets.
+`rateLimit.algorithm` decides how calls are counted:
+
+| Algorithm | Counts | At a window's edge |
+| --- | --- | --- |
+| `fixed-window` (the default) | Calls per window of `windowMs` | A burst at the end of one window and another at the start of the next pass nearly twice the limit in a moment |
+| `gcra` | The token-bucket algorithm, kept as one timestamp per key: `maxRequests` per `windowMs` on average, and at most `burst` at once | There is no edge: two milliseconds earn back a fifth of a call at 100 a second |
+
+```ts
+rateLimit: { enabled: true, maxRequests: 100, windowMs: 1_000, algorithm: 'gcra', burst: 20, store }
+```
+
+`burst` defaults to `maxRequests`. With a store, GCRA needs the store's `gcra()`, which returns a
+`RateLimitDecision`: whether the call may go, and from when a refused one would. Both bundled stores
+have it. `RedisRateLimitStore` runs it as one Lua script on Redis's own clock, so every worker agrees
+on the time and two cannot both take the last slot; it needs a client with `eval`. `gcraDecide()` is
+the arithmetic on its own, for a store of your own.
+
+A `RateLimitStore` has `hit(key, windowMs)`, which returns a `RateLimitHit`: the count in the current
+window, and when the window resets. It may also have `reset()`, and `gcra()` for the GCRA algorithm.
 
 - `MemoryRateLimitStore` keeps counters in the process, with `reset()` and `clear()`.
 - `RedisRateLimitStore` shares them between processes. It takes a `RedisRateLimitLikeClient` (`incr`,
@@ -4804,8 +5043,20 @@ The score starts at 100. It loses 20 per consecutive failure, up to 60, and 1 pe
 latency, up to 30.
 
 `ProviderHealthMonitor` does the tracking. `recordSuccess()` takes a latency and `recordFailure()` the
-error; `score()`, `isHealthy()`, and `snapshot()` read the result. Each `ProviderHealthSnapshot` has
-the counts, consecutive failures, average latency, last error, and score.
+error; `score()`, `isHealthy()`, `isUnknown()`, and `snapshot()` read the result. Each
+`ProviderHealthSnapshot` has the counts, consecutive failures, average latency, last error, score, a
+`status`, and whether it is `stale`.
+
+A `ProviderHealthStatus` is `unknown` with nothing recent to judge by, `unhealthy` past the failure
+threshold or under the minimum score, `degraded` when calls fail or are slow but not enough to stop
+routing to it, and `healthy` otherwise.
+
+**Health that expires.** Health moves only with traffic. Without a limit, a provider that failed on
+Monday and got no calls since is still unhealthy on Wednesday, and one that worked last week is still
+healthy after it broke. `observationTtlMs` bounds how long an outcome counts. A provider whose last
+call is older is `unknown` and `stale`, and is routed to as a provider never seen, with its last error
+still on record. `ai.checkProviders({ staleOnly: true })` runs the health check of every unknown
+provider; run it on a schedule to keep an idle provider current.
 
 ## Metrics and export
 
@@ -4862,9 +5113,10 @@ cost only when it can price the call in dollars.
 
 - The breaker's failure counts are per worker even with a shared store; only open, closed, and who
   may probe are shared.
-- The rate limiter uses fixed windows, so a burst straddling a window boundary can reach twice the
-  limit for a moment.
-- Health scores come from real calls; a provider that receives no traffic keeps its last score.
+- The default fixed windows let a burst straddling a window boundary reach twice the limit for a
+  moment; `algorithm: 'gcra'` does not. GCRA through Redis needs `eval`.
+- Health comes from calls. Without `observationTtlMs`, a provider that receives no traffic keeps its last
+  score; with it, an idle provider is `unknown` until a call or `checkProviders()` says more.
 - rate limiting
 
 ---
@@ -7496,7 +7748,26 @@ chooses between are exported too:
 
 `recordingFetch()` returns a `RecordingFetch`: a fetch with a `flush()`. Await `flush()` before a test
 ends; it resolves once every fixture is on disk. `RecordOptions` add the real `fetch`, the `redact`
-hook, and a clock.
+hook, a clock, and `timing`.
+
+**Replaying a stream at its pace.** With `timing: true`, a recording keeps each chunk of the response
+and when it arrived, as a `RecordedChunk` in the response's `chunks`. `ReplayOptions.pace`, a
+`ReplayPace`, then decides how a replay sends them:
+
+| Pace | Sends |
+| --- | --- |
+| `instant` (the default) | The whole body at once, as without timing |
+| `original` | Each chunk when it arrived, relative to the first |
+| A number | The gaps scaled: `0.1` is ten times faster |
+| A function | Each chunk once the function resolves, so a test releases them one at a time |
+
+A pacing function is told the chunk's position, how many there are, when it arrived, and the gap
+before it, as `ReplayChunkInfo`. Paced replay is what tests idle timeouts, cancellation mid-stream,
+backpressure, and a streaming UI against a real provider's rhythm.
+
+```ts
+const fetch = replayFetch({ directory, pace: 'original' });
+```
 
 `ReplayOptions` add `onMissing`. The default, `throw`, raises `FixtureMissingError` with the request's
 method, URL, and match key, so you can find the recording that should have matched. `live` falls
@@ -7586,8 +7857,8 @@ optional `validate`.
 
 - Replay matches requests exactly, after normalization. A change to a prompt or a request field needs
   a new recording. That is the point: the fixture shows what changed.
-- Streaming responses are recorded whole and replayed in one chunk, so replay does not reproduce a
-  provider's chunk timing.
+- Without `timing`, a streamed response is recorded whole and replayed in one chunk. Recording with
+  timing still reads the whole response before handing it to the caller.
 
 ---
 
@@ -7699,6 +7970,13 @@ it as they are:
 The costs view counts model runs, which is where the tracer records cost, so a parent run that sums
 its children is not counted twice. `StudioCostReport` is the shape it returns.
 
+`rollups`, a `StudioRollups`, makes the costs view read hourly totals instead of traces: give it the
+rollup store behind `rollupTraceStore()` from `nexus-ai-pro/tracing/rollups`. Each `StudioRollupRow`
+is an hour of one kind, model, provider, and tenant. A month of a million runs is a few thousand rows,
+so the view answers in milliseconds however large the trace store grows. The costliest runs still come
+from the traces, from the most recent 1,000 in the window, and a budget whose filter needs more than a
+model, provider, kind, or name still reads the traces.
+
 ## Access and safety
 
 The studio can change things — answer an interrupt, edit a thread, promote a prompt — so it is
@@ -7806,8 +8084,8 @@ up — cycles — are marked, so they can be drawn around the side.
 - The studio is experimental: it is new, and its views will gain detail.
 - It reads what the stores can list. An operation store without `list()` hides the queue, and a
   graph given without a way to list threads can only open a thread by id.
-- The costs view reads up to 100,000 runs in its window. Point it at a long window on a very large
-  trace store and it will be slow; narrow the window instead.
+- Without `rollups`, the costs view reads up to 100,000 runs in its window, which is slow on a very
+  large trace store. Give it rollups.
 - Accounts come from an authenticator you configure; the studio does not run a sign-in flow of its
   own. For people in a browser, put a signing-in proxy in front, or give each person a link.
 
@@ -7897,7 +8175,10 @@ Two helpers build assistants:
 - `graphAssistant()` serves a compiled graph. Server threads map to graph threads, so state,
   interrupts, and history are the graph's own. It needs only `GraphLike`, a structural slice, so the
   server entry point never imports the graph runtime. `GraphAssistantOptions` sets a `description`
-  for the assistants endpoint, and `metadata` recorded on every checkpoint. A graph without a
+  for the assistants endpoint, `metadata` recorded on every checkpoint, and `events`: projections
+  of the graph's event stream, such as `['messages', 'tools']`, to record on each run, so a client
+  following it sees model output and tool calls as they happen. The run's last event still carries
+  its state and any question. A graph without a
   checkpointer still serves stateless runs, but cannot resume or roll back.
 - `functionAssistant()` serves a plain function, which may return a value or yield events.
 
@@ -7971,6 +8252,9 @@ revision. Both need a read scope unless `metrics: { public: true }`; `metrics: f
 claiming, and new runs it accepts are queued. Runs in flight get `timeoutMs` (25 seconds by default)
 to finish. With a queue, the rest are handed back for another worker to continue. The `DrainResult`
 lists the runs that finished and the runs that were handed off.
+
+A client that reads a run's events slowly cannot make the server hold more: events go to the run's
+event log, which keeps `maxEventsPerRun` per run, and each reader reads from it at its own pace.
 
 A graph served through `graphAssistant()` does not wait for the timeout. With a queue, a drain sets
 the run's `control` to draining, which the graph reads as its `RunControl`. It finishes the superstep
@@ -8825,13 +9109,14 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 323 KB | 100% | none |
-| `nexus-ai-pro/config` | 315 KB | 98% | none |
-| `nexus-ai-pro/core` | 311 KB | 96% | none |
+| `nexus-ai-pro` | 325 KB | 100% | none |
+| `nexus-ai-pro/config` | 318 KB | 98% | none |
+| `nexus-ai-pro/core` | 314 KB | 97% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 49% | none |
 | `nexus-ai-pro/batch` | 113 KB | 35% | none |
-| `nexus-ai-pro/server` | 110 KB | 34% | none |
+| `nexus-ai-pro/server` | 111 KB | 34% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 30% | none |
+| `nexus-ai-pro/agent` | 89 KB | 27% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 25% | none |
 | `nexus-ai-pro/providers/groq` | 82 KB | 25% | none |
 | `nexus-ai-pro/providers/mistral` | 82 KB | 25% | none |
@@ -8840,57 +9125,58 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/lmstudio` | 81 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 81 KB | 25% | none |
 | `nexus-ai-pro/providers/openrouter` | 81 KB | 25% | none |
-| `nexus-ai-pro/agent` | 76 KB | 24% | none |
-| `nexus-ai-pro/router` | 76 KB | 24% | none |
+| `nexus-ai-pro/router` | 76 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 74 KB | 23% | none |
+| `nexus-ai-pro/graph` | 73 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 68 KB | 21% | none |
-| `nexus-ai-pro/graph` | 62 KB | 19% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 18% | none |
 | `nexus-ai-pro/providers/ollama` | 57 KB | 18% | none |
 | `nexus-ai-pro/security` | 53 KB | 16% | none |
-| `nexus-ai-pro/images` | 52 KB | 16% | none |
+| `nexus-ai-pro/images` | 53 KB | 16% | none |
 | `nexus-ai-pro/postgres` | 51 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 50 KB | 15% | none |
-| `nexus-ai-pro/operations` | 47 KB | 15% | none |
+| `nexus-ai-pro/operations` | 47 KB | 14% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 14% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 14% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
-| `nexus-ai-pro/evaluate` | 37 KB | 11% | none |
+| `nexus-ai-pro/evaluate` | 38 KB | 12% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
-| `nexus-ai-pro/ops` | 33 KB | 10% | none |
+| `nexus-ai-pro/ops` | 36 KB | 11% | none |
 | `nexus-ai-pro/context-hub` | 32 KB | 10% | none |
 | `nexus-ai-pro/sqlite` | 31 KB | 10% | none |
+| `nexus-ai-pro/voice` | 30 KB | 9% | none |
+| `nexus-ai-pro/tracing` | 29 KB | 9% | none |
 | `nexus-ai-pro/server/deployments` | 29 KB | 9% | none |
-| `nexus-ai-pro/voice` | 28 KB | 9% | none |
+| `nexus-ai-pro/telephony` | 29 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 9% | none |
-| `nexus-ai-pro/telephony` | 28 KB | 9% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
+| `nexus-ai-pro/evals` | 27 KB | 8% | none |
 | `nexus-ai-pro/graph/functional` | 26 KB | 8% | none |
-| `nexus-ai-pro/evals` | 26 KB | 8% | none |
 | `nexus-ai-pro/insights` | 25 KB | 8% | none |
 | `nexus-ai-pro/testing` | 25 KB | 8% | none |
-| `nexus-ai-pro/tracing` | 23 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 23 KB | 7% | none |
-| `nexus-ai-pro/images/stores` | 21 KB | 7% | none |
-| `nexus-ai-pro/telephony/twilio` | 21 KB | 7% | none |
+| `nexus-ai-pro/images/stores` | 21 KB | 6% | none |
+| `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 18 KB | 6% | none |
 | `nexus-ai-pro/connectors` | 18 KB | 6% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 6% | none |
 | `nexus-ai-pro/images/evals` | 17 KB | 5% | none |
+| `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
+| `nexus-ai-pro/lifecycle` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 16 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 5% | none |
 | `nexus-ai-pro/mcp` | 15 KB | 5% | none |
+| `nexus-ai-pro/tracing/otlp` | 15 KB | 5% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 5% | none |
 | `nexus-ai-pro/prompts/client` | 15 KB | 5% | none |
-| `nexus-ai-pro/lifecycle` | 15 KB | 5% | none |
 | `nexus-ai-pro/context` | 14 KB | 4% | none |
 | `nexus-ai-pro/images/assets` | 14 KB | 4% | none |
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
@@ -8898,13 +9184,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/operations` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 12 KB | 4% | none |
-| `nexus-ai-pro/server/tenancy` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
 | `nexus-ai-pro/operations/adapters` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/store` | 11 KB | 3% | none |
+| `nexus-ai-pro/testing/record` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/redis` | 11 KB | 3% | none |
 | `nexus-ai-pro/providers` | 10 KB | 3% | none |
@@ -8919,25 +9205,26 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/moderation` | 9 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
-| `nexus-ai-pro/testing/record` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
+| `nexus-ai-pro/evals/judge` | 7 KB | 2% | none |
 | `nexus-ai-pro/graph/lint` | 6 KB | 2% | none |
 | `nexus-ai-pro/store` | 6 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 6 KB | 2% | none |
 | `nexus-ai-pro/server/remote` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/prompts` | 6 KB | 2% | none |
+| `nexus-ai-pro/ops/rate-limit-adapters` | 6 KB | 2% | none |
 | `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 2% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 2% | none |
 | `nexus-ai-pro/embeddings/mock` | 5 KB | 2% | none |
+| `nexus-ai-pro/tracing/rollups` | 5 KB | 2% | none |
 | `nexus-ai-pro/postgres/evaluate` | 5 KB | 2% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 2% | none |
 | `nexus-ai-pro/rag` | 5 KB | 2% | none |
 | `nexus-ai-pro/loaders/html` | 5 KB | 2% | none |
-| `nexus-ai-pro/evals/judge` | 5 KB | 2% | none |
 | `nexus-ai-pro/pipeline` | 4 KB | 1% | none |
 | `nexus-ai-pro/prompts/file` | 4 KB | 1% | none |
 | `nexus-ai-pro/prompts/redis` | 4 KB | 1% | none |
@@ -8951,7 +9238,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/loaders/json` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/loaders/pdf` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/loaders/git` | 3 KB | 0.9% | none |
-| `nexus-ai-pro/ops/rate-limit-adapters` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/cache` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/cache/adapters` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/jobs` | 2 KB | 0.6% | none |

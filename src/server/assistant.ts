@@ -1,3 +1,4 @@
+import type { GraphStreamProjection } from '../types/graph.js';
 import type { AssistantRunContext, ServerAssistant } from '../types/server.js';
 
 /**
@@ -30,7 +31,27 @@ export interface GraphLike {
   ): AsyncIterable<unknown>;
   /** Writes values into a thread's state, which is how a rollback is applied. */
   updateState?(threadId: string, values: Record<string, unknown>, options?: { asNode?: string }): Promise<unknown>;
+  /** Runs an input as a stream of typed events. Used when the assistant serves `events`. */
+  events?(input: unknown, options: GraphEventOptionsLike): GraphEventsLike;
+  /** Like `events()`, answering an interrupt. */
+  resumeEvents?(threadId: string, value: unknown, options: GraphEventOptionsLike): GraphEventsLike;
+  /** Like `events()`, continuing a thread from its latest checkpoint. */
+  continueEvents?(threadId: string, options: GraphEventOptionsLike): GraphEventsLike;
 }
+
+/** The options of a graph's `events()` the adapter passes. */
+type GraphEventOptionsLike = {
+  threadId?: string;
+  signal?: AbortSignal;
+  metadata?: Record<string, unknown>;
+  control?: DrainSwitch;
+  include?: GraphStreamProjection[];
+};
+
+/** A graph's event stream, as the adapter reads it: the events, then the run's result. */
+type GraphEventsLike = AsyncIterable<unknown> & {
+  result: Promise<{ status: string; state: unknown; interrupt?: unknown; interrupts?: unknown[] }>;
+};
 
 /** Asks a graph to stop after its current superstep. A graph's `RunControl` has this shape. */
 type DrainSwitch = { readonly draining: boolean; readonly reason?: string };
@@ -41,6 +62,13 @@ export interface GraphAssistantOptions {
   description?: string;
   /** Metadata recorded on every checkpoint the server's runs create. */
   metadata?: Record<string, unknown>;
+  /**
+   * Records these projections of the graph's event stream on each run, such as `messages` and
+   * `tools`, so a client following the run sees model output and tool calls as they happen. The
+   * run's last event still carries its state and any question, as without it. Defaults to none: one
+   * event per superstep.
+   */
+  events?: GraphStreamProjection[];
 }
 
 /**
@@ -55,9 +83,20 @@ export interface GraphAssistantOptions {
  * runs again.
  */
 export function graphAssistant(graph: GraphLike, options: GraphAssistantOptions = {}): ServerAssistant {
+  const projections = options.events?.length ? options.events : undefined;
+  const eventOptions = (context: AssistantRunContext, threadId?: string): GraphEventOptionsLike => ({
+    ...(threadId ? { threadId } : {}),
+    signal: context.signal,
+    metadata: { ...options.metadata, runId: context.runId },
+    ...(context.control ? { control: context.control } : {}),
+    include: [...(projections ?? []), 'values'],
+  });
   return {
     description: options.description,
     stream(input: unknown, context: AssistantRunContext) {
+      if (projections && graph.events) {
+        return withResult(graph.events(input ?? {}, eventOptions(context, context.threadId)));
+      }
       return graph.stream(input ?? {}, {
         threadId: context.threadId,
         signal: context.signal,
@@ -66,6 +105,9 @@ export function graphAssistant(graph: GraphLike, options: GraphAssistantOptions 
       });
     },
     resume(threadId: string, value: unknown, context: AssistantRunContext) {
+      if (projections && graph.resumeEvents) {
+        return withResult(graph.resumeEvents(threadId, value, eventOptions(context)));
+      }
       return graph.resume(threadId, value, {
         signal: context.signal,
         metadata: { ...options.metadata, runId: context.runId },
@@ -87,6 +129,7 @@ export function graphAssistant(graph: GraphLike, options: GraphAssistantOptions 
       if (checkpoint.status !== 'running' && checkpoint.status !== 'failed' && checkpoint.status !== 'interrupted') {
         return undefined;
       }
+      if (projections && graph.continueEvents) return withResult(graph.continueEvents(threadId, eventOptions(context)));
       return graph.continue(threadId, {
         signal: context.signal,
         metadata: { ...options.metadata, runId: context.runId },
@@ -123,5 +166,22 @@ export function functionAssistant(
       }
       yield { type: 'done', status: 'succeeded', state: await result };
     },
+  };
+}
+
+/**
+ * The stream's events, then one event with the run's result, shaped as a graph's last step event is:
+ * its status, its state, and any question. That last event is what the server reads a run's output
+ * and interrupt from.
+ */
+async function* withResult(events: GraphEventsLike): AsyncIterable<unknown> {
+  for await (const event of events) yield event;
+  const result = await events.result;
+  yield {
+    type: result.status === 'awaiting_input' ? 'interrupt' : 'done',
+    status: result.status,
+    state: result.state,
+    ...(result.interrupt === undefined ? {} : { interrupt: result.interrupt }),
+    ...(result.interrupts === undefined ? {} : { interrupts: result.interrupts }),
   };
 }

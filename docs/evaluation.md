@@ -176,7 +176,28 @@ An `Experiment` records:
 - every `ExampleResult`: the example id, repetition, output or error, latency, cost, and scores;
 - a `MetricSummary` per metric: count, mean, standard deviation, minimum, maximum, and the pass rate
   when the evaluator reported passes;
-- the summary scores, and metadata.
+- the summary scores, and metadata;
+- `evaluators`: an `EvaluatorProvenance` for each evaluator, in order — its position, name, the
+  score keys it produced, and what it declared;
+- `framework`: the package name and version that ran it.
+
+A score means little without what produced it. `withProvenance()` marks an evaluator with its name,
+version, the judge model and prompt version behind it, and its rubric, and the experiment records
+them. It returns the same evaluator, which runs exactly as before:
+
+```ts
+import { withProvenance } from 'nexus-ai-pro/evaluate';
+
+const grounded = withProvenance(groundedness, {
+  name: 'groundedness',
+  version: '3',
+  judge: { model: 'claude-sonnet-5-5', promptVersion: 'grounded-v3', temperature: 0 },
+  rubric: 'Every claim is supported by a cited passage.',
+});
+```
+
+An evaluator with no provenance is recorded by its function's name, or as `evaluator-<position>`, with
+the keys it produced, so two experiments can still be checked for using the same scorers.
 
 | Function | What it does |
 | --- | --- |
@@ -296,6 +317,16 @@ const run = await ai.runEvals([
     judge: judge.asEvalJudge(),
   },
 ]);
+```
+
+`judge.asEvaluator()` is the same judge as an evaluator for `evaluate()`. It scores each output under
+`key` (`judge` by default); `input` maps an evaluation context to what the judge sees, and defaults to
+the output as the answer, the expected output as the reference, and the inputs as the question. The
+experiment records the judge's model, temperature, rubric, and a hash of its instructions:
+
+```ts
+const experiment = await evaluate(target, dataset, [judge.asEvaluator({ key: 'quality' })]);
+experiment.evaluators?.[0]?.judge; // { model, promptVersion, temperature }
 ```
 
 ## Eval cases in detail
@@ -477,4 +508,5 @@ specific entry point that provides it.
 | `TrajectoryOptions` | interface | Options for `trajectory()`. |
 | `underCost` | function | Cost as a pass or fail, per example. |
 | `underLatency` | function | Latency as a pass or fail, so a quality gate can hold a budget as well as a score. |
+| `withProvenance` | function | Says where an evaluator's scores come from: its name and version, the judge model and prompt version behind it, and its rubric. |
 <!-- reference:end -->

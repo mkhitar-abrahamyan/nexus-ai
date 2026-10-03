@@ -8,7 +8,7 @@ team can share.
 Import only what you use. The root import is the client and nothing else, and every other capability
 has its own entry point with a size budget CI enforces; [the packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md)
 publishes what each one costs. The package has no required dependencies: a graph-only application
-loads 51 KB, and installs nothing but this package.
+loads 73 KB, and installs nothing but this package.
 
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
@@ -248,8 +248,9 @@ Shipped so far:
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
 Next, the 2.x line hardens what exists rather than adding families. 2.1 makes graphs survive real
-failure: background checkpoint writes, recovery after retries, idle timeouts, and cooperative
-drain. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
+failure — background checkpoint writes, recovery after retries, idle timeouts, cooperative drain —
+and makes what they record survive too: crash-safe traces, OpenTelemetry export, one event stream,
+and dashboard rollups. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
 releases after it.
 
 ## Before Production

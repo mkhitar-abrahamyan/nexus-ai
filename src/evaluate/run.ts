@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import { NEXUS_VERSION } from '../version.js';
 import { type EvaluationCache, evaluationCacheKey } from './cache.js';
+import { declaredProvenance } from './provenance.js';
 import type {
   Dataset,
   DatasetExample,
@@ -98,11 +100,13 @@ export async function evaluate<I = unknown, O = unknown>(
     })),
   );
 
+  // The score keys each evaluator produced, for the experiment's provenance.
+  const produced = evaluators.map(() => new Set<string>());
   await runConcurrently(
     jobs,
     options.concurrency ?? 4,
     async ({ example, run }) => {
-      const result = await evaluateOne(target, example, run, evaluators, options);
+      const result = await evaluateOne(target, example, run, evaluators, options, produced);
       results.push(result);
       options.onResult?.(result);
     },
@@ -129,6 +133,16 @@ export async function evaluate<I = unknown, O = unknown>(
     results,
     metrics: summarize(results),
     summary,
+    evaluators: evaluators.map((evaluator, position) => {
+      const declared = declaredProvenance(evaluator);
+      return {
+        ...declared,
+        position,
+        name: declared?.name ?? (evaluator.name || `evaluator-${position}`),
+        keys: [...(produced[position] ?? [])],
+      };
+    }),
+    framework: { name: 'nexus-ai-pro', version: NEXUS_VERSION },
     ...(options.metadata ? { metadata: options.metadata } : {}),
     ...(options.cache
       ? {
@@ -159,6 +173,7 @@ async function evaluateOne<I, O>(
   run: number,
   evaluators: Array<Evaluator<I, O>>,
   options: EvaluateOptions,
+  produced: Array<Set<string>>,
 ): Promise<ExampleResult> {
   const started = Date.now();
   let output: unknown;
@@ -203,9 +218,11 @@ async function evaluateOne<I, O>(
   }
 
   const scores: EvaluationScore[] = [];
-  for (const evaluator of evaluators) {
+  for (const [position, evaluator] of evaluators.entries()) {
     try {
-      scores.push(...normalizeScores(await evaluator(context), evaluator as Evaluator));
+      const made = normalizeScores(await evaluator(context), evaluator as Evaluator);
+      for (const score of made) produced[position]?.add(score.key);
+      scores.push(...made);
     } catch (caught) {
       // An evaluator that throws is a failed measurement, not a failed example: record it and move
       // on, so one broken scorer cannot void a whole experiment.

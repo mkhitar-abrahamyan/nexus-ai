@@ -165,6 +165,41 @@ export interface Experiment {
   metadata?: Record<string, unknown>;
   /** Example runs answered from the evaluation cache, and runs of the target, when a cache was used. */
   cache?: { hits: number; misses: number };
+  /** Where each evaluator's scores came from, in the order the evaluators were given. */
+  evaluators?: EvaluatorProvenance[];
+  /** The framework that ran the experiment. */
+  framework?: { name: string; version: string };
+}
+
+/**
+ * Where one evaluator's scores came from. `position`, `name`, and `keys` are always recorded; the
+ * rest is what the evaluator declared through `withProvenance()`, or what an `LLMJudge` declares for
+ * itself.
+ */
+export interface EvaluatorProvenance {
+  /** Its place among the evaluators passed to `evaluate()`, from 0. */
+  position: number;
+  /** What it is called: as declared, its function's name, or `evaluator-<position>`. */
+  name: string;
+  /** The score keys it produced in this experiment. */
+  keys: string[];
+  /** Its version, as declared. */
+  version?: string;
+  /** The model behind a judge, and how it was called. */
+  judge?: {
+    /** The judge model. */
+    model: string;
+    /** The provider, when known. */
+    provider?: string;
+    /** Identifies the judge's instructions: a version, or a hash of its prompt. */
+    promptVersion?: string;
+    /** Its sampling temperature. */
+    temperature?: number;
+  };
+  /** What a good answer looks like, as the evaluator was told. */
+  rubric?: string;
+  /** Anything else worth recording. */
+  metadata?: Record<string, unknown>;
 }
 
 /** Where experiments are kept, for later comparison. */

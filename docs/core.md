@@ -579,7 +579,7 @@ The root import is the core client and nothing else:
 | Types of configuration, requests, and responses | `NexusAIConfig`, `CompletionRequest`, `NexusResponse` |
 | Errors the client throws | `NexusProviderError`, `NexusSecurityError`, `CostBudgetError` |
 
-Importing it costs about 323 KB, against 572 KB when the root re-exported most of the package.
+Importing it costs about 325 KB, against 572 KB when the root re-exported most of the package.
 Provider adapters load on their first call, and so do the features that answer asynchronously: agents,
 evals, verification, the semantic cache, and the image and embedding engines.
 

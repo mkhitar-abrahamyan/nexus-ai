@@ -344,6 +344,61 @@ was asked.
 `interruptKey()` is the stable key an answer is stored under: task, step, and index. That is how
 several `Send` tasks of one node keep their own answers.
 
+## Streaming events
+
+`stream()` yields one event per superstep. A chat window, a progress view, or a live trace needs more
+than that: model output as it is written, tool calls as they start and finish. `events()` runs the
+graph as one stream of typed events instead, and every part of the package that follows a run reads
+the same one.
+
+```ts
+const run = agent.events(agentInput('What changed in the contract?'), { threadId });
+
+for await (const { chunk } of run.messages()) process.stdout.write(chunk.content);
+const result = await run.result;
+```
+
+Each event is a `GraphStreamEvent`, tagged by its `GraphStreamProjection`:
+
+| Projection | What it carries |
+| --- | --- |
+| `values` | The state and status after each superstep |
+| `updates` | Each task's write, with its node |
+| `messages` | A `GraphMessageChunk` of model output: its text, `text` or `reasoning`, and an optional message id |
+| `tools` | A `GraphToolEvent`: a call starting with its arguments, its progress, then its result or error |
+| `tasks` | Each task starting, retrying, failing, and ending |
+| `checkpoints` | Each checkpoint written |
+| `custom` | What nodes pass to `emit()` |
+
+`GraphEventsOptions` are the run's own options plus `include`, which defaults to `values`, `updates`,
+`messages`, `tools`, and `custom`. `resumeEvents()` and `continueEvents()` do the same for an
+answer to an interrupt and for a thread carried on. A node streams model output with
+`context.message()` and reports tool calls with `context.tool()`; `createAgent()` does both for you.
+
+The returned `GraphEventStream` can be iterated for everything included, or read one projection at a
+time through `messages()`, `tools()`, `values()`, and `updates()`. Create every reader before
+reading any: the run starts at the first read, and stops once every reader has stopped. `result`
+resolves with the run's result.
+
+**Subgraphs.** A graph used as a node keeps its events to itself by default. With `subgraphs: true`
+they come through too, each with a `namespace` naming the nodes it came through, such as
+`['review']`. `GraphRunOptions.subgraphEvents` does the same for `onEvent`.
+
+**Slow readers.** Every reader has its own buffer of `maxBuffered` events (1,000). At the end of each
+superstep the run waits for its slowest reader, so a reader that falls behind slows the graph rather
+than filling memory. Within a superstep, a node can still write faster than a reader reads, and
+`overflow`, a `GraphStreamOverflow`, decides what happens when a buffer is full:
+
+| Policy | When the buffer is full |
+| --- | --- |
+| `coalesce` (the default) | A model chunk is merged into the one before it from the same task, and a state snapshot replaces the older one, so no text is lost. When nothing can merge, the oldest event goes. |
+| `drop-oldest`, `drop-newest` | Events are lost, and counted. |
+| `error` | The stream ends with `GraphStreamOverflowError` and the run stops. |
+
+`streamStats()` returns `GraphStreamStats`: the most any reader held at once, and how many events were
+merged or dropped. A reader a hundred times slower than a node that streams 100,000 chunks still holds
+no more than its buffer.
+
 ## State and checkpoints
 
 A `GraphCheckpoint` is everything needed to resume a thread elsewhere:
@@ -695,6 +750,8 @@ like a graph.
   its store gains little: the run still waits for the writes before it returns.
 - A drain is honoured between supersteps. A superstep that runs for an hour finishes first; an abort
   signal is the way to stop one sooner.
+- `events()` streams what nodes report: a node that calls a model without `context.message()`, or a
+  tool without `context.tool()`, streams no tokens or tool events. `createAgent()` reports both.
 - The linter reads the graph's shape. It cannot see a side effect before an interrupt, a `Send`
   fan-out too wide for its services, or a tool that should need approval.
 - The in-process checkpointer loses threads on restart; use an operation store for durability.
@@ -737,8 +794,11 @@ specific entry point that provides it.
 | `GraphDrainedError` | class | Raised when a run stops because its `RunControl` was drained. |
 | `GraphError` | class | Base class for graph errors, each with a stable `code`. |
 | `GraphEvent` | type | Fine-grained events delivered to `GraphRunOptions.onEvent`. |
+| `GraphEventsOptions` | interface | Options for `events()`: the run's own options, what to include, and how much to buffer. |
+| `GraphEventStream` | class | A graph run as one stream of typed events, with each projection readable on its own. |
 | `GraphInput` | type | What a caller may pass to `invoke()`: the graph's input channels, or every channel by default. |
 | `GraphInterrupt` | class | Thrown by `context.interrupt()` to suspend the graph. |
+| `GraphMessageChunk` | interface | A piece of a model's output, as a node streams it: text, or a reasoning summary. |
 | `GraphNodeError` | class | Raised when a node throws. |
 | `GraphNodeTimeoutError` | class | Raised when a node outlives its run limit, or goes longer than its idle limit without showing progress. |
 | `GraphNotInterruptedError` | class | Raised when resuming a thread that is not awaiting input. |
@@ -749,8 +809,14 @@ specific entry point that provides it.
 | `GraphStatus` | type | Where a run stands: running, paused to ask a human, finished, failed, or stopped at a breakpoint or by a signal. |
 | `GraphStepEvent` | interface | One superstep, as seen by `stream()`. |
 | `GraphStepLimitError` | class | Raised when a run exceeds its superstep budget. |
+| `GraphStreamEvent` | type | One event of `events()`, tagged by its projection. |
+| `GraphStreamOverflow` | type | What an event stream does when a reader falls behind within a superstep. |
+| `GraphStreamOverflowError` | class | Raised by an event stream whose reader fell behind with `overflow: 'error'`. |
+| `GraphStreamProjection` | type | What `events()` can include. |
+| `GraphStreamStats` | interface | What an event stream did to keep up with its slowest reader. |
 | `GraphTask` | interface | One unit of work in a superstep. |
 | `GraphThreadNotFoundError` | class | Raised when a thread has no checkpoint to resume or inspect. |
+| `GraphToolEvent` | interface | A tool call's progress, as a node reports it. |
 | `GraphValidationError` | class | Raised when a graph definition is invalid: an unknown node, a missing entry point, or a bad channel. |
 | `interruptKey` | function | Stable key for one interrupt, so a replayed node picks up the answer it was given. |
 | `InterruptRequest` | interface | A request for human input, surfaced when a node interrupts. |

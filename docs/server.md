@@ -81,7 +81,10 @@ Two helpers build assistants:
 - `graphAssistant()` serves a compiled graph. Server threads map to graph threads, so state,
   interrupts, and history are the graph's own. It needs only `GraphLike`, a structural slice, so the
   server entry point never imports the graph runtime. `GraphAssistantOptions` sets a `description`
-  for the assistants endpoint, and `metadata` recorded on every checkpoint. A graph without a
+  for the assistants endpoint, `metadata` recorded on every checkpoint, and `events`: projections
+  of the graph's event stream, such as `['messages', 'tools']`, to record on each run, so a client
+  following it sees model output and tool calls as they happen. The run's last event still carries
+  its state and any question. A graph without a
   checkpointer still serves stateless runs, but cannot resume or roll back.
 - `functionAssistant()` serves a plain function, which may return a value or yield events.
 
@@ -155,6 +158,9 @@ revision. Both need a read scope unless `metrics: { public: true }`; `metrics: f
 claiming, and new runs it accepts are queued. Runs in flight get `timeoutMs` (25 seconds by default)
 to finish. With a queue, the rest are handed back for another worker to continue. The `DrainResult`
 lists the runs that finished and the runs that were handed off.
+
+A client that reads a run's events slowly cannot make the server hold more: events go to the run's
+event log, which keeps `maxEventsPerRun` per run, and each reader reads from it at its own pace.
 
 A graph served through `graphAssistant()` does not wait for the timeout. With a queue, a drain sets
 the run's `control` to draining, which the graph reads as its `RunControl`. It finishes the superstep

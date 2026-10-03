@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { withProvenance } from '../evaluate/provenance.js';
+import type { EvaluationContext, Evaluator } from '../types/evaluate.js';
 import type { CompletionRequest, Message } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import type { EvalCase, EvalJudge } from './runner.js';
@@ -123,6 +126,41 @@ export class LLMJudge<Response = NexusResponse> {
       raw: response,
       providerUsed: providerOf(response),
       modelUsed: modelOf(response),
+    });
+  }
+
+  /**
+   * The judge as an evaluator for `evaluate()`, scoring each output under `key` (`judge` by
+   * default). `input` turns an evaluation context into what the judge sees; by default the output is
+   * the answer, the example's expected output the reference, and its inputs the question. The
+   * experiment records the judge's model, temperature, rubric, and a hash of its instructions.
+   */
+  asEvaluator(options: { key?: string; input?: (context: EvaluationContext) => LLMJudgeInput } = {}): Evaluator {
+    const evaluator: Evaluator = async (context) => {
+      const input = options.input?.(context) ?? {
+        actual: text(context.output),
+        ...(context.example.expected === undefined ? {} : { expected: text(context.example.expected) }),
+        query: text(context.example.inputs),
+      };
+      const verdict = await this.evaluate(input);
+      return {
+        key: options.key ?? 'judge',
+        score: verdict.score,
+        passed: verdict.passed,
+        ...(verdict.rationale ? { comment: verdict.rationale } : {}),
+      };
+    };
+    return withProvenance(evaluator, {
+      name: options.key ?? 'judge',
+      judge: {
+        model: this.options.model,
+        promptVersion: createHash('sha256')
+          .update(this.options.systemPrompt ?? 'default')
+          .digest('hex')
+          .slice(0, 12),
+        temperature: this.options.temperature ?? 0,
+      },
+      ...(this.options.rubric ? { rubric: this.options.rubric } : {}),
     });
   }
 
@@ -262,4 +300,8 @@ function clamp(value: number, [min, max]: [number, number]): number {
 
 function midpoint([min, max]: [number, number]): number {
   return min + (max - min) / 2;
+}
+
+function text(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value ?? '');
 }

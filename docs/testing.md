@@ -46,7 +46,26 @@ chooses between are exported too:
 
 `recordingFetch()` returns a `RecordingFetch`: a fetch with a `flush()`. Await `flush()` before a test
 ends; it resolves once every fixture is on disk. `RecordOptions` add the real `fetch`, the `redact`
-hook, and a clock.
+hook, a clock, and `timing`.
+
+**Replaying a stream at its pace.** With `timing: true`, a recording keeps each chunk of the response
+and when it arrived, as a `RecordedChunk` in the response's `chunks`. `ReplayOptions.pace`, a
+`ReplayPace`, then decides how a replay sends them:
+
+| Pace | Sends |
+| --- | --- |
+| `instant` (the default) | The whole body at once, as without timing |
+| `original` | Each chunk when it arrived, relative to the first |
+| A number | The gaps scaled: `0.1` is ten times faster |
+| A function | Each chunk once the function resolves, so a test releases them one at a time |
+
+A pacing function is told the chunk's position, how many there are, when it arrived, and the gap
+before it, as `ReplayChunkInfo`. Paced replay is what tests idle timeouts, cancellation mid-stream,
+backpressure, and a streaming UI against a real provider's rhythm.
+
+```ts
+const fetch = replayFetch({ directory, pace: 'original' });
+```
 
 `ReplayOptions` add `onMissing`. The default, `throw`, raises `FixtureMissingError` with the request's
 method, URL, and match key, so you can find the recording that should have matched. `live` falls
@@ -136,8 +155,8 @@ optional `validate`.
 
 - Replay matches requests exactly, after normalization. A change to a prompt or a request field needs
   a new recording. That is the point: the fixture shows what changed.
-- Streaming responses are recorded whole and replayed in one chunk, so replay does not reproduce a
-  provider's chunk timing.
+- Without `timing`, a streamed response is recorded whole and replayed in one chunk. Recording with
+  timing still reads the whole response before handing it to the caller.
 
 <!-- reference:start -->
 ## Reference
@@ -178,12 +197,15 @@ specific entry point that provides it.
 | `installFetch` | function | Replaces `globalThis.fetch` until the returned function is called, for code that does not take a `fetch` option — several completion providers call the global directly. |
 | `MatchInput` | interface | What a matcher sees: the request, with credentials already removed. |
 | `readFixtures` | function | Reads every exchange in a fixture directory, for inspection or a custom replay. |
+| `RecordedChunk` | interface | One piece of a streamed response, and when it arrived. |
 | `RecordedExchange` | interface | One request and the response it got, as written to a fixture file. |
 | `RecordedRequest` | interface | A recorded request, with credentials removed. |
 | `RecordedResponse` | interface | A recorded response. |
 | `recordingFetch` | function | Wraps a real fetch so that every exchange is written to the fixture directory. |
 | `RecordingFetch` | type | A fetch that also lets a test wait for every fixture it has written. |
 | `RecordOptions` | interface | Options for recording. |
+| `ReplayChunkInfo` | interface | What a pacing function is told about the chunk it releases. |
 | `replayFetch` | function | Serves recorded exchanges instead of calling the network. |
 | `ReplayOptions` | interface | Options for replaying. |
+| `ReplayPace` | type | How a replayed stream is paced, for a recording made with `timing`. |
 <!-- reference:end -->

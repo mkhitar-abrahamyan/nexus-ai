@@ -48,6 +48,7 @@ export function traceGraph(tracer: Tracer, options: GraphTracingOptions = {}): G
   const active = new Map<string, RunHandle>();
   const retries = new Map<string, number>();
   const emitted = new Map<string, unknown[]>();
+  const tools = new Map<string, RunHandle>();
 
   const onEvent = (event: GraphEvent): void => {
     switch (event.type) {
@@ -65,6 +66,33 @@ export function traceGraph(tracer: Tracer, options: GraphTracingOptions = {}): G
       }
       case 'task_retry': {
         retries.set(event.taskId, event.attempt);
+        return;
+      }
+      case 'tool': {
+        // A tool call is a run of its own, inside the node that made it.
+        const key = `${event.taskId}:${event.tool.id}`;
+        if (event.tool.phase === 'start') {
+          const parent = active.get(event.taskId) ?? root;
+          tools.set(
+            key,
+            parent.child({
+              name: event.tool.name,
+              kind: 'tool',
+              inputs: event.tool.args,
+              metadata: { callId: event.tool.id },
+            }),
+          );
+          return;
+        }
+        if (event.tool.phase === 'progress') return;
+        const handle = tools.get(key);
+        if (!handle) return;
+        tools.delete(key);
+        void handle.finish(
+          event.tool.phase === 'error'
+            ? { error: new Error(event.tool.error ?? 'The tool failed') }
+            : { outputs: event.tool.result },
+        );
         return;
       }
       case 'custom': {
@@ -95,7 +123,11 @@ export function traceGraph(tracer: Tracer, options: GraphTracingOptions = {}): G
     root,
     runFor: (node) => [...active.values()].find((handle) => handle.id && nameOf(active, handle) === node),
     async finish(result) {
-      // A task still open means the run stopped mid-step: a pause, an abort, or a failure.
+      // A task or tool still open means the run stopped mid-step: a pause, an abort, or a failure.
+      for (const [key, handle] of tools) {
+        tools.delete(key);
+        await handle.finish({ metadata: { unfinished: true } });
+      }
       for (const [taskId, handle] of active) {
         active.delete(taskId);
         await handle.finish({ metadata: { unfinished: true } });

@@ -24,6 +24,7 @@ import type {
   StudioGraphLike,
   StudioGraphSource,
   StudioOptions,
+  StudioRollups,
   StudioSources,
 } from './types.js';
 
@@ -133,7 +134,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
           sources.client?.getCircuitBreakerStatus ||
           sources.client?.getMetricsSnapshot,
       ),
-      costs: Boolean(sources.traces),
+      costs: Boolean(sources.traces || sources.rollups),
       operations: typeof sources.operations?.list === 'function',
       assets: Boolean(sources.assets),
       contexts: Boolean(sources.contexts),
@@ -736,6 +737,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   }
 
   async function costReport(days: number): Promise<StudioCostReport> {
+    if (sources.rollups) return rollupCostReport(sources.rollups, days);
     const store = need(sources.traces, 'traces');
     const end = now();
     const since = new Date(end.getTime() - days * 86_400_000).toISOString();
@@ -772,6 +774,75 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
         .sort((a, b) => b[1].cost - a[1].cost)
         .map(([model, entry]) => ({ model, ...entry })),
       top: [...runs]
+        .sort((a, b) => (b.cost ?? 0) - (a.cost ?? 0))
+        .slice(0, 10)
+        .map((run) => ({ id: run.id, traceId: run.traceId, name: run.name, model: run.model, cost: run.cost ?? 0 })),
+      budgets,
+    };
+  }
+
+  /**
+   * The cost report from hourly rows. The costliest runs still come from the traces, from the most
+   * recent 1,000 in the window, since a rollup holds totals rather than runs.
+   */
+  async function rollupCostReport(rollups: StudioRollups, days: number): Promise<StudioCostReport> {
+    const end = now();
+    const since = new Date(end.getTime() - days * 86_400_000).toISOString();
+    const rows = await rollups.query({ since, until: end.toISOString() });
+
+    const byDay = new Map<string, { cost: number; runs: number }>();
+    const byModel = new Map<string, { cost: number; runs: number }>();
+    let total = 0;
+    for (const row of rows) {
+      total += row.cost;
+      const dayEntry = byDay.get(row.hour.slice(0, 10)) ?? { cost: 0, runs: 0 };
+      dayEntry.cost += row.cost;
+      dayEntry.runs += row.runs;
+      byDay.set(row.hour.slice(0, 10), dayEntry);
+      const model = row.model || 'unknown';
+      const modelEntry = byModel.get(model) ?? { cost: 0, runs: 0 };
+      modelEntry.cost += row.cost;
+      modelEntry.runs += row.runs;
+      byModel.set(model, modelEntry);
+    }
+
+    const recent = sources.traces ? counted(await sources.traces.query({ since, limit: 1_000 })) : [];
+    const budgets = [];
+    for (const budget of sources.budgets ?? []) {
+      const start = periodStart(end, budget.period).toISOString();
+      const filter = budget.filter ?? {};
+      const fields = Object.keys(filter).filter((key) => (filter as Record<string, unknown>)[key] !== undefined);
+      let spent: number;
+      if (fields.every((key) => key === 'model' || key === 'provider' || key === 'kind' || key === 'name')) {
+        const kinds = filter.kind === undefined ? undefined : Array.isArray(filter.kind) ? filter.kind : [filter.kind];
+        spent = (await rollups.query({ since: start, until: end.toISOString() }))
+          .filter(
+            (row) =>
+              (filter.model === undefined || row.model === filter.model) &&
+              (filter.provider === undefined || row.provider === filter.provider) &&
+              (filter.name === undefined || row.name === filter.name) &&
+              (kinds === undefined || kinds.includes(row.kind as never)),
+          )
+          .reduce((sum, row) => sum + row.cost, 0);
+      } else {
+        // A filter the rows cannot answer, such as tags or metadata, still reads the traces.
+        const store = need(sources.traces, 'traces');
+        spent = counted(await store.query({ ...filter, since: start, limit: 100_000 })).reduce(
+          (sum, run) => sum + (run.cost ?? 0),
+          0,
+        );
+      }
+      budgets.push({ ...budget, spent, remaining: Math.max(0, budget.limit - spent), exceeded: spent > budget.limit });
+    }
+
+    return {
+      days,
+      total,
+      byDay: [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([day, entry]) => ({ day, ...entry })),
+      byModel: [...byModel.entries()]
+        .sort((a, b) => b[1].cost - a[1].cost)
+        .map(([model, entry]) => ({ model, ...entry })),
+      top: [...recent]
         .sort((a, b) => (b.cost ?? 0) - (a.cost ?? 0))
         .slice(0, 10)
         .map((run) => ({ id: run.id, traceId: run.traceId, name: run.name, model: run.model, cost: run.cost ?? 0 })),

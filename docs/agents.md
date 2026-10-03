@@ -105,6 +105,21 @@ if (run.status === 'awaiting_input') {
 
 Because it is a checkpoint, the approval can arrive days later, from another process.
 
+**Its output streams as it is written.** An agent reports what its model says and every tool it
+calls on the graph's event stream, with nothing to wire in its nodes. With `streamTokens: true` and a
+client that has `stream()`, as `AgentModelClient` allows, the answer arrives token by token; without
+it, each answer arrives as one message once the model returns. Middleware sees the assembled response
+either way.
+
+```ts
+const agent = createAgent({ client: ai, tools, streamTokens: true });
+const run = agent.events(agentInput('Refund order 1182'), { threadId });
+
+const tokens = run.messages();
+const calls = run.tools();
+// Read both; each has its own buffer. See "Streaming events" in the graph guide.
+```
+
 **An agent is an operation of its client.** Pass `lifecycle: ai.lifecycle`, and every run is
 authorized, counted, and audited as an `agent` operation, alongside the model calls it makes.
 `ai.agent()` runs as one already. The [lifecycle guide](./lifecycle.md) explains what that shares.

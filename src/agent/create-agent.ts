@@ -4,7 +4,7 @@ import { type CompiledGraph, createGraph } from '../graph/graph.js';
 import type { GraphCheckpointer, NodeContext } from '../types/graph.js';
 import { Command, END, Send } from '../types/graph.js';
 import type { CompletionRequest, Message, ToolDefinition } from '../types/messages.js';
-import type { NexusResponse, ToolCall } from '../types/response.js';
+import type { NexusResponse, ResponseMeta, StreamChunk, ToolCall } from '../types/response.js';
 import type { Store } from '../types/store.js';
 import { ToolExecutor, toolMessageContent } from './tool.js';
 
@@ -22,6 +22,8 @@ import { ToolExecutor, toolMessageContent } from './tool.js';
 export interface AgentModelClient {
   /** Runs one completion. */
   complete(request: CompletionRequest): Promise<NexusResponse>;
+  /** Streams one completion. Used when the agent is created with `streamTokens`. */
+  stream?(request: CompletionRequest): AsyncIterable<StreamChunk>;
 }
 
 /** A tool call the agent is about to make. */
@@ -118,6 +120,12 @@ export interface CreateAgentOptions {
    * `ai.lifecycle`. Its model calls are operations of their own.
    */
   lifecycle?: OperationLifecycleLike;
+  /**
+   * Streams the model's output token by token onto the run's `messages` events, through the client's
+   * `stream()`. Without it, or with a client that cannot stream, each answer arrives as one message
+   * event once the model returns. Middleware sees the assembled response either way.
+   */
+  streamTokens?: boolean;
 }
 
 const agentChannels = () => ({
@@ -188,7 +196,13 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
           request = (await item.beforeModel?.({ request, state, store: options.store })) ?? request;
         }
 
-        let response = await options.client.complete(request);
+        let response =
+          options.streamTokens && options.client.stream
+            ? await streamed(options.client.stream(request), (chunk) => context.message(chunk))
+            : await options.client.complete(request);
+        if (!(options.streamTokens && options.client.stream) && response.content) {
+          context.message({ content: response.content });
+        }
         for (const item of middleware) {
           response = (await item.afterModel?.({ response, state, store: options.store })) ?? response;
         }
@@ -248,6 +262,7 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
         }
 
         const run = async (): Promise<AgentToolResult> => executor.execute(description.name, args);
+        context.tool({ phase: 'start', id: call.id, name: description.name, args });
         const result = await middleware.reduceRight<() => Promise<AgentToolResult>>(
           (next, item) =>
             item.wrapToolCall
@@ -255,6 +270,11 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
               : next,
           run,
         )();
+        context.tool(
+          result.ok
+            ? { phase: 'result', id: call.id, name: description.name, result: result.result }
+            : { phase: 'error', id: call.id, name: description.name, error: result.error ?? 'The tool failed' },
+        );
 
         return { messages: [toolMessage(call, result)] };
       },
@@ -349,3 +369,37 @@ function parseArguments(raw: string): ParsedArguments {
 }
 
 export type { NodeContext };
+
+/**
+ * Reads a streamed completion into a response, handing each piece of text to `onChunk` as it
+ * arrives. Tool calls and the final metadata come from their own chunks.
+ */
+async function streamed(
+  chunks: AsyncIterable<StreamChunk>,
+  onChunk: (chunk: { kind: 'text' | 'reasoning'; content: string }) => void,
+): Promise<NexusResponse> {
+  let content = '';
+  const toolCalls: ToolCall[] = [];
+  let meta: Partial<ResponseMeta> = {};
+  for await (const chunk of chunks) {
+    if (chunk.type === 'text' && chunk.content) {
+      content += chunk.content;
+      onChunk({ kind: 'text', content: chunk.content });
+    } else if (chunk.type === 'reasoning' && chunk.content) {
+      onChunk({ kind: 'reasoning', content: chunk.content });
+    } else if (chunk.type === 'tool_call' && chunk.toolCall) {
+      toolCalls.push(chunk.toolCall);
+    } else if (chunk.type === 'done') {
+      meta = chunk.meta ?? meta;
+    } else if (chunk.type === 'error') {
+      throw new Error(chunk.error ?? 'The model stream failed');
+    }
+  }
+  return {
+    content,
+    role: 'assistant',
+    ...(toolCalls.length ? { toolCalls } : {}),
+    finishReason: toolCalls.length ? 'tool_calls' : 'stop',
+    meta: meta as ResponseMeta,
+  };
+}

@@ -1454,7 +1454,7 @@ written down in a guide's limitations today:
 **What 2.x protects.** These are the reasons to choose the package, and no release trades them away:
 
 - No required dependency, and a size budget on every entry point. A graph-only application still
-  loads about 51 KB and installs nothing else.
+  loads about 73 KB and installs nothing else.
 - Structural adapter contracts. A vector store, database client, Redis client, or transport is an
   interface the application fills, never a bundled SDK.
 - TypeScript first. No second language runtime.

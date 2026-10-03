@@ -873,11 +873,16 @@ export class NexusAI {
   }
 
   /**
-   * Calls each provider's health check and records the result.
+   * Calls each provider's health check and records the result. With `staleOnly`, only the providers
+   * whose health is `unknown` are checked: never called, or not since `health.observationTtlMs`. Run
+   * it on a schedule to keep an idle provider's health current.
    */
-  async checkProviders(): Promise<Array<{ providerName: string; ok: boolean; error?: string }>> {
+  async checkProviders(
+    options: { staleOnly?: boolean } = {},
+  ): Promise<Array<{ providerName: string; ok: boolean; error?: string }>> {
     const results: Array<{ providerName: string; ok: boolean; error?: string }> = [];
     for (const [providerName, provider] of this.providers) {
+      if (options.staleOnly && !this.health.isUnknown(providerName)) continue;
       const started = Date.now();
       try {
         const ok = await provider.healthCheck();

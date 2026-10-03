@@ -274,6 +274,15 @@ export interface RateLimitConfig {
   /** What a budget is counted per: each user, each model, or everything together. */
   key?: 'userId' | 'model' | 'global';
   /**
+   * How calls are counted. `fixed-window` (the default) counts per window, so a burst at the end of
+   * one window and another at the start of the next can pass twice the limit in a moment. `gcra` is
+   * the token-bucket algorithm kept as one timestamp per key: calls are spread at `maxRequests` per
+   * `windowMs`, with at most `burst` at once, and no window edge to burst across.
+   */
+  algorithm?: 'fixed-window' | 'gcra';
+  /** With `gcra`, the calls allowed at once after a quiet spell. Defaults to `maxRequests`. */
+  burst?: number;
+  /**
    * Where counters live. Omitted means process-local, which multiplies the real limit by the
    * number of workers; supply `RedisRateLimitStore` to share one budget across them.
    */

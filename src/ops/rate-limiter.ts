@@ -39,11 +39,12 @@ interface Bucket {
 }
 
 /**
- * Fixed-window rate limiting, per user, per model, or globally, in memory or through a shared
- * store.
+ * Rate limiting per user, per model, or globally, in memory or through a shared store, by fixed
+ * windows or by GCRA.
  */
 export class RateLimiter {
   private buckets = new Map<string, Bucket>();
+  private arrivals = new Map<string, number>();
 
   /**
    * Counts one call against a distributed store.
@@ -62,6 +63,13 @@ export class RateLimiter {
     }
 
     const key = this.getKey(request, config);
+    if (config.algorithm === 'gcra') {
+      if (!store.gcra)
+        throw new Error('This rate-limit store cannot decide GCRA; give it gcra(), or use fixed windows');
+      const decided = await store.gcra(key, emissionOf(config), burstOf(config));
+      if (!decided.allowed) throw new NexusRateLimitError(key, decided.retryAt);
+      return;
+    }
     const hit = await store.hit(key, config.windowMs);
     if (hit.count > config.maxRequests) {
       throw new NexusRateLimitError(key, hit.resetAt);
@@ -74,6 +82,12 @@ export class RateLimiter {
 
     const key = this.getKey(request, config);
     const now = Date.now();
+    if (config.algorithm === 'gcra') {
+      const decided = gcraDecide(this.arrivals.get(key), now, emissionOf(config), burstOf(config));
+      if (!decided.allowed) throw new NexusRateLimitError(key, decided.retryAt);
+      this.arrivals.set(key, decided.tat);
+      return;
+    }
     const bucket = this.buckets.get(key);
 
     if (!bucket || bucket.resetAt <= now) {
@@ -88,8 +102,34 @@ export class RateLimiter {
   }
 
   private getKey(request: RateLimitedRequest, config: RateLimitConfig): string {
+    // The two algorithms keep separate state, so switching a config never reads the other's.
     if (config.key === 'model') return `model:${request.model}`;
     if (config.key === 'global') return 'global';
     return `user:${request.userId || 'anonymous'}`;
   }
+}
+
+/** Milliseconds between calls at the sustained rate. */
+function emissionOf(config: RateLimitConfig): number {
+  return config.windowMs / Math.max(1, config.maxRequests);
+}
+
+function burstOf(config: RateLimitConfig): number {
+  return Math.max(1, config.burst ?? config.maxRequests);
+}
+
+/**
+ * GCRA on one key's theoretical arrival time: the time the key would be idle again at the allowed
+ * rate. A call is allowed when that time, after counting it, is no more than `burst` intervals ahead.
+ */
+export function gcraDecide(
+  tat: number | undefined,
+  now: number,
+  emissionMs: number,
+  burst: number,
+): { allowed: boolean; retryAt: number; tat: number } {
+  const next = Math.max(tat ?? now, now) + emissionMs;
+  const allowAt = next - burst * emissionMs;
+  if (allowAt > now) return { allowed: false, retryAt: allowAt, tat: tat ?? now };
+  return { allowed: true, retryAt: now, tat: next };
 }

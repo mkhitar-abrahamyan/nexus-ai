@@ -77,6 +77,48 @@ export class MemoryTraceStore implements TraceStore {
   }
 }
 
+/** Options for `closeAbandonedRuns()`. */
+export interface CloseAbandonedRunsOptions {
+  /** A run still running after this long is taken to belong to a process that ended. */
+  olderThanMs: number;
+  /** Replaces the system clock, for tests. */
+  now?: () => Date;
+}
+
+/**
+ * Closes runs a process left running when it ended, so a crash shows as a failure rather than as
+ * work that is still going.
+ *
+ * Only a tracer with `incremental` writes a run before it finishes, so only its runs can be left
+ * behind. Each one older than `olderThanMs` is saved as an error named `RunAbandoned`, with
+ * `metadata.abandoned`, keeping everything it recorded. Call it when a worker starts, or on a
+ * schedule. Returns how many runs it closed.
+ */
+export async function closeAbandonedRuns(store: TraceStore, options: CloseAbandonedRunsOptions): Promise<number> {
+  const now = options.now?.() ?? new Date();
+  const until = new Date(now.getTime() - options.olderThanMs).toISOString();
+  let closed = 0;
+  const seen = new Set<string>();
+  // Each closed run leaves the query's results, so reading the first page again reaches the next. A
+  // store that kept returning the same runs would loop, so a page of runs already closed ends it.
+  for (;;) {
+    const stuck = (await store.query({ status: 'running', until, limit: 500 })).filter((run) => !seen.has(run.id));
+    if (stuck.length === 0) return closed;
+    for (const run of stuck) {
+      seen.add(run.id);
+      await store.save({
+        ...run,
+        status: 'error',
+        endedAt: now.toISOString(),
+        latencyMs: Math.max(0, now.getTime() - Date.parse(run.startedAt)),
+        error: { name: 'RunAbandoned', message: 'The process running this ended before it finished' },
+        metadata: { ...run.metadata, abandoned: true },
+      });
+      closed += 1;
+    }
+  }
+}
+
 /** Options for the JSONL trace store. */
 export interface JsonlTraceStoreOptions {
   /** File runs are appended to, one JSON object per line. */
