@@ -3,13 +3,14 @@
 This roadmap is a design proposal, not a compatibility promise. Stable and experimental
 surfaces are defined in [API_STABILITY.md](./API_STABILITY.md).
 
-Status baseline: **1.18.0**. 99 export subpaths, each
-held to a size budget in CI, 12 completion providers, 5 embedding providers, 2 batch providers, 3
-image providers plus a mock, 101 completion registry models plus 63 aliases, and 11 embedding models
-plus 5 aliases. 643 unit tests pass; coverage sits at **92.1% lines / 77.6% branches / 87.2%
-functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry
-drift, per-subpath size, documentation and guide coverage, a graph benchmark, mock conformance, packed-package smoke, API contract,
-consumer type resolution, and clean install on Node 22 and 24.
+Status baseline: **2.0.0**. 135 export subpaths, each held to a size budget in CI, 12 completion
+providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, and 98 completion
+registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 776
+unit tests pass; coverage sits at **94.1% lines / 79.7% branches / 89.5% functions** against gates of
+82/67/73. CI verifies lint, format, build, tests, coverage, registry drift, `llms.txt` drift,
+per-subpath size, documentation and guide coverage, the root import, a graph benchmark, mock
+conformance, packed-package smoke, API contract, consumer type resolution, and clean install on
+Node 22 and 24.
 
 ---
 
@@ -21,9 +22,9 @@ weight is a constraint on every new feature rather than a feature of its own.
 
 Measured from the current build, an entry point costs a fraction of the root import: `/agent` 11%,
 `/graph` 9%, `/operations` 7%, `/evaluate` 5%, `/tracing` 4%, `/mcp` 2%, `/store` 1%,
-`/cache/memory-cache` 0.5%, `/streaming` 0.2%. Dependencies are counted as well as bytes: 95 of the
-99 entry points import no third-party package at all, and the four that do — the root, `/config`,
-`/core`, and `/security` — are the ones that reach the schema validators. Every new capability gets its own export subpath and stays out of the
+`/cache/memory-cache` 0.5%, `/streaming` 0.2%. Dependencies are counted as well as bytes: since 2.0 no entry
+point imports a third-party package, and the schema validators are optional peers loaded on first
+use. Every new capability gets its own export subpath and stays out of the
 root, and `npm run size:check` fails the build when any entry point grows past its budget or picks up
 a dependency it did not have.
 
@@ -561,6 +562,12 @@ be large to get there. Three rules apply to every item below.
 | 1.24.0 | Deployment at scale, self-managed | Revisions, canaries, autoscaling signals, Helm, tenant quotas | A canary rolled back on a regression; workers scaling on queue depth |
 | 1.25.0 | The bridge to 2.0 | Every capability on its own subpath; everything 2.0 removes deprecated | A migrated consumer compiles; a codemod and a migration guide |
 | 2.0.0 | Consolidation | One lifecycle, slim root, optional validators, stable surfaces | One authorize, audit, and budget across ten families; a migrated consumer compiles; a 5.3 MB install with no optional peer |
+| 2.1.0 | Fault-tolerant graphs | Async durability, recovery after retries, idle timeouts, cooperative drain | Crash injection at every durable boundary; a saga that resumes into the same compensation |
+| 2.2.0 | Crash-safe observability | Incremental traces, one event stream, OTel conventions, dashboard rollups | A crashed run leaves an `incomplete` trace; flat memory under a slow subscriber |
+| 2.3.0 | Persistence and scale | Versioned migrations, indexed dispatch, distributed resilience, one tenant model | A 2.0 database upgrades in place; ten racing workers keep every invariant |
+| 2.4.0 | Agents that act safely | A middleware catalog, capabilities and permissions, a sandbox contract, auth adapters | Fewer tokens at equal quality over 150 tools; a refused out-of-bounds write |
+| 2.5.0 | Production retrieval, graduation | Sparse search and rerank contracts, durable ingestion, measured graduation | A resumed 100,000-document ingestion; each graduated surface with its evidence |
+| 2.6.0 | Protocols and portability | Agent protocols beyond MCP, a portable kernel | An A2A round trip; the kernel passing on Node, Deno, Bun, and an edge runtime |
 
 ---
 
@@ -1409,7 +1416,335 @@ Node 22.
 
 ---
 
-## 27. Longer-term backlog
+## 27. After 2.0: harden before widening
+
+2.0 closed the breadth gaps. Agents, graphs, durable workflows, retrieval, evaluation, prompts, a
+server, and deployment all exist. What is left is how they behave when things go wrong: under a
+crash, a slow database, a rolling deploy, a thousand workers, or a hostile tool call. So the 2.x line
+stops adding feature families and makes the ones that exist reliable, observable, and fast under
+failure.
+
+An audit of 2.0.0 against its own documentation found the gaps the next releases close. Each one is
+written down in a guide's limitations today:
+
+| Gap in 2.0.0 | Where it shows | Closed in |
+| --- | --- | --- |
+| Checkpoint writes block the graph; every superstep waits for a database round trip | `src/graph/graph.ts` awaits each save | 2.1 |
+| A node that exhausts its retries fails the graph; no recovery or compensation path | graph guide | 2.1 |
+| Node timeouts are wall-clock only; a long task cannot prove it is still making progress | `timeoutMs` | 2.1 |
+| No cooperative drain inside a graph run; a stopped worker aborts mid-superstep | graph guide | 2.1 |
+| A trace is written when its root finishes, so a crashed run leaves no trace | tracing guide | 2.2 |
+| Streams carry supersteps and custom events; model tokens and tool progress need wiring by hand | graph guide | 2.2 |
+| A recorded stream replays as one chunk | testing guide | 2.2 |
+| Studio dashboards query up to 100,000 runs per chart | `studio/src/api.ts` | 2.2 |
+| A Postgres migration creates what is missing but never alters an existing table | Postgres guide | 2.3 |
+| The Redis operation store scans every record to find queued work | deployments guide | 2.3 |
+| Circuit-breaker failure counts stay per worker even with a shared store | resilience guide | 2.3 |
+| The rate limiter counts fixed windows, so a burst at a boundary doubles the limit | resilience guide | 2.3 |
+| Provider health only moves with real traffic, so an idle provider keeps a stale score | resilience guide | 2.3 |
+| The auto-router ranks every candidate on every request | providers guide | 2.3 |
+| Three agent middleware ship: summarize, redact, and limit tool calls | agents guide | 2.4 |
+| Tool safety is by tool name; there are no capabilities, permissions, or sandbox contract | security guide | 2.4 |
+| The server's `auth` hook has no standard implementations | server guide | 2.4 |
+| Keyword search is an in-memory index; reranking means an LLM call | retrieval guide | 2.5 |
+| Ingestion has no versions, hashes, incremental refresh, or resume | loaders guide | 2.5 |
+| Ten surfaces are experimental in production readiness with no measurable way out | API stability | 2.5 |
+| The client pipeline is Node-only; no agent protocol beyond MCP | README | 2.6 |
+
+**What 2.x protects.** These are the reasons to choose the package, and no release trades them away:
+
+- No required dependency, and a size budget on every entry point. A graph-only application still
+  loads about 51 KB and installs nothing else.
+- Structural adapter contracts. A vector store, database client, Redis client, or transport is an
+  interface the application fills, never a bundled SDK.
+- TypeScript first. No second language runtime.
+- Self-hosted by default. Nothing phones home, including model data.
+- One lifecycle and one execution context. New work plugs into them instead of adding a parallel
+  path.
+- No breaking change before 3.0. New behaviour is opt-in, such as `durability: 'async'`, and
+  defaults keep their 2.0 meaning.
+
+**What 2.x does not prioritize:** more completion providers, more vector databases, more image
+providers, a second language, a hosted service, more domain workflow templates, or another
+orchestration abstraction. None of them reduces the risk that matters now, which is that the
+package grew broader faster than its production mileage.
+
+**How a 2.x release is measured.** It closes the gaps in its row above, and it ships a proof that
+fails when the gap reopens: a crash-injection test, a race test, a benchmark with a budget, or a
+conformance suite. Every primitive it touches gets a line in a semantics table that says what can
+repeat after a crash, what is durable, and what a side effect must do.
+
+---
+
+## 28. 2.1.0: fault-tolerant graphs
+
+Graph primitives are complete. This release makes them survive real failure without the
+application wiring recovery by hand.
+
+**Durability modes.** `compile({ durability })` takes `sync`, `async`, or `exit`:
+
+| Mode | Behaviour | For |
+| --- | --- | --- |
+| `sync` (default) | Each checkpoint is persisted before the next superstep | Payments and anything with side effects that must line up with state |
+| `async` | Checkpoints are written in the background while the graph runs | Most agents |
+| `exit` | State is persisted at interrupts, completion, drain, and failure | Short, high-throughput jobs |
+
+`async` flushes before an interrupt, completion, a drain, or a fatal error, and on an explicit
+`flush()`. Its queue is bounded: when the store falls behind, the graph waits rather than holding
+unbounded state in memory.
+
+**Recovery after retries.** A node takes `onError`, called once its retries are exhausted. It
+receives a `NodeFailure`: the node, task id, attempt count, first and last attempt times, the error,
+the timeout that fired if one did, and the thread and run ids. It returns a state update or a
+`Command`, so a failed charge can route to a refund node. The failure and the decision are
+checkpointed before the graph moves on, so a crash between them resumes into the same path, not a
+different one. Graph-wide node defaults set retries, timeouts, and `onError` once.
+
+**Run and idle timeouts.** `timeout: { runMs, idleMs }` separates "may never run longer than ten
+minutes" from "must show progress every thirty seconds". Emitting an event, writing a checkpoint,
+streaming a model token, reporting tool progress, or calling `ctx.heartbeat()` refreshes the idle
+timer. A `Send` can override the timeout of the task it creates.
+
+**Cooperative drain.** A `RunControl` passed to `invoke()` or `stream()` can `drain(reason)`. The
+current superstep finishes, its checkpoint is persisted, and the run ends with `GraphDrainedError`
+carrying the thread id, so another worker resumes it. The agent server's drain uses it.
+
+**Progress that survives a retry.** An operation's `ctx.heartbeat(progress)` keeps its last payload,
+and the next attempt reads it as `ctx.previousHeartbeat`, so a crashed import resumes at row 82,331
+instead of row one. Idempotency helpers sit beside it. Neither pretends a side effect runs exactly
+once.
+
+**`nexus graph lint`.** It reads a compiled graph and reports designs that fail in production: a
+retried node with no idempotency key, an unbounded cycle, a `Send` with no fan-out bound, a memory
+checkpointer under the server, a side effect before an interrupt, or a sensitive tool with no
+approval.
+
+**Semantics table.** The graph guide gets the table for every execution primitive: graph node,
+functional step, interrupt prelude, cached node, and operation attempt. It states what repeats after
+a crash, what is durable, and what a side effect must do.
+
+**Live provider matrix.** A scheduled workflow runs minimal real requests against every completion
+provider (completion, stream, tools, structured output, embeddings, batch where supported) when its
+repository secrets are set, and opens an issue when a provider breaks. It does not run on pull
+requests.
+
+**Proof.**
+- A crash-injection suite kills a run at every durable boundary (before, during, and after a
+  checkpoint, during a tool call, after a side effect, after a lease) and checks the resumed state
+  equals an uninterrupted run, on the memory, SQLite, Redis, and Postgres checkpointers.
+- A saga test: a payment node exhausts its retries, `onError` routes to compensation, the process
+  dies, and the resumed run takes the same compensation path.
+- The graph benchmark adds 50 supersteps on Postgres. `async` must cut wall time by at least the
+  round trips it no longer waits for, with identical final state.
+- A property test generates random graphs with branches, `Send`, interrupts, retries, and forks, and
+  checks that replay from any checkpoint reduces to the same state.
+
+---
+
+## 29. 2.2.0: crash-safe observability and one event stream
+
+The package records a great deal, but it records most of it at the end. This release records as it
+goes, and gives every consumer the same events.
+
+**Incremental traces.** A `TraceSink` takes `start`, `event`, and `finish` as they happen instead of a
+finished tree. A run that dies stays in the store with status `incomplete`, every finished span
+intact. Studio shows it, and can follow a live run. Sampling moves to the root's start, with an
+optional tail decision that keeps errors.
+
+**One event stream.** Graphs, agents, the server's SSE, Studio, and the tracer read one canonical
+event stream, with projections: `messages` (model tokens), `tools` (start, progress, result, error),
+`values`, `updates`, `tasks`, `subgraphs`, and `custom`. Model and tool events arrive without
+`ctx.emit()`. One iterator can take several projections, or each has its own.
+
+**Backpressure everywhere.** Every pipe between a provider and a browser declares what it does when
+the reader is slower: block the producer, coalesce updates, drop low-value events, disconnect, or
+spool to the durable event log. Queue depths are metrics. No path pushes to an unbounded array.
+
+**OpenTelemetry as the interchange.** Spans carry the GenAI semantic conventions
+(`gen_ai.operation.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.*`) and
+standard resource attributes, with a `nexus.*` namespace only for what is Nexus-specific: graph node
+and step, routing strategy, failover count. Trace context propagates through the server, operations,
+and remote graphs, so a trace spans processes and any OTLP backend reads it without glue.
+
+**Rollups for dashboards.** Hourly metric rollups per tenant, assistant, model, and provider: runs,
+errors, tokens, cost, and latency percentiles. Studio's cost and health charts read 24 rows instead
+of 100,000 traces. Traces stay the forensic record.
+
+**Timed replay.** The recorder can keep chunk timing. Replay runs instantly, at the original pace,
+scaled, or step by step, so idle timeouts, cancellation, and streaming UIs can be tested.
+
+**Evaluator provenance.** An experiment records each evaluator's version, judge model, judge prompt
+version, rubric, and the framework version, so a score can be traced to what produced it.
+
+**Proof.**
+- A process killed at minute 14 of a 15-minute agent run leaves a readable trace marked
+  `incomplete`, with every span that finished.
+- A slow-subscriber test: a browser reading 100 times slower than the model holds memory flat under
+  each backpressure policy.
+- An OTLP collector in CI receives a graph run's spans with the GenAI attributes and one trace id
+  across the server and a worker.
+- Studio's cost view answers over a million stored runs within its latency budget.
+
+---
+
+## 30. 2.3.0: persistence and scale
+
+This release removes the scaling cliffs that are documented today, and makes upgrades safe.
+
+**Versioned migrations.** Each Postgres and SQLite adapter ships numbered migrations, recorded in a
+`nexus_schema_migrations` table with checksums. `nexus db status`, `nexus db migrate --dry-run`, and
+`migrate()` apply them in order under an advisory lock, in a transaction where the database allows.
+Schema changes follow expand and contract: a column is added in one minor, written by the next,
+and removed only in a major.
+
+**Indexed dispatch.** The Redis operation store keeps queued work in a sorted set by ready time and
+claims it atomically, so a claim costs O(log N) instead of a scan. The operation store stays the
+source of truth; the dispatch index only says what is ready.
+
+**Distributed resilience.**
+- Circuit-breaker observations move into the shared store as a rolling window, so nine failures
+  across three workers count as nine.
+- The rate limiter adds token bucket and GCRA, which have no window boundary to burst across.
+- Health observations expire after `observationTtlMs`. A provider with no recent traffic is
+  `unknown`, not healthy or unhealthy, and an optional active probe refreshes it.
+
+**A routing index.** Capability requirements become a bitmask, and the candidate shortlist for a
+normalized set of requirements is cached. Only health, budget, price overrides, and latency are
+evaluated per request.
+
+**One tenant model.** `tenantId` joins the execution context, and stores, trace stores, operations,
+asset stores, datasets, prompts, the context hub, budgets, rate limits, and cache keys scope by it.
+Cache keys gain a namespace (tenant, environment, model revision, context version), and cache
+outcomes (hit, miss, stale, bypass, error) are traced with their reason.
+
+**`nexus doctor`.** One command checks the Node version, optional peers, provider credentials,
+database and Redis connectivity, pending migrations, stuck leases, registry age, and settings that
+cannot work together, such as a memory checkpointer or a process-local tenant store behind several
+server replicas.
+
+**Runtime budgets.** CI tracks runtime performance and memory the way it tracks import size, with
+tolerances: graph creation and an empty node, a 1,000-node compile, `Send` throughput, checkpoint
+latency per backend, routing over 10, 100, and 1,000 models, a 20-middleware chain, trace events,
+SSE fan-out, operation claims, and cache lookups. Long-running tests watch for listener,
+`AbortController`, and closure retention over 100,000 checkpoints and 10,000 threads.
+
+**Proof.**
+- A database created by 2.0.0 upgrades to 2.3.0 with `nexus db migrate`, and a 2.2 worker and a 2.3
+  worker run side by side during the rollout.
+- Ten workers race the same thread, operation, tenant budget, and circuit, and every invariant
+  holds.
+- A claim stays flat from 1,000 to 100,000 queued operations.
+- A warm routing plan answers in under 100 µs at p50 and under 1 ms at p99 over 1,000 models.
+- A tenant-isolation suite runs against every storage adapter and fails on any cross-tenant get,
+  list, search, delete, fork, resume, trace query, or vector search.
+
+---
+
+## 31. 2.4.0: agents that act safely
+
+Agents can do a lot; this release gives them a complete middleware kit and a real security
+boundary, without growing `createAgent()`.
+
+**A middleware catalog**, each its own import on `nexus-ai-pro/agent/middleware`:
+`modelRetry()`, `toolRetry()`, `modelFallback()`, `dynamicModel()`, `toolSelector()`,
+`contextEditor()`, `piiMiddleware()`, `humanApproval()`, `modelCallLimit()`, and
+`filesystemContext()`. `toolSelector()` sends a model only the tools relevant to the turn, by rule or
+by embedding similarity, so an agent with 150 MCP tools sends a dozen schemas instead of 150.
+
+**Capabilities and permissions.** A tool declares the capabilities it needs, such as
+`network:api.github.com` or `filesystem:write`. A permission policy grants filesystem paths,
+network hosts, and shell commands, and decides each call: allow, deny, or interrupt for approval.
+Danger is a property of what a tool does, not of its name.
+
+**A sandbox contract.** Code and shell tools run through a `Sandbox` interface the application
+fills: a container, a VM, a remote interpreter. The package ships the contract, a conformance suite,
+and a process-level reference for development only.
+
+**A deep-agent preset.** `nexus-ai-pro/deep-agent` composes `createAgent()` with planning, a
+filesystem, subagents, skills, context offloading, the tool selector, and permissions. It is a
+preset over the existing agent and graph runtime, not a third engine.
+
+**Server authentication.** `jwtAuth()`, `apiKeyAuth()`, and `trustedProxyAuth()` fill the server's
+`auth` hook. All three return one `Principal` (subject, tenant, roles, scopes), which reaches runs,
+traces, budgets, tools, the store, audit, and deployments.
+
+**Proof.**
+- An agent over 150 tools completes a benchmark task set with `toolSelector()` at equal quality and
+  a measured cut in tokens and latency, reported by an experiment.
+- The permission policy refuses a write outside the workspace and a request to an unlisted host,
+  and interrupts on a granted-with-approval command, in a test that drives a real tool loop.
+- A deep agent completes a multi-step task on a fixture repository inside the reference sandbox.
+- A JWT from a test identity provider reaches a tool call as a `Principal`, scoped to its tenant.
+
+---
+
+## 32. 2.5.0: production retrieval and graduation
+
+Retrieval works at prototype scale. This release makes it work at production scale, and moves the
+experimental surfaces out of experimental with evidence.
+
+**Sparse retrieval as a contract.** `SparseRetriever` lets external keyword search take part in
+hybrid retrieval. References ship for Postgres full-text search and one search engine, through the
+same structural-client approach as the vector stores. The in-memory `KeywordIndex` stays for small
+corpora.
+
+**Rerankers as a contract.** `Reranker` takes a query and documents and returns them ranked. Adapters
+cover hosted rerank APIs and a local cross-encoder, with no SDK dependency. `modelReranker()` stays
+for when an LLM is the right judge.
+
+**Durable ingestion.** An ingestion pipeline on durable operations tracks each source's version and
+content hash, each chunk's version, and the embedding model. It refreshes only what changed,
+propagates deletions, writes idempotently, and resumes after a crash at the document it stopped on.
+
+**Measured graduation.** Every experimental surface gets a checklist (see section 36) and works
+through it: Studio, deployments with tenant limits and the worker queue, the context hub, insights,
+loaders, the vector stores, retrievers, the MCP registry, SQLite, and images. A surface leaves
+experimental when every item has evidence, not on a date.
+
+**Deployment statistics.** Canary guards reuse the evaluation verdict: a minimum run count, a
+confidence level, a minimum effect size, and quality from online evaluation alongside errors, cost,
+and latency. A revision that regresses quality rolls back automatically.
+
+**An adapter kit.** `defineVectorStoreAdapter()`, `defineProviderAdapter()`, `defineRetrieverAdapter()`,
+and their siblings, each with contract tests, a capability declaration, version compatibility,
+benchmark fixtures, error normalization, and telemetry requirements. A community package can be
+built and verified without entering this repository.
+
+**Proof.**
+- Hybrid retrieval over Postgres full-text and pgvector beats vector-only on the stored dataset, with
+  a hosted reranker and a local one compared in one experiment.
+- An ingestion of 100,000 documents killed halfway resumes without re-embedding finished chunks,
+  and a second run after editing ten documents re-embeds only those.
+- Each graduated surface's checklist is published with its evidence in `API_STABILITY.md`.
+- A canary with a seeded quality regression is rolled back, and one with noise under the minimum
+  effect size is not.
+
+---
+
+## 33. 2.6.0: protocols and portability
+
+Interoperability comes after the core is hardened, because a protocol adapter is only as reliable
+as what it exposes.
+
+**Agent protocols**, each on its own subpath and out of the root:
+
+- `nexus-ai-pro/protocols/ag-ui`: the server's canonical event stream (section 29) as a
+  frontend-neutral protocol;
+- `nexus-ai-pro/protocols/a2a`: a Nexus agent calling, and serving, remote agents;
+- `nexus-ai-pro/protocols/acp`: when coding-agent interoperability is a target.
+
+**A portable kernel.** `nexus-ai-pro/runtime` holds messages, the provider and tool contracts,
+streaming, capabilities, and fetch-based adapters, with no `fs`, `net`, `child_process`, or
+Node-only crypto. It runs on edge runtimes, Deno, Bun, and in browsers. Operations, Postgres, SQLite,
+the server, Studio, and telephony stay Node-only, and say so.
+
+**Proof.** A Nexus agent and a remote agent complete a task over A2A in both directions; a frontend
+renders a run through AG-UI with no Nexus client code; the kernel's tests pass on Node, Deno, Bun,
+and an edge runtime in CI.
+
+---
+
+## 34. Longer-term backlog
 
 **Absorbed by the releases above.** MCP adapters, human approval checkpoints, long-term memory, an
 evaluation platform, prompt and workflow versioning, record and replay fixtures, and the local
@@ -1425,9 +1760,15 @@ control plane.
 4. OCR, captioning, visual question answering, image embeddings, and media search and RAG.
 5. Policy-as-code presets versioned independently from the runtime.
 6. Multi-tenant credential-vault adapters and routing by provider residency.
-7. Browser and edge builds: Node filesystem, crypto, DNS, and stream dependencies isolated behind
-   adapters, so that compatibility is explicit.
-8. Streaming reads and writes for the filesystem and S3 asset stores.
+7. Streaming reads and writes for the filesystem and S3 asset stores.
+8. Revision-specific worker pools, so a deployment revision maps to an image digest instead of
+   every image carrying every revision; and multi-region deployment.
+9. Model registry data released on its own, as a versioned package or a file the application
+   supplies, so prices can move faster than the runtime. Never fetched from a central server.
+10. Context hub hardening beyond graduation: signed bundles, and a content digest recorded on every
+   trace so a production run names the exact context that produced it.
+11. Evaluation follow-ons: multi-turn thread evaluation, adversarial and synthetic datasets,
+   evaluation budgets, and asynchronous online-evaluation workers.
 
 **Deliberately not planned.**
 - A hosted service. Deployment stays self-hosted through the server and templates.
@@ -1436,7 +1777,7 @@ control plane.
 
 ---
 
-## 28. Design notes carried forward
+## 35. Design notes carried forward
 
 These decisions predate this revision and still hold.
 
@@ -1488,7 +1829,9 @@ await ai.images.edit({
 
 ---
 
-## 29. How an item graduates
+## 36. How an item graduates
+
+A new surface starts this way:
 
 1. Provider-neutral types and a deterministic mock land first.
 2. One real adapter proves the contract; conformance fixtures cover it.
@@ -1496,5 +1839,18 @@ await ai.images.edit({
 4. Packed-package, clean-install, and consumer type-resolution tests pass on every supported Node
    line.
 5. Evaluation appropriate to the modality covers the supported capability matrix.
-6. Only then does the surface leave experimental status in
-   [API_STABILITY.md](./API_STABILITY.md).
+
+It leaves experimental status in [API_STABILITY.md](./API_STABILITY.md) only when every item below has
+evidence, published with the graduation:
+
+| Requirement | Evidence |
+| --- | --- |
+| API stability | Covered by the 2.x compatibility rules, with no planned breaking change |
+| Conformance | Passes its contract suite on every supported backend |
+| Crash recovery | Crash-injection tests at each durable boundary, where it has one |
+| Concurrency | Race tests with several processes on the same records |
+| Load | A published benchmark with a budget in CI |
+| Tenant isolation | The isolation suite, where it stores tenant data |
+| Security | A written threat review, with its findings closed |
+| Upgrade | A migration test from the previous minor |
+| Soak | A long-running test with flat memory and no leaked handles |

@@ -259,8 +259,10 @@ Shipped so far:
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, the image family leaves experimental once recorded live conformance passes on all three
-backends.
+Next, the 2.x line hardens what exists rather than adding families. 2.1 makes graphs survive real
+failure: background checkpoint writes, recovery after retries, idle timeouts, and cooperative
+drain. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
+releases after it.
 
 ## Before Production
 
