@@ -1,6 +1,7 @@
 import { AnthropicProvider } from '../src/providers/anthropic.js';
 import type { BaseProvider } from '../src/providers/base.js';
 import { CohereProvider } from '../src/providers/cohere.js';
+import { DeepSeekProvider } from '../src/providers/deepseek.js';
 import { GoogleProvider } from '../src/providers/google.js';
 import { GroqProvider } from '../src/providers/groq.js';
 import { MistralProvider } from '../src/providers/mistral.js';
@@ -26,7 +27,7 @@ const globalToolsEnabled = process.env.CONFORMANCE_TEST_TOOLS === 'true';
 if (process.env.OPENAI_API_KEY) {
   providers.push({
     name: 'openai',
-    model: process.env.OPENAI_CONFORMANCE_MODEL || 'gpt-5.4-mini',
+    model: process.env.OPENAI_CONFORMANCE_MODEL || 'gpt-6-luna',
     provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
     testJson: true,
     testTools: true,
@@ -46,7 +47,7 @@ if (process.env.ANTHROPIC_API_KEY) {
 if (process.env.GOOGLE_API_KEY) {
   providers.push({
     name: 'google',
-    model: process.env.GOOGLE_CONFORMANCE_MODEL || 'gemini-2.5-flash',
+    model: process.env.GOOGLE_CONFORMANCE_MODEL || 'gemini-3.5-flash-lite',
     provider: new GoogleProvider({ apiKey: process.env.GOOGLE_API_KEY }),
     testJson: true,
     testTools: true,
@@ -66,8 +67,18 @@ if (process.env.GROQ_API_KEY) {
 if (process.env.MISTRAL_API_KEY) {
   providers.push({
     name: 'mistral',
-    model: process.env.MISTRAL_CONFORMANCE_MODEL || 'mistral/mistral-small-2603',
+    model: process.env.MISTRAL_CONFORMANCE_MODEL || 'mistral/ministral-8b-2512',
     provider: new MistralProvider({ apiKey: process.env.MISTRAL_API_KEY }),
+    testJson: true,
+    testTools: true,
+  });
+}
+
+if (process.env.DEEPSEEK_API_KEY) {
+  providers.push({
+    name: 'deepseek',
+    model: process.env.DEEPSEEK_CONFORMANCE_MODEL || 'deepseek/deepseek-flash',
+    provider: new DeepSeekProvider({ apiKey: process.env.DEEPSEEK_API_KEY }),
     testJson: true,
     testTools: true,
   });

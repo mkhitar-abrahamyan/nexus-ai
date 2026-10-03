@@ -331,7 +331,7 @@ export class OperationRunner<TResult = unknown> {
       const heartbeat = this.startHeartbeat(record, handle);
       let outcome: { ok: true; value: TResult } | { ok: false; error: unknown };
       try {
-        const value = await executor(this.buildContext(record, handle));
+        const value = await executor(this.buildContext(record, handle, heartbeat.beat));
         outcome = { ok: true, value };
       } catch (error) {
         outcome = { ok: false, error };
@@ -417,11 +417,19 @@ export class OperationRunner<TResult = unknown> {
   private startHeartbeat(
     record: OperationRecord<TResult>,
     handle: LocalOperationHandle<TResult>,
-  ): { stop: () => void; latest: () => OperationRecord<TResult>; beat: () => Promise<void> } {
+  ): { stop: () => void; latest: () => OperationRecord<TResult>; beat: (details?: unknown) => Promise<void> } {
     let latest = record;
     let stopped = false;
+    // Beats run one at a time. Two at once would race on the record's sequence, and the loser's
+    // details would be dropped.
+    let inFlight: Promise<void> = Promise.resolve();
+    const beat = (details?: unknown): Promise<void> => {
+      const next = inFlight.then(() => renew(details));
+      inFlight = next.catch(() => undefined);
+      return next;
+    };
 
-    const beat = async (): Promise<void> => {
+    const renew = async (details?: unknown): Promise<void> => {
       if (stopped) return;
       const current = await this.store.read(latest.id);
       if (!current) return;
@@ -450,6 +458,7 @@ export class OperationRunner<TResult = unknown> {
         heartbeatAt: renewed.updatedAt,
       };
       renewed.progress = handle.progress() ?? current.progress;
+      if (details !== undefined) renewed.heartbeatDetails = details;
       if (await this.store.update(renewed, current.sequence)) latest = renewed;
     };
 
@@ -475,23 +484,20 @@ export class OperationRunner<TResult = unknown> {
     };
   }
 
-  private buildContext(record: OperationRecord<TResult>, handle: LocalOperationHandle<TResult>): OperationContext {
+  private buildContext(
+    record: OperationRecord<TResult>,
+    handle: LocalOperationHandle<TResult>,
+    beat: (details?: unknown) => Promise<void>,
+  ): OperationContext {
     return {
       operationId: record.id,
       attempt: record.attempt,
       signal: handle.signal,
       report: (progress: OperationProgress) => handle.report(progress),
-      heartbeat: async () => {
-        const current = await this.store.read(record.id);
-        if (!current || isTerminalOperationStatus(current.status)) return;
-        const renewed = this.advance(current, 'running');
-        renewed.lease = {
-          owner: this.owner,
-          expiresAt: new Date(this.now().getTime() + this.leaseMs).toISOString(),
-          heartbeatAt: renewed.updatedAt,
-        };
-        await this.store.update(renewed, current.sequence);
-      },
+      // The same beat as the timer's, so the runner's view of the record stays current. A beat that
+      // bypassed it left the runner holding a stale sequence, and the final write could not land.
+      heartbeat: (details?: unknown) => beat(details),
+      ...(record.heartbeatDetails === undefined ? {} : { previousHeartbeat: record.heartbeatDetails }),
       traceContext: record.traceContext,
       metadata: record.metadata,
     };

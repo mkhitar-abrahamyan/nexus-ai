@@ -120,7 +120,8 @@ export class GraphNotInterruptedError extends GraphError {
 }
 
 /**
- * Raised when a node outlives its `timeoutMs`.
+ * Raised when a node outlives its run limit, or goes longer than its idle limit without showing
+ * progress.
  *
  * Separate from an ordinary failure because it is usually worth retrying, and because the node's
  * signal was aborted underneath it rather than the node choosing to stop.
@@ -129,11 +130,41 @@ export class GraphNodeTimeoutError extends GraphError {
   constructor(
     /** The node. */
     public readonly node: string,
-    /** The timeout it exceeded, in milliseconds. */
+    /** The limit it exceeded, in milliseconds. */
     public readonly timeoutMs: number,
+    /** `run` for the whole-attempt limit, `idle` for the limit between signs of progress. */
+    public readonly kind: 'run' | 'idle' = 'run',
   ) {
-    super(`Graph node "${node}" exceeded its ${timeoutMs}ms timeout`, 'GRAPH_NODE_TIMEOUT');
+    super(
+      kind === 'idle'
+        ? `Graph node "${node}" showed no progress for ${timeoutMs}ms, its idle timeout`
+        : `Graph node "${node}" exceeded its ${timeoutMs}ms timeout`,
+      'GRAPH_NODE_TIMEOUT',
+    );
     this.name = 'GraphNodeTimeoutError';
+  }
+}
+
+/**
+ * Raised when a run stops because its `RunControl` was drained.
+ *
+ * Not a failure: the superstep in flight finished and its checkpoint was written, so the thread is
+ * intact. Call `continue(threadId)` to resume it, on this worker or another.
+ */
+export class GraphDrainedError extends GraphError {
+  constructor(
+    /** The thread to continue. */
+    public readonly threadId: string,
+    /** Supersteps completed before the drain. */
+    public readonly step: number,
+    /** Why the drain was requested. */
+    public readonly reason?: string,
+  ) {
+    super(
+      `Graph run on thread "${threadId}" drained after step ${step}${reason ? ` (${reason})` : ''}; continue() resumes it`,
+      'GRAPH_DRAINED',
+    );
+    this.name = 'GraphDrainedError';
   }
 }
 

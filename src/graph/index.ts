@@ -20,6 +20,7 @@ export {
   type OperationStoreCheckpointerOptions,
 } from './checkpointer.js';
 export {
+  GraphDrainedError,
   GraphError,
   GraphInterrupt,
   GraphNodeError,
@@ -30,12 +31,14 @@ export {
   GraphValidationError,
   interruptKey,
 } from './errors.js';
+export { RunControl } from './run-control.js';
 export { Command, END, Send, START } from '../types/graph.js';
 export type {
   Channel,
   ChannelSchema,
   CommandTarget,
   CompileOptions,
+  DurabilityMode,
   EdgeRouter,
   GraphBreakpoint,
   GraphCheckpoint,
@@ -55,11 +58,17 @@ export type {
   NodeCacheEntry,
   NodeCachePolicy,
   NodeContext,
+  NodeErrorHandler,
+  NodeFailure,
   NodeFn,
   NodeOptions,
   NodeResult,
+  NodeTimeout,
   PendingInterrupt,
+  RecoveredFailure,
   RetryPolicy,
+  RunControlLike,
+  SendOptions,
   StateOf,
   StateUpdate,
   StoredGraphCheckpoint,

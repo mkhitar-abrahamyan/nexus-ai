@@ -4,6 +4,62 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Fault-tolerant graphs. A graph now chooses when its checkpoints are written, recovers from a node
+whose retries ran out, tells a hung task from a slow one, and stops cleanly when its worker has to
+go. Nothing changes until a graph opts in: the defaults keep their 2.0 meaning.
+
+### Added
+
+- **Durability modes.** `compile({ durability })` takes `sync` (the default), `async`, or `exit`.
+  `async` writes checkpoints in the background, in order, while the next superstep runs, and waits
+  for them before the run returns, pauses, fails, or drains. `maxPendingWrites` (8) bounds the writes
+  in flight. `exit` writes only where the run stops. `flush()` waits for every run's writes.
+- **Recovery after retries.** A node's `onError` receives a `NodeFailure` once its retries run out
+  and returns an update or a `Command`, such as a route to a refund node. The decision is
+  checkpointed, as `recovered` on the next checkpoint, before anything it routes to runs, so a crash
+  after it resumes into the same path. `compile({ nodeDefaults })` sets retries, timeouts, and
+  `onError` for every node.
+- **Run and idle timeouts.** `timeout: { runMs, idleMs }` caps an attempt and the time between signs
+  of progress. `context.heartbeat()`, `emit()`, and `report()` refresh the idle timer.
+  `GraphNodeTimeoutError.kind` says which limit fired. A `Send` can override the timeout of the task
+  it creates, and the override is checkpointed with the task.
+- **Cooperative drain.** `RunControl`, passed as `control` to a run, stops it after its current
+  superstep with its checkpoint written, ending in `GraphDrainedError`; `continue()` resumes it
+  anywhere. The agent server drains its graph runs this way when a replica drains with a queue, so
+  they are handed off at once instead of after the drain timeout.
+- **`lintGraph()`** on the new `nexus-ai-pro/graph/lint`, and `nexus graph lint`: static cycles,
+  retried nodes that are not `idempotent` or have no timeout, deferred durability with side effects,
+  an in-process checkpointer under a deployment, unbounded concurrency, and unchecked routes. Nodes
+  can declare `idempotent: true`, and `describe()` reports durability, the checkpointer, and each
+  node's retries, timeouts, and recovery.
+- **Progress that survives a retry.** An operation's `context.heartbeat(details)` stores `details` as
+  `heartbeatDetails`, and the next attempt reads them as `context.previousHeartbeat`.
+- A `task_failed` graph event, and a semantics table in the graph guide that says what each
+  execution primitive repeats after a crash.
+- A weekly `live-providers` workflow runs real conformance against every provider with a key in the
+  repository's secrets, DeepSeek included, and opens an issue when one breaks.
+
+### Fixed
+
+- **A manual operation heartbeat no longer strands the result.** `context.heartbeat()` wrote the
+  record behind the runner's back, so the runner's final write failed its sequence check and a
+  successful result was not saved. Heartbeats now go through the runner, one at a time.
+- `continue()` on a finished thread left it marked `running` with an empty result. It now leaves it
+  completed and returns its state.
+
+### Proof
+
+- A crash-injection suite kills a run before, during, and after every checkpoint write and inside
+  nodes, before and after their side effects, in `sync` and `async` mode, on the memory, operation
+  store, SQLite, Postgres, and Redis checkpointers. A fresh process always reaches the state of an
+  uninterrupted run.
+- A saga test: a charge exhausts its retries, `onError` routes to a refund, the process dies during
+  the refund, and the resumed run refunds without charging again.
+- A property test generates 40 graphs with branches, loops, `Send`, retries, and interrupts, and
+  replays each from every checkpoint of its history to the same state.
+- The graph benchmark runs 50 supersteps against an 8 ms store: `async` finishes in about half the
+  time of `sync`, in the same state, and CI fails if it stops beating it by a quarter.
+
 ## [2.0.0] - 2026-10-02
 
 Consolidation. One lifecycle runs every call of every family, the root import holds the core client

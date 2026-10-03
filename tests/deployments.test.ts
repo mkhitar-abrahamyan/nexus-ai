@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { appendList } from '../src/graph/channels.js';
+import { MemoryGraphCheckpointer } from '../src/graph/checkpointer.js';
+import { createGraph } from '../src/graph/graph.js';
 import { compareRuns } from '../src/insights/regressions.js';
 import { MemoryOperationStore } from '../src/operations/store.js';
+import { END } from '../src/types/graph.js';
 import type { Principal, RunRecord, ScalingSnapshot, ServerAssistant, ThreadRecord } from '../src/types/server.js';
-import { functionAssistant } from '../src/server/assistant.js';
+import { functionAssistant, graphAssistant } from '../src/server/assistant.js';
 import { bucket, Deployments, watchCanaries } from '../src/server/deployments.js';
 import { MemoryRunEventLog } from '../src/server/events.js';
 import { type AgentServer, type AgentServerOptions, createAgentServer } from '../src/server/server.js';
@@ -647,6 +651,63 @@ test('a draining worker answers 503, hands a long run to another worker, and the
     const text = await (await call(first, 'GET', '/metrics')).text();
     assert.match(text, /nexus_server_runs_handed_off_total 1/);
     assert.match(text, /nexus_server_worker_draining 1/);
+  } finally {
+    await first.stop();
+    await second.stop();
+  }
+});
+
+test('a draining worker stops a graph run at a superstep boundary, and the next worker runs no step twice', async () => {
+  const shared = {
+    state: new MemoryServerStore(),
+    events: new MemoryRunEventLog(),
+    store: new MemoryOperationStore<unknown>(),
+    checkpoints: new MemoryGraphCheckpointer(),
+  };
+  const ran: string[] = [];
+  const steps = ['s0', 's1', 's2', 's3', 's4', 's5'];
+  const graph = createGraph({ channels: { log: appendList<string>() } });
+  for (const step of steps) {
+    graph.addNode(step, async () => {
+      ran.push(step);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return { log: [step] };
+    });
+  }
+  graph.setEntry('s0');
+  for (const [index, step] of steps.slice(0, -1).entries()) graph.addEdge(step, steps[index + 1] as string);
+  graph.addEdge('s5', END);
+  const assistant = graphAssistant(graph.compile({ checkpointer: shared.checkpoints }));
+  const replica = () =>
+    createAgentServer({
+      assistants: { pipeline: assistant },
+      state: shared.state,
+      events: shared.events,
+      operations: { store: shared.store, leaseMs: 5_000 },
+      queue: { concurrency: 1, pollMs: 10 },
+    });
+
+  const first = replica();
+  await first.start();
+  const thread = await jsonOf<ThreadRecord>(await call(first, 'POST', '/threads', { assistant: 'pipeline' }));
+  const accepted = await jsonOf<RunRecord>(await call(first, 'POST', `/threads/${thread.id}/runs`, { input: {} }));
+  while (ran.length < 2) await new Promise((resolve) => setTimeout(resolve, 5));
+
+  const started = Date.now();
+  const result = await first.drain({ timeoutMs: 5_000 });
+  assert.ok(Date.now() - started < 1_000, 'the drain did not wait for its timeout');
+  assert.deepEqual(result.released, [accepted.id]);
+  const parked = await shared.checkpoints.get(thread.id);
+  assert.equal((parked as { drained?: unknown } | undefined)?.drained !== undefined, true, 'parked at a boundary');
+
+  const second = replica();
+  await second.start();
+  try {
+    const [run] = await allSettled(shared.state, 1);
+    assert.equal(run?.status, 'succeeded');
+    assert.equal(run?.attempt, 2);
+    assert.deepEqual(ran, steps, 'every step ran exactly once across the two workers');
+    assert.deepEqual((await shared.checkpoints.get(thread.id))?.state.log, steps);
   } finally {
     await first.stop();
     await second.stop();

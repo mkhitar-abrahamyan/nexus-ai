@@ -35,7 +35,15 @@ export class Send {
     readonly node: string,
     /** What the task receives as `context.input`. */
     readonly input?: unknown,
+    /** Options for this task alone. `timeout` replaces the node's own for it. */
+    readonly options?: SendOptions,
   ) {}
+}
+
+/** Options for one task a `Send` creates. */
+export interface SendOptions {
+  /** Replaces the node's timeout for this task, such as a longer limit for one large document. */
+  timeout?: NodeTimeout;
 }
 
 /** Where a `Command` sends control. */
@@ -85,6 +93,116 @@ export interface GraphTask {
   node: string;
   /** The task's `Send` input. */
   input?: unknown;
+  /** The timeout its `Send` set, replacing the node's own. */
+  timeout?: NodeTimeout;
+}
+
+/**
+ * How long a node may run, in two senses.
+ *
+ * `runMs` caps the whole attempt: "this may never take longer than ten minutes". `idleMs` caps the
+ * time between signs of progress: "this may take ten minutes, but must show progress every thirty
+ * seconds". A node shows progress by calling `context.heartbeat()`, `context.emit()`, or
+ * `context.report()`. Either limit fails the attempt with `GraphNodeTimeoutError`, which the retry
+ * policy may retry.
+ */
+export interface NodeTimeout {
+  /** The longest an attempt may run, in milliseconds. */
+  runMs?: number;
+  /** The longest an attempt may go without showing progress, in milliseconds. */
+  idleMs?: number;
+}
+
+/**
+ * When a graph writes its checkpoints.
+ *
+ * - `sync` (the default) writes each checkpoint before the next superstep starts. Use it when a
+ *   node's side effects must line up with the state that records them, such as payments.
+ * - `async` writes checkpoints in the background while the graph runs on. Every write still
+ *   happens, in order, and the run waits for them before it returns, pauses, fails, or drains. A
+ *   crash can lose the last few supersteps, which then run again.
+ * - `exit` writes only when the run stops: at an interrupt, a breakpoint, completion, a failure, an
+ *   abort, or a drain. A crash loses the whole run. For short, high-throughput graphs.
+ */
+export type DurabilityMode = 'sync' | 'async' | 'exit';
+
+/**
+ * Why a node's last attempt failed, handed to its `onError` once retries are exhausted.
+ *
+ * Everything here is what the runtime knows at the moment of failure. The decision `onError`
+ * returns is checkpointed before the graph moves on, so a crash after it resumes into the same path.
+ */
+export interface NodeFailure {
+  /** The node that failed. */
+  node: string;
+  /** The task that failed. Equal to `node` unless the task came from a `Send`. */
+  taskId: string;
+  /** The superstep it failed in. */
+  step: number;
+  /** Attempts made, including the last. */
+  attempts: number;
+  /** ISO-8601 time of the first attempt. */
+  firstAttemptAt: string;
+  /** ISO-8601 time the last attempt failed. */
+  failedAt: string;
+  /** What the last attempt threw. */
+  error: unknown;
+  /** True when the retry policy ran out; false when the error was not retryable. */
+  retryExhausted: boolean;
+  /** The limit that ended the last attempt, when a timeout did. */
+  timeout?: { type: 'run' | 'idle'; limitMs: number };
+  /** The task's `Send` input. */
+  input?: unknown;
+  /** The thread the run belongs to. */
+  threadId: string;
+}
+
+/**
+ * Decides what happens after a node's retries are exhausted: a state update, a `Command` that
+ * routes to a compensation node, or nothing, to carry on along the node's own edges. Throwing fails
+ * the graph with that error.
+ *
+ * It decides; it should not act. Compensation with side effects belongs in the node it routes to,
+ * which runs only after the decision is checkpointed.
+ */
+export type NodeErrorHandler<S extends ChannelSchema = ChannelSchema> = (
+  failure: NodeFailure,
+  context: { state: Readonly<StateOf<S>> },
+) => NodeResult<S> | Promise<NodeResult<S>>;
+
+/** A failure a node's `onError` recovered from, as its checkpoint records it. */
+export interface RecoveredFailure {
+  /** The node that failed. */
+  node: string;
+  /** The task that failed. */
+  taskId: string;
+  /** The superstep it failed in. */
+  step: number;
+  /** Attempts made. */
+  attempts: number;
+  /** What the last attempt threw, as a name and a message. */
+  error: { name: string; message: string };
+  /** ISO-8601 time the last attempt failed. */
+  failedAt: string;
+  /** True when the retry policy ran out. */
+  retryExhausted: boolean;
+  /** The limit that ended the last attempt, when a timeout did. */
+  timeout?: { type: 'run' | 'idle'; limitMs: number };
+  /** Where `onError` sent the run, when it returned a `Command` with a target. */
+  goto?: string[];
+}
+
+/**
+ * Asks a running graph to stop at the end of its current superstep.
+ *
+ * `RunControl` from `nexus-ai-pro/graph` implements it. Any object with these members works, so a
+ * server can pass its own.
+ */
+export interface RunControlLike {
+  /** True once a drain was requested. */
+  readonly draining: boolean;
+  /** Why the drain was requested. */
+  readonly reason?: string;
 }
 
 /**
@@ -108,12 +226,28 @@ export interface RetryPolicy {
   retryOn?(error: unknown, attempt: number): boolean;
 }
 
-/** How a node runs: retries, a timeout, where it may route, deferral, and caching. */
-export interface NodeOptions {
+/**
+ * How a node runs: retries, timeouts, recovery, where it may route, deferral, caching, and whether
+ * it is safe to run twice.
+ */
+export interface NodeOptions<S extends ChannelSchema = ChannelSchema> {
   /** Retries failed attempts, overriding the graph's default policy. */
   retry?: RetryPolicy;
-  /** Aborts the node's signal and fails the attempt when it runs longer than this. */
+  /** Aborts the node's signal and fails the attempt when it runs longer than this. Same as `timeout.runMs`. */
   timeoutMs?: number;
+  /** A run limit, an idle limit, or both. `timeout.runMs` wins over `timeoutMs`. */
+  timeout?: NodeTimeout;
+  /**
+   * Called once retries are exhausted, instead of failing the graph. See `NodeErrorHandler`. A
+   * `Command` it returns may route anywhere; declare those targets in `ends`.
+   */
+  onError?: NodeErrorHandler<S>;
+  /**
+   * Declares that running this node twice is safe: it has no side effects, or they carry an
+   * idempotency key. Nothing at run time depends on it; `lintGraph()` uses it to flag retried nodes
+   * that are not.
+   */
+  idempotent?: boolean;
   /**
    * Nodes this one may reach through `Send` or a `Command`. Declaring them keeps compile-time
    * reachability checks and diagrams exact, so a node reached only that way is not reported as
@@ -275,8 +409,13 @@ export interface NodeContext<S extends ChannelSchema> {
    * users, and runs.
    */
   readonly store?: Store;
-  /** Reports progress without writing to state. */
+  /** Reports progress without writing to state. Refreshes an idle timeout. */
   report(progress: Omit<GraphProgress, 'step' | 'node'>): void;
+  /**
+   * Shows the node is still making progress, which refreshes its idle timeout. For long work that
+   * neither emits nor reports, such as a large upload or a slow tool call.
+   */
+  heartbeat(): void;
   /**
    * Sends anything to the run's `onEvent` listener as a `custom` event: model tokens as they stream,
    * intermediate results, a status line. Nothing is written to state or checkpointed.
@@ -351,6 +490,10 @@ export interface GraphCheckpoint<S extends ChannelSchema = ChannelSchema> {
   error?: { name: string; message: string };
   /** Present when the run paused at a breakpoint rather than to ask a question. */
   breakpoint?: GraphBreakpoint;
+  /** Failures in the step this checkpoint follows that a node's `onError` recovered from. */
+  recovered?: RecoveredFailure[];
+  /** Present when the run stopped because a drain was requested. `continue()` resumes it. */
+  drained?: { reason?: string; at: string };
   /** ISO-8601 time the checkpoint was written. */
   createdAt: string;
   /** Application data, including `graph` when the graph was compiled with a name. */
@@ -443,6 +586,14 @@ export interface GraphRunOptions {
   onEvent?: (event: GraphEvent) => void;
   /** Receives what nodes pass to `context.report()`. A throwing callback never fails the node. */
   onProgress?: (progress: GraphProgress) => void;
+  /** Overrides the compiled `durability` for this run. */
+  durability?: DurabilityMode;
+  /**
+   * Lets the caller stop the run at the end of its current superstep: pass a `RunControl` and call
+   * `drain()`, on SIGTERM for example. The run writes its checkpoint and ends with
+   * `GraphDrainedError`, and `continue()` resumes it, on this worker or another.
+   */
+  control?: RunControlLike;
 }
 
 /** The outcome of a run. */
@@ -471,6 +622,16 @@ export interface GraphResult<S extends ChannelSchema, O extends keyof S = keyof 
 export type GraphEvent =
   | { type: 'task_start'; step: number; taskId: string; node: string; attempt: number }
   | { type: 'task_retry'; step: number; taskId: string; node: string; attempt: number; error: string }
+  | {
+      type: 'task_failed';
+      step: number;
+      taskId: string;
+      node: string;
+      attempts: number;
+      error: string;
+      /** True when the node's `onError` recovered, so the graph carries on. */
+      recovered: boolean;
+    }
   | {
       type: 'task_end';
       step: number;
@@ -509,6 +670,8 @@ export interface GraphStepEvent<S extends ChannelSchema> {
   interrupts?: PendingInterrupt[];
   /** The breakpoint the step stopped at. */
   breakpoint?: GraphBreakpoint;
+  /** Failures in this step that a node's `onError` recovered from. */
+  recovered?: RecoveredFailure[];
   /** A `Command.PARENT` that ended this run, for the graph that contains it. In memory only. */
   parentCommand?: Command;
 }
@@ -527,7 +690,15 @@ export interface GraphDescription {
     ends?: string[];
     defer?: boolean;
     retry?: boolean;
+    /** Attempts its retry policy allows, when more than one. */
+    maxAttempts?: number;
     timeoutMs?: number;
+    /** Its run and idle limits, when it has either. */
+    timeout?: NodeTimeout;
+    /** True when the node recovers from failure through `onError`. */
+    onError?: boolean;
+    /** True when the node is declared safe to run twice. */
+    idempotent?: boolean;
     /** True when the node reuses results through `cache`. */
     cache?: boolean;
     /** The graph this node runs, when it is a compiled graph used through `asNode()`. */
@@ -547,6 +718,12 @@ export interface GraphDescription {
   input?: string[];
   /** Channels a caller gets back, when the graph restricts them. */
   output?: string[];
+  /** When checkpoints are written. */
+  durability?: DurabilityMode;
+  /** Where checkpoints go: the in-process default, a store the application passed, or nowhere. */
+  checkpointer?: 'memory' | 'custom' | 'none';
+  /** Tasks a superstep runs at once. */
+  maxConcurrency?: number;
 }
 
 /**
@@ -570,6 +747,18 @@ export interface CompileOptions {
   maxConcurrency?: number;
   /** Default retry policy for every node. A node's own policy wins. */
   retry?: RetryPolicy;
+  /**
+   * Defaults for every node: a retry policy, timeouts, and an `onError`. A node's own options win,
+   * field by field. `retry` here is the same as `compile({ retry })`, and wins over it.
+   */
+  nodeDefaults?: Pick<NodeOptions, 'retry' | 'timeout' | 'onError'>;
+  /** When checkpoints are written: `sync` (the default), `async`, or `exit`. See `DurabilityMode`. */
+  durability?: DurabilityMode;
+  /**
+   * Checkpoint writes `async` durability keeps in flight before the graph waits for the store to
+   * catch up. Defaults to 8. Bounds what a slow store can cost in memory.
+   */
+  maxPendingWrites?: number;
   /**
    * What happens to sibling tasks when one fails. `fail-fast` (the default) aborts their signals;
    * `settle` lets them finish, which is worth it when their work is expensive to repeat.

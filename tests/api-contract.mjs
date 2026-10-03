@@ -91,6 +91,7 @@ const expectedSubpaths = [
   './graph',
   './graph/functional',
   './graph/visualize',
+  './graph/lint',
   './sqlite',
   './sqlite/operations',
   './sqlite/store',

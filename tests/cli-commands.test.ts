@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { createDataset } from '../src/evaluate/datasets.js';
 import { evaluate } from '../src/evaluate/run.js';
@@ -14,6 +15,7 @@ import { toNodeListener } from '../src/server/node.js';
 import { createAgentServer } from '../src/server/server.js';
 import { JsonlTraceStore } from '../src/tracing/stores.js';
 import type { Experiment } from '../src/types/evaluate.js';
+import { END } from '../src/types/graph.js';
 
 /** Runs the CLI from source, so these tests do not depend on a build having happened first. */
 function nexus(args: string[], cwd = process.cwd()) {
@@ -218,6 +220,50 @@ test('nexus traces lists, shows, and exports runs from a trace store', async () 
     );
     assert.match(nexus(['traces', 'list', '--store', moduleStore]).stdout, /from-module/);
     assert.equal(nexus(['traces', 'show', 'missing', '--store', moduleStore]).status, 2);
+  });
+});
+
+test('nexus graph lint fails on an error finding, and on a warning with --strict', async () => {
+  await withDirectory(async (directory) => {
+    const graphModule = pathToFileURL(path.resolve('src/graph/graph.ts')).href;
+    const typesModule = pathToFileURL(path.resolve('src/types/graph.ts')).href;
+    const looping = path.join(directory, 'looping.mjs');
+    await writeFile(
+      looping,
+      `import { createGraph } from '${graphModule}';
+import { END } from '${typesModule}';
+const counter = { reduce: (a = 0, b) => a + b };
+export const billing = createGraph({ channels: { n: counter } })
+  .addNode('a', () => ({ n: 1 }), { retry: { maxAttempts: 3 } })
+  .addNode('b', () => ({ n: 1 }))
+  .setEntry('a')
+  .addEdge('a', 'b')
+  .addEdge('b', 'a')
+  .compile();
+`,
+    );
+    const failed = nexus(['graph', 'lint', `${looping}#billing`, '--json']);
+    assert.equal(failed.status, 1, failed.stderr);
+    const report = JSON.parse(failed.stdout) as { findings: Array<{ code: string }>; failed: boolean };
+    assert.ok(report.findings.some((finding) => finding.code === 'UNBOUNDED_CYCLE'));
+    assert.equal(report.failed, true);
+
+    const described = path.join(directory, 'described.mjs');
+    await writeFile(
+      described,
+      `export const graph = {
+  nodes: [{ id: 'a', retry: true, maxAttempts: 2, timeout: { runMs: 100 } }],
+  edges: [{ from: 'a', to: '${END}' }],
+  dynamic: [],
+  checkpointer: 'custom',
+};
+`,
+    );
+    const warned = nexus(['graph', 'lint', described]);
+    assert.equal(warned.status, 0, 'a warning alone passes');
+    assert.match(warned.stdout, /RETRY_WITHOUT_IDEMPOTENCY/);
+    assert.equal(nexus(['graph', 'lint', described, '--strict']).status, 1, '--strict fails on it');
+    assert.equal(nexus(['graph', 'lint']).status, 2, 'a missing module is a usage mistake');
   });
 });
 

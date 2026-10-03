@@ -318,6 +318,12 @@ export interface AssistantRunContext {
   /** The revision serving the run, when the assistant has revisions. */
   revision?: string;
   /**
+   * Set to draining when this replica drains and has a queue to hand work to. A graph served through
+   * `graphAssistant()` reads it as its `RunControl`: it finishes its superstep, writes its checkpoint,
+   * and stops, and another worker continues the run from there.
+   */
+  control?: { readonly draining: boolean; readonly reason?: string };
+  /**
    * Records US dollars the run spent, such as a model call's cost. The amount is added to the run's
    * `cost` and to its tenant's budget; a budget that stops runs in flight cancels this one.
    */

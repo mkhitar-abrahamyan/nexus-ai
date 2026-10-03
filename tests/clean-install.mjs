@@ -64,8 +64,11 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // Raised again in 1.25.0 for the bridge to 2.0: a deprecation note on each of the 499 root exports
 // that move, carried in both declaration builds; `nexus migrate` and its map; nine entry points; and
 // MIGRATING.md. The notes go when 2.0 drops those exports from the root.
-const MAX_PACKED_BYTES = 900_000;
-const MAX_UNPACKED_BYTES = 5_650_000;
+// Raised again in 2.1.0 for fault-tolerant graphs and crash-safe observability: durability, recovery,
+// timeouts, and drain in the graph runtime, the graph/lint entry point, incremental and OTLP tracing,
+// the event stream, rollups, and timed replay, each documented in both declaration builds.
+const MAX_PACKED_BYTES = 1_000_000;
+const MAX_UNPACKED_BYTES = 5_900_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling

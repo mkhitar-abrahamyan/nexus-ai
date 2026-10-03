@@ -1940,9 +1940,9 @@ before its first step, audited and counted when it ends. `lifecycleFamily` label
 `agent` as `createAgent()` sets. The [lifecycle guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/lifecycle.md) has the details.
 
 `GraphRunOptions` sets the `threadId`, `maxSteps`, a signal, metadata for every checkpoint,
-`maxConcurrency`, breakpoints for this run, `onEvent`, and `onProgress`. `onEvent` receives each
-`GraphEvent`: `task_start`, `task_retry`, `task_end` with the update and whether it was served from
-the cache, `checkpoint`, and `custom`. `onProgress` receives each `GraphProgress` a node reported.
+`maxConcurrency`, breakpoints for this run, `onEvent`, `onProgress`, its `durability`, and a `control`
+to drain it. `onEvent` receives each `GraphEvent`: `task_start`, `task_retry`, `task_failed`,
+`task_end` with the update and whether it was served from the cache, `checkpoint`, and `custom`. `onProgress` receives each `GraphProgress` a node reported.
 
 A node asks a question with an `InterruptRequest`: a `reason` and a JSON `payload`. Each question
 waits as a `PendingInterrupt`, with its id, node, task, step, position within the node, and when it
@@ -1952,7 +1952,7 @@ was asked.
 | --- | --- |
 | `resume()`, `resumeWith()` | Answer the one pending question. |
 | `resumeInterrupts()`, `resumeInterruptsWith()` | Answer several, by id. |
-| `continue()` | Carries on from a breakpoint. |
+| `continue()` | Carries on from a breakpoint, a drain, or a failure. On a finished thread it changes nothing and returns its state. |
 | `resumeFrom()` | Rewinds to a step and runs forward. |
 
 `interruptKey()` is the stable key an answer is stored under: task, step, and index. That is how
@@ -2007,6 +2007,162 @@ To build a checkpoint by hand, for a seed or a test, write a `CheckpointDraft` �
 its version, id, tasks, and questions — and pass it to `toCheckpoint()`. It fills those in, and always
 derives the id again, so a copy moved to another thread never keeps a stale one.
 
+## Surviving failure
+
+A graph in production meets slow databases, failing services, hung calls, and workers that are
+stopped mid-run. Each of those has a setting, and none changes how a graph behaves until you use it.
+
+### When checkpoints are written
+
+`compile({ durability })` takes a `DurabilityMode`. `GraphRunOptions.durability` overrides it for
+one run.
+
+| Mode | Writes | A crash loses | For |
+| --- | --- | --- | --- |
+| `sync` (the default) | Each checkpoint, before the next superstep starts | Nothing that finished | Side effects that must line up with state, such as payments |
+| `async` | Each checkpoint, in the background while the next superstep runs | The last few supersteps, which run again | Most agents |
+| `exit` | Only where the run stops: an interrupt, a breakpoint, completion, a failure, an abort, or a drain | The whole run | Short, high-throughput graphs |
+
+`async` keeps every write and its order. The writes still go one at a time, because a checkpointer
+replaces anything at a later step, so the gain is that the graph stops waiting: it does the next
+step's work while the store catches up. Against a store with an 8 ms round trip, a 50-step graph
+whose steps each take about as long finishes in about half the time. The run waits for every write
+before it returns, pauses, fails, or drains. `maxPendingWrites` (8) caps the writes in flight, so a
+slow store slows the graph down rather than filling memory. A write that fails in the background fails
+the run. `flush()` on a compiled graph waits for the writes of every run in progress.
+
+### Recovering after retries
+
+A node's retry policy decides how often it tries. `onError` decides what happens when the tries run
+out. It receives a `NodeFailure` and returns what a node returns: a state update, a `Command`, or
+nothing to carry on along the node's own edges. Throwing fails the graph as before.
+
+```ts
+import { Command } from 'nexus-ai-pro/graph';
+
+.addNode('charge', chargeCard, {
+  retry: { maxAttempts: 3 },
+  ends: ['refund'],
+  onError: (failure) =>
+    new Command({ update: { status: 'payment_failed' }, goto: 'refund' }),
+})
+```
+
+A `NodeFailure` holds the node and task, the step, the attempts made, when the first attempt started
+and the last one failed, the error, whether the retry policy ran out or the error was not retryable,
+the timeout that ended the attempt if one did, the `Send` input, and the thread. A `NodeErrorHandler`
+is the function's type. It decides and should not act: compensation with side effects belongs in the
+node it routes to.
+
+The decision is part of durable state. The checkpoint after the step lists each recovery as a
+`RecoveredFailure` in `recovered`, with the error, the attempts, and where the run went, and that
+checkpoint is written before anything the decision routes to can run, in every durability mode. A
+crash after it resumes into the same compensation path, and the failed node is not run again. The step
+event carries the same list, and `onEvent` gets a `task_failed` event, with `recovered` set when
+`onError` handled it. A mistake in the graph itself, a `GraphValidationError`, is never recovered.
+
+`compile({ nodeDefaults })` sets a retry policy, timeouts, and an `onError` for every node at once.
+A node's own options win, field by field.
+
+### Run and idle timeouts
+
+A `NodeTimeout` sets two limits. `runMs` caps an attempt: it may never take longer. `idleMs` caps
+the time between signs of progress: the attempt may run as long as it likes while it keeps showing it
+is alive. `timeoutMs` is the same as `timeout.runMs`.
+
+```ts
+.addNode('crawl', async ({ heartbeat, emit }) => {
+  for (const page of pages) {
+    emit({ page: await fetchPage(page) }); // progress, which also refreshes the idle timer
+    heartbeat();                           // or just that, for work with nothing to report
+  }
+}, { timeout: { runMs: 10 * 60_000, idleMs: 30_000 } })
+```
+
+`context.heartbeat()`, `context.emit()`, and `context.report()` each refresh the idle timer. Either
+limit aborts the node's signal and fails the attempt with `GraphNodeTimeoutError`, whose `kind` says
+which. The retry policy may retry it, and `onError` sees it in `failure.timeout`.
+
+A `Send` can give the task it creates its own limits through `SendOptions`, such as more time for one
+large document. The override is saved with the task, so it holds after a resume:
+
+```ts
+new Send('summarize', doc, { timeout: { runMs: 5 * 60_000 } })
+```
+
+### Draining a run
+
+An abort signal stops a run in the middle of a superstep and cancels the nodes in flight. A
+`RunControl` stops it cleanly instead: the superstep in flight finishes, its checkpoint is written,
+and the run ends with `GraphDrainedError`, which names the thread and the step. Any process can then
+`continue()` the thread.
+
+```ts
+import { RunControl } from 'nexus-ai-pro/graph';
+
+const control = new RunControl();
+process.on('SIGTERM', () => control.drain('sigterm'));
+
+await graph.invoke(input, { threadId, control });
+```
+
+One control drains any number of runs. `onDrain()` registers a listener. The checkpoint records the
+drain in `drained`, with its reason. `GraphRunOptions.control` takes any `RunControlLike`, an object
+with `draining` and `reason`. The agent server passes one to every graph it serves, and drains
+them when the replica drains (see the [server guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md)).
+
+### What repeats after a crash
+
+A crash can run some work twice. This is exactly what, so that a side effect can be written to be
+safe:
+
+| Primitive | Runs again after a crash? | What is durable | A side effect must |
+| --- | --- | --- | --- |
+| Graph node, `sync` | The superstep it was in, if its checkpoint was not written | Every finished superstep | Be idempotent |
+| Graph node, `async` | The supersteps not yet written | Every superstep the store has acknowledged | Be idempotent |
+| Graph node, `exit` | The whole run | Pauses, failures, drains, and the end | Be idempotent, or the graph has none |
+| A node before an interrupt | Yes, once more when the answer arrives | The question and its answer | Come after the interrupt |
+| A cached node | No, on a hit | The cached result | Not exist |
+| `onError` | Only if the crash came before its checkpoint | The decision, before its target runs | Not exist: route to a node instead |
+| Functional workflow step | Only the step in flight | Each finished step's result | Be idempotent |
+| Operation attempt | The whole attempt | The record, and its last heartbeat details | Be idempotent, and resume from `previousHeartbeat` |
+
+Nothing here runs a side effect exactly once. An idempotency key on the call that makes it is what
+turns "at least once" into "effectively once".
+
+### Linting a graph
+
+`lintGraph()` from `nexus-ai-pro/graph/lint` reads a compiled graph's shape — or a description saved
+as JSON — and returns a `GraphLintFinding` for each design that works in a demo and fails in
+production. Nothing runs. `nexus graph lint` runs it from the command line (see the
+[command-line guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md)).
+
+| `GraphLintCode` | `GraphLintSeverity` | Finds |
+| --- | --- | --- |
+| `UNBOUNDED_CYCLE` | error | A cycle of static edges, which only the step limit can stop |
+| `RETRY_WITHOUT_IDEMPOTENCY` | warning | A retried node not declared `idempotent` |
+| `RETRY_WITHOUT_TIMEOUT` | warning | A retried node with no timeout, whose hung attempt is never retried |
+| `DEFERRED_DURABILITY_WITH_SIDE_EFFECTS` | warning | `async` or `exit` durability with nodes not declared `idempotent` |
+| `MEMORY_CHECKPOINTER` | warning, or error when `deployed` | The in-process default, which a restart loses |
+| `NO_CHECKPOINTER` | info | No checkpoints, so no interrupt, resume, drain, or recovery |
+| `UNBOUNDED_CONCURRENCY` | warning | A superstep with no limit on tasks at once |
+| `DYNAMIC_ROUTE` | info | A router with no mapping and no `ends`, whose routes cannot be checked |
+
+Each finding has its code, severity, node (a path such as `review/approve` inside a subgraph), what
+is wrong, and the fix. `GraphLintOptions` sets `deployed` for a graph that runs where restarts and
+hand-offs are normal, and `ignore` for codes to skip.
+
+A node declares `idempotent: true` when running it twice is safe. Nothing at run time depends on it;
+it is what lets the linter tell a safe retry from a dangerous one.
+
+```ts
+import { lintGraph } from 'nexus-ai-pro/graph/lint';
+
+for (const finding of lintGraph(graph, { deployed: true })) {
+  console.log(`${finding.severity} ${finding.code}: ${finding.message}`);
+}
+```
+
 ## Errors
 
 Every graph error extends `GraphError` and carries a stable `code`:
@@ -2018,8 +2174,10 @@ Every graph error extends `GraphError` and carries a stable `code`:
   false`, which has nowhere to keep the question.
 - `GraphStepLimitError` — the run exceeded `maxSteps`, naming the nodes still pending.
 - `GraphNodeError` — a node threw; the original error is its `cause`.
-- `GraphNodeTimeoutError` — a node outlived `timeoutMs`. It is separate because it is often worth
-  retrying.
+- `GraphNodeTimeoutError` — a node outlived its run limit, or went past its idle limit without
+  showing progress; `kind` is `run` or `idle`. It is separate because it is often worth retrying.
+- `GraphDrainedError` — not a failure: the run stopped because its `RunControl` drained, after its
+  superstep finished and was checkpointed. `continue()` resumes it.
 - `GraphThreadNotFoundError` — no checkpoint exists for the thread.
 - `GraphNotInterruptedError` — a resume was asked of a thread that is not waiting for input.
 
@@ -2030,7 +2188,12 @@ Every graph error extends `GraphError` and carries a stable `code`:
 - the name, and each node with its options and any subgraph;
 - each edge, conditional or not, with its label;
 - routers whose targets cannot be known in advance;
-- the input and output channels.
+- the input and output channels;
+- the durability mode, which checkpointer it writes to (`memory`, `custom`, or `none`), and its
+  concurrency limit.
+
+Each node lists its retry attempts, timeouts, whether it has an `onError`, and whether it is declared
+`idempotent`. That is what `lintGraph()` reads.
 
 `toMermaid()` draws anything `Describable` — a description, or anything with `describe()`. Its
 `MermaidOptions` set the direction (`TD` or `LR`), whether subgraphs are expanded or collapsed, and
@@ -2142,6 +2305,12 @@ like a graph.
 
 - A node before an interrupt runs twice: once to ask, once to receive the answer. Keep that work
   cheap or idempotent.
+- `async` writes go one at a time to keep their order, so a graph whose steps are much faster than
+  its store gains little: the run still waits for the writes before it returns.
+- A drain is honoured between supersteps. A superstep that runs for an hour finishes first; an abort
+  signal is the way to stop one sooner.
+- The linter reads the graph's shape. It cannot see a side effect before an interrupt, a `Send`
+  fan-out too wide for its services, or a tool that should need approval.
 - The in-process checkpointer loses threads on restart; use an operation store for durability.
 - Cached node results must survive the cache store's serialization.
 - A workflow's code between steps runs again on every resume. Keep side effects inside steps.
@@ -4227,7 +4396,25 @@ The executor is a function of an `OperationContext`, which gives it:
 - the id and the attempt number;
 - a signal, aborted on cancellation, timeout, or a lost lease;
 - `report()` for progress, and `heartbeat()` to extend the lease before a long step;
+- `previousHeartbeat`, what an earlier attempt last passed to `heartbeat()`;
 - the trace headers and metadata from submission.
+
+**Resuming from progress.** An attempt that fails is run again from the top. `heartbeat(details)`
+stores `details` on the record as `heartbeatDetails`, and the next attempt reads them as
+`previousHeartbeat`, so a long job resumes where it stopped instead of starting over:
+
+```ts
+await runner.submit(async (context) => {
+  const from = (context.previousHeartbeat as { row: number } | undefined)?.row ?? 0;
+  for (let row = from; row < rows.length; row += 1) {
+    await importRow(rows[row]); // idempotent: keyed by the row
+    await context.heartbeat({ row: row + 1 });
+  }
+});
+```
+
+The details must survive the store's serialization. They say where to resume, not that the work
+before them happened exactly once, so the work itself still needs an idempotency key.
 
 `submit()` returns a `DurableOperationHandle`. It implements the `OperationHandle` contract — `id`,
 `status()`, `result()`, `cancel()`, and `events()` — and adds `record()` for the stored snapshot and
@@ -7715,7 +7902,8 @@ Two helpers build assistants:
 - `functionAssistant()` serves a plain function, which may return a value or yield events.
 
 An assistant receives an `AssistantRunContext`: the run id, the thread, an abort signal, the principal,
-the run's metadata, the attempt, and the revision serving it. Its `recordCost(usd)` records what the
+the run's metadata, the attempt, the revision serving it, and a `control` that turns to draining
+when the replica drains. Its `recordCost(usd)` records what the
 run spent, such as a model call's cost:
 
 ```ts
@@ -7782,7 +7970,12 @@ revision. Both need a read scope unless `metrics: { public: true }`; `metrics: f
 `drain({ timeoutMs })` gets a replica ready to stop. `/health` answers `503`, the replica stops
 claiming, and new runs it accepts are queued. Runs in flight get `timeoutMs` (25 seconds by default)
 to finish. With a queue, the rest are handed back for another worker to continue. The `DrainResult`
-lists the runs that finished and the runs that were handed off. Call it on `SIGTERM`:
+lists the runs that finished and the runs that were handed off.
+
+A graph served through `graphAssistant()` does not wait for the timeout. With a queue, a drain sets
+the run's `control` to draining, which the graph reads as its `RunControl`. It finishes the superstep
+in flight, writes its checkpoint, and stops, and the run goes back to the queue at once. The next
+worker continues from that checkpoint, so no step runs twice and none is cut off halfway. Call it on `SIGTERM`:
 
 ```ts
 process.on('SIGTERM', async () => {
@@ -8422,6 +8615,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | `nexus db sql` | Prints the Postgres schema for the adapters you use. |
 | `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
 | `nexus migrate` | Moves imports to the subpaths the 2.0 root import keeps them on. |
+| `nexus graph lint` | Checks a compiled graph's shape for designs that fail in production. |
 
 `nexus help` prints every flag.
 
@@ -8513,6 +8707,20 @@ build output, and version control.
 A second run changes nothing. Comments inside an import list that it splits are not kept. It works on
 text, so an import statement inside a string is rewritten too. The
 [migration guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers what 2.0 changes beyond imports.
+
+## Linting a graph
+
+`nexus graph lint` loads a module and runs `lintGraph()` on the graph it exports: the export named
+after `#`, or `graph`, or the default. The export can be a compiled graph or a description saved as
+JSON.
+
+```bash
+npx nexus graph lint ./dist/billing.js#checkout --deployed
+```
+
+It prints each finding and its fix, and exits 1 when a finding is an error. `--strict` fails on
+warnings too, `--deployed` treats the in-process checkpointer as an error, and `--ignore` skips codes,
+such as `--ignore DYNAMIC_ROUTE`. The [graph guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/graphs.md#linting-a-graph) lists every rule.
 
 ## Exit codes
 
@@ -8622,7 +8830,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/core` | 311 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 49% | none |
 | `nexus-ai-pro/batch` | 113 KB | 35% | none |
-| `nexus-ai-pro/server` | 109 KB | 34% | none |
+| `nexus-ai-pro/server` | 110 KB | 34% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 30% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 25% | none |
 | `nexus-ai-pro/providers/groq` | 82 KB | 25% | none |
@@ -8632,15 +8840,15 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/lmstudio` | 81 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 81 KB | 25% | none |
 | `nexus-ai-pro/providers/openrouter` | 81 KB | 25% | none |
+| `nexus-ai-pro/agent` | 76 KB | 24% | none |
 | `nexus-ai-pro/router` | 76 KB | 24% | none |
 | `nexus-ai-pro/providers/anthropic` | 74 KB | 23% | none |
 | `nexus-ai-pro/providers/google` | 68 KB | 21% | none |
-| `nexus-ai-pro/agent` | 66 KB | 20% | none |
+| `nexus-ai-pro/graph` | 62 KB | 19% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 18% | none |
 | `nexus-ai-pro/providers/ollama` | 57 KB | 18% | none |
 | `nexus-ai-pro/security` | 53 KB | 16% | none |
 | `nexus-ai-pro/images` | 52 KB | 16% | none |
-| `nexus-ai-pro/graph` | 51 KB | 16% | none |
 | `nexus-ai-pro/postgres` | 51 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 50 KB | 15% | none |
@@ -8660,8 +8868,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 28 KB | 9% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
+| `nexus-ai-pro/graph/functional` | 26 KB | 8% | none |
 | `nexus-ai-pro/evals` | 26 KB | 8% | none |
-| `nexus-ai-pro/graph/functional` | 25 KB | 8% | none |
 | `nexus-ai-pro/insights` | 25 KB | 8% | none |
 | `nexus-ai-pro/testing` | 25 KB | 8% | none |
 | `nexus-ai-pro/tracing` | 23 KB | 7% | none |
@@ -8717,6 +8925,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
+| `nexus-ai-pro/graph/lint` | 6 KB | 2% | none |
 | `nexus-ai-pro/store` | 6 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 6 KB | 2% | none |
 | `nexus-ai-pro/server/remote` | 6 KB | 2% | none |

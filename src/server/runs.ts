@@ -170,6 +170,10 @@ export class RunManager {
   private readonly local = new Map<string, { cancel(reason?: string): boolean }>();
   /** Runs holding one of this replica's execution slots. */
   private readonly slots = new Set<string>();
+  /** The drain switch of each run this replica is executing, so `drain()` can reach graph runs. */
+  private readonly controls = new Map<string, { draining: boolean; reason?: string }>();
+  /** Runs handed back to the queue during a drain, as each graph run stopped at a boundary. */
+  private readonly drainedRuns = new Set<string>();
   private readonly state: ServerStateStore;
   private readonly events: RunEventLog;
   private readonly now: () => Date;
@@ -430,12 +434,22 @@ export class RunManager {
   async drain(options: { timeoutMs?: number } = {}): Promise<DrainResult> {
     this.draining = true;
     this.stopWorking();
+    // A graph run stops at its next superstep boundary with its checkpoint written, so with a queue to
+    // hand it to, nothing waits for the timeout and nothing is cut off mid-step.
+    if (this.options.queue) {
+      for (const control of this.controls.values()) {
+        control.draining = true;
+        control.reason = 'replica draining';
+      }
+    }
     const running = [...this.slots];
     const deadline = Date.now() + (options.timeoutMs ?? 25_000);
     // These waits hold the process open on purpose: a drain must finish before the process may exit.
     while (this.slots.size > 0 && Date.now() < deadline) await pause(Math.min(50, deadline - Date.now()));
 
-    const released: string[] = [];
+    // Graph runs that stopped at a boundary were handed off already, as they stopped.
+    const released: string[] = [...this.drainedRuns];
+    this.drainedRuns.clear();
     if (this.options.queue) {
       for (const id of [...this.slots]) {
         if (this.runner.release(id)) released.push(id);
@@ -621,10 +635,12 @@ export class RunManager {
   private async execute(plan: RunPlan, context: OperationContext): Promise<unknown> {
     const runId = context.operationId;
     let cost = 0;
+    const control: { draining: boolean; reason?: string } = { draining: false };
     const runContext: AssistantRunContext = {
       runId,
       threadId: plan.threadId,
       signal: context.signal,
+      control,
       principal: plan.principal,
       metadata: plan.metadata,
       attempt: context.attempt,
@@ -670,6 +686,7 @@ export class RunManager {
         : plan.assistant.stream(plan.input, runContext));
 
     let last: unknown;
+    this.controls.set(runId, control);
     try {
       for await (const event of stream) {
         last = event;
@@ -677,6 +694,9 @@ export class RunManager {
         context.report({ message: typeOf(event) });
       }
     } catch (error) {
+      // A graph that drained stopped cleanly at a superstep boundary; releasing it makes the stop a
+      // hand-off, so the next worker continues from the checkpoint it just wrote.
+      if (control.draining && isDrained(error) && this.runner.release(runId)) this.drainedRuns.add(runId);
       if (context.signal.aborted && context.signal.reason instanceof OperationReleasedError) {
         // A hand-off, not a failure: the thread stays with this run, and another worker continues it.
         await this.record(runId, 'status', { status: 'queued', reason: 'handed to another worker' });
@@ -696,6 +716,8 @@ export class RunManager {
       await this.releaseThread(plan.threadId, runId);
       await this.releaseTenant(runId, plan.principal?.tenantId);
       throw error;
+    } finally {
+      this.controls.delete(runId);
     }
 
     const interrupt = interruptOf(last);
@@ -936,4 +958,9 @@ function delay(ms: number): Promise<void> {
     const timer = setTimeout(resolve, Math.max(0, ms));
     if (typeof timer === 'object') timer.unref?.();
   });
+}
+
+/** True for the error a graph throws when its run drained: `GraphDrainedError`, read by its code. */
+function isDrained(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'GRAPH_DRAINED';
 }

@@ -25,6 +25,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | `nexus db sql` | Prints the Postgres schema for the adapters you use. |
 | `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
 | `nexus migrate` | Moves imports to the subpaths the 2.0 root import keeps them on. |
+| `nexus graph lint` | Checks a compiled graph's shape for designs that fail in production. |
 
 `nexus help` prints every flag.
 
@@ -116,6 +117,20 @@ build output, and version control.
 A second run changes nothing. Comments inside an import list that it splits are not kept. It works on
 text, so an import statement inside a string is rewritten too. The
 [migration guide](../MIGRATING.md) covers what 2.0 changes beyond imports.
+
+## Linting a graph
+
+`nexus graph lint` loads a module and runs `lintGraph()` on the graph it exports: the export named
+after `#`, or `graph`, or the default. The export can be a compiled graph or a description saved as
+JSON.
+
+```bash
+npx nexus graph lint ./dist/billing.js#checkout --deployed
+```
+
+It prints each finding and its fix, and exits 1 when a finding is an error. `--strict` fails on
+warnings too, `--deployed` treats the in-process checkpointer as an error, and `--ignore` skips codes,
+such as `--ignore DYNAMIC_ROUTE`. The [graph guide](./graphs.md#linting-a-graph) lists every rule.
 
 ## Exit codes
 

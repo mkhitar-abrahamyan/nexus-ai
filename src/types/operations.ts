@@ -162,6 +162,11 @@ export interface OperationRecord<TResult = unknown> {
   lease?: OperationLease;
   /** The latest progress reported. */
   progress?: OperationProgress;
+  /**
+   * What the executor last passed to `context.heartbeat()`, such as the last row it processed. Kept
+   * across attempts, so a retry can resume from it. Must be serializable.
+   */
+  heartbeatDetails?: unknown;
   /** The result, once it succeeded. Must be serializable; bytes belong in an asset store. */
   result?: TResult;
   /** The failure, once it failed. */
@@ -346,8 +351,17 @@ export interface OperationContext {
   signal: AbortSignal;
   /** Publishes a progress event and persists it. */
   report(progress: OperationProgress): void;
-  /** Extends the lease immediately, for a step known to exceed the heartbeat interval. */
-  heartbeat(): Promise<void>;
+  /**
+   * Extends the lease immediately, for a step known to exceed the heartbeat interval. `details`, when
+   * given, is stored with the record and handed to the next attempt as `previousHeartbeat`, so work
+   * that fails halfway can resume where it was instead of starting over.
+   */
+  heartbeat(details?: unknown): Promise<void>;
+  /**
+   * The `details` an earlier attempt last passed to `heartbeat()`. Undefined on a first attempt,
+   * and when no attempt passed any.
+   */
+  previousHeartbeat?: unknown;
   /** Trace propagation headers from submission. */
   traceContext?: Record<string, string>;
   /** Application data from submission. */

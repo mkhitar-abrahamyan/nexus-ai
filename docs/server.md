@@ -86,7 +86,8 @@ Two helpers build assistants:
 - `functionAssistant()` serves a plain function, which may return a value or yield events.
 
 An assistant receives an `AssistantRunContext`: the run id, the thread, an abort signal, the principal,
-the run's metadata, the attempt, and the revision serving it. Its `recordCost(usd)` records what the
+the run's metadata, the attempt, the revision serving it, and a `control` that turns to draining
+when the replica drains. Its `recordCost(usd)` records what the
 run spent, such as a model call's cost:
 
 ```ts
@@ -153,7 +154,12 @@ revision. Both need a read scope unless `metrics: { public: true }`; `metrics: f
 `drain({ timeoutMs })` gets a replica ready to stop. `/health` answers `503`, the replica stops
 claiming, and new runs it accepts are queued. Runs in flight get `timeoutMs` (25 seconds by default)
 to finish. With a queue, the rest are handed back for another worker to continue. The `DrainResult`
-lists the runs that finished and the runs that were handed off. Call it on `SIGTERM`:
+lists the runs that finished and the runs that were handed off.
+
+A graph served through `graphAssistant()` does not wait for the timeout. With a queue, a drain sets
+the run's `control` to draining, which the graph reads as its `RunControl`. It finishes the superstep
+in flight, writes its checkpoint, and stops, and the run goes back to the queue at once. The next
+worker continues from that checkpoint, so no step runs twice and none is cut off halfway. Call it on `SIGTERM`:
 
 ```ts
 process.on('SIGTERM', async () => {

@@ -41,6 +41,18 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.1 stage (Unreleased)
+
+Everything 2.1 adds is stable from the start and additive: no default changes meaning.
+
+- graph durability modes, `flush()`, `maxPendingWrites`, `onError` with `NodeFailure` and
+  `RecoveredFailure`, `nodeDefaults`, `NodeTimeout`, `context.heartbeat()`, `SendOptions`,
+  `RunControl` and `RunControlLike`, and `GraphDrainedError` (`nexus-ai-pro/graph`);
+- `lintGraph()` and its finding types (`nexus-ai-pro/graph/lint`). New rules may be added in a minor
+  release; a rule's code and severity do not change within 2.x;
+- `OperationContext.previousHeartbeat` and `OperationRecord.heartbeatDetails`;
+- `AssistantRunContext.control`.
+
 ## 2.0 stage (2.0.0)
 
 2.0 removes what 1.x deprecated and promotes the surfaces that have settled.

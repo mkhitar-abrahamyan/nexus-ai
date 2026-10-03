@@ -1,6 +1,6 @@
 # Graphs
 
-<!-- covers: ./graph ./graph/functional ./graph/visualize -->
+<!-- covers: ./graph ./graph/functional ./graph/visualize ./graph/lint -->
 
 Stateful graphs from `nexus-ai-pro/graph`: typed channels, parallel branches, conditional and deferred edges, interrupts for human input, checkpoints that survive a restart, time travel, subgraphs, per-node caching, and a Mermaid visualizer on `nexus-ai-pro/graph/visualize`. A graph-only application imports no third-party package.
 
@@ -326,9 +326,9 @@ before its first step, audited and counted when it ends. `lifecycleFamily` label
 `agent` as `createAgent()` sets. The [lifecycle guide](./lifecycle.md) has the details.
 
 `GraphRunOptions` sets the `threadId`, `maxSteps`, a signal, metadata for every checkpoint,
-`maxConcurrency`, breakpoints for this run, `onEvent`, and `onProgress`. `onEvent` receives each
-`GraphEvent`: `task_start`, `task_retry`, `task_end` with the update and whether it was served from
-the cache, `checkpoint`, and `custom`. `onProgress` receives each `GraphProgress` a node reported.
+`maxConcurrency`, breakpoints for this run, `onEvent`, `onProgress`, its `durability`, and a `control`
+to drain it. `onEvent` receives each `GraphEvent`: `task_start`, `task_retry`, `task_failed`,
+`task_end` with the update and whether it was served from the cache, `checkpoint`, and `custom`. `onProgress` receives each `GraphProgress` a node reported.
 
 A node asks a question with an `InterruptRequest`: a `reason` and a JSON `payload`. Each question
 waits as a `PendingInterrupt`, with its id, node, task, step, position within the node, and when it
@@ -338,7 +338,7 @@ was asked.
 | --- | --- |
 | `resume()`, `resumeWith()` | Answer the one pending question. |
 | `resumeInterrupts()`, `resumeInterruptsWith()` | Answer several, by id. |
-| `continue()` | Carries on from a breakpoint. |
+| `continue()` | Carries on from a breakpoint, a drain, or a failure. On a finished thread it changes nothing and returns its state. |
 | `resumeFrom()` | Rewinds to a step and runs forward. |
 
 `interruptKey()` is the stable key an answer is stored under: task, step, and index. That is how
@@ -393,6 +393,162 @@ To build a checkpoint by hand, for a seed or a test, write a `CheckpointDraft` �
 its version, id, tasks, and questions — and pass it to `toCheckpoint()`. It fills those in, and always
 derives the id again, so a copy moved to another thread never keeps a stale one.
 
+## Surviving failure
+
+A graph in production meets slow databases, failing services, hung calls, and workers that are
+stopped mid-run. Each of those has a setting, and none changes how a graph behaves until you use it.
+
+### When checkpoints are written
+
+`compile({ durability })` takes a `DurabilityMode`. `GraphRunOptions.durability` overrides it for
+one run.
+
+| Mode | Writes | A crash loses | For |
+| --- | --- | --- | --- |
+| `sync` (the default) | Each checkpoint, before the next superstep starts | Nothing that finished | Side effects that must line up with state, such as payments |
+| `async` | Each checkpoint, in the background while the next superstep runs | The last few supersteps, which run again | Most agents |
+| `exit` | Only where the run stops: an interrupt, a breakpoint, completion, a failure, an abort, or a drain | The whole run | Short, high-throughput graphs |
+
+`async` keeps every write and its order. The writes still go one at a time, because a checkpointer
+replaces anything at a later step, so the gain is that the graph stops waiting: it does the next
+step's work while the store catches up. Against a store with an 8 ms round trip, a 50-step graph
+whose steps each take about as long finishes in about half the time. The run waits for every write
+before it returns, pauses, fails, or drains. `maxPendingWrites` (8) caps the writes in flight, so a
+slow store slows the graph down rather than filling memory. A write that fails in the background fails
+the run. `flush()` on a compiled graph waits for the writes of every run in progress.
+
+### Recovering after retries
+
+A node's retry policy decides how often it tries. `onError` decides what happens when the tries run
+out. It receives a `NodeFailure` and returns what a node returns: a state update, a `Command`, or
+nothing to carry on along the node's own edges. Throwing fails the graph as before.
+
+```ts
+import { Command } from 'nexus-ai-pro/graph';
+
+.addNode('charge', chargeCard, {
+  retry: { maxAttempts: 3 },
+  ends: ['refund'],
+  onError: (failure) =>
+    new Command({ update: { status: 'payment_failed' }, goto: 'refund' }),
+})
+```
+
+A `NodeFailure` holds the node and task, the step, the attempts made, when the first attempt started
+and the last one failed, the error, whether the retry policy ran out or the error was not retryable,
+the timeout that ended the attempt if one did, the `Send` input, and the thread. A `NodeErrorHandler`
+is the function's type. It decides and should not act: compensation with side effects belongs in the
+node it routes to.
+
+The decision is part of durable state. The checkpoint after the step lists each recovery as a
+`RecoveredFailure` in `recovered`, with the error, the attempts, and where the run went, and that
+checkpoint is written before anything the decision routes to can run, in every durability mode. A
+crash after it resumes into the same compensation path, and the failed node is not run again. The step
+event carries the same list, and `onEvent` gets a `task_failed` event, with `recovered` set when
+`onError` handled it. A mistake in the graph itself, a `GraphValidationError`, is never recovered.
+
+`compile({ nodeDefaults })` sets a retry policy, timeouts, and an `onError` for every node at once.
+A node's own options win, field by field.
+
+### Run and idle timeouts
+
+A `NodeTimeout` sets two limits. `runMs` caps an attempt: it may never take longer. `idleMs` caps
+the time between signs of progress: the attempt may run as long as it likes while it keeps showing it
+is alive. `timeoutMs` is the same as `timeout.runMs`.
+
+```ts
+.addNode('crawl', async ({ heartbeat, emit }) => {
+  for (const page of pages) {
+    emit({ page: await fetchPage(page) }); // progress, which also refreshes the idle timer
+    heartbeat();                           // or just that, for work with nothing to report
+  }
+}, { timeout: { runMs: 10 * 60_000, idleMs: 30_000 } })
+```
+
+`context.heartbeat()`, `context.emit()`, and `context.report()` each refresh the idle timer. Either
+limit aborts the node's signal and fails the attempt with `GraphNodeTimeoutError`, whose `kind` says
+which. The retry policy may retry it, and `onError` sees it in `failure.timeout`.
+
+A `Send` can give the task it creates its own limits through `SendOptions`, such as more time for one
+large document. The override is saved with the task, so it holds after a resume:
+
+```ts
+new Send('summarize', doc, { timeout: { runMs: 5 * 60_000 } })
+```
+
+### Draining a run
+
+An abort signal stops a run in the middle of a superstep and cancels the nodes in flight. A
+`RunControl` stops it cleanly instead: the superstep in flight finishes, its checkpoint is written,
+and the run ends with `GraphDrainedError`, which names the thread and the step. Any process can then
+`continue()` the thread.
+
+```ts
+import { RunControl } from 'nexus-ai-pro/graph';
+
+const control = new RunControl();
+process.on('SIGTERM', () => control.drain('sigterm'));
+
+await graph.invoke(input, { threadId, control });
+```
+
+One control drains any number of runs. `onDrain()` registers a listener. The checkpoint records the
+drain in `drained`, with its reason. `GraphRunOptions.control` takes any `RunControlLike`, an object
+with `draining` and `reason`. The agent server passes one to every graph it serves, and drains
+them when the replica drains (see the [server guide](./server.md)).
+
+### What repeats after a crash
+
+A crash can run some work twice. This is exactly what, so that a side effect can be written to be
+safe:
+
+| Primitive | Runs again after a crash? | What is durable | A side effect must |
+| --- | --- | --- | --- |
+| Graph node, `sync` | The superstep it was in, if its checkpoint was not written | Every finished superstep | Be idempotent |
+| Graph node, `async` | The supersteps not yet written | Every superstep the store has acknowledged | Be idempotent |
+| Graph node, `exit` | The whole run | Pauses, failures, drains, and the end | Be idempotent, or the graph has none |
+| A node before an interrupt | Yes, once more when the answer arrives | The question and its answer | Come after the interrupt |
+| A cached node | No, on a hit | The cached result | Not exist |
+| `onError` | Only if the crash came before its checkpoint | The decision, before its target runs | Not exist: route to a node instead |
+| Functional workflow step | Only the step in flight | Each finished step's result | Be idempotent |
+| Operation attempt | The whole attempt | The record, and its last heartbeat details | Be idempotent, and resume from `previousHeartbeat` |
+
+Nothing here runs a side effect exactly once. An idempotency key on the call that makes it is what
+turns "at least once" into "effectively once".
+
+### Linting a graph
+
+`lintGraph()` from `nexus-ai-pro/graph/lint` reads a compiled graph's shape — or a description saved
+as JSON — and returns a `GraphLintFinding` for each design that works in a demo and fails in
+production. Nothing runs. `nexus graph lint` runs it from the command line (see the
+[command-line guide](./cli.md)).
+
+| `GraphLintCode` | `GraphLintSeverity` | Finds |
+| --- | --- | --- |
+| `UNBOUNDED_CYCLE` | error | A cycle of static edges, which only the step limit can stop |
+| `RETRY_WITHOUT_IDEMPOTENCY` | warning | A retried node not declared `idempotent` |
+| `RETRY_WITHOUT_TIMEOUT` | warning | A retried node with no timeout, whose hung attempt is never retried |
+| `DEFERRED_DURABILITY_WITH_SIDE_EFFECTS` | warning | `async` or `exit` durability with nodes not declared `idempotent` |
+| `MEMORY_CHECKPOINTER` | warning, or error when `deployed` | The in-process default, which a restart loses |
+| `NO_CHECKPOINTER` | info | No checkpoints, so no interrupt, resume, drain, or recovery |
+| `UNBOUNDED_CONCURRENCY` | warning | A superstep with no limit on tasks at once |
+| `DYNAMIC_ROUTE` | info | A router with no mapping and no `ends`, whose routes cannot be checked |
+
+Each finding has its code, severity, node (a path such as `review/approve` inside a subgraph), what
+is wrong, and the fix. `GraphLintOptions` sets `deployed` for a graph that runs where restarts and
+hand-offs are normal, and `ignore` for codes to skip.
+
+A node declares `idempotent: true` when running it twice is safe. Nothing at run time depends on it;
+it is what lets the linter tell a safe retry from a dangerous one.
+
+```ts
+import { lintGraph } from 'nexus-ai-pro/graph/lint';
+
+for (const finding of lintGraph(graph, { deployed: true })) {
+  console.log(`${finding.severity} ${finding.code}: ${finding.message}`);
+}
+```
+
 ## Errors
 
 Every graph error extends `GraphError` and carries a stable `code`:
@@ -404,8 +560,10 @@ Every graph error extends `GraphError` and carries a stable `code`:
   false`, which has nowhere to keep the question.
 - `GraphStepLimitError` — the run exceeded `maxSteps`, naming the nodes still pending.
 - `GraphNodeError` — a node threw; the original error is its `cause`.
-- `GraphNodeTimeoutError` — a node outlived `timeoutMs`. It is separate because it is often worth
-  retrying.
+- `GraphNodeTimeoutError` — a node outlived its run limit, or went past its idle limit without
+  showing progress; `kind` is `run` or `idle`. It is separate because it is often worth retrying.
+- `GraphDrainedError` — not a failure: the run stopped because its `RunControl` drained, after its
+  superstep finished and was checkpointed. `continue()` resumes it.
 - `GraphThreadNotFoundError` — no checkpoint exists for the thread.
 - `GraphNotInterruptedError` — a resume was asked of a thread that is not waiting for input.
 
@@ -416,7 +574,12 @@ Every graph error extends `GraphError` and carries a stable `code`:
 - the name, and each node with its options and any subgraph;
 - each edge, conditional or not, with its label;
 - routers whose targets cannot be known in advance;
-- the input and output channels.
+- the input and output channels;
+- the durability mode, which checkpointer it writes to (`memory`, `custom`, or `none`), and its
+  concurrency limit.
+
+Each node lists its retry attempts, timeouts, whether it has an `onError`, and whether it is declared
+`idempotent`. That is what `lintGraph()` reads.
 
 `toMermaid()` draws anything `Describable` — a description, or anything with `describe()`. Its
 `MermaidOptions` set the direction (`TD` or `LR`), whether subgraphs are expanded or collapsed, and
@@ -528,6 +691,12 @@ like a graph.
 
 - A node before an interrupt runs twice: once to ask, once to receive the answer. Keep that work
   cheap or idempotent.
+- `async` writes go one at a time to keep their order, so a graph whose steps are much faster than
+  its store gains little: the run still waits for the writes before it returns.
+- A drain is honoured between supersteps. A superstep that runs for an hour finishes first; an abort
+  signal is the way to stop one sooner.
+- The linter reads the graph's shape. It cannot see a side effect before an interrupt, a `Send`
+  fan-out too wide for its services, or a tool that should need approval.
 - The in-process checkpointer loses threads on restart; use an operation store for durability.
 - Cached node results must survive the cache store's serialization.
 - A workflow's code between steps runs again on every resume. Keep side effects inside steps.
@@ -556,6 +725,7 @@ specific entry point that provides it.
 | `CompileOptions` | interface | Options applied when a graph is compiled: stores, breakpoints, concurrency, retries, and failure handling. |
 | `counter` | function | Sums numeric writes, for a counter several branches increment. |
 | `createGraph` | function | Starts a graph definition. |
+| `DurabilityMode` | type | When a graph writes its checkpoints. |
 | `EdgeRouter` | type | Chooses where to go after a node. |
 | `END` | constant | Terminal sentinel. |
 | `GraphBreakpoint` | interface | Where a run paused for debugging. |
@@ -564,12 +734,13 @@ specific entry point that provides it.
 | `GraphCheckpointV1` | interface | A checkpoint as 1.x stored it: no version or id, tasks only when `next` could not say them, and the first question repeated in `interrupt`. |
 | `GraphCheckpointV2` | type | Deprecated: Use `GraphCheckpoint`, which is this schema in 2.0. The 2.0 checkpoint schema under the name 1.25 gave it, so code written against 1.25 compiles. |
 | `GraphDescription` | interface | A graph's shape, as data: what `describe()` returns and what the visualizer draws. |
+| `GraphDrainedError` | class | Raised when a run stops because its `RunControl` was drained. |
 | `GraphError` | class | Base class for graph errors, each with a stable `code`. |
 | `GraphEvent` | type | Fine-grained events delivered to `GraphRunOptions.onEvent`. |
 | `GraphInput` | type | What a caller may pass to `invoke()`: the graph's input channels, or every channel by default. |
 | `GraphInterrupt` | class | Thrown by `context.interrupt()` to suspend the graph. |
 | `GraphNodeError` | class | Raised when a node throws. |
-| `GraphNodeTimeoutError` | class | Raised when a node outlives its `timeoutMs`. |
+| `GraphNodeTimeoutError` | class | Raised when a node outlives its run limit, or goes longer than its idle limit without showing progress. |
 | `GraphNotInterruptedError` | class | Raised when resuming a thread that is not awaiting input. |
 | `GraphProgress` | interface | Progress a node reported through `context.report()`. |
 | `GraphResult` | interface | The outcome of a run. |
@@ -591,15 +762,22 @@ specific entry point that provides it.
 | `NodeCacheEntry` | interface | A cached node result: the writes it made and where it routed. |
 | `NodeCachePolicy` | interface | How a node reuses its results: the key, how long a result lasts, and where results are kept. |
 | `NodeContext` | interface | What a node receives when it runs. |
+| `NodeErrorHandler` | type | Decides what happens after a node's retries are exhausted: a state update, a `Command` that routes to a compensation node, or nothing, to carry on along the node's own edges. |
+| `NodeFailure` | interface | Why a node's last attempt failed, handed to its `onError` once retries are exhausted. |
 | `NodeFn` | type | A node: reads state from its context and returns an update, a `Command`, or nothing. |
-| `NodeOptions` | interface | How a node runs: retries, a timeout, where it may route, deferral, and caching. |
+| `NodeOptions` | interface | How a node runs: retries, timeouts, recovery, where it may route, deferral, caching, and whether it is safe to run twice. |
 | `NodeResult` | type | What a node may return: an update, a `Command`, or nothing. |
+| `NodeTimeout` | interface | How long a node may run, in two senses. |
 | `OperationStoreCheckpointer` | class | Persists checkpoints through the `OperationStore` that already backs durable operations. |
 | `OperationStoreCheckpointerOptions` | interface | Options for the operation-store checkpointer. |
 | `PendingInterrupt` | interface | A question a node asked through `interrupt()`, waiting for an answer. |
+| `RecoveredFailure` | interface | A failure a node's `onError` recovered from, as its checkpoint records it. |
 | `reducerChannel` | function | Builds a channel from a plain reducer, for a rule none of the built-ins covers. |
 | `RetryPolicy` | interface | How a node retries. |
+| `RunControl` | class | Stops graph runs cleanly: each finishes its current superstep, writes its checkpoint, and ends with `GraphDrainedError`, so another worker can `continue()` it. |
+| `RunControlLike` | interface | Asks a running graph to stop at the end of its current superstep. |
 | `Send` | class | Routes to one node with its own input, creating one task per value. |
+| `SendOptions` | interface | Options for one task a `Send` creates. |
 | `START` | constant | Entry sentinel. |
 | `StateGraph` | class | Builds a typed state graph. |
 | `StateOf` | type | The state object a schema describes. |
@@ -623,6 +801,16 @@ specific entry point that provides it.
 | `WorkflowRunOptions` | interface | Options for one run of a workflow. |
 | `WorkflowState` | interface | What a workflow checkpoint holds: the input, every completed step's result, and the output. |
 | `WorkflowStepTimeoutError` | class | Raised when a step outlives its `timeoutMs`. |
+
+### `nexus-ai-pro/graph/lint`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `GraphLintCode` | type | The rules `lintGraph()` checks. |
+| `GraphLintFinding` | interface | One design problem `lintGraph()` found. |
+| `GraphLintOptions` | interface | Options for `lintGraph()`. |
+| `GraphLintSeverity` | type | How much a lint finding matters: `error` fails `nexus graph lint`, the others only report. |
+| `lintGraph` | function | Finds designs that work in a demo and fail in production, by reading a compiled graph's shape. |
 
 ### `nexus-ai-pro/graph/visualize`
 

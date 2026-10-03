@@ -510,6 +510,16 @@
         "default": "./dist-cjs/graph/visualize.js"
       }
     },
+    "./graph/lint": {
+      "import": {
+        "types": "./dist/graph/lint.d.ts",
+        "default": "./dist/graph/lint.js"
+      },
+      "require": {
+        "types": "./dist-cjs/graph/lint.d.ts",
+        "default": "./dist-cjs/graph/lint.js"
+      }
+    },
     "./agent": {
       "import": {
         "types": "./dist/agent/index.d.ts",
@@ -1721,6 +1731,9 @@
       ],
       "graph/visualize": [
         "dist-cjs/graph/visualize.d.ts"
+      ],
+      "graph/lint": [
+        "dist-cjs/graph/lint.d.ts"
       ],
       "agent": [
         "dist-cjs/agent/index.d.ts"

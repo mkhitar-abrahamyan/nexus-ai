@@ -89,6 +89,7 @@ const imports = [
   { specifier: 'nexus-ai-pro/ops/circuit-breaker', exports: ['CircuitBreaker'] },
   { specifier: 'nexus-ai-pro/ops/rate-limit-adapters', exports: ['MemoryRateLimitStore', 'RedisRateLimitStore'] },
   { specifier: 'nexus-ai-pro/graph/visualize', exports: ['toMermaid', 'toGraphJSON', 'toSvg', 'layoutGraph'] },
+  { specifier: 'nexus-ai-pro/graph/lint', exports: ['lintGraph'] },
   { specifier: 'nexus-ai-pro/graph/functional', exports: ['workflow', 'Workflow', 'WorkflowStepTimeoutError'] },
   {
     specifier: 'nexus-ai-pro/sqlite',

@@ -157,7 +157,25 @@ The executor is a function of an `OperationContext`, which gives it:
 - the id and the attempt number;
 - a signal, aborted on cancellation, timeout, or a lost lease;
 - `report()` for progress, and `heartbeat()` to extend the lease before a long step;
+- `previousHeartbeat`, what an earlier attempt last passed to `heartbeat()`;
 - the trace headers and metadata from submission.
+
+**Resuming from progress.** An attempt that fails is run again from the top. `heartbeat(details)`
+stores `details` on the record as `heartbeatDetails`, and the next attempt reads them as
+`previousHeartbeat`, so a long job resumes where it stopped instead of starting over:
+
+```ts
+await runner.submit(async (context) => {
+  const from = (context.previousHeartbeat as { row: number } | undefined)?.row ?? 0;
+  for (let row = from; row < rows.length; row += 1) {
+    await importRow(rows[row]); // idempotent: keyed by the row
+    await context.heartbeat({ row: row + 1 });
+  }
+});
+```
+
+The details must survive the store's serialization. They say where to resume, not that the work
+before them happened exactly once, so the work itself still needs an idempotency key.
 
 `submit()` returns a `DurableOperationHandle`. It implements the `OperationHandle` contract — `id`,
 `status()`, `result()`, `cancel()`, and `events()` — and adds `record()` for the stored snapshot and

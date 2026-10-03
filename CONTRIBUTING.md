@@ -49,7 +49,14 @@ regenerate it in the change that edits the source.
 
 ## Running real-provider tests
 
-Mock conformance runs everywhere. Real-provider conformance is opt-in and needs your own keys:
+Mock conformance runs everywhere. Real-provider conformance is opt-in and needs your own keys.
+
+The `live-providers` workflow runs it every week, and on demand, for each provider whose key is set
+as a repository secret: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `GROQ_API_KEY`,
+`MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `COHERE_API_KEY`, and `OPENROUTER_API_KEY`. A provider without a key is skipped.
+When a run fails, the workflow opens an issue, or comments on the open one, so a provider that changed
+its API is caught before a release rather than by users. It never runs on pull requests, so forks never
+see the keys.
 
 ```bash
 npm run test:conformance:real
