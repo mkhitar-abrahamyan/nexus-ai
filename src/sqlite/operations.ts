@@ -8,6 +8,7 @@ import {
   type OperationStoreFilter,
   type OperationStoreStats,
 } from '../types/operations.js';
+import type { MigrationResult, SchemaMigration } from '../utils/schema-migrations.js';
 import {
   isSqliteUniqueViolation,
   quoteSqliteTable,
@@ -15,6 +16,7 @@ import {
   type SqliteLikeClient,
   toSqliteClient,
 } from './client.js';
+import type { SqliteMigrateOptions } from './migrations.js';
 
 /** Options for the SQLite operation store. */
 export interface SqliteOperationStoreOptions {
@@ -25,10 +27,41 @@ export interface SqliteOperationStoreOptions {
 const DEFAULT_TABLE = 'nexus_operations';
 const TERMINAL = TERMINAL_OPERATION_STATUSES.map((status) => `'${status}'`).join(', ');
 
-/** The schema, as statements. Applied by `migrate()`, or by the application's own tooling. */
+/** The schema, as statements: every migration's, in order. For the application's own tooling. */
 export function sqliteOperationStoreMigration(options: SqliteOperationStoreOptions = {}): string[] {
+  return sqliteOperationStoreMigrations(options).flatMap((migration) => [...migration.statements]);
+}
+
+/**
+ * The versioned schema, which `migrate()` applies. Version 1 is the 2.0 table; version 2 indexes
+ * queued work by age, so a claim reads the oldest few rows instead of sorting the queue; version 3
+ * indexes queued work by tenant.
+ */
+export function sqliteOperationStoreMigrations(options: SqliteOperationStoreOptions = {}): SchemaMigration[] {
   const name = options.table ?? DEFAULT_TABLE;
   const table = quoteSqliteTable(name);
+  const component = `operations:${name}`;
+  return [
+    { component, version: 1, name: 'create the operations table', statements: createStatements(name, table) },
+    {
+      component,
+      version: 2,
+      name: 'index queued work by age',
+      // Not partial: SQLite's planner prefers the recovery index over a partial one and sorts the queue.
+      statements: [`CREATE INDEX IF NOT EXISTS "${name}_queued" ON ${table} (status, created_at, id)`],
+    },
+    {
+      component,
+      version: 3,
+      name: 'index queued work by tenant',
+      statements: [
+        `CREATE INDEX IF NOT EXISTS "${name}_tenant_queued" ON ${table} (status, json_extract(doc, '$.tenantId'), created_at, id)`,
+      ],
+    },
+  ];
+}
+
+function createStatements(name: string, table: string): string[] {
   return [
     `CREATE TABLE IF NOT EXISTS ${table} (
   id TEXT PRIMARY KEY,
@@ -66,9 +99,14 @@ export class SqliteOperationStore<TResult = unknown> implements OperationStore<T
     this.table = quoteSqliteTable(options.table ?? DEFAULT_TABLE);
   }
 
-  /** Creates the table and indexes if they do not exist. Never runs implicitly. */
-  async migrate(): Promise<void> {
-    for (const statement of sqliteOperationStoreMigration(this.options)) await this.client.exec(statement);
+  /**
+   * Applies this store's pending migrations, recorded in `nexus_schema_migrations`, each inside
+   * `BEGIN IMMEDIATE`. Never runs implicitly. Safe on a file an older release created.
+   */
+  async migrate(options: SqliteMigrateOptions = {}): Promise<MigrationResult> {
+    // Loaded when called, so an application that migrates elsewhere never imports the runner.
+    const { applySqliteMigrations } = await import('./migrations.js');
+    return applySqliteMigrations(this.client, sqliteOperationStoreMigrations(this.options), options);
   }
 
   /**

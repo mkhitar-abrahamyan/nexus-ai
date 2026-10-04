@@ -44,6 +44,15 @@ export interface CircuitBreakerConfig {
    * `nexus-ai-pro/ops/circuit-store` and `nexus-ai-pro/postgres/circuits`.
    */
   store?: CircuitStateStore;
+  /**
+   * Counts every worker's calls together, so nine failures spread over three workers count as nine.
+   * Each worker adds the calls it saw to a rolling window in the `store` when it syncs, and opens the
+   * circuit everywhere once the shared count crosses `failureThreshold` (failures since any worker's
+   * last success) or `failureRateThreshold`. Checks stay synchronous: a worker learns the shared count
+   * on its next sync, at most `syncIntervalMs` late. Needs a store with `observe()`; every bundled one
+   * has it. Off by default, when each worker counts only its own calls.
+   */
+  shareObservations?: boolean;
   /** Names this worker in shared state. Defaults to a random id. */
   workerId?: string;
   /** Shared state is refreshed at most this often, on the next check that needs it. Defaults to 1 second. */
@@ -90,6 +99,39 @@ export interface CircuitSnapshot {
   retryAt?: string;
   /** The most recent error, as text. */
   lastError?: string;
+  /** Every worker's calls together, as of this worker's last sync, with `shareObservations`. */
+  shared?: CircuitWindow;
+}
+
+/** Calls one worker saw since it last reported, which `CircuitStateStore.observe()` adds to the shared window. */
+export interface CircuitObservation {
+  /** Calls and failures per window bucket, by the bucket's start in epoch milliseconds. */
+  buckets: Array<{ at: number; calls: number; failures: number }>;
+  /** Whether any of the calls succeeded, which ends the shared failure streak before `trailingFailures` is added. */
+  succeeded: boolean;
+  /** Failures after the last success, or every failure when none succeeded. */
+  trailingFailures: number;
+  /** The rolling window, in milliseconds. */
+  windowMs: number;
+  /** The width of one bucket. A bucket that ended before `now - windowMs` is dropped. */
+  bucketMs: number;
+  /** Epoch milliseconds now, by the breaker's clock. */
+  now: number;
+  /**
+   * Epoch milliseconds of the circuit's last close. Buckets that started before it are not counted, so
+   * failures that opened a circuit do not reopen it the moment a probe closes it.
+   */
+  since?: number;
+}
+
+/** A provider's calls across every worker, inside the rolling window. */
+export interface CircuitWindow {
+  /** Calls counted. */
+  calls: number;
+  /** Of those, failures. */
+  failures: number;
+  /** Failures since any worker last reported a success. */
+  consecutiveFailures: number;
 }
 
 /** A circuit decision as every worker sees it. */
@@ -126,6 +168,12 @@ export interface CircuitStateStore {
    * recovering provider is probed once rather than by every replica at the same moment.
    */
   claimProbe(providerName: string, owner: string, ttlMs: number): Promise<boolean> | boolean;
+  /**
+   * Adds one worker's calls to a provider's shared window, and returns the window across every
+   * worker. Optional; `shareObservations` needs it. Each call must add atomically, so two workers
+   * reporting at once both count.
+   */
+  observe?(providerName: string, observation: CircuitObservation): Promise<CircuitWindow> | CircuitWindow;
 }
 
 /** @internal A circuit's local state. Shared with the coordinator module, never exported publicly. */
@@ -144,6 +192,8 @@ export interface CircuitEntry {
   probeClaimed: boolean;
   /** Why the circuit last changed state. */
   reason?: string;
+  /** The shared window from the last sync, with `shareObservations`. */
+  shared?: CircuitWindow;
 }
 
 /**
@@ -241,6 +291,7 @@ export class CircuitBreaker {
     this.refreshState(providerName, entry);
     this.pushWindow(entry, false);
     entry.consecutiveFailures = 0;
+    this.coordinator?.observed(providerName, false);
 
     if (entry.state === 'half-open') {
       entry.halfOpenInFlight = Math.max(0, entry.halfOpenInFlight - 1);
@@ -267,6 +318,7 @@ export class CircuitBreaker {
 
     this.pushWindow(entry, true);
     entry.consecutiveFailures += 1;
+    this.coordinator?.observed(providerName, true);
     entry.lastError = error instanceof Error ? error.message : error === undefined ? undefined : String(error);
 
     if (entry.state === 'half-open') {
@@ -310,6 +362,7 @@ export class CircuitBreaker {
             ? new Date(entry.openedAt + resetTimeoutMs).toISOString()
             : undefined,
         lastError: entry.lastError,
+        ...(entry.shared ? { shared: { ...entry.shared } } : {}),
       };
     });
   }
@@ -383,6 +436,7 @@ export class CircuitBreaker {
       entry.openedAt = undefined;
       entry.consecutiveFailures = 0;
       entry.window = [];
+      entry.shared = undefined;
       entry.halfOpenInFlight = 0;
       entry.halfOpenSuccesses = 0;
       entry.probeClaimed = false;

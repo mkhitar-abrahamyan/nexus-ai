@@ -5,6 +5,7 @@ import type {
   OperationStoreStats,
 } from '../types/operations.js';
 import { isTerminalOperationStatus } from '../types/operations.js';
+import { OperationDuplicateError } from './errors.js';
 import { assertSerializableRecord } from './serialization.js';
 import { countRecords, isUnheldQueued, matchesFilter } from './stats.js';
 
@@ -33,9 +34,19 @@ export class MemoryOperationStore<TResult = unknown> implements OperationStore<T
     this.maxRecords = options.maxRecords ?? 1000;
   }
 
-  /** Stores a new record. Refuses records carrying raw bytes. */
+  /**
+   * Stores a new record. Throws `OperationDuplicateError` when another record already holds its
+   * idempotency key, as every shared store does, so two submissions racing under one key cannot both
+   * start. Refuses records carrying raw bytes.
+   */
   create(record: OperationRecord<TResult>): void {
     assertSerializableRecord(record);
+    if (record.idempotencyKey) {
+      const owner = this.byIdempotencyKey.get(record.idempotencyKey);
+      if (owner !== undefined && owner !== record.id && this.records.has(owner)) {
+        throw new OperationDuplicateError(record.idempotencyKey);
+      }
+    }
     this.records.set(record.id, clone(record));
     if (record.idempotencyKey) this.byIdempotencyKey.set(record.idempotencyKey, record.id);
     this.evict();

@@ -183,13 +183,19 @@ request does, as `ThreadBusyPolicy`:
 | Policy | Behaviour |
 | --- | --- |
 | `reject` | `409` with `THREAD_BUSY`. The default. |
-| `enqueue` | Waits for the run in flight, up to `queueTimeoutMs`, then runs. |
+| `enqueue` | Waits its turn behind the runs in flight, up to `queueTimeoutMs`, then runs; still busy then, it is refused with `THREAD_BUSY`. |
 | `interrupt` | Cancels the run in flight and starts the new one. |
 | `rollback` | Cancels it, puts the thread back to the step it was at before, and starts the new one. |
 
 `rollback` needs an assistant with `restore`; `graphAssistant()` provides it by writing the earlier
 checkpoint's state forward, so the history stays intact. An assistant without it is refused with
 `AssistantCapabilityError` rather than silently doing something else.
+
+The thread is claimed atomically. The claim is a record in the operation store under a unique
+idempotency key, moved from run to run by compare-and-set, so of ten replicas starting runs on one
+thread at the same moment exactly one proceeds and the rest meet the policy. Before 2.2 a thread's
+busy check read and wrote separately, and replicas racing could all see it free. A custom operation
+store without `findByIdempotencyKey` keeps that older behaviour.
 
 ## Streaming, and reconnecting
 

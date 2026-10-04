@@ -9,6 +9,7 @@ import {
   type VectorStore,
 } from '../hallucination/retrieval.js';
 import { assertDimensions, assertWidth, filterEntries, parseMetadata, vectorsFor } from '../rag/vector-helpers.js';
+import type { MigrationResult, SchemaMigration } from '../utils/schema-migrations.js';
 import {
   quoteSqliteTable,
   type SqliteDatabaseLike,
@@ -16,6 +17,7 @@ import {
   type SqliteValue,
   toSqliteClient,
 } from './client.js';
+import type { SqliteMigrateOptions } from './migrations.js';
 
 /** Options for the SQLite vector store. */
 export interface SqliteVectorStoreOptions {
@@ -49,6 +51,18 @@ export function sqliteVectorStoreMigration(options: { table?: string } = {}): st
   return `CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, content TEXT NOT NULL, source TEXT, metadata TEXT, embedding BLOB NOT NULL)`;
 }
 
+/** The versioned schema, which `migrate()` applies. Version 1 is the 2.0 table. */
+export function sqliteVectorStoreMigrations(options: { table?: string } = {}): SchemaMigration[] {
+  return [
+    {
+      component: `vectors:${options.table ?? 'nexus_vectors'}`,
+      version: 1,
+      name: 'create the vectors table',
+      statements: [sqliteVectorStoreMigration(options)],
+    },
+  ];
+}
+
 /**
  * Retrieval chunks in SQLite: one file, no server, the same contract as every other store.
  *
@@ -72,9 +86,14 @@ export class SqliteVectorStore implements VectorStore {
     this.embed = options.embed ?? ((texts) => createHashEmbeddings(texts, options.dimensions));
   }
 
-  /** Creates the table unless it exists. Never runs implicitly. */
-  async migrate(): Promise<void> {
-    await this.client.exec(sqliteVectorStoreMigration(this.options));
+  /**
+   * Applies this store's pending migrations, recorded in `nexus_schema_migrations`, each inside
+   * `BEGIN IMMEDIATE`. Never runs implicitly. Safe on a file an older release created.
+   */
+  async migrate(options: SqliteMigrateOptions = {}): Promise<MigrationResult> {
+    // Loaded when called, so an application that migrates elsewhere never imports the runner.
+    const { applySqliteMigrations } = await import('./migrations.js');
+    return applySqliteMigrations(this.client, sqliteVectorStoreMigrations(this.options), options);
   }
 
   /** Adds chunks, or replaces those whose id exists, embedding those without a vector in one batch. */

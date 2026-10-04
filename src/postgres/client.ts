@@ -60,11 +60,6 @@ export function fromJson<T>(value: unknown): T {
   return (typeof value === 'string' ? JSON.parse(value) : value) as T;
 }
 
-/** Runs migration statements one at a time, which every driver accepts. */
-export async function runStatements(client: PostgresLikeClient, statements: readonly string[]): Promise<void> {
-  for (const statement of statements) await client.query(statement);
-}
-
 /** Whether an error is Postgres refusing a duplicate key. */
 export function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === '23505';

@@ -500,6 +500,16 @@
         "default": "./dist-cjs/sqlite/vectors.js"
       }
     },
+    "./sqlite/migrations": {
+      "import": {
+        "types": "./dist/sqlite/migrations.d.ts",
+        "default": "./dist/sqlite/migrations.js"
+      },
+      "require": {
+        "types": "./dist-cjs/sqlite/migrations.d.ts",
+        "default": "./dist-cjs/sqlite/migrations.js"
+      }
+    },
     "./graph/visualize": {
       "import": {
         "types": "./dist/graph/visualize.d.ts",
@@ -678,6 +688,26 @@
       "require": {
         "types": "./dist-cjs/postgres/evaluate.d.ts",
         "default": "./dist-cjs/postgres/evaluate.js"
+      }
+    },
+    "./postgres/migrations": {
+      "import": {
+        "types": "./dist/postgres/migrations.d.ts",
+        "default": "./dist/postgres/migrations.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/migrations.d.ts",
+        "default": "./dist-cjs/postgres/migrations.js"
+      }
+    },
+    "./postgres/rollups": {
+      "import": {
+        "types": "./dist/postgres/rollups.d.ts",
+        "default": "./dist/postgres/rollups.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/rollups.d.ts",
+        "default": "./dist-cjs/postgres/rollups.js"
       }
     },
     "./optimizer/cost": {
@@ -1568,10 +1598,13 @@
     "ajv-formats": "^3.0.1",
     "bullmq": "^5.63.0",
     "express": "^5.1.0",
+    "nexus-ai-pro-2-0": "npm:nexus-ai-pro@^2.0.0",
+    "nexus-ai-pro-2-1": "npm:nexus-ai-pro@^2.1.0",
     "ollama": "^0.5.6",
     "openai": "^4.52.0",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0",
+    "wasmoon": "^1.16.0",
     "yaml": "^2.9.1",
     "zod": "^3.23.0"
   },
@@ -1797,6 +1830,12 @@
       "postgres/evaluate": [
         "dist-cjs/postgres/evaluate.d.ts"
       ],
+      "postgres/migrations": [
+        "dist-cjs/postgres/migrations.d.ts"
+      ],
+      "postgres/rollups": [
+        "dist-cjs/postgres/rollups.d.ts"
+      ],
       "server": [
         "dist-cjs/server/index.d.ts"
       ],
@@ -2009,6 +2048,9 @@
       ],
       "sqlite/vectors": [
         "dist-cjs/sqlite/vectors.d.ts"
+      ],
+      "sqlite/migrations": [
+        "dist-cjs/sqlite/migrations.d.ts"
       ],
       "mcp/registry": [
         "dist-cjs/mcp/registry.d.ts"

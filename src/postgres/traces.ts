@@ -1,6 +1,8 @@
 import { assembleTree } from '../tracing/query.js';
 import type { Run, RunFeedback, RunQuery, RunTree, TraceStore } from '../types/tracing.js';
-import { fromJson, type PostgresLikeClient, quoteDerived, quoteTable, runStatements } from './client.js';
+import type { MigrationResult, SchemaMigration } from '../utils/schema-migrations.js';
+import { fromJson, type PostgresLikeClient, quoteDerived, quoteTable } from './client.js';
+import type { PostgresMigrateOptions } from './migrations.js';
 import { jsonFieldEquals, SqlParams } from './sql.js';
 
 /** Options for the Postgres trace store. */
@@ -11,10 +13,33 @@ export interface PostgresTraceStoreOptions {
 
 const DEFAULT_TABLE = 'nexus_runs';
 
-/** The schema, as statements. */
+/** The schema, as statements: every migration's, in order. */
 export function traceStoreMigration(options: PostgresTraceStoreOptions = {}): string[] {
+  return traceStoreMigrations(options).flatMap((migration) => [...migration.statements]);
+}
+
+/**
+ * The versioned schema, which `migrate()` and `nexus db migrate` apply. Version 1 is the 2.0 table;
+ * version 2 indexes runs by `metadata.tenantId`, which a tenant-scoped trace store filters on.
+ */
+export function traceStoreMigrations(options: PostgresTraceStoreOptions = {}): SchemaMigration[] {
   const name = options.table ?? DEFAULT_TABLE;
   const table = quoteTable(name);
+  const component = `traces:${name}`;
+  return [
+    { component, version: 1, name: 'create the runs table', statements: createStatements(name, table) },
+    {
+      component,
+      version: 2,
+      name: 'index runs by tenant',
+      statements: [
+        `CREATE INDEX IF NOT EXISTS ${quoteDerived(name, 'tenant_started')} ON ${table} ((doc #>> '{metadata,tenantId}'), started_at DESC)`,
+      ],
+    },
+  ];
+}
+
+function createStatements(name: string, table: string): string[] {
   return [
     `CREATE TABLE IF NOT EXISTS ${table} (
   id text PRIMARY KEY,
@@ -54,9 +79,14 @@ export class PostgresTraceStore implements TraceStore {
     this.table = quoteTable(options.table ?? DEFAULT_TABLE);
   }
 
-  /** Creates the table and indexes if they do not exist. Never runs implicitly. */
-  async migrate(): Promise<void> {
-    await runStatements(this.client, traceStoreMigration(this.options));
+  /**
+   * Applies this store's pending migrations, recorded in `nexus_schema_migrations`, under a lock.
+   * Never runs implicitly. Safe on a database an older release created: what exists is kept.
+   */
+  async migrate(options: PostgresMigrateOptions = {}): Promise<MigrationResult> {
+    // Loaded when called, so an application that migrates elsewhere never imports the runner.
+    const { applyPostgresMigrations } = await import('./migrations.js');
+    return applyPostgresMigrations(this.client, traceStoreMigrations(this.options), options);
   }
 
   /** Stores a run, replacing an earlier version with the same id. */
@@ -116,6 +146,14 @@ export class PostgresTraceStore implements TraceStore {
       );
     }
     for (const [field, expected] of Object.entries(query.metadata ?? {})) {
+      // A tenant filter reads the expression the tenant index covers; the type check keeps the
+      // in-memory meaning, where the number 7 is not the string "7".
+      if (field === 'tenantId' && typeof expected === 'string') {
+        where.push(
+          `doc #>> '{metadata,tenantId}' = ${params.add(expected)} AND jsonb_typeof(doc #> '{metadata,tenantId}') = 'string'`,
+        );
+        continue;
+      }
       where.push(jsonFieldEquals(`(doc -> 'metadata')`, field, expected, params));
     }
 

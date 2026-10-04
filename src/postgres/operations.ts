@@ -8,14 +8,9 @@ import type {
   OperationStoreStats,
 } from '../types/operations.js';
 import { TERMINAL_OPERATION_STATUSES } from '../types/operations.js';
-import {
-  fromJson,
-  isUniqueViolation,
-  type PostgresLikeClient,
-  quoteDerived,
-  quoteTable,
-  runStatements,
-} from './client.js';
+import type { MigrationResult, SchemaMigration } from '../utils/schema-migrations.js';
+import { fromJson, isUniqueViolation, type PostgresLikeClient, quoteDerived, quoteTable } from './client.js';
+import type { PostgresMigrateOptions } from './migrations.js';
 
 /** Options for the Postgres operation store. */
 export interface PostgresOperationStoreOptions {
@@ -26,10 +21,42 @@ export interface PostgresOperationStoreOptions {
 const DEFAULT_TABLE = 'nexus_operations';
 const TERMINAL = TERMINAL_OPERATION_STATUSES.map((status) => `'${status}'`).join(', ');
 
-/** The schema, as statements. Applied by `migrate()`, `nexus db sql`, or the application's own tooling. */
+/** The schema, as statements: every migration's, in order. For `nexus db sql` or the application's own tooling. */
 export function operationStoreMigration(options: PostgresOperationStoreOptions = {}): string[] {
+  return operationStoreMigrations(options).flatMap((migration) => [...migration.statements]);
+}
+
+/**
+ * The versioned schema, which `migrate()` and `nexus db migrate` apply. Version 1 is the 2.0 table;
+ * version 2 indexes queued work by age, so a claim reads the oldest few rows instead of sorting the
+ * queue; version 3 indexes queued work by tenant.
+ */
+export function operationStoreMigrations(options: PostgresOperationStoreOptions = {}): SchemaMigration[] {
   const name = options.table ?? DEFAULT_TABLE;
   const table = quoteTable(name);
+  const component = `operations:${name}`;
+  return [
+    { component, version: 1, name: 'create the operations table', statements: createStatements(name, table) },
+    {
+      component,
+      version: 2,
+      name: 'index queued work by age',
+      statements: [
+        `CREATE INDEX IF NOT EXISTS ${quoteDerived(name, 'queued')} ON ${table} (created_at, id) WHERE status = 'queued'`,
+      ],
+    },
+    {
+      component,
+      version: 3,
+      name: 'index queued work by tenant',
+      statements: [
+        `CREATE INDEX IF NOT EXISTS ${quoteDerived(name, 'tenant_queued')} ON ${table} ((doc ->> 'tenantId'), created_at, id) WHERE status = 'queued'`,
+      ],
+    },
+  ];
+}
+
+function createStatements(name: string, table: string): string[] {
   return [
     `CREATE TABLE IF NOT EXISTS ${table} (
   id text PRIMARY KEY,
@@ -70,9 +97,14 @@ export class PostgresOperationStore<TResult = unknown> implements OperationStore
     this.table = quoteTable(options.table ?? DEFAULT_TABLE);
   }
 
-  /** Creates the table and indexes if they do not exist. Never runs implicitly. */
-  async migrate(): Promise<void> {
-    await runStatements(this.client, operationStoreMigration(this.options));
+  /**
+   * Applies this store's pending migrations, recorded in `nexus_schema_migrations`, under a lock.
+   * Never runs implicitly. Safe on a database an older release created: what exists is kept.
+   */
+  async migrate(options: PostgresMigrateOptions = {}): Promise<MigrationResult> {
+    // Loaded when called, so an application that migrates elsewhere never imports the runner.
+    const { applyPostgresMigrations } = await import('./migrations.js');
+    return applyPostgresMigrations(this.client, operationStoreMigrations(this.options), options);
   }
 
   /**

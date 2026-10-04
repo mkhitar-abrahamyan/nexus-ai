@@ -98,6 +98,7 @@ const imports = [
   { specifier: 'nexus-ai-pro/sqlite/operations', exports: ['SqliteOperationStore', 'sqliteOperationStoreMigration'] },
   { specifier: 'nexus-ai-pro/sqlite/store', exports: ['SqliteStore', 'sqliteStoreMigration'] },
   { specifier: 'nexus-ai-pro/sqlite/vectors', exports: ['SqliteVectorStore', 'sqliteVectorStoreMigration'] },
+  { specifier: 'nexus-ai-pro/sqlite/migrations', exports: ['applySqliteMigrations', 'sqliteMigrationStatus'] },
   { specifier: 'nexus-ai-pro/agent', exports: ['createAgent', 'agentInput', 'AgentLoop', 'tool', 'ToolExecutor'] },
   { specifier: 'nexus-ai-pro/store', exports: ['MemoryStore', 'cosine'] },
   { specifier: 'nexus-ai-pro/store/redis', exports: ['RedisStore'] },
@@ -136,6 +137,11 @@ const imports = [
     specifier: 'nexus-ai-pro/postgres/evaluate',
     exports: ['PostgresDatasetStore', 'PostgresExperimentStore', 'evaluationStoreMigration'],
   },
+  {
+    specifier: 'nexus-ai-pro/postgres/migrations',
+    exports: ['applyPostgresMigrations', 'postgresMigrationStatus', 'SchemaMigrationError'],
+  },
+  { specifier: 'nexus-ai-pro/postgres/rollups', exports: ['PostgresRollupStore', 'rollupStoreMigrations'] },
   { specifier: 'nexus-ai-pro/postgres/circuits', exports: ['PostgresCircuitStateStore', 'circuitStoreMigration'] },
   { specifier: 'nexus-ai-pro/postgres/prompts', exports: ['PostgresPromptStore', 'promptStoreMigration'] },
   {

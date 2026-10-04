@@ -22,7 +22,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | `nexus eval` | Runs JSON or JS eval cases. |
 | `nexus eval run`, `compare`, `gate` | Run an evaluation module to an experiment file, compare two, and fail a build only on a regression beyond noise. |
 | `nexus traces list`, `show`, `export` | Read a JSONL trace file, or any trace store a module exports. |
-| `nexus db sql` | Prints the Postgres schema for the adapters you use. |
+| `nexus db sql`, `status`, `migrate` | Print the Postgres schema, show which migrations a database has, and apply the rest. |
 | `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
 | `nexus migrate` | Moves imports to the subpaths the 2.0 root import keeps them on. |
 | `nexus graph lint` | Checks a compiled graph's shape for designs that fail in production. |
@@ -60,11 +60,31 @@ nexus eval gate baseline.json candidate.json
 nexus traces list --store runs.jsonl --status error --since 2026-09-20T00:00:00Z
 nexus traces show trace-123 --store store.mjs
 nexus db sql --adapters operations,traces | psql "$DATABASE_URL"
+nexus db status --client db.mjs --check
+nexus db migrate --client db.mjs --dry-run
 ```
 
 `--store` takes a JSONL file, or a module that exports a trace store as `{ store }`, such as a
 Postgres store over your own pool. `nexus db sql` prints the schema rather than applying it, so it
-needs no database driver and goes through your own migration tooling.
+needs no database driver and goes through your own migration tooling; `--record` adds the rows that
+mark each migration applied.
+
+`nexus db status` and `nexus db migrate` reach the database through a module you write, which exports
+your own client, so the CLI still needs no driver:
+
+```js
+// db.mjs
+import pg from 'pg';
+export const client = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+export const close = () => client.end();
+```
+
+The module may also export `dialect` (`postgres` or `sqlite`, detected from the client otherwise), a
+`transaction` function for Postgres (see the [Postgres guide](./postgres.md)), and `migrations`, a
+list that replaces the bundled one, for stores on custom tables. `--adapters` narrows the bundled list
+and `--table` renames the migrations table. `status` prints each migration as applied, pending,
+changed, or written by a newer release, and with `--check` exits 1 while one is pending or changed,
+which suits a deploy step. `migrate --dry-run` prints the statements it would run.
 
 ## Deployments
 

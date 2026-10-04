@@ -260,7 +260,7 @@ and embedding run.
 | `RollupTotals` | Runs, errors, cost, input and output tokens, and latency counts per bucket. |
 | `RollupRow` | A key and its totals. |
 | `RollupQuery` | An hour range, kinds, a model, a provider, a tenant, or a name. |
-| `RollupStore` | `add()` and `query()`. `MemoryRollupStore` keeps rows in memory; any database can implement it. |
+| `RollupStore` | `add()` and `query()`. `MemoryRollupStore` keeps rows in memory, and `PostgresRollupStore`, from `nexus-ai-pro/postgres/rollups`, beside your traces; any database can implement it. |
 | `ROLLUP_LATENCY_BOUNDS_MS` | The latency buckets, from 10 ms to 10 minutes. |
 | `rollupPercentile()` | A percentile from the buckets, exact to the bucket. |
 | `sumRollups()` | Rows summed into one total. |
@@ -338,7 +338,8 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
 - With `incremental`, a run is written twice, so a store pays twice the writes. A run left by a dead
   process stays `running` until `closeAbandonedRuns()` closes it.
 - `OtlpTraceExporter` speaks OTLP/HTTP JSON, not gRPC or protobuf; every collector accepts JSON on port
-  4318. Rollups come only as `MemoryRollupStore`; a database rollup is a `RollupStore` of your own.
+  4318. Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a
+  `RollupStore` of your own.
 - An alert measures up to 1,000 runs in its window unless its filter sets a larger `limit`.
 - Cost alerts sum every run in the window, so give a `filter` such as `{ kind: 'model' }` when
   parent runs also record cost.

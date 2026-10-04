@@ -41,6 +41,27 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.2 stage (Unreleased)
+
+Everything 2.2 adds is stable from the start and additive: no default changes meaning.
+
+- versioned migrations: `SchemaMigration`, `AppliedMigration`, `MigrationStatus`, `MigrationResult`,
+  `SchemaMigrationError`, `migrationChecksum()`, `applyPostgresMigrations()`,
+  `postgresMigrationStatus()`, `postgresMigrations()`, `PostgresMigrateOptions`, every adapter's
+  `…Migrations()`, and the SQLite twins (`nexus-ai-pro/postgres`, `nexus-ai-pro/postgres/migrations`,
+  `nexus-ai-pro/sqlite`, `nexus-ai-pro/sqlite/migrations`). A migration, once released, never
+  changes; later releases add versions. `migrate()` now resolves to a `MigrationResult` instead of
+  nothing;
+- `nexus db status` and `nexus db migrate`, and `nexus db sql --record`;
+- `RedisOperationStoreOptions.index` and `reindex()`;
+- `CircuitBreakerConfig.shareObservations`, `CircuitStateStore.observe()`, `CircuitObservation`,
+  `CircuitWindow`, and `CircuitSnapshot.shared`;
+- `PostgresRollupStore` (`nexus-ai-pro/postgres/rollups`).
+
+Three races are closed rather than added: a busy thread is claimed atomically, and the in-memory and
+Redis operation stores refuse a second record under a held idempotency key, as the SQL stores
+already did.
+
 ## 2.1 stage (2.1.0)
 
 Everything 2.1 adds is stable from the start and additive: no default changes meaning.

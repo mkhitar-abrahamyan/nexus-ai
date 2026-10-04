@@ -1,4 +1,11 @@
-import type { CircuitBreakerConfig, CircuitEntry, CircuitState, SharedCircuitState } from './circuit-breaker.js';
+import type {
+  CircuitBreakerConfig,
+  CircuitEntry,
+  CircuitState,
+  CircuitStateStore,
+  CircuitWindow,
+  SharedCircuitState,
+} from './circuit-breaker.js';
 
 /**
  * Shared circuit state for `CircuitBreaker`, loaded only when a `store` is configured.
@@ -31,6 +38,11 @@ export class CircuitCoordinator {
   private lastSyncAt = Number.NEGATIVE_INFINITY;
   /** False after a store failure, until a sync succeeds; the breaker then decides locally. */
   private reachable = true;
+  /** Calls not yet added to the shared window, per provider, with `shareObservations`. */
+  private readonly unreported = new Map<
+    string,
+    { buckets: Map<number, { calls: number; failures: number }>; succeeded: boolean; trailing: number }
+  >();
 
   constructor(private readonly host: CircuitHost) {}
 
@@ -57,6 +69,8 @@ export class CircuitCoordinator {
     this.syncing = (async () => {
       try {
         this.lastSyncAt = this.host.now();
+        // Only awaited with calls to report, so a breaker that shares none reads exactly as before.
+        if (this.unreported.size > 0) await this.report(store);
         for (const shared of await store.read()) this.adopt(shared);
 
         const resetTimeoutMs = this.host.config.resetTimeoutMs ?? 30_000;
@@ -77,6 +91,31 @@ export class CircuitCoordinator {
       }
     })();
     return this.syncing;
+  }
+
+  /**
+   * Counts one call toward the shared window, to be added on the next sync. Cheap and synchronous:
+   * a check never waits for the store.
+   */
+  observed(providerName: string, failed: boolean): void {
+    if (!this.host.config.shareObservations || !this.host.config.store?.observe) return;
+    const bucketMs = bucketWidth(this.host.config.windowMs ?? 60_000);
+    const at = Math.floor(this.host.now() / bucketMs) * bucketMs;
+    let pending = this.unreported.get(providerName);
+    if (!pending) {
+      pending = { buckets: new Map(), succeeded: false, trailing: 0 };
+      this.unreported.set(providerName, pending);
+    }
+    const bucket = pending.buckets.get(at) ?? { calls: 0, failures: 0 };
+    bucket.calls += 1;
+    if (failed) bucket.failures += 1;
+    pending.buckets.set(at, bucket);
+    if (failed) pending.trailing += 1;
+    else {
+      pending.succeeded = true;
+      pending.trailing = 0;
+    }
+    this.tick();
   }
 
   /** Publishes a transition this worker made. */
@@ -108,6 +147,24 @@ export class CircuitCoordinator {
   reconcile(): void {
     for (const name of [...this.host.names()]) {
       const entry = this.host.entry(name);
+      // Calls made before this module loaded are still in the local window; nothing has been
+      // reported yet, so all of them count toward the shared one.
+      if (this.host.config.shareObservations && this.host.config.store?.observe && entry.window.length > 0) {
+        const bucketMs = bucketWidth(this.host.config.windowMs ?? 60_000);
+        const buckets = new Map<number, { calls: number; failures: number }>();
+        for (const call of entry.window) {
+          const at = Math.floor(call.at / bucketMs) * bucketMs;
+          const bucket = buckets.get(at) ?? { calls: 0, failures: 0 };
+          bucket.calls += 1;
+          if (call.failed) bucket.failures += 1;
+          buckets.set(at, bucket);
+        }
+        this.unreported.set(name, {
+          buckets,
+          succeeded: entry.window.some((call) => !call.failed),
+          trailing: entry.consecutiveFailures,
+        });
+      }
       if (entry.state === 'open' && entry.changedAt === Number.NEGATIVE_INFINITY) {
         this.published(name, entry, 'open', entry.reason ?? 'opened while shared state was loading');
       }
@@ -117,6 +174,54 @@ export class CircuitCoordinator {
 
   async flush(): Promise<void> {
     await Promise.all([...this.pending]);
+  }
+
+  /**
+   * Adds this worker's unreported calls to each provider's shared window, then opens a closed circuit
+   * whose shared count crossed a threshold. The batch is taken before the first await, so calls made
+   * while it is in flight wait for the next sync rather than being lost or counted twice.
+   */
+  private async report(store: CircuitStateStore): Promise<void> {
+    if (!store.observe || this.unreported.size === 0) return;
+    const batches = [...this.unreported];
+    this.unreported.clear();
+    const windowMs = this.host.config.windowMs ?? 60_000;
+    for (const [name, pending] of batches) {
+      const entry = this.host.entry(name);
+      const window = await store.observe(name, {
+        buckets: [...pending.buckets].map(([at, bucket]) => ({ at, calls: bucket.calls, failures: bucket.failures })),
+        succeeded: pending.succeeded,
+        trailingFailures: pending.trailing,
+        windowMs,
+        bucketMs: bucketWidth(windowMs),
+        now: this.host.now(),
+        ...(entry.state === 'closed' && Number.isFinite(entry.changedAt) ? { since: entry.changedAt } : {}),
+      });
+      entry.shared = {
+        calls: window.calls,
+        failures: window.failures,
+        consecutiveFailures: window.consecutiveFailures,
+      };
+      this.judge(name, entry, window);
+    }
+  }
+
+  /** Opens a closed circuit whose shared window crossed the breaker's thresholds. */
+  private judge(name: string, entry: CircuitEntry, window: CircuitWindow): void {
+    if (entry.state !== 'closed') return;
+    const config = this.host.config;
+    if (window.consecutiveFailures >= (config.failureThreshold ?? 5)) {
+      this.host.transition(name, entry, 'open', 'shared failure threshold reached');
+      return;
+    }
+    const rate = config.failureRateThreshold;
+    if (
+      rate !== undefined &&
+      window.calls >= (config.minimumThroughput ?? 10) &&
+      window.failures / window.calls >= rate
+    ) {
+      this.host.transition(name, entry, 'open', 'shared failure rate threshold reached');
+    }
   }
 
   /** Takes a decision another worker published, when it is newer than what this worker knows. */
@@ -161,4 +266,9 @@ export class CircuitCoordinator {
       // A broken error listener must not break routing.
     }
   }
+}
+
+/** The width of one shared-window bucket: a twelfth of the window, so a bucket rolling out moves the count by little. */
+export function bucketWidth(windowMs: number): number {
+  return Math.max(1, Math.floor(windowMs / 12));
 }

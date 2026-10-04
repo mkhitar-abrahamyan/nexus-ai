@@ -19,11 +19,13 @@ export const BOOLEAN_FLAGS = new Set([
   'allow-dataset-mismatch',
   'check',
   'densify',
+  'dry-run',
   'fail',
   'fail-on-regression',
   'help',
   'json',
   'print',
+  'record',
   'reveal-values',
   'write',
 ]);

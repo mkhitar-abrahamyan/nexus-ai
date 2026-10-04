@@ -7,7 +7,9 @@ import type {
   StorePutOptions,
   StoreSearchOptions,
 } from '../types/store.js';
+import type { MigrationResult, SchemaMigration } from '../utils/schema-migrations.js';
 import { quoteSqliteTable, type SqliteDatabaseLike, type SqliteLikeClient, toSqliteClient } from './client.js';
+import type { SqliteMigrateOptions } from './migrations.js';
 
 /** Options for the SQLite store. */
 export interface SqliteStoreOptions {
@@ -44,6 +46,18 @@ export function sqliteStoreMigration(options: Pick<SqliteStoreOptions, 'table'> 
   ];
 }
 
+/** The versioned schema, which `migrate()` applies. Version 1 is the 2.0 schema. */
+export function sqliteStoreMigrations(options: Pick<SqliteStoreOptions, 'table'> = {}): SchemaMigration[] {
+  return [
+    {
+      component: `store:${options.table ?? DEFAULT_TABLE}`,
+      version: 1,
+      name: 'create the store table',
+      statements: sqliteStoreMigration(options),
+    },
+  ];
+}
+
 interface StoreRow {
   namespace: string;
   key: string;
@@ -76,9 +90,14 @@ export class SqliteStore implements Store {
     this.now = options.now ?? (() => new Date());
   }
 
-  /** Creates the table and indexes if they do not exist. Never runs implicitly. */
-  async migrate(): Promise<void> {
-    for (const statement of sqliteStoreMigration(this.options)) await this.client.exec(statement);
+  /**
+   * Applies this store's pending migrations, recorded in `nexus_schema_migrations`, each inside
+   * `BEGIN IMMEDIATE`. Never runs implicitly. Safe on a file an older release created.
+   */
+  async migrate(options: SqliteMigrateOptions = {}): Promise<MigrationResult> {
+    // Loaded when called, so an application that migrates elsewhere never imports the runner.
+    const { applySqliteMigrations } = await import('./migrations.js');
+    return applySqliteMigrations(this.client, sqliteStoreMigrations(this.options), options);
   }
 
   /** Stores an item, keeping its original `createdAt` when it replaces one. */

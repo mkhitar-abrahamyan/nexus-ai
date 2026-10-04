@@ -6,7 +6,9 @@ import {
   type VectorSearchResult,
   type VectorStore,
 } from '../hallucination/retrieval.js';
-import { fromJson, type PostgresLikeClient, quoteDerived, quoteTable, runStatements } from './client.js';
+import type { MigrationResult, SchemaMigration } from '../utils/schema-migrations.js';
+import { fromJson, type PostgresLikeClient, quoteDerived, quoteTable } from './client.js';
+import type { PostgresMigrateOptions } from './migrations.js';
 import { SqlParams, textArray } from './sql.js';
 
 /** Options for the pgvector store. */
@@ -26,6 +28,20 @@ export interface PostgresVectorStoreOptions {
 }
 
 const DEFAULT_TABLE = 'nexus_vectors';
+
+/**
+ * The versioned schema, which `migrate()` and `nexus db migrate` apply. Version 1 is the 2.0 schema.
+ */
+export function vectorStoreMigrations(options: Omit<PostgresVectorStoreOptions, 'embed'>): SchemaMigration[] {
+  return [
+    {
+      component: `vectors:${options.table ?? DEFAULT_TABLE}`,
+      version: 1,
+      name: 'create the vectors table',
+      statements: vectorStoreMigration(options),
+    },
+  ];
+}
 
 /** The schema, as statements: the pgvector extension, the table, and its index. */
 export function vectorStoreMigration(options: Omit<PostgresVectorStoreOptions, 'embed'>): string[] {
@@ -80,9 +96,14 @@ export class PostgresVectorStore implements VectorStore {
     this.embed = options.embed ?? ((texts) => createHashEmbeddings(texts, options.dimensions));
   }
 
-  /** Creates the extension, table, and index. Never runs implicitly. */
-  async migrate(): Promise<void> {
-    await runStatements(this.client, vectorStoreMigration(this.options));
+  /**
+   * Applies this store's pending migrations, recorded in `nexus_schema_migrations`, under a lock.
+   * Never runs implicitly. Safe on a database an older release created: what exists is kept.
+   */
+  async migrate(options: PostgresMigrateOptions = {}): Promise<MigrationResult> {
+    // Loaded when called, so an application that migrates elsewhere never imports the runner.
+    const { applyPostgresMigrations } = await import('./migrations.js');
+    return applyPostgresMigrations(this.client, vectorStoreMigrations(this.options), options);
   }
 
   /** Adds chunks, or replaces those whose id exists, embedding those without a vector in one batch. */

@@ -1,4 +1,4 @@
-import { OperationReleasedError } from '../operations/errors.js';
+import { OperationDuplicateError, OperationReleasedError } from '../operations/errors.js';
 import { OperationRunner } from '../operations/runner.js';
 import { operationStats } from '../operations/stats.js';
 import { MemoryOperationStore } from '../operations/store.js';
@@ -141,6 +141,10 @@ interface Submission {
 const THREADS = ['nexus', 'server', 'threads'];
 const RUNS = RUNS_NAMESPACE as string[];
 const KIND_PREFIX = 'assistant:';
+/** The idempotency-key prefix of the record that says which run holds a thread. */
+const THREAD_CLAIM = 'nexus-thread:';
+/** A claim whose run never got recorded is abandoned after this long: its starter died mid-start. */
+const UNRECORDED_CLAIM_MS = 60_000;
 const DEFAULT_CONCURRENCY = 10;
 const DEFAULT_POLL_MS = 1_000;
 const DEFAULT_RECOVER_MS = 30_000;
@@ -311,14 +315,29 @@ export class RunManager {
    */
   async start(options: StartRunOptions): Promise<RunRecord> {
     const base = this.assistant(options.assistant);
+    const runId = `run-${randomId()}`;
     let thread: ThreadRecord | undefined;
 
     if (options.threadId) {
       thread = await this.thread(options.threadId, options.principal);
-      thread = await this.settleBusyThread(thread, options);
+      thread = await this.settleBusyThread(thread, options, runId);
     }
+    try {
+      return await this.startClaimed(runId, base, thread, options);
+    } catch (error) {
+      // Whatever refused the run after it claimed the thread, the thread is free again.
+      if (thread) await this.releaseClaim(thread.id, runId).catch((cause: unknown) => this.report(cause, { runId }));
+      throw error;
+    }
+  }
 
-    const runId = `run-${randomId()}`;
+  /** The rest of `start()`, once the thread, if any, is this run's. */
+  private async startClaimed(
+    runId: string,
+    base: ServerAssistant,
+    thread: ThreadRecord | undefined,
+    options: StartRunOptions,
+  ): Promise<RunRecord> {
     let assistant = base;
     let revision: RunRevision | undefined;
     if (base.route) {
@@ -594,6 +613,7 @@ export class RunManager {
 
     if (acceptedId !== runId) {
       // An idempotency key matched a run that already exists, so this one was never started.
+      if (thread) await this.releaseClaim(thread.id, runId);
       await this.state.delete(RUNS, runId);
       await this.releaseTenant(runId, options.principal?.tenantId);
       return (await this.state.get<RunRecord>(RUNS, acceptedId)) ?? run;
@@ -800,22 +820,28 @@ export class RunManager {
     this.schedule(claimed > 0 && this.freeSlots() > 0 ? 0 : Math.min(pollMs, this.options.recoverEveryMs ?? pollMs));
   }
 
-  /** Applies the busy policy, returning the thread once it is free to run something new. */
-  private async settleBusyThread(thread: ThreadRecord, options: StartRunOptions): Promise<ThreadRecord> {
+  /**
+   * Applies the busy policy, returning the thread once this run holds it. The thread is claimed
+   * atomically, so of several replicas starting runs on one thread at once, exactly one proceeds and
+   * the rest meet the policy; a thread still busy after the policy has run its course is refused.
+   */
+  private async settleBusyThread(thread: ThreadRecord, options: StartRunOptions, runId: string): Promise<ThreadRecord> {
     const policy = options.onBusy ?? this.options.onBusy ?? 'reject';
     let current = thread;
+    // `enqueue` waits its turn for as long as the queue timeout allows; the others need a few tries.
+    const deadline = this.now().getTime() + (this.options.queueTimeoutMs ?? 30_000);
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const activeId = current.activeRunId;
+    for (let attempt = 0; attempt < 4 || (policy === 'enqueue' && this.now().getTime() < deadline); attempt += 1) {
+      const activeId = await this.claimThread(current, runId);
       if (!activeId) return current;
       const active = await this.state.get<RunRecord>(RUNS, activeId);
-      if (!active || isFinished(active.status)) {
-        current = { ...current, activeRunId: undefined };
-        await this.state.put(THREADS, current.id, current);
-        return current;
-      }
 
       if (policy === 'reject') throw new ThreadBusyError(current.id, activeId);
+      if (!active) {
+        // Another replica claimed the thread and is still recording its run; it will be there shortly.
+        await delay(50);
+        continue;
+      }
       if (policy === 'enqueue') {
         await this.waitForRun(activeId);
         current = await this.thread(current.id, options.principal);
@@ -832,9 +858,82 @@ export class RunManager {
       }
       current = { ...current, activeRunId: undefined };
       await this.state.put(THREADS, current.id, current);
-      return current;
     }
-    return current;
+    throw new ThreadBusyError(current.id, current.activeRunId ?? 'another run');
+  }
+
+  /**
+   * Claims a thread for a run. The claim is a record in the operation store under a unique
+   * idempotency key, moved from run to run by compare-and-set, so two replicas cannot both take a free
+   * thread: creating it races on the key, and taking it over races on the sequence. Resolves
+   * undefined once this run holds the thread, or the id of the unfinished run that does.
+   *
+   * A store without `findByIdempotencyKey` falls back to the thread record's `activeRunId`, which is
+   * what every release before 2.2 used, and which two replicas racing can both see empty.
+   */
+  private async claimThread(thread: ThreadRecord, runId: string): Promise<string | undefined> {
+    if (!this.store.findByIdempotencyKey) {
+      const activeId = thread.activeRunId;
+      return activeId && !(await this.runIsFree(activeId, undefined)) ? activeId : undefined;
+    }
+    const key = `${THREAD_CLAIM}${thread.id}`;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const claim = await this.store.findByIdempotencyKey(key);
+      const at = this.now().toISOString();
+      if (!claim) {
+        try {
+          await this.store.create({
+            id: `${key}:${runId}`,
+            // Finished, so no worker ever claims or recovers it as work.
+            status: 'succeeded',
+            attempt: 1,
+            maxAttempts: 1,
+            sequence: 0,
+            createdAt: at,
+            updatedAt: at,
+            kind: 'server.thread',
+            idempotencyKey: key,
+            result: { runId },
+          });
+          return undefined;
+        } catch (error) {
+          if (error instanceof OperationDuplicateError) continue;
+          throw error;
+        }
+      }
+      const holder = (claim.result as { runId?: string } | undefined)?.runId;
+      if (holder === runId) return undefined;
+      if (holder && !(await this.runIsFree(holder, claim.updatedAt))) return holder;
+      const taken = await this.store.update(
+        { ...claim, result: { runId }, sequence: claim.sequence + 1, updatedAt: at },
+        claim.sequence,
+      );
+      if (taken) return undefined;
+    }
+    const holder = ((await this.store.findByIdempotencyKey(key))?.result as { runId?: string } | undefined)?.runId;
+    return holder ?? 'another run';
+  }
+
+  /**
+   * Whether a thread's holder no longer needs it: its run finished, or it was never recorded and its
+   * claim is old enough that the replica starting it must have died.
+   */
+  private async runIsFree(runId: string, claimedAt: string | undefined): Promise<boolean> {
+    const run = await this.state.get<RunRecord>(RUNS, runId);
+    if (run) return isFinished(run.status);
+    if (claimedAt === undefined) return true;
+    return this.now().getTime() - Date.parse(claimedAt) > UNRECORDED_CLAIM_MS;
+  }
+
+  /** Frees a thread this run holds. Losing the compare-and-set means another run took it over, which is fine. */
+  private async releaseClaim(threadId: string, runId: string): Promise<void> {
+    if (!this.store.findByIdempotencyKey) return;
+    const claim = await this.store.findByIdempotencyKey(`${THREAD_CLAIM}${threadId}`);
+    if (!claim || (claim.result as { runId?: string } | undefined)?.runId !== runId) return;
+    await this.store.update(
+      { ...claim, result: {}, sequence: claim.sequence + 1, updatedAt: this.now().toISOString() },
+      claim.sequence,
+    );
   }
 
   /** Waits for a run to finish, for the `enqueue` policy. */
@@ -851,6 +950,7 @@ export class RunManager {
 
   private async releaseThread(threadId: string | undefined, runId: string): Promise<void> {
     if (!threadId) return;
+    await this.releaseClaim(threadId, runId).catch((error: unknown) => this.report(error, { runId }));
     const thread = await this.state.get<ThreadRecord>(THREADS, threadId);
     if (!thread || thread.activeRunId !== runId) return;
     await this.state.put(THREADS, threadId, { ...thread, activeRunId: undefined, updatedAt: this.now().toISOString() });

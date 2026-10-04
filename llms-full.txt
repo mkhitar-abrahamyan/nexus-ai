@@ -3133,7 +3133,7 @@ and embedding run.
 | `RollupTotals` | Runs, errors, cost, input and output tokens, and latency counts per bucket. |
 | `RollupRow` | A key and its totals. |
 | `RollupQuery` | An hour range, kinds, a model, a provider, a tenant, or a name. |
-| `RollupStore` | `add()` and `query()`. `MemoryRollupStore` keeps rows in memory; any database can implement it. |
+| `RollupStore` | `add()` and `query()`. `MemoryRollupStore` keeps rows in memory, and `PostgresRollupStore`, from `nexus-ai-pro/postgres/rollups`, beside your traces; any database can implement it. |
 | `ROLLUP_LATENCY_BOUNDS_MS` | The latency buckets, from 10 ms to 10 minutes. |
 | `rollupPercentile()` | A percentile from the buckets, exact to the bucket. |
 | `sumRollups()` | Rows summed into one total. |
@@ -3211,7 +3211,8 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
 - With `incremental`, a run is written twice, so a store pays twice the writes. A run left by a dead
   process stays `running` until `closeAbandonedRuns()` closes it.
 - `OtlpTraceExporter` speaks OTLP/HTTP JSON, not gRPC or protobuf; every collector accepts JSON on port
-  4318. Rollups come only as `MemoryRollupStore`; a database rollup is a `RollupStore` of your own.
+  4318. Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a
+  `RollupStore` of your own.
 - An alert measures up to 1,000 runs in its window unless its filter sets a larger `limit`.
 - Cost alerts sum every run in the window, so give a `filter` such as `{ kind: 'model' }` when
   parent runs also record cost.
@@ -4188,8 +4189,9 @@ Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.m
 
 
 Postgres storage for everything that has to outlive a process or be shared between workers: durable
-operations and graph checkpoints, long-term memory, traces, datasets and experiments, shared circuit
-state, prompt versions, and retrieval vectors with pgvector.
+operations and graph checkpoints, long-term memory, traces and their hourly rollups, datasets and
+experiments, shared circuit state, prompt versions, and retrieval vectors with pgvector. Every schema
+is versioned, so an upgrade applies only what changed.
 
 Each adapter has its own entry point and works with the Postgres client you already use. None creates
 a schema until you ask. `PostgresPromptStore` is covered in the [prompts guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/prompts.md).
@@ -4205,7 +4207,7 @@ import { PostgresOperationStore, PostgresStore, PostgresTraceStore } from 'nexus
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const operations = new PostgresOperationStore(pool);
-await operations.migrate(); // or: nexus db sql | psql "$DATABASE_URL"
+await operations.migrate(); // or: nexus db migrate --client db.mjs
 ```
 
 | Adapter | Subpath | Serves |
@@ -4214,7 +4216,8 @@ await operations.migrate(); // or: nexus db sql | psql "$DATABASE_URL"
 | `PostgresStore` | `/postgres/store` | long-term memory, ranked by pgvector when `vectorDimensions` is set |
 | `PostgresTraceStore` | `/postgres/traces` | traces, with every query filter in SQL |
 | `PostgresDatasetStore`, `PostgresExperimentStore` | `/postgres/evaluate` | datasets and experiments |
-| `PostgresCircuitStateStore` | `/postgres/circuits` | circuit state shared between workers |
+| `PostgresCircuitStateStore` | `/postgres/circuits` | circuit state shared between workers, and the failure window they count together |
+| `PostgresRollupStore` | `/postgres/rollups` | hourly totals of runs, for dashboards |
 | `PostgresVectorStore` | `/postgres/vectors` | retrieval chunks, ranked by pgvector in the database |
 
 **No driver is a dependency.** Each adapter takes anything with a `query(text, values)` method that
@@ -4222,9 +4225,10 @@ resolves to `{ rows }`: `pg`'s `Pool` and `Client`, `@neondatabase/serverless`, 
 `fromPostgresJs(sql)` adapts `postgres.js`. Parameters are only ever strings, numbers, and `null`,
 cast in SQL, so a driver's own conversion of arrays or dates never changes what is stored.
 
-**Nothing creates a schema at import.** `migrate()` applies an adapter's schema when you call it;
-`postgresMigration()` and `nexus db sql` produce the same SQL for the migration tooling you already
-use. Table names are options, schema-qualified if you like.
+**Nothing creates a schema at import.** `migrate()` applies an adapter's pending migrations when you
+call it, and `nexus db migrate` does it for every adapter. `postgresMigration()` and `nexus db sql`
+produce the same SQL for the migration tooling you already use. Table names are options,
+schema-qualified if you like.
 
 **What Postgres adds over the other stores:**
 
@@ -4277,37 +4281,127 @@ name that is not letters, digits, and underscores is refused, so a table option 
 Without `vectorDimensions`, `PostgresStore` keeps embeddings as JSON and ranks in the process. That
 works on any Postgres and suits namespaces of a few thousand items.
 
-### Migrations
+### Versioned migrations
 
-Each adapter's `migrate()` applies its schema. Each also has a migration function that returns the
-same statements, for your own tooling, and takes the same table options:
+Each adapter's schema is a list of numbered migrations, and the database records which ran. A
+`SchemaMigration` names its `component` — the adapter and its table, such as
+`operations:nexus_operations` — its `version`, counted from 1 within the component, a `name`, and
+its `statements`. Version 1 of every component is the schema 2.0 created, statement for statement,
+so a database made by 2.0 or 2.1 is recognized as it is: its first migration records version 1 and
+applies only what came later.
 
-| Adapter | Migration function |
-| --- | --- |
-| `PostgresOperationStore` | `operationStoreMigration()` |
-| `PostgresStore` | `storeMigration()`, which also creates the pgvector extension when `vectorDimensions` is set. |
-| `PostgresTraceStore` | `traceStoreMigration()` |
-| `PostgresDatasetStore`, `PostgresExperimentStore` | `evaluationStoreMigration()` |
-| `PostgresCircuitStateStore` | `circuitStoreMigration()` |
-| `PostgresPromptStore` | `promptStoreMigration()` |
-| `PostgresVectorStore` | `vectorStoreMigration()` |
+`migrate()` applies an adapter's pending migrations and resolves to a `MigrationResult`: the
+migrations it `applied`, the `statements` it ran, and whether it was a `dryRun`. Each is recorded in
+`nexus_schema_migrations` with `migrationChecksum()` of its statements, a hash that ignores line
+endings. A migration whose statements changed after it ran — an edited migration, or adapter options
+such as a vector width that differ from those it ran with — is refused with a `SchemaMigrationError`
+before anything is written. Its `code` is `MIGRATION_CHANGED`, `MIGRATION_INVALID` for a list with a
+gap or a duplicate, or `MIGRATION_LOCKED` when another migrator held the lock too long.
 
-`postgresMigration()` joins them into one script, which is what `nexus db sql` prints.
-`PostgresMigrationOptions` chooses:
+`PostgresMigrateOptions` tunes a run:
 
-- the `adapters`, each a `PostgresAdapter` name: `operations`, `store`, `traces`, `evaluation`,
-  `circuits`, `prompts`, or `vectors`. Every one but `vectors` is included by default.
-- `vectorDimensions`, for the store and for the `vectors` table. The `vectors` table needs it, and is
-  included only when named: `nexus db sql --adapters vectors --vector-dimensions 1536`.
+- `dryRun` plans without writing anything, not even the migrations table.
+- `table` renames `nexus_schema_migrations`.
+- `transaction` runs each migration and the row recording it in one transaction on one connection.
+  Pass it for a pool, where `BEGIN` and `COMMIT` would otherwise reach different connections;
+  PGlite needs only `transaction: (run) => db.transaction(run)`. Without it, statements run one at a
+  time and the record is written last. Every bundled statement is idempotent, so a migration that was
+  interrupted runs again next time.
+- `lockTtlMs` and `lockTimeoutMs`: the lock is a row with a lease rather than a session advisory
+  lock, so it holds through a connection pool and serverless drivers alike. A second migrator waits up
+  to `lockTimeoutMs` (2 minutes), and the lease (10 minutes, renewed before each migration) lets one
+  take over from a migrator that died.
 
-The script uses the default table names. When you rename a table, build its SQL from the adapter's own
-migration function with the same options.
+`applyPostgresMigrations(client, migrations, options)` and `postgresMigrationStatus(client,
+migrations)` do the same for any list, such as every adapter's together. A `MigrationStatus` lists
+what is `applied` (each an `AppliedMigration` with its checksum and `appliedAt`), what is `pending`,
+what `changed`, and what is `unknown`: migrations a newer release recorded. Unknown ones are expected
+during a rollout and are left alone, and `current` is true when nothing is pending or changed. Both
+functions live in `nexus-ai-pro/postgres/migrations` too, for an application that imports one adapter.
+
+`postgresMigrations()` lists the migrations of the chosen adapters on their default tables, in the
+order `POSTGRES_ADAPTERS` gives. `PostgresMigrationOptions` chooses the `adapters`, each a
+`PostgresAdapter` name: `operations`, `store`, `traces`, `evaluation`, `circuits`, `prompts`,
+`rollups`, or `vectors`. Every one but `vectors` is included by default, and `vectorDimensions` sets
+the store's and the `vectors` table's width. A store on a custom table migrates through its own
+`migrate()`, under a component of its own.
+
+```ts
+import { applyPostgresMigrations, postgresMigrations, postgresMigrationStatus } from 'nexus-ai-pro/postgres';
+
+const migrations = postgresMigrations({ adapters: ['operations', 'traces', 'rollups'] });
+const status = await postgresMigrationStatus(pool, migrations);
+if (!status.current) await applyPostgresMigrations(pool, migrations, { transaction });
+```
+
+`nexus db status --client db.mjs` and `nexus db migrate --client db.mjs` do the same from a shell,
+through a module that exports your client; the [CLI guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) has the details.
+
+What each version adds:
+
+| Component | Version | What it does |
+| --- | --- | --- |
+| `operations:nexus_operations` | 1 | the 2.0 table |
+| | 2 | indexes queued work by age, so a claim reads the oldest few rows instead of sorting the queue |
+| | 3 | indexes queued work by tenant |
+| `traces:nexus_runs` | 1 | the 2.0 table |
+| | 2 | indexes runs by `metadata.tenantId`, which a tenant's trace queries read |
+| `circuits:nexus_circuits` | 1 | the 2.0 table |
+| | 2 | the failure window workers count together, and its streak |
+| `rollups:nexus_rollups` | 1 | the rollups table |
+| `store`, `evaluation`, `prompts`, `vectors` | 1 | the 2.0 tables |
+
+**Schema changes expand, then contract.** A column or index is added in one minor release, written
+by the next, and removed only in a major, so a worker of the previous minor keeps running against a
+migrated database during a rollout. That is tested against the published packages: a database 2.0.0
+created is migrated by 2.2, and a 2.1.0 worker and a 2.2 worker drain one queue together with nothing
+run twice.
+
+Each adapter still has a function returning its statements, for your own tooling, and one returning
+its versions; both take the same table options:
+
+| Adapter | Statements | Versions |
+| --- | --- | --- |
+| `PostgresOperationStore` | `operationStoreMigration()` | `operationStoreMigrations()` |
+| `PostgresStore` | `storeMigration()`, which also creates the pgvector extension when `vectorDimensions` is set | `storeMigrations()` |
+| `PostgresTraceStore` | `traceStoreMigration()` | `traceStoreMigrations()` |
+| `PostgresDatasetStore`, `PostgresExperimentStore` | `evaluationStoreMigration()` | `evaluationStoreMigrations()` |
+| `PostgresCircuitStateStore` | `circuitStoreMigration()` | `circuitStoreMigrations()` |
+| `PostgresPromptStore` | `promptStoreMigration()` | `promptStoreMigrations()` |
+| `PostgresRollupStore` | `rollupStoreMigration()` | `rollupStoreMigrations()` |
+| `PostgresVectorStore` | `vectorStoreMigration()` | `vectorStoreMigrations()` |
+
+`postgresMigration()` joins every chosen adapter's statements into one script, which is what
+`nexus db sql` prints. Every statement is idempotent, so the script runs again safely after an
+upgrade. `PostgresMigrationScriptOptions` adds `record`, which also creates the migrations table
+— the statements `migrationsTableStatements()` returns — and records every migration in the script as
+applied, so `nexus db status` agrees with a database your own tooling built
+(`nexus db sql --record`).
 
 ```ts
 import { writeFileSync } from 'node:fs';
 import { postgresMigration } from 'nexus-ai-pro/postgres';
 
-writeFileSync('migrations/0007_nexus.sql', postgresMigration({ adapters: ['operations', 'traces'] }));
+writeFileSync('migrations/0007_nexus.sql', postgresMigration({ adapters: ['operations', 'traces'], record: true }));
+```
+
+## Dashboard rollups
+
+`PostgresRollupStore` keeps the hourly rollups `rollupTraceStore()` produces (see the
+[tracing guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tracing.md)) beside the traces themselves, so a dashboard's totals survive a restart
+and every replica adds to the same rows. Adding to a row is one `INSERT … ON CONFLICT DO UPDATE`
+that sums every total, latency buckets included, so two workers finishing runs in the same hour both
+count. A query reads only the rows of its range and filters exactly as `MemoryRollupStore` does.
+`PostgresRollupStoreOptions` has one field, `table` (`nexus_rollups`).
+
+```ts
+import { PostgresRollupStore } from 'nexus-ai-pro/postgres/rollups';
+import { rollupTraceStore, sumRollups } from 'nexus-ai-pro/tracing/rollups';
+
+const rollups = new PostgresRollupStore(pool);
+await rollups.migrate();
+const traces = rollupTraceStore(new PostgresTraceStore(pool), rollups);
+const month = sumRollups(await rollups.query({ since: '2026-10-01T00:00:00Z', tenant: 'acme' }));
 ```
 
 ## Retrieval with pgvector
@@ -4334,8 +4428,10 @@ const context = await chunks.search(question, { topK: 5, filter: { tenant: 'acme
 
 ## Limitations
 
-- A migration creates what is missing; it does not alter a table an earlier version created. The
-  changelog says when a release changes a schema.
+- Migrations only add. A column or index is never dropped in a minor release, so the schema of an
+  upgraded database is a superset of what each release reads.
+- `nexus db migrate` migrates the default tables. A store on a custom table migrates through its own
+  `migrate()`, or through a `migrations` list the database module exports.
 - Without `vectorDimensions`, semantic search in `PostgresStore` reads and ranks every item under the
   prefix in the process.
 - The HNSW index is approximate: it can miss a match that an exact scan would return, and a metadata
@@ -4406,7 +4502,9 @@ It does what every operation store does:
 - lists records, and `prune()` deletes finished ones older than a cutoff.
 
 `SqliteOperationStoreOptions` names the `table` (`nexus_operations`). `sqliteOperationStoreMigration()`
-returns its schema, for your own tooling.
+returns its schema, for your own tooling, and `sqliteOperationStoreMigrations()` its versions: version
+2 indexes queued work by age, so a claim reads the oldest few rows instead of sorting the queue, and
+version 3 indexes it by tenant.
 
 ## Long-term memory
 
@@ -4418,7 +4516,7 @@ the process, with the same helpers the in-memory store uses, so every store answ
 way.
 
 `SqliteStoreOptions` takes the `table` (`nexus_store`), the `index`, and a clock. `sweep()` deletes
-expired items, and `sqliteStoreMigration()` returns the schema.
+expired items. `sqliteStoreMigration()` returns the schema, and `sqliteStoreMigrations()` its versions.
 
 ## Retrieval vectors
 
@@ -4434,7 +4532,8 @@ and how similarity is computed:
 | `scan` (default) | In JavaScript, over the rows that pass the filter. | Nothing. |
 | `sqlite-vec` | Inside SQLite, with `vec_distance_cosine()`, so only the best rows leave the database. | The sqlite-vec extension, loaded into the handle first. |
 
-`sqliteVectorStoreMigration()` returns the table's schema.
+`sqliteVectorStoreMigration()` returns the table's schema, and `sqliteVectorStoreMigrations()` its
+versions.
 
 ```ts
 import Database from 'better-sqlite3';
@@ -4446,6 +4545,35 @@ sqliteVec.load(db);
 const vectors = new SqliteVectorStore(db, { dimensions: 1536, embed, search: 'sqlite-vec' });
 await vectors.migrate();
 ```
+
+## Versioned migrations
+
+Each adapter's `migrate()` applies its pending migrations and records each in
+`nexus_schema_migrations` with a checksum, as the Postgres adapters do; the
+[Postgres guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.md) explains the shared types: `SchemaMigration`, `AppliedMigration`,
+`MigrationStatus`, `MigrationResult`, `migrationChecksum()`, and `SchemaMigrationError`. Version 1 is
+the schema 2.0 created, so a file made by 2.0 or 2.1 is recognized as it is, and an edited migration
+is refused before anything runs.
+
+Each migration runs inside `BEGIN IMMEDIATE`, which takes SQLite's write lock: its statements and the
+row recording it land together or not at all, and a second process migrating the same file waits for
+the first. `SqliteMigrateOptions` takes `dryRun` and the migrations `table`.
+
+`sqliteMigrations()` lists the chosen adapters' migrations on their default tables; each is a
+`SqliteAdapter` name, `operations`, `store`, or `vectors`, and all three are included by default.
+`applySqliteMigrations()` and `sqliteMigrationStatus()` apply and inspect any list, from
+`nexus-ai-pro/sqlite` or `nexus-ai-pro/sqlite/migrations`. `sqliteMigrationsTableStatement()` is the
+statement that creates the migrations table, for your own tooling.
+
+```ts
+import { applySqliteMigrations, sqliteMigrations, sqliteMigrationStatus } from 'nexus-ai-pro/sqlite';
+
+const status = await sqliteMigrationStatus(db, sqliteMigrations());
+if (!status.current) await applySqliteMigrations(db, sqliteMigrations());
+```
+
+`nexus db migrate --client db.mjs` does the same from a shell; the [CLI guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) has the
+details.
 
 ## Limitations
 
@@ -4721,14 +4849,40 @@ Two more optional methods serve queues and autoscalers:
 
 An `OperationStoreFilter` narrows both by `kindPrefix`, such as `assistant:` for the agent server's
 runs. `operationStats()` calls `stats()`, or counts `list()` for a store without it. Every store
-here has both methods. Postgres and SQLite answer each with one indexed query; Redis reads every record.
+here has both methods. Postgres and SQLite answer `listQueued()` from an index of queued work by age,
+so a claim reads the oldest few rows however long the queue is. Redis does too with `index: true`;
+without it, Redis reads every record.
+
+Every store refuses a second record under an idempotency key another record holds, with
+`OperationDuplicateError`, so ten workers submitting one key at the same moment run the work once and
+all ten handles resolve to its result. The in-memory and Redis stores enforce it from 2.2 on; with
+`eval`, Redis checks and writes in one Lua call.
 
 | Store | Notes |
 | --- | --- |
 | `MemoryOperationStore` | The default. Evicts the oldest settled records beyond `MemoryOperationStoreOptions.maxRecords` (1,000). |
-| `RedisOperationStore` | Takes a `RedisOperationLikeClient` (`hget`, `hset`, `hdel`, `hvals`, and optionally `eval`) and `RedisOperationStoreOptions` (a key `prefix` and `useEval`). With `eval`, the compare-and-set is one atomic Lua call. Without it, a read-then-write narrows the race but cannot close it. |
+| `RedisOperationStore` | Takes a `RedisOperationLikeClient` (`hget`, `hset`, `hdel`, `hvals`, and optionally `eval`, `hmget`, and the sorted-set commands) and `RedisOperationStoreOptions` (a key `prefix`, `useEval`, and `index`). With `eval`, the compare-and-set is one atomic Lua call. Without it, a read-then-write narrows the race but cannot close it. |
 | `PostgresOperationStore` | See the [Postgres guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.md). |
 | `SqliteOperationStore` | See the [SQLite guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/sqlite.md). |
+
+### The Redis dispatch index
+
+With `index: true`, `RedisOperationStore` keeps queued work in a sorted set by age and leased work in
+one by lease expiry. `listQueued()` reads the oldest few records from the first, and `claimExpired()`
+reads only lapsed leases from the second, so a claim reads the same handful of records with 100,000
+operations queued as with 1,000. The records stay the source of truth: an index entry only says where
+to look, and one that no longer matches its record is skipped, then removed by a Lua script that
+checks the record in the same step. It needs `zadd`, `zrem`, and `zrangebyscore`, which `ioredis`
+has; with `eval`, a record and its index entries change together.
+
+It is off by default, because a 2.1 worker writes records without index entries. Turn it on once
+every worker sharing the prefix runs 2.2, then call `reindex()` once to index what is already stored.
+`reindex()` is safe while workers are busy, and resolves to how many records it read.
+
+```ts
+const operations = new RedisOperationStore(redis, { index: true });
+await operations.reindex(); // once, after the last 2.1 worker is gone
+```
 
 An `OperationDispatcher` hands an accepted record to a worker. `BullMQOperationDispatcher` queues only
 the id and routing metadata on a `BullMQLikeOperationQueue`. It uses the operation id as the job id, so
@@ -4783,6 +4937,8 @@ When work must survive a restart or run on another worker, use an operation inst
 
 ## Limitations
 
+- A queue filter is applied while the Redis index is read in order, so a `kindPrefix` that matches
+  little of a long shared queue reads far into it. Give very different queues their own `prefix`.
 - The in-memory operation store and `JobQueue` live in one process. `SqliteOperationStore` shares
   records between processes on one machine; a distributed deployment needs `RedisOperationStore` or
   `PostgresOperationStore` and a dispatcher such as BullMQ.
@@ -4965,6 +5121,7 @@ For sharing state between workers:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `store` | — | The shared `CircuitStateStore`. |
+| `shareObservations` | `false` | Count every worker's calls together, so nine failures across three workers count as nine. |
 | `workerId` | — | This worker's name in the store. |
 | `syncIntervalMs` | 1 s | How often shared state is pulled. |
 | `probeLeaseMs` | 30 s | How long one worker holds the right to probe. |
@@ -4979,17 +5136,45 @@ For sharing state between workers:
 | `allowRequest()` | May this call go? |
 | `recordSuccess()`, `recordFailure()` | Report how it went. |
 | `state()`, `isOpen()`, `openProviders()` | Read the circuits. |
-| `snapshot()` | A `CircuitSnapshot` per provider: state, consecutive failures, calls and failures in the window, failure rate, when it opened, when it will probe, and the last error. |
+| `snapshot()` | A `CircuitSnapshot` per provider: state, consecutive failures, calls and failures in the window, failure rate, when it opened, when it will probe, the last error, and with `shareObservations` the `shared` window every worker counts. |
 | `reset()` | Closes one circuit, or all of them. |
 | `sync()`, `flush()` | With a store: pull shared state, and wait for pending writes before shutting down. |
 
-A `CircuitStateStore` holds only the decisions every worker must agree on. It has three methods:
+A `CircuitStateStore` holds the decisions every worker must agree on, and optionally the calls they
+count together:
 
 | Method | What it does |
 | --- | --- |
 | `read()` | Every `SharedCircuitState`: a provider, `open` or `closed`, when it opened, when and by which worker it was last written, and why. |
 | `write()` | Records one provider's state. |
 | `claimProbe()` | Lets exactly one worker probe an open circuit, for a lease. |
+| `observe()` | Optional. Adds one worker's calls to the provider's shared window and returns the window across every worker. |
+
+### Counting failures across workers
+
+Without `shareObservations`, each worker counts only its own calls: three workers each seeing three
+failures never reach a threshold of nine. With it, each worker adds what it saw to a rolling window in
+the store, and the circuit opens everywhere once the shared count crosses `failureThreshold` — counted
+as failures since any worker last succeeded — or `failureRateThreshold`. Checks stay synchronous:
+calls are batched and reported when the worker syncs, so a worker learns the shared count at most
+`syncIntervalMs` late, and a request never waits on the store.
+
+A report is a `CircuitObservation`: calls and failures per window bucket, whether any call
+succeeded, the failures after the last success, the window and bucket widths, and the time of the
+circuit's last close, before which nothing counts, so the failures that opened a circuit do not
+reopen it the moment a probe closes it. The store answers with a `CircuitWindow`: the calls and
+failures in the window, and the consecutive failures. Every bundled store implements `observe()`:
+the memory store in process, Redis in one Lua call (with `eval`), and Postgres in one statement, after
+version 2 of its schema.
+
+```ts
+const ai = createNexus({
+  circuitBreaker: { enabled: true, store: new RedisCircuitStateStore(redis), shareObservations: true },
+});
+```
+
+Ten workers sharing one circuit are tested on all three stores: ten failures, one per worker, open the
+circuit on all of them, exactly one probes after the cooldown, and its success closes it everywhere.
 
 Two stores are included:
 
@@ -8278,13 +8463,19 @@ request does, as `ThreadBusyPolicy`:
 | Policy | Behaviour |
 | --- | --- |
 | `reject` | `409` with `THREAD_BUSY`. The default. |
-| `enqueue` | Waits for the run in flight, up to `queueTimeoutMs`, then runs. |
+| `enqueue` | Waits its turn behind the runs in flight, up to `queueTimeoutMs`, then runs; still busy then, it is refused with `THREAD_BUSY`. |
 | `interrupt` | Cancels the run in flight and starts the new one. |
 | `rollback` | Cancels it, puts the thread back to the step it was at before, and starts the new one. |
 
 `rollback` needs an assistant with `restore`; `graphAssistant()` provides it by writing the earlier
 checkpoint's state forward, so the history stays intact. An assistant without it is refused with
 `AssistantCapabilityError` rather than silently doing something else.
+
+The thread is claimed atomically. The claim is a record in the operation store under a unique
+idempotency key, moved from run to run by compare-and-set, so of ten replicas starting runs on one
+thread at the same moment exactly one proceeds and the rest meet the policy. Before 2.2 a thread's
+busy check read and wrote separately, and replicas racing could all see it free. A custom operation
+store without `findByIdempotencyKey` keeps that older behaviour.
 
 ## Streaming, and reconnecting
 
@@ -8897,7 +9088,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | `nexus eval` | Runs JSON or JS eval cases. |
 | `nexus eval run`, `compare`, `gate` | Run an evaluation module to an experiment file, compare two, and fail a build only on a regression beyond noise. |
 | `nexus traces list`, `show`, `export` | Read a JSONL trace file, or any trace store a module exports. |
-| `nexus db sql` | Prints the Postgres schema for the adapters you use. |
+| `nexus db sql`, `status`, `migrate` | Print the Postgres schema, show which migrations a database has, and apply the rest. |
 | `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
 | `nexus migrate` | Moves imports to the subpaths the 2.0 root import keeps them on. |
 | `nexus graph lint` | Checks a compiled graph's shape for designs that fail in production. |
@@ -8935,11 +9126,31 @@ nexus eval gate baseline.json candidate.json
 nexus traces list --store runs.jsonl --status error --since 2026-09-20T00:00:00Z
 nexus traces show trace-123 --store store.mjs
 nexus db sql --adapters operations,traces | psql "$DATABASE_URL"
+nexus db status --client db.mjs --check
+nexus db migrate --client db.mjs --dry-run
 ```
 
 `--store` takes a JSONL file, or a module that exports a trace store as `{ store }`, such as a
 Postgres store over your own pool. `nexus db sql` prints the schema rather than applying it, so it
-needs no database driver and goes through your own migration tooling.
+needs no database driver and goes through your own migration tooling; `--record` adds the rows that
+mark each migration applied.
+
+`nexus db status` and `nexus db migrate` reach the database through a module you write, which exports
+your own client, so the CLI still needs no driver:
+
+```js
+// db.mjs
+import pg from 'pg';
+export const client = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+export const close = () => client.end();
+```
+
+The module may also export `dialect` (`postgres` or `sqlite`, detected from the client otherwise), a
+`transaction` function for Postgres (see the [Postgres guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.md)), and `migrations`, a
+list that replaces the bundled one, for stores on custom tables. `--adapters` narrows the bundled list
+and `--table` renames the migrations table. `status` prints each migration as applied, pending,
+changed, or written by a newer release, and with `--check` exits 1 while one is pending or changed,
+which suits a deploy step. `migrate --dry-run` prints the statements it would run.
 
 ## Deployments
 
@@ -9110,13 +9321,13 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 325 KB | 100% | none |
+| `nexus-ai-pro` | 326 KB | 100% | none |
 | `nexus-ai-pro/config` | 318 KB | 98% | none |
-| `nexus-ai-pro/core` | 314 KB | 97% | none |
-| `nexus-ai-pro/realtime` | 158 KB | 49% | none |
+| `nexus-ai-pro/core` | 314 KB | 96% | none |
+| `nexus-ai-pro/realtime` | 158 KB | 48% | none |
+| `nexus-ai-pro/server` | 115 KB | 35% | none |
 | `nexus-ai-pro/batch` | 113 KB | 35% | none |
-| `nexus-ai-pro/server` | 111 KB | 34% | none |
-| `nexus-ai-pro/realtime/session` | 96 KB | 30% | none |
+| `nexus-ai-pro/realtime/session` | 96 KB | 29% | none |
 | `nexus-ai-pro/agent` | 89 KB | 27% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 25% | none |
 | `nexus-ai-pro/providers/groq` | 82 KB | 25% | none |
@@ -9126,20 +9337,21 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/lmstudio` | 81 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 81 KB | 25% | none |
 | `nexus-ai-pro/providers/openrouter` | 81 KB | 25% | none |
+| `nexus-ai-pro/postgres` | 78 KB | 24% | none |
 | `nexus-ai-pro/router` | 76 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 74 KB | 23% | none |
 | `nexus-ai-pro/graph` | 73 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 68 KB | 21% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 18% | none |
-| `nexus-ai-pro/providers/ollama` | 57 KB | 18% | none |
+| `nexus-ai-pro/providers/ollama` | 57 KB | 17% | none |
+| `nexus-ai-pro/operations` | 55 KB | 17% | none |
 | `nexus-ai-pro/security` | 53 KB | 16% | none |
 | `nexus-ai-pro/images` | 53 KB | 16% | none |
-| `nexus-ai-pro/postgres` | 51 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 50 KB | 15% | none |
-| `nexus-ai-pro/operations` | 47 KB | 14% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 14% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 14% | none |
+| `nexus-ai-pro/sqlite` | 41 KB | 13% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/evaluate` | 38 KB | 12% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
@@ -9147,7 +9359,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
 | `nexus-ai-pro/ops` | 36 KB | 11% | none |
 | `nexus-ai-pro/context-hub` | 32 KB | 10% | none |
-| `nexus-ai-pro/sqlite` | 31 KB | 10% | none |
 | `nexus-ai-pro/voice` | 30 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 29 KB | 9% | none |
 | `nexus-ai-pro/server/deployments` | 29 KB | 9% | none |
@@ -9163,6 +9374,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
+| `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 18 KB | 6% | none |
 | `nexus-ai-pro/connectors` | 18 KB | 6% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 6% | none |
@@ -9181,30 +9393,32 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/context` | 14 KB | 4% | none |
 | `nexus-ai-pro/images/assets` | 14 KB | 4% | none |
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
-| `nexus-ai-pro/sqlite/operations` | 13 KB | 4% | none |
-| `nexus-ai-pro/postgres/operations` | 13 KB | 4% | none |
+| `nexus-ai-pro/sqlite/operations` | 14 KB | 4% | none |
+| `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
+| `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
-| `nexus-ai-pro/sqlite/vectors` | 12 KB | 4% | none |
+| `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
-| `nexus-ai-pro/operations/adapters` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/store` | 11 KB | 3% | none |
+| `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/testing/record` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/redis` | 11 KB | 3% | none |
 | `nexus-ai-pro/providers` | 10 KB | 3% | none |
 | `nexus-ai-pro/providers/base` | 10 KB | 3% | none |
+| `nexus-ai-pro/sqlite/store` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |
-| `nexus-ai-pro/postgres/traces` | 10 KB | 3% | none |
+| `nexus-ai-pro/postgres/migrations` | 10 KB | 3% | none |
 | `nexus-ai-pro/rag/files` | 10 KB | 3% | none |
 | `nexus-ai-pro/prompts` | 10 KB | 3% | none |
 | `nexus-ai-pro/rag/pinecone` | 10 KB | 3% | none |
 | `nexus-ai-pro/rag/chroma` | 10 KB | 3% | none |
 | `nexus-ai-pro/voice/openai` | 9 KB | 3% | none |
 | `nexus-ai-pro/images/moderation` | 9 KB | 3% | none |
-| `nexus-ai-pro/sqlite/store` | 9 KB | 3% | none |
+| `nexus-ai-pro/sqlite/migrations` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
@@ -9215,14 +9429,16 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/graph/lint` | 6 KB | 2% | none |
 | `nexus-ai-pro/store` | 6 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 6 KB | 2% | none |
+| `nexus-ai-pro/postgres/evaluate` | 6 KB | 2% | none |
 | `nexus-ai-pro/server/remote` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/prompts` | 6 KB | 2% | none |
+| `nexus-ai-pro/postgres/circuits` | 6 KB | 2% | none |
+| `nexus-ai-pro/ops/circuit-store` | 6 KB | 2% | none |
 | `nexus-ai-pro/ops/rate-limit-adapters` | 6 KB | 2% | none |
 | `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 2% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 2% | none |
 | `nexus-ai-pro/embeddings/mock` | 5 KB | 2% | none |
 | `nexus-ai-pro/tracing/rollups` | 5 KB | 2% | none |
-| `nexus-ai-pro/postgres/evaluate` | 5 KB | 2% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 2% | none |
 | `nexus-ai-pro/rag` | 5 KB | 2% | none |
 | `nexus-ai-pro/loaders/html` | 5 KB | 2% | none |
@@ -9231,8 +9447,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/prompts/redis` | 4 KB | 1% | none |
 | `nexus-ai-pro/loaders/csv` | 4 KB | 1% | none |
 | `nexus-ai-pro/operations/webhooks` | 3 KB | 0.9% | none |
-| `nexus-ai-pro/postgres/circuits` | 3 KB | 0.9% | none |
-| `nexus-ai-pro/ops/circuit-store` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/cache/memory-cache` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/loaders/text` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/loaders/markdown` | 3 KB | 0.9% | none |

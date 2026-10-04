@@ -495,7 +495,7 @@ test('the combined migration script runs on an empty database and the helpers re
     const { rows } = await fresh.query<{ count: number }>(
       "select count(*)::int as count from information_schema.tables where table_name like 'nexus_%'",
     );
-    assert.equal(rows[0]?.count, 9, 'six tables, plus three for prompts');
+    assert.equal(rows[0]?.count, 11, 'eight tables, plus three for prompts');
     assert.doesNotMatch(postgresMigration({ adapters: ['traces'] }), /nexus_operations/);
   } finally {
     await fresh.close();
@@ -547,4 +547,59 @@ test('a workflow that crashed on one worker continues on another through Postgre
   for await (const event of build().continue('order-12')) output = (event as { output?: unknown }).output ?? output;
   assert.equal(output, 'shipped');
   assert.deepEqual(charges, ['charge']);
+});
+
+test('the Postgres rollup store sums exactly as the in-memory one, with two workers adding at once', async () => {
+  const { MemoryRollupStore, rollupTraceStore, sumRollups, rollupPercentile } = await import(
+    '../src/tracing/rollups.js'
+  );
+  const { PostgresRollupStore } = await import('../src/postgres/index.js');
+  const postgres = new PostgresRollupStore(client, { table: table('rollups') });
+  await postgres.migrate();
+  const memory = new MemoryRollupStore();
+  const runs: Run[] = Array.from({ length: 60 }, (_, index) => ({
+    id: `r${index}`,
+    traceId: `t${index}`,
+    name: 'support',
+    kind: 'model',
+    status: index % 7 === 0 ? 'error' : 'ok',
+    startedAt: new Date(Date.UTC(2026, 9, 1, index % 3, index)).toISOString(),
+    latencyMs: 40 * (index + 1),
+    cost: 0.01,
+    model: index % 2 ? 'gpt-5-mini' : 'claude-sonnet-5-5',
+    provider: index % 2 ? 'openai' : 'anthropic',
+    usage: { inputTokens: 100, outputTokens: 20 },
+    metadata: { tenantId: index % 4 ? 'acme' : 'globex' },
+  })) as Run[];
+
+  // Two workers finishing runs into the same hours at the same moment.
+  const workerA = rollupTraceStore(new MemoryTraceStore(), postgres);
+  const workerB = rollupTraceStore(new MemoryTraceStore(), postgres);
+  await Promise.all(runs.map((run, index) => (index % 2 ? workerA : workerB).save(run)));
+  const reference = rollupTraceStore(new MemoryTraceStore(), memory);
+  for (const run of runs) await reference.save(run);
+
+  const key = (row: { hour: string; kind: string; model: string; tenant: string }) =>
+    `${row.hour}|${row.kind}|${row.model}|${row.tenant}`;
+  const sorted = <T extends { hour: string; kind: string; model: string; tenant: string }>(rows: T[]) =>
+    [...rows].sort((a, b) => key(a).localeCompare(key(b)));
+  for (const query of [
+    {},
+    { tenant: 'acme' },
+    { model: 'gpt-5-mini' },
+    { since: '2026-10-01T01:30:00.000Z' },
+    { kind: [] },
+  ]) {
+    const fromPostgres = sorted(await postgres.query(query));
+    const fromMemory = sorted(memory.query(query));
+    assert.deepEqual(
+      fromPostgres.map((row) => ({ ...row, cost: Math.round(row.cost * 1e6) })),
+      fromMemory.map((row) => ({ ...row, cost: Math.round(row.cost * 1e6) })),
+      JSON.stringify(query),
+    );
+  }
+  const total = sumRollups(await postgres.query());
+  assert.equal(total.runs, 60);
+  assert.equal(total.errors, 9);
+  assert.equal(rollupPercentile(total.latency, 0.5), rollupPercentile(sumRollups(memory.query()).latency, 0.5));
 });

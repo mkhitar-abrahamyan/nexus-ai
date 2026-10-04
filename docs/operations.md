@@ -259,14 +259,40 @@ Two more optional methods serve queues and autoscalers:
 
 An `OperationStoreFilter` narrows both by `kindPrefix`, such as `assistant:` for the agent server's
 runs. `operationStats()` calls `stats()`, or counts `list()` for a store without it. Every store
-here has both methods. Postgres and SQLite answer each with one indexed query; Redis reads every record.
+here has both methods. Postgres and SQLite answer `listQueued()` from an index of queued work by age,
+so a claim reads the oldest few rows however long the queue is. Redis does too with `index: true`;
+without it, Redis reads every record.
+
+Every store refuses a second record under an idempotency key another record holds, with
+`OperationDuplicateError`, so ten workers submitting one key at the same moment run the work once and
+all ten handles resolve to its result. The in-memory and Redis stores enforce it from 2.2 on; with
+`eval`, Redis checks and writes in one Lua call.
 
 | Store | Notes |
 | --- | --- |
 | `MemoryOperationStore` | The default. Evicts the oldest settled records beyond `MemoryOperationStoreOptions.maxRecords` (1,000). |
-| `RedisOperationStore` | Takes a `RedisOperationLikeClient` (`hget`, `hset`, `hdel`, `hvals`, and optionally `eval`) and `RedisOperationStoreOptions` (a key `prefix` and `useEval`). With `eval`, the compare-and-set is one atomic Lua call. Without it, a read-then-write narrows the race but cannot close it. |
+| `RedisOperationStore` | Takes a `RedisOperationLikeClient` (`hget`, `hset`, `hdel`, `hvals`, and optionally `eval`, `hmget`, and the sorted-set commands) and `RedisOperationStoreOptions` (a key `prefix`, `useEval`, and `index`). With `eval`, the compare-and-set is one atomic Lua call. Without it, a read-then-write narrows the race but cannot close it. |
 | `PostgresOperationStore` | See the [Postgres guide](./postgres.md). |
 | `SqliteOperationStore` | See the [SQLite guide](./sqlite.md). |
+
+### The Redis dispatch index
+
+With `index: true`, `RedisOperationStore` keeps queued work in a sorted set by age and leased work in
+one by lease expiry. `listQueued()` reads the oldest few records from the first, and `claimExpired()`
+reads only lapsed leases from the second, so a claim reads the same handful of records with 100,000
+operations queued as with 1,000. The records stay the source of truth: an index entry only says where
+to look, and one that no longer matches its record is skipped, then removed by a Lua script that
+checks the record in the same step. It needs `zadd`, `zrem`, and `zrangebyscore`, which `ioredis`
+has; with `eval`, a record and its index entries change together.
+
+It is off by default, because a 2.1 worker writes records without index entries. Turn it on once
+every worker sharing the prefix runs 2.2, then call `reindex()` once to index what is already stored.
+`reindex()` is safe while workers are busy, and resolves to how many records it read.
+
+```ts
+const operations = new RedisOperationStore(redis, { index: true });
+await operations.reindex(); // once, after the last 2.1 worker is gone
+```
 
 An `OperationDispatcher` hands an accepted record to a worker. `BullMQOperationDispatcher` queues only
 the id and routing metadata on a `BullMQLikeOperationQueue`. It uses the operation id as the job id, so
@@ -321,6 +347,8 @@ When work must survive a restart or run on another worker, use an operation inst
 
 ## Limitations
 
+- A queue filter is applied while the Redis index is read in order, so a `kindPrefix` that matches
+  little of a long shared queue reads far into it. Give very different queues their own `prefix`.
 - The in-memory operation store and `JobQueue` live in one process. `SqliteOperationStore` shares
   records between processes on one machine; a distributed deployment needs `RedisOperationStore` or
   `PostgresOperationStore` and a dispatcher such as BullMQ.

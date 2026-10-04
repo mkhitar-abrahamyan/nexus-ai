@@ -1,6 +1,6 @@
 # SQLite
 
-<!-- covers: ./sqlite ./sqlite/operations ./sqlite/store ./sqlite/vectors -->
+<!-- covers: ./sqlite ./sqlite/operations ./sqlite/store ./sqlite/vectors ./sqlite/migrations -->
 
 Durable persistence on one machine with no server to run: operation records — and through them graph
 and workflow checkpoints — long-term memory, and retrieval vectors, in a SQLite file. Each adapter takes the database
@@ -59,7 +59,9 @@ It does what every operation store does:
 - lists records, and `prune()` deletes finished ones older than a cutoff.
 
 `SqliteOperationStoreOptions` names the `table` (`nexus_operations`). `sqliteOperationStoreMigration()`
-returns its schema, for your own tooling.
+returns its schema, for your own tooling, and `sqliteOperationStoreMigrations()` its versions: version
+2 indexes queued work by age, so a claim reads the oldest few rows instead of sorting the queue, and
+version 3 indexes it by tenant.
 
 ## Long-term memory
 
@@ -71,7 +73,7 @@ the process, with the same helpers the in-memory store uses, so every store answ
 way.
 
 `SqliteStoreOptions` takes the `table` (`nexus_store`), the `index`, and a clock. `sweep()` deletes
-expired items, and `sqliteStoreMigration()` returns the schema.
+expired items. `sqliteStoreMigration()` returns the schema, and `sqliteStoreMigrations()` its versions.
 
 ## Retrieval vectors
 
@@ -87,7 +89,8 @@ and how similarity is computed:
 | `scan` (default) | In JavaScript, over the rows that pass the filter. | Nothing. |
 | `sqlite-vec` | Inside SQLite, with `vec_distance_cosine()`, so only the best rows leave the database. | The sqlite-vec extension, loaded into the handle first. |
 
-`sqliteVectorStoreMigration()` returns the table's schema.
+`sqliteVectorStoreMigration()` returns the table's schema, and `sqliteVectorStoreMigrations()` its
+versions.
 
 ```ts
 import Database from 'better-sqlite3';
@@ -99,6 +102,35 @@ sqliteVec.load(db);
 const vectors = new SqliteVectorStore(db, { dimensions: 1536, embed, search: 'sqlite-vec' });
 await vectors.migrate();
 ```
+
+## Versioned migrations
+
+Each adapter's `migrate()` applies its pending migrations and records each in
+`nexus_schema_migrations` with a checksum, as the Postgres adapters do; the
+[Postgres guide](./postgres.md) explains the shared types: `SchemaMigration`, `AppliedMigration`,
+`MigrationStatus`, `MigrationResult`, `migrationChecksum()`, and `SchemaMigrationError`. Version 1 is
+the schema 2.0 created, so a file made by 2.0 or 2.1 is recognized as it is, and an edited migration
+is refused before anything runs.
+
+Each migration runs inside `BEGIN IMMEDIATE`, which takes SQLite's write lock: its statements and the
+row recording it land together or not at all, and a second process migrating the same file waits for
+the first. `SqliteMigrateOptions` takes `dryRun` and the migrations `table`.
+
+`sqliteMigrations()` lists the chosen adapters' migrations on their default tables; each is a
+`SqliteAdapter` name, `operations`, `store`, or `vectors`, and all three are included by default.
+`applySqliteMigrations()` and `sqliteMigrationStatus()` apply and inspect any list, from
+`nexus-ai-pro/sqlite` or `nexus-ai-pro/sqlite/migrations`. `sqliteMigrationsTableStatement()` is the
+statement that creates the migrations table, for your own tooling.
+
+```ts
+import { applySqliteMigrations, sqliteMigrations, sqliteMigrationStatus } from 'nexus-ai-pro/sqlite';
+
+const status = await sqliteMigrationStatus(db, sqliteMigrations());
+if (!status.current) await applySqliteMigrations(db, sqliteMigrations());
+```
+
+`nexus db migrate --client db.mjs` does the same from a shell; the [CLI guide](./cli.md) has the
+details.
 
 ## Limitations
 

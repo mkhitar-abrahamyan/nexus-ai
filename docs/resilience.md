@@ -171,6 +171,7 @@ For sharing state between workers:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `store` | — | The shared `CircuitStateStore`. |
+| `shareObservations` | `false` | Count every worker's calls together, so nine failures across three workers count as nine. |
 | `workerId` | — | This worker's name in the store. |
 | `syncIntervalMs` | 1 s | How often shared state is pulled. |
 | `probeLeaseMs` | 30 s | How long one worker holds the right to probe. |
@@ -185,17 +186,45 @@ For sharing state between workers:
 | `allowRequest()` | May this call go? |
 | `recordSuccess()`, `recordFailure()` | Report how it went. |
 | `state()`, `isOpen()`, `openProviders()` | Read the circuits. |
-| `snapshot()` | A `CircuitSnapshot` per provider: state, consecutive failures, calls and failures in the window, failure rate, when it opened, when it will probe, and the last error. |
+| `snapshot()` | A `CircuitSnapshot` per provider: state, consecutive failures, calls and failures in the window, failure rate, when it opened, when it will probe, the last error, and with `shareObservations` the `shared` window every worker counts. |
 | `reset()` | Closes one circuit, or all of them. |
 | `sync()`, `flush()` | With a store: pull shared state, and wait for pending writes before shutting down. |
 
-A `CircuitStateStore` holds only the decisions every worker must agree on. It has three methods:
+A `CircuitStateStore` holds the decisions every worker must agree on, and optionally the calls they
+count together:
 
 | Method | What it does |
 | --- | --- |
 | `read()` | Every `SharedCircuitState`: a provider, `open` or `closed`, when it opened, when and by which worker it was last written, and why. |
 | `write()` | Records one provider's state. |
 | `claimProbe()` | Lets exactly one worker probe an open circuit, for a lease. |
+| `observe()` | Optional. Adds one worker's calls to the provider's shared window and returns the window across every worker. |
+
+### Counting failures across workers
+
+Without `shareObservations`, each worker counts only its own calls: three workers each seeing three
+failures never reach a threshold of nine. With it, each worker adds what it saw to a rolling window in
+the store, and the circuit opens everywhere once the shared count crosses `failureThreshold` — counted
+as failures since any worker last succeeded — or `failureRateThreshold`. Checks stay synchronous:
+calls are batched and reported when the worker syncs, so a worker learns the shared count at most
+`syncIntervalMs` late, and a request never waits on the store.
+
+A report is a `CircuitObservation`: calls and failures per window bucket, whether any call
+succeeded, the failures after the last success, the window and bucket widths, and the time of the
+circuit's last close, before which nothing counts, so the failures that opened a circuit do not
+reopen it the moment a probe closes it. The store answers with a `CircuitWindow`: the calls and
+failures in the window, and the consecutive failures. Every bundled store implements `observe()`:
+the memory store in process, Redis in one Lua call (with `eval`), and Postgres in one statement, after
+version 2 of its schema.
+
+```ts
+const ai = createNexus({
+  circuitBreaker: { enabled: true, store: new RedisCircuitStateStore(redis), shareObservations: true },
+});
+```
+
+Ten workers sharing one circuit are tested on all three stores: ten failures, one per worker, open the
+circuit on all of them, exactly one probes after the cooldown, and its success closes it everywhere.
 
 Two stores are included:
 
@@ -363,10 +392,12 @@ specific entry point that provides it.
 | --- | --- | --- |
 | `CircuitBreaker` | class | Trips routing away from a provider that is failing. |
 | `CircuitBreakerConfig` | interface | Configuration for the circuit breaker. |
+| `CircuitObservation` | interface | Calls one worker saw since it last reported, which `CircuitStateStore.observe()` adds to the shared window. |
 | `CircuitSnapshot` | interface | One circuit's state, for a health endpoint or dashboard. |
 | `CircuitState` | type | Where a circuit stands: `closed` lets traffic through, `open` refuses it, `half-open` admits probes. |
 | `CircuitStateChange` | interface | A circuit changing state. |
 | `CircuitStateStore` | interface | Where shared circuit decisions live. |
+| `CircuitWindow` | interface | A provider's calls across every worker, inside the rolling window. |
 | `SharedCircuitState` | interface | A circuit decision as every worker sees it. |
 
 ### `nexus-ai-pro/ops/circuit-store`

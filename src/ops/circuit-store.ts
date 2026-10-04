@@ -1,6 +1,11 @@
-import type { CircuitStateStore, SharedCircuitState } from './circuit-breaker.js';
+import type { CircuitObservation, CircuitStateStore, CircuitWindow, SharedCircuitState } from './circuit-breaker.js';
 
-export type { CircuitStateStore, SharedCircuitState } from './circuit-breaker.js';
+export type {
+  CircuitObservation,
+  CircuitStateStore,
+  CircuitWindow,
+  SharedCircuitState,
+} from './circuit-breaker.js';
 
 /**
  * Shared circuit state in one process.
@@ -11,8 +16,40 @@ export type { CircuitStateStore, SharedCircuitState } from './circuit-breaker.js
 export class MemoryCircuitStateStore implements CircuitStateStore {
   private readonly states = new Map<string, SharedCircuitState>();
   private readonly probes = new Map<string, { owner: string; expiresAt: number }>();
+  private readonly windows = new Map<
+    string,
+    { buckets: Map<number, { calls: number; failures: number }>; streak: number }
+  >();
 
   constructor(private readonly now: () => number = () => Date.now()) {}
+
+  /** Adds one worker's calls to a provider's window and returns the window across every worker. */
+  observe(providerName: string, observation: CircuitObservation): CircuitWindow {
+    let window = this.windows.get(providerName);
+    if (!window) {
+      window = { buckets: new Map(), streak: 0 };
+      this.windows.set(providerName, window);
+    }
+    for (const bucket of observation.buckets) {
+      const stored = window.buckets.get(bucket.at) ?? { calls: 0, failures: 0 };
+      stored.calls += bucket.calls;
+      stored.failures += bucket.failures;
+      window.buckets.set(bucket.at, stored);
+    }
+    window.streak = observation.succeeded ? observation.trailingFailures : window.streak + observation.trailingFailures;
+    const keepAfter = observation.now - observation.windowMs - observation.bucketMs;
+    const since = observation.since ?? Number.NEGATIVE_INFINITY;
+    let calls = 0;
+    let failures = 0;
+    for (const [at, bucket] of window.buckets) {
+      if (at <= keepAfter) window.buckets.delete(at);
+      else if (at >= since) {
+        calls += bucket.calls;
+        failures += bucket.failures;
+      }
+    }
+    return { calls, failures, consecutiveFailures: window.streak };
+  }
 
   /** Every provider's shared circuit state. */
   read(): SharedCircuitState[] {
@@ -77,6 +114,41 @@ redis.call('DEL', KEYS[2])
 return 1
 `;
 
+// KEYS: the provider's window hash. ARGV: succeeded (1 or 0), trailing failures, drop at or before,
+// count from, expiry in ms, then (bucket, calls, failures) triples. Adds, trims, and sums in one step.
+const OBSERVE_SCRIPT = `
+local key = KEYS[1]
+for i = 6, #ARGV, 3 do
+  redis.call('HINCRBY', key, 'c:' .. ARGV[i], ARGV[i + 1])
+  redis.call('HINCRBY', key, 'f:' .. ARGV[i], ARGV[i + 2])
+end
+local streak
+if ARGV[1] == '1' then
+  redis.call('HSET', key, 'streak', ARGV[2])
+  streak = tonumber(ARGV[2])
+else
+  streak = tonumber(redis.call('HINCRBY', key, 'streak', ARGV[2]))
+end
+local keepAfter = tonumber(ARGV[3])
+local since = tonumber(ARGV[4])
+local calls, failures = 0, 0
+local fields = redis.call('HGETALL', key)
+for i = 1, #fields, 2 do
+  local name = fields[i]
+  local kind = string.sub(name, 1, 2)
+  if kind == 'c:' or kind == 'f:' then
+    local at = tonumber(string.sub(name, 3))
+    if at <= keepAfter then
+      redis.call('HDEL', key, name)
+    elseif at >= since then
+      if kind == 'c:' then calls = calls + tonumber(fields[i + 1]) else failures = failures + tonumber(fields[i + 1]) end
+    end
+  end
+end
+redis.call('PEXPIRE', key, ARGV[5])
+return { calls, failures, streak }
+`;
+
 /** Options for the Redis circuit store. */
 export interface RedisCircuitStateStoreOptions {
   /** Key prefix. Defaults to `nexus-ai-pro:circuits:`. */
@@ -98,6 +170,13 @@ export interface RedisCircuitStateStoreOptions {
 export class RedisCircuitStateStore implements CircuitStateStore {
   private readonly prefix: string;
   private readonly useEval: boolean;
+  /**
+   * Adds one worker's calls to a provider's shared window in one Lua call, and returns the window
+   * across every worker. Present only when the client has `eval`, since the add and the sum must
+   * happen together; without it, `shareObservations` has nothing to call and each worker counts
+   * its own calls.
+   */
+  readonly observe?: (providerName: string, observation: CircuitObservation) => Promise<CircuitWindow>;
 
   constructor(
     private readonly client: RedisCircuitLikeClient,
@@ -105,6 +184,23 @@ export class RedisCircuitStateStore implements CircuitStateStore {
   ) {
     this.prefix = options.prefix ?? 'nexus-ai-pro:circuits:';
     this.useEval = options.useEval !== false && typeof client.eval === 'function';
+    if (this.useEval) this.observe = (providerName, observation) => this.observeWithEval(providerName, observation);
+  }
+
+  private async observeWithEval(providerName: string, observation: CircuitObservation): Promise<CircuitWindow> {
+    const reply = (await (this.client.eval as NonNullable<RedisCircuitLikeClient['eval']>)(
+      OBSERVE_SCRIPT,
+      1,
+      `${this.prefix}window:${providerName}`,
+      observation.succeeded ? '1' : '0',
+      String(observation.trailingFailures),
+      String(observation.now - observation.windowMs - observation.bucketMs),
+      String(observation.since ?? -1),
+      String(observation.windowMs * 2 + observation.bucketMs),
+      ...observation.buckets.flatMap((bucket) => [String(bucket.at), String(bucket.calls), String(bucket.failures)]),
+    )) as unknown[];
+    const [calls, failures, streak] = (reply ?? []).map(Number);
+    return { calls: calls ?? 0, failures: failures ?? 0, consecutiveFailures: streak ?? 0 };
   }
 
   /** Every provider's shared circuit state. Unreadable entries are skipped. */

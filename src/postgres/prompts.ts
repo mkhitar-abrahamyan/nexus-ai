@@ -1,5 +1,7 @@
 import type { PromptHistoryEntry, PromptLabel, PromptStore, PromptVersion } from '../types/prompts.js';
-import { fromJson, type PostgresLikeClient, quoteDerived, quoteTable, runStatements } from './client.js';
+import type { MigrationResult, SchemaMigration } from '../utils/schema-migrations.js';
+import { fromJson, type PostgresLikeClient, quoteDerived, quoteTable } from './client.js';
+import type { PostgresMigrateOptions } from './migrations.js';
 
 /** Options for the Postgres prompt store. */
 export interface PostgresPromptStoreOptions {
@@ -10,6 +12,20 @@ export interface PostgresPromptStoreOptions {
 function tables(options: PostgresPromptStoreOptions) {
   const base = options.table ?? 'nexus_prompt';
   return { base, versions: `${base}_versions`, labels: `${base}_labels`, history: `${base}_history` };
+}
+
+/**
+ * The versioned schema, which `migrate()` and `nexus db migrate` apply. Version 1 is the 2.0 schema.
+ */
+export function promptStoreMigrations(options: PostgresPromptStoreOptions = {}): SchemaMigration[] {
+  return [
+    {
+      component: `prompts:${tables(options).versions}`,
+      version: 1,
+      name: 'create the prompt tables',
+      statements: promptStoreMigration(options),
+    },
+  ];
 }
 
 /** The schema for the prompt store, as statements. */
@@ -62,9 +78,14 @@ export class PostgresPromptStore implements PromptStore {
     this.history = quoteTable(names.history);
   }
 
-  /** Creates the prompt tables if they do not exist. Never runs implicitly. */
-  async migrate(): Promise<void> {
-    await runStatements(this.client, promptStoreMigration(this.options));
+  /**
+   * Applies this store's pending migrations, recorded in `nexus_schema_migrations`, under a lock.
+   * Never runs implicitly. Safe on a database an older release created: what exists is kept.
+   */
+  async migrate(options: PostgresMigrateOptions = {}): Promise<MigrationResult> {
+    // Loaded when called, so an application that migrates elsewhere never imports the runner.
+    const { applyPostgresMigrations } = await import('./migrations.js');
+    return applyPostgresMigrations(this.client, promptStoreMigrations(this.options), options);
   }
 
   /** Stores a version, unless one with the same content version exists. */

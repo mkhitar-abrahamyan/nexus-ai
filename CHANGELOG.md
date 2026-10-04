@@ -4,6 +4,61 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Production scale and safe upgrades. Every database schema is versioned, so an upgrade applies only
+what changed, and a worker of the previous release keeps running beside the new one. A claim costs
+the same however long the queue is, a circuit breaker counts every worker's failures, and work that
+several replicas race for is taken by exactly one. Nothing changes until it is opted into, except
+three races that are now closed.
+
+### Added
+
+- **Versioned migrations.** Every Postgres and SQLite adapter's schema is a list of numbered
+  `SchemaMigration`s, recorded in `nexus_schema_migrations` with a checksum. `migrate()` applies what
+  is pending, under a lock that holds through a connection pool, and refuses a migration whose
+  statements changed after it ran (`SchemaMigrationError`). Version 1 is the schema 2.0 created, so an
+  existing database is recognized as it is. `applyPostgresMigrations()`, `postgresMigrationStatus()`,
+  `postgresMigrations()`, and their SQLite twins work on any list, from `nexus-ai-pro/postgres`,
+  `nexus-ai-pro/sqlite`, and the new `nexus-ai-pro/postgres/migrations` and
+  `nexus-ai-pro/sqlite/migrations`. `PostgresMigrateOptions.transaction` runs each migration in one
+  transaction on one connection, and `postgresMigration({ record: true })` records what the script
+  creates.
+- **`nexus db status` and `nexus db migrate`**, through a module that exports your own client:
+  applied, pending, changed, and newer migrations, `--check` for a deploy step, and `--dry-run`.
+- **Indexed dispatch.** Version 2 of the Postgres and SQLite operation schemas indexes queued work by
+  age, so a claim reads the oldest few rows instead of sorting the queue, and version 3 by tenant.
+  `RedisOperationStore` takes `index: true`: queued work in a sorted set by age and leased work in one
+  by lease expiry, kept in the same Lua call as the record, with `reindex()` to index what is already
+  stored. A claim reads the same handful of records with 100,000 operations queued as with 1,000.
+- **A circuit breaker that counts across workers.** `shareObservations: true` adds each worker's
+  calls to a rolling window in the shared store, so nine failures over three workers count as nine
+  and the circuit opens on all of them. Checks stay synchronous; a worker learns the shared count on
+  its next sync. `CircuitStateStore.observe()` is implemented by the memory, Redis, and Postgres
+  stores, and `CircuitSnapshot.shared` reports the window.
+- **`PostgresRollupStore`**, on the new `nexus-ai-pro/postgres/rollups`: hourly rollups beside the
+  traces, summed in one statement so two workers adding to one hour both count.
+
+### Fixed
+
+- **Two replicas could both start a run on one busy thread.** The busy check read and wrote
+  separately. A thread is now claimed through the operation store under a unique key with
+  compare-and-set, so exactly one run proceeds and the rest meet the busy policy. An `enqueue` start
+  still busy when `queueTimeoutMs` runs out is refused instead of running beside the other.
+- **Two submissions under one idempotency key could both run** on the in-memory and Redis operation
+  stores, which overwrote the key's owner. Both now refuse a second record under a key another record
+  holds, as Postgres and SQLite do, and Redis checks and writes in one Lua call.
+- A circuit breaker's calls recorded before its shared-state module finished loading were not
+  shared.
+
+### Proof
+
+- A database created by the published 2.0.0 package upgrades with 2.2's migrations, on Postgres and
+  SQLite, and a published 2.1.0 worker and a 2.2 worker drain one queue together, nothing run twice.
+- Ten workers race one thread, one idempotency key, one queue, one tenant's slots and budget, and one
+  circuit, on every shared store, and every invariant holds.
+- A Redis claim reads the same number of records at 1,000 and 100,000 queued; Postgres and SQLite
+  plan a claim through the age index with no sort.
+- The Redis stores' Lua runs for real in the tests, in a Lua VM over an in-memory Redis.
+
 ## [2.1.0] - 2026-10-04
 
 Fault-tolerant graphs and crash-safe observability. A graph now chooses when its checkpoints are

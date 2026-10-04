@@ -1,5 +1,7 @@
 import type { Dataset, DatasetStore, Experiment, ExperimentStore } from '../types/evaluate.js';
-import { fromJson, type PostgresLikeClient, quoteDerived, quoteTable, runStatements } from './client.js';
+import type { MigrationResult, SchemaMigration } from '../utils/schema-migrations.js';
+import { fromJson, type PostgresLikeClient, quoteDerived, quoteTable } from './client.js';
+import type { PostgresMigrateOptions } from './migrations.js';
 
 /** Options for the Postgres evaluation stores. */
 export interface PostgresEvaluationStoreOptions {
@@ -7,6 +9,20 @@ export interface PostgresEvaluationStoreOptions {
   datasetsTable?: string;
   /** Experiments table. Defaults to `nexus_experiments`. */
   experimentsTable?: string;
+}
+
+/**
+ * The versioned schema, which `migrate()` and `nexus db migrate` apply. Version 1 is the 2.0 schema.
+ */
+export function evaluationStoreMigrations(options: PostgresEvaluationStoreOptions = {}): SchemaMigration[] {
+  return [
+    {
+      component: `evaluation:${options.datasetsTable ?? 'nexus_datasets'},${options.experimentsTable ?? 'nexus_experiments'}`,
+      version: 1,
+      name: 'create the dataset and experiment tables',
+      statements: evaluationStoreMigration(options),
+    },
+  ];
 }
 
 /** The schema for both tables, as statements. */
@@ -52,9 +68,14 @@ export class PostgresDatasetStore implements DatasetStore {
     this.table = quoteTable(options.datasetsTable ?? 'nexus_datasets');
   }
 
-  /** Creates both evaluation tables if they do not exist. Never runs implicitly. */
-  async migrate(): Promise<void> {
-    await runStatements(this.client, evaluationStoreMigration(this.options));
+  /**
+   * Applies this store's pending migrations, recorded in `nexus_schema_migrations`, under a lock.
+   * Never runs implicitly. Safe on a database an older release created: what exists is kept.
+   */
+  async migrate(options: PostgresMigrateOptions = {}): Promise<MigrationResult> {
+    // Loaded when called, so an application that migrates elsewhere never imports the runner.
+    const { applyPostgresMigrations } = await import('./migrations.js');
+    return applyPostgresMigrations(this.client, evaluationStoreMigrations(this.options), options);
   }
 
   /** Stores a dataset version, replacing one with the same name and version. */
@@ -104,9 +125,14 @@ export class PostgresExperimentStore implements ExperimentStore {
     this.table = quoteTable(options.experimentsTable ?? 'nexus_experiments');
   }
 
-  /** Creates both evaluation tables if they do not exist. Never runs implicitly. */
-  async migrate(): Promise<void> {
-    await runStatements(this.client, evaluationStoreMigration(this.options));
+  /**
+   * Applies this store's pending migrations, recorded in `nexus_schema_migrations`, under a lock.
+   * Never runs implicitly. Safe on a database an older release created: what exists is kept.
+   */
+  async migrate(options: PostgresMigrateOptions = {}): Promise<MigrationResult> {
+    // Loaded when called, so an application that migrates elsewhere never imports the runner.
+    const { applyPostgresMigrations } = await import('./migrations.js');
+    return applyPostgresMigrations(this.client, evaluationStoreMigrations(this.options), options);
   }
 
   /** Stores an experiment, replacing one with the same id. */
