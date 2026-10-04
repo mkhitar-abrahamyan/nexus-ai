@@ -58,7 +58,7 @@ const project = [
 ];
 const optional = [
   ['llms-full.txt', 'Full documentation', 'The README and every guide in one file, for a tool that takes one document'],
-  ['ROADMAP.md', 'Roadmap', 'Delivered work and what is planned next'],
+  ['ROADMAP.md', 'Roadmap', 'The releases planned next, and the gaps each one closes'],
   ['CONTRIBUTING.md', 'Contributing', 'Testing and the release procedure'],
 ];
 

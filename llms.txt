@@ -57,5 +57,5 @@ Import only what you use. The root import is the client and nothing else, and ev
 ## Optional
 
 - [Full documentation](https://raw.githubusercontent.com/mkhitar-abrahamyan/nexus-ai/main/llms-full.txt): The README and every guide in one file, for a tool that takes one document
-- [Roadmap](https://raw.githubusercontent.com/mkhitar-abrahamyan/nexus-ai/main/ROADMAP.md): Delivered work and what is planned next
+- [Roadmap](https://raw.githubusercontent.com/mkhitar-abrahamyan/nexus-ai/main/ROADMAP.md): The releases planned next, and the gaps each one closes
 - [Contributing](https://raw.githubusercontent.com/mkhitar-abrahamyan/nexus-ai/main/CONTRIBUTING.md): Testing and the release procedure
