@@ -41,6 +41,21 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.3 stage (Unreleased)
+
+Everything 2.3 adds is stable from the start and additive: no default changes meaning.
+
+- `ToolDefinition.capabilities` and the capability grammar; `permissionPolicy()`, `PermissionPolicy`,
+  `PermissionRules`, `PermissionRequest`, `PermissionVerdict`, `PermissionDecision`,
+  `PermissionPolicyLike`, `parseCapability()`, `capabilitiesOf()`, `isSensitiveCapability()`, and
+  `normalizePath()` (`nexus-ai-pro/agent/permissions`); `CreateAgentOptions.permissions`;
+- the sandbox contract: `Sandbox`, its option, result, and isolation types, `sandboxTools()`,
+  `runSandboxConformance()` and its report types, `SandboxPathError` (`nexus-ai-pro/agent/sandbox`).
+  `processSandbox()` is a development reference and may change; conformance checks may be added;
+- `NodeOptions.effects` and `interrupts`, `CompileOptions.tools`, `GraphToolDescription`, and the lint
+  codes `SENSITIVE_TOOL_WITHOUT_APPROVAL`, `UNDECLARED_TOOL_CAPABILITIES`, and
+  `SIDE_EFFECT_BEFORE_INTERRUPT`.
+
 ## 2.2 stage (2.2.0)
 
 Everything 2.2 adds is stable from the start and additive: no default changes meaning.

@@ -606,13 +606,20 @@ production. Nothing runs. `nexus graph lint` runs it from the command line (see 
 | `NO_CHECKPOINTER` | info | No checkpoints, so no interrupt, resume, drain, or recovery |
 | `UNBOUNDED_CONCURRENCY` | warning | A superstep with no limit on tasks at once |
 | `DYNAMIC_ROUTE` | info | A router with no mapping and no `ends`, whose routes cannot be checked |
+| `SENSITIVE_TOOL_WITHOUT_APPROVAL` | warning, or error when `deployed` | A tool that writes, runs commands or code, or reaches the network, with no approval and no permission policy |
+| `UNDECLARED_TOOL_CAPABILITIES` | info | A tool with no capabilities and no approval, whose effects cannot be judged |
+| `SIDE_EFFECT_BEFORE_INTERRUPT` | warning | A node that declares `effects` and `interrupts`, so its effects repeat when it runs again on the answer |
 
 Each finding has its code, severity, node (a path such as `review/approve` inside a subgraph), what
 is wrong, and the fix. `GraphLintOptions` sets `deployed` for a graph that runs where restarts and
 hand-offs are normal, and `ignore` for codes to skip.
 
 A node declares `idempotent: true` when running it twice is safe. Nothing at run time depends on it;
-it is what lets the linter tell a safe retry from a dangerous one.
+it is what lets the linter tell a safe retry from a dangerous one. A node can also declare its
+`effects`, as capabilities, and that it `interrupts`. A graph compiled with `tools` — `createAgent()`
+passes its own — describes each as a `GraphToolDescription`: its name, its fixed capabilities or
+that it computes them per call, and how its calls are approved (`interrupt`, `policy`, or `none`).
+The [agents guide](./agents.md) covers capabilities and permission policies.
 
 ```ts
 import { lintGraph } from 'nexus-ai-pro/graph/lint';

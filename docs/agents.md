@@ -1,6 +1,6 @@
 # Agents and tools
 
-<!-- covers: ./agent ./connectors -->
+<!-- covers: ./agent ./agent/permissions ./agent/sandbox ./connectors -->
 <!-- sources: src/agent src/connectors -->
 
 Tool-calling agents, from `nexus-ai-pro/agent`. There are two:
@@ -124,6 +124,109 @@ const calls = run.tools();
 authorized, counted, and audited as an `agent` operation, alongside the model calls it makes.
 `ai.agent()` runs as one already. The [lifecycle guide](./lifecycle.md) explains what that shares.
 
+## What a tool may do
+
+Approval by tool name does not scale: a tool that runs commands is harmless running `git status`
+and dangerous running `rm -rf`. So a tool declares what each call does, as capabilities, and a
+permission policy decides every call from them, before it runs.
+
+**Capabilities.** `ToolDefinition.capabilities` is a list, or a function of the call's arguments so
+the policy sees the path, host, or command the call actually uses:
+
+| Capability | Means |
+| --- | --- |
+| `filesystem:read`, `filesystem:read:<path>` | Reads files, or one path |
+| `filesystem:write`, `filesystem:write:<path>` | Writes, creates, or deletes files |
+| `network`, `network:<host or URL>` | Opens a network connection |
+| `shell`, `shell:<command line>` | Runs a shell command |
+| `code` | Runs code it was given |
+| `<name>`, `<name>:<detail>` | An effect of your own, such as `payments:refund` |
+
+`capabilities: []` says a tool changes nothing; a tool with no list is undeclared. From
+`nexus-ai-pro/agent/permissions`, `parseCapability()` splits one into a `ParsedCapability` (kind,
+access, target), `capabilitiesOf()` resolves a tool's list for one call (`undefined` when
+undeclared, or when its function throws), and `isSensitiveCapability()` says whether one does
+anything but read.
+
+```ts
+const fetchUrl = tool({
+  name: 'fetch_url',
+  description: 'Fetches a web page',
+  parameters: { type: 'object', properties: { url: { type: 'string' } } },
+  capabilities: (args) => [`network:${args.url}`],
+  execute: ({ url }) => fetch(String(url)).then((response) => response.text()),
+});
+```
+
+**A permission policy.** `permissionPolicy()` builds a `PermissionPolicy` from `PermissionRules`:
+
+| Rule | Grants |
+| --- | --- |
+| `filesystem` | `read` and `write` globs: `/workspace/**` is the workspace and everything in it. A write grant also allows reading. |
+| `network` | `allow` hosts: `api.github.com`, `*.openai.com` for its subdomains, `*` for any. |
+| `shell` | `allow` command prefixes: `git` allows every git command, `npm test` only that. A command line that chains, pipes, redirects, or substitutes is never granted by a prefix. |
+| `code` | A decision for running code: `deny` by default. |
+| `custom` | Decisions for your own capabilities, by kind or in full: `{ payments: 'ask', 'payments:refund': 'deny' }`. |
+| `ask` | Patterns that need approval even when granted: `shell`, `filesystem:write`, `network:*.stripe.com`. |
+| `undeclared`, `ungranted` | What happens to a tool with no capabilities, and to a capability no grant covers: `deny` by default. |
+| `tools` | A decision per tool name, applied first. |
+| `root` | What relative paths resolve against. |
+
+Paths are normalized before any grant sees them — `normalizePath()` resolves `.` and `..` and
+backslashes — so `/workspace/output/../../etc/passwd` is judged as `/etc/passwd`.
+
+```ts
+import { permissionPolicy } from 'nexus-ai-pro/agent/permissions';
+
+const agent = createAgent({
+  client: ai,
+  tools,
+  checkpointer,
+  permissions: permissionPolicy({
+    filesystem: { read: ['/workspace/**'], write: ['/workspace/output/**'] },
+    network: { allow: ['api.github.com'] },
+    shell: { allow: ['git', 'npm test'] },
+    ask: ['shell'],
+  }),
+});
+```
+
+`decide()` takes a `PermissionRequest` — the tool, its arguments, its capabilities — and returns a
+`PermissionVerdict`: a `PermissionDecision` of `allow`, `ask`, or `deny`, and a reason. A call is
+denied when any capability is, asked about when any needs approval, and allowed only when every
+one is granted. In `createAgent({ permissions })`, which takes any `PermissionPolicyLike`, a denied
+call never runs and the model reads `Permission denied: <reason>`; an `ask` interrupts exactly as
+`interruptOn` does, with the call's `capabilities` and the policy's reason on the `AgentToolCall`
+it asks about. Arguments an approver corrects are decided again, so an edit cannot reach what the
+policy denies.
+
+**A sandbox.** Commands and code belong in a sandbox the application provides — a container, a VM,
+a remote interpreter — through the `Sandbox` interface on `nexus-ai-pro/agent/sandbox`: `exec()`
+with `SandboxExecOptions` (a working directory, variables, standard input, a timeout, a signal),
+returning a `SandboxExecResult`; file reads and writes; and its `SandboxIsolation`, what it claims
+to isolate. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and
+`list_files`, each declaring exactly what one call does, with files under the `mount` a policy sees
+(`/workspace` by default); `SandboxToolsOptions` chooses them.
+
+`runSandboxConformance()` checks any sandbox against the contract, with no test framework, and
+returns a `SandboxConformanceReport` of `SandboxConformanceCheck`s: output, errors, and exit codes;
+standard input and variables, with none of the host's; a timeout that stops the command; files that
+round-trip where commands run; and paths outside the sandbox refused, as `SandboxPathError`.
+`SandboxConformanceOptions` names the JavaScript command and the timeout it tests.
+
+`processSandbox()` is a reference for development: commands run as ordinary processes in a
+directory, with only `PATH` and the variables given, and its file methods refuse any path outside
+`root` (`ProcessSandboxOptions`). A command it runs can still touch anything you can, and its
+`isolation` says so. It is never a security boundary.
+
+```ts
+import { processSandbox, runSandboxConformance, sandboxTools } from 'nexus-ai-pro/agent/sandbox';
+
+const sandbox = processSandbox({ root: './.agent-workspace' });   // development only
+const report = await runSandboxConformance(() => mySandbox());    // prove your own
+const agent = createAgent({ client: ai, tools: sandboxTools(sandbox), permissions, checkpointer });
+```
+
 ## Middleware
 
 `AgentMiddleware` wraps the parts of a run worth controlling. It has three hooks, each optional,
@@ -244,6 +347,41 @@ specific entry point that provides it.
 | `ToolExecutor` | class | Runs tool calls by name, reporting failures as results rather than throwing. |
 | `toolMessageContent` | function | What the model reads for a tool's result: the parts of a `toolOutput()`, or anything else as JSON. |
 | `toolOutput` | function | Builds a tool's result as content: text, images, and asset references, in order. |
+
+### `nexus-ai-pro/agent/permissions`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `capabilitiesOf` | function | The capabilities one call of a tool declares: its static list, or what its function computes from the call's arguments. |
+| `isSensitiveCapability` | function | Whether a capability is sensitive: anything but reading files. |
+| `normalizePath` | function | A path made absolute and normalized, with `.` and `..` resolved, so `/workspace/../etc` is `/etc` before any grant sees it. |
+| `parseCapability` | function | Splits a capability string into its kind, access, and target. |
+| `ParsedCapability` | interface | One capability, split into its parts. |
+| `PermissionDecision` | type | What a policy decides for one call: run it, refuse it, or interrupt for a person's approval. |
+| `permissionPolicy` | function | Builds a policy from what it grants. |
+| `PermissionPolicy` | class | A policy built from `PermissionRules`. |
+| `PermissionPolicyLike` | interface | Anything that decides tool calls. |
+| `PermissionRequest` | interface | One tool call, as a policy sees it. |
+| `PermissionRules` | interface | What a policy grants. |
+| `PermissionVerdict` | interface | A policy's decision, with the reason a person or a model reads. |
+
+### `nexus-ai-pro/agent/sandbox`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `processSandbox` | function | A sandbox that runs commands as ordinary processes in a directory, for development and tests only. |
+| `ProcessSandboxOptions` | interface | Options for `processSandbox()`. |
+| `runSandboxConformance` | function | Checks a sandbox against the contract, without a test framework, so any sandbox — a container runner, a VM, a hosted service — can prove itself the same way: |
+| `Sandbox` | interface | Where an agent's commands, code, and files go. |
+| `SandboxConformanceCheck` | interface | One conformance check's result. |
+| `SandboxConformanceOptions` | interface | Options for `runSandboxConformance()`. |
+| `SandboxConformanceReport` | interface | What `runSandboxConformance()` found. |
+| `SandboxExecOptions` | interface | Options for one command. |
+| `SandboxExecResult` | interface | What a command did. |
+| `SandboxIsolation` | interface | What a sandbox claims to isolate. |
+| `SandboxPathError` | class | Raised when a path would leave the sandbox. |
+| `sandboxTools` | function | Tools that act through a sandbox, each declaring exactly what one call does: `run_command` declares `shell:<the command>`, and the file tools declare `filesystem:read` or `filesystem:write` with the path under `mount`. |
+| `SandboxToolsOptions` | interface | Options for `sandboxTools()`. |
 
 ### `nexus-ai-pro/connectors`
 

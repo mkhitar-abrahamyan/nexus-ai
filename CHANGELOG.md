@@ -4,6 +4,36 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Agents that act safely, on production retrieval.
+
+### Added
+
+- **Capabilities and permission policies.** A tool declares what each call does —
+  `filesystem:write:<path>`, `network:<host>`, `shell:<command>`, `code`, or an effect of the
+  application's own — as a list or a function of its arguments. `permissionPolicy()`, on the new
+  `nexus-ai-pro/agent/permissions`, grants filesystem globs, network hosts, and shell command
+  prefixes, and decides each call: allow, deny, or ask. Paths are normalized before any grant sees
+  them, and a command that chains, pipes, or substitutes is never granted by a prefix.
+  `createAgent({ permissions })` enforces it before a tool runs: a denied call never runs, an `ask`
+  interrupts as `interruptOn` does, and arguments an approver edits are decided again.
+- **A sandbox contract**, on the new `nexus-ai-pro/agent/sandbox`: the `Sandbox` interface a
+  container, VM, or hosted interpreter fills; `sandboxTools()`, whose calls declare exactly the
+  command or path they use; `runSandboxConformance()`, which proves any sandbox against the
+  contract; and `processSandbox()`, a reference for development that is never a security boundary
+  and says so.
+- **The linter reads capabilities.** `SENSITIVE_TOOL_WITHOUT_APPROVAL` reports a tool that writes, runs
+  commands or code, or reaches the network with neither approval nor a policy;
+  `UNDECLARED_TOOL_CAPABILITIES` a tool whose effects cannot be judged; and
+  `SIDE_EFFECT_BEFORE_INTERRUPT` a node that declares `effects` and `interrupts`. An agent's graph
+  describes its tools for it.
+
+### Proof
+
+- In a real agent tool loop, a write outside the workspace and a request to an unlisted host are
+  refused before their tools run, and a granted command that needs approval waits for a person.
+- The process sandbox passes the conformance suite, and a sandbox that leaks the host's environment
+  and writes outside its root fails exactly those two checks.
+
 ## [2.2.0] - 2026-10-05
 
 Production scale and safe upgrades. Every database schema is versioned, so an upgrade applies only

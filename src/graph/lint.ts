@@ -1,3 +1,4 @@
+import { isSensitiveCapability } from '../agent/capabilities.js';
 import type { GraphDescription } from '../types/graph.js';
 
 /** How much a lint finding matters: `error` fails `nexus graph lint`, the others only report. */
@@ -12,7 +13,10 @@ export type GraphLintCode =
   | 'MEMORY_CHECKPOINTER'
   | 'NO_CHECKPOINTER'
   | 'UNBOUNDED_CONCURRENCY'
-  | 'DYNAMIC_ROUTE';
+  | 'DYNAMIC_ROUTE'
+  | 'SENSITIVE_TOOL_WITHOUT_APPROVAL'
+  | 'UNDECLARED_TOOL_CAPABILITIES'
+  | 'SIDE_EFFECT_BEFORE_INTERRUPT';
 
 /** One design problem `lintGraph()` found. */
 export interface GraphLintFinding {
@@ -56,6 +60,9 @@ export interface GraphLintOptions {
  * | `NO_CHECKPOINTER` | info | No checkpoints, so no interrupt, resume, or recovery |
  * | `UNBOUNDED_CONCURRENCY` | warning | A fan-out with no limit on tasks at once |
  * | `DYNAMIC_ROUTE` | info | A router with no mapping or `ends`, so routes cannot be checked |
+ * | `SENSITIVE_TOOL_WITHOUT_APPROVAL` | warning, or error when `deployed` | A tool that writes, runs commands or code, or reaches the network, with no approval and no permission policy |
+ * | `UNDECLARED_TOOL_CAPABILITIES` | info | A tool with no capabilities and no approval, whose effects cannot be judged |
+ * | `SIDE_EFFECT_BEFORE_INTERRUPT` | warning | A node that declares effects and interrupts, so its effects repeat when it runs again on the answer |
  *
  * @example
  * ```ts
@@ -118,7 +125,40 @@ function lintDescription(
         fix: 'Set `timeout: { runMs }`, or `idleMs` with `context.heartbeat()` for long work.',
       });
     }
+    if (node.effects?.length && node.interrupts && !node.idempotent) {
+      findings.push({
+        code: 'SIDE_EFFECT_BEFORE_INTERRUPT',
+        severity: 'warning',
+        node: at(node.id),
+        message: `"${at(node.id)}" declares effects (${node.effects.join(', ')}) and may interrupt, so when the answer comes the node runs again from the top and repeats whatever it did before asking.`,
+        fix: 'Ask in a node of its own before the effect, or give the effect an idempotency key and declare the node idempotent.',
+      });
+    }
     if (node.subgraph) lintDescription(node.subgraph, `${at(node.id)}/`, options, findings, false);
+  }
+
+  for (const tool of description.tools ?? []) {
+    if (tool.approval !== 'none') continue;
+    const sensitive = (tool.capabilities ?? []).filter((capability) => isSensitiveCapability(capability));
+    if (sensitive.length > 0 || tool.dynamic) {
+      findings.push({
+        code: 'SENSITIVE_TOOL_WITHOUT_APPROVAL',
+        severity: options.deployed ? 'error' : 'warning',
+        node: `tool:${tool.name}`,
+        message: sensitive.length
+          ? `Tool "${tool.name}" can ${sensitive.join(', ')}, and nothing approves or limits its calls.`
+          : `Tool "${tool.name}" computes its capabilities per call, and nothing approves or limits its calls.`,
+        fix: 'Give the agent a permission policy that grants what the tool may do, or approve its calls with interruptOn.',
+      });
+    } else if (tool.capabilities === undefined) {
+      findings.push({
+        code: 'UNDECLARED_TOOL_CAPABILITIES',
+        severity: 'info',
+        node: `tool:${tool.name}`,
+        message: `Tool "${tool.name}" declares no capabilities, so what it does cannot be judged.`,
+        fix: 'Declare its capabilities, or `capabilities: []` for a tool that changes nothing.',
+      });
+    }
   }
 
   if (!top) return;

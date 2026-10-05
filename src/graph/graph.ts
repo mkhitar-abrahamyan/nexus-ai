@@ -525,7 +525,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   describe(): GraphDescription {
     const nodes = [...this.nodes.entries()].map(([id, definition]) => {
       const subgraph = (definition.fn as { [SUBGRAPH]?: CompiledGraph<ChannelSchema> })[SUBGRAPH];
-      const { ends, defer, timeoutMs, cache, idempotent } = definition.options;
+      const { ends, defer, timeoutMs, cache, idempotent, effects, interrupts } = definition.options;
       const maxAttempts = this.retryPolicy(definition).maxAttempts;
       const timeout = this.timeoutOf(definition);
       return {
@@ -538,6 +538,8 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
         ...(this.errorHandler(definition) ? { onError: true } : {}),
         ...(idempotent ? { idempotent: true } : {}),
         ...(cache ? { cache: true } : {}),
+        ...(effects?.length ? { effects: [...effects] } : {}),
+        ...(interrupts ? { interrupts: true } : {}),
         ...(subgraph ? { subgraph: subgraph.describe() } : {}),
       };
     });
@@ -574,6 +576,14 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       checkpointer:
         this.options.checkpointer === false ? 'none' : this.options.checkpointer === undefined ? 'memory' : 'custom',
       maxConcurrency: this.options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
+      ...(this.options.tools?.length
+        ? {
+            tools: this.options.tools.map((tool) => ({
+              ...tool,
+              ...(tool.capabilities ? { capabilities: [...tool.capabilities] } : {}),
+            })),
+          }
+        : {}),
     };
   }
 

@@ -540,6 +540,26 @@
         "default": "./dist-cjs/agent/index.js"
       }
     },
+    "./agent/permissions": {
+      "import": {
+        "types": "./dist/agent/permissions.d.ts",
+        "default": "./dist/agent/permissions.js"
+      },
+      "require": {
+        "types": "./dist-cjs/agent/permissions.d.ts",
+        "default": "./dist-cjs/agent/permissions.js"
+      }
+    },
+    "./agent/sandbox": {
+      "import": {
+        "types": "./dist/agent/sandbox.d.ts",
+        "default": "./dist/agent/sandbox.js"
+      },
+      "require": {
+        "types": "./dist-cjs/agent/sandbox.d.ts",
+        "default": "./dist-cjs/agent/sandbox.js"
+      }
+    },
     "./store": {
       "import": {
         "types": "./dist/store/index.d.ts",
@@ -1811,6 +1831,12 @@
       ],
       "agent": [
         "dist-cjs/agent/index.d.ts"
+      ],
+      "agent/permissions": [
+        "dist-cjs/agent/permissions.d.ts"
+      ],
+      "agent/sandbox": [
+        "dist-cjs/agent/sandbox.d.ts"
       ],
       "store": [
         "dist-cjs/store/index.d.ts"

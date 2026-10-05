@@ -7,12 +7,23 @@ export function tool<TArgs extends Record<string, unknown> = Record<string, unkn
   description: string;
   parameters: Record<string, unknown>;
   execute: (args: TArgs) => Promise<unknown> | unknown;
+  /** What the tool does to the world, for a permission policy; see `ToolDefinition.capabilities`. */
+  capabilities?: readonly string[] | ((args: TArgs) => readonly string[]);
 }): ToolDefinition {
+  const capabilities = definition.capabilities;
   return {
     name: definition.name,
     description: definition.description,
     parameters: definition.parameters,
     execute: async (args) => definition.execute(args as TArgs),
+    ...(capabilities === undefined
+      ? {}
+      : {
+          capabilities:
+            typeof capabilities === 'function'
+              ? (args: Record<string, unknown>) => capabilities(args as TArgs)
+              : capabilities,
+        }),
   };
 }
 
@@ -66,6 +77,11 @@ export class ToolExecutor {
   /** Whether a tool is registered. */
   has(name: string): boolean {
     return this.tools.has(name);
+  }
+
+  /** A registered tool, or `undefined`. */
+  get(name: string): ToolDefinition | undefined {
+    return this.tools.get(name);
   }
 
   /** Every registered tool. */

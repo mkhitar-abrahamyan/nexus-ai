@@ -100,6 +100,8 @@ const imports = [
   { specifier: 'nexus-ai-pro/sqlite/vectors', exports: ['SqliteVectorStore', 'sqliteVectorStoreMigration'] },
   { specifier: 'nexus-ai-pro/sqlite/migrations', exports: ['applySqliteMigrations', 'sqliteMigrationStatus'] },
   { specifier: 'nexus-ai-pro/agent', exports: ['createAgent', 'agentInput', 'AgentLoop', 'tool', 'ToolExecutor'] },
+  { specifier: 'nexus-ai-pro/agent/permissions', exports: ['permissionPolicy', 'parseCapability', 'normalizePath'] },
+  { specifier: 'nexus-ai-pro/agent/sandbox', exports: ['processSandbox', 'sandboxTools', 'runSandboxConformance'] },
   { specifier: 'nexus-ai-pro/store', exports: ['MemoryStore', 'cosine'] },
   { specifier: 'nexus-ai-pro/store/redis', exports: ['RedisStore'] },
   { specifier: 'nexus-ai-pro/mcp', exports: ['McpClient', 'McpServer', 'createStdioTransport', 'McpError'] },

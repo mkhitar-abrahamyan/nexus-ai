@@ -126,6 +126,14 @@ export interface ToolDefinition {
   /** Runs the tool, for the agent loop and executors that call tools automatically. */
   execute?: (args: Record<string, unknown>) => Promise<unknown>;
   /**
+   * What the tool does to the world, as capabilities a permission policy decides on:
+   * `filesystem:read` or `filesystem:write` with an optional path, `network` with an optional host,
+   * `shell` with an optional command, `code`, or a name of the application's own such as `payments`.
+   * A function computes them from each call's arguments, so a policy sees the path, host, or command
+   * the call actually uses. Never sent to a model.
+   */
+  capabilities?: readonly string[] | ((args: Record<string, unknown>) => readonly string[]);
+  /**
    * Ends a cacheable prefix after this tool. Only honored when the request sets
    * `cache.mode: 'explicit'` and the provider accepts caller-placed breakpoints.
    */

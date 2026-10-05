@@ -99,8 +99,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime` | 158 KB | 47% | none |
 | `nexus-ai-pro/server` | 116 KB | 35% | none |
 | `nexus-ai-pro/batch` | 113 KB | 34% | none |
+| `nexus-ai-pro/agent` | 98 KB | 29% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 29% | none |
-| `nexus-ai-pro/agent` | 94 KB | 28% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/groq` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/mistral` | 82 KB | 24% | none |
@@ -110,7 +110,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/openai` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/openrouter` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 80 KB | 24% | none |
-| `nexus-ai-pro/graph` | 78 KB | 23% | none |
+| `nexus-ai-pro/graph` | 79 KB | 24% | none |
 | `nexus-ai-pro/postgres` | 78 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 74 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 68 KB | 20% | none |
@@ -176,6 +176,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
+| `nexus-ai-pro/agent/sandbox` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/store` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/testing/record` | 11 KB | 3% | none |
@@ -194,14 +195,15 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/moderation` | 9 KB | 3% | none |
 | `nexus-ai-pro/sqlite/migrations` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
+| `nexus-ai-pro/graph/lint` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
+| `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
 | `nexus-ai-pro/ops/rate-limit-adapters` | 7 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
 | `nexus-ai-pro/evals/judge` | 7 KB | 2% | none |
-| `nexus-ai-pro/graph/lint` | 6 KB | 2% | none |
 | `nexus-ai-pro/store` | 6 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/evaluate` | 6 KB | 2% | none |

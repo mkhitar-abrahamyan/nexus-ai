@@ -2235,13 +2235,20 @@ production. Nothing runs. `nexus graph lint` runs it from the command line (see 
 | `NO_CHECKPOINTER` | info | No checkpoints, so no interrupt, resume, drain, or recovery |
 | `UNBOUNDED_CONCURRENCY` | warning | A superstep with no limit on tasks at once |
 | `DYNAMIC_ROUTE` | info | A router with no mapping and no `ends`, whose routes cannot be checked |
+| `SENSITIVE_TOOL_WITHOUT_APPROVAL` | warning, or error when `deployed` | A tool that writes, runs commands or code, or reaches the network, with no approval and no permission policy |
+| `UNDECLARED_TOOL_CAPABILITIES` | info | A tool with no capabilities and no approval, whose effects cannot be judged |
+| `SIDE_EFFECT_BEFORE_INTERRUPT` | warning | A node that declares `effects` and `interrupts`, so its effects repeat when it runs again on the answer |
 
 Each finding has its code, severity, node (a path such as `review/approve` inside a subgraph), what
 is wrong, and the fix. `GraphLintOptions` sets `deployed` for a graph that runs where restarts and
 hand-offs are normal, and `ignore` for codes to skip.
 
 A node declares `idempotent: true` when running it twice is safe. Nothing at run time depends on it;
-it is what lets the linter tell a safe retry from a dangerous one.
+it is what lets the linter tell a safe retry from a dangerous one. A node can also declare its
+`effects`, as capabilities, and that it `interrupts`. A graph compiled with `tools` — `createAgent()`
+passes its own — describes each as a `GraphToolDescription`: its name, its fixed capabilities or
+that it computes them per call, and how its calls are approved (`interrupt`, `policy`, or `none`).
+The [agents guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/agents.md) covers capabilities and permission policies.
 
 ```ts
 import { lintGraph } from 'nexus-ai-pro/graph/lint';
@@ -2561,6 +2568,109 @@ const calls = run.tools();
 **An agent is an operation of its client.** Pass `lifecycle: ai.lifecycle`, and every run is
 authorized, counted, and audited as an `agent` operation, alongside the model calls it makes.
 `ai.agent()` runs as one already. The [lifecycle guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/lifecycle.md) explains what that shares.
+
+## What a tool may do
+
+Approval by tool name does not scale: a tool that runs commands is harmless running `git status`
+and dangerous running `rm -rf`. So a tool declares what each call does, as capabilities, and a
+permission policy decides every call from them, before it runs.
+
+**Capabilities.** `ToolDefinition.capabilities` is a list, or a function of the call's arguments so
+the policy sees the path, host, or command the call actually uses:
+
+| Capability | Means |
+| --- | --- |
+| `filesystem:read`, `filesystem:read:<path>` | Reads files, or one path |
+| `filesystem:write`, `filesystem:write:<path>` | Writes, creates, or deletes files |
+| `network`, `network:<host or URL>` | Opens a network connection |
+| `shell`, `shell:<command line>` | Runs a shell command |
+| `code` | Runs code it was given |
+| `<name>`, `<name>:<detail>` | An effect of your own, such as `payments:refund` |
+
+`capabilities: []` says a tool changes nothing; a tool with no list is undeclared. From
+`nexus-ai-pro/agent/permissions`, `parseCapability()` splits one into a `ParsedCapability` (kind,
+access, target), `capabilitiesOf()` resolves a tool's list for one call (`undefined` when
+undeclared, or when its function throws), and `isSensitiveCapability()` says whether one does
+anything but read.
+
+```ts
+const fetchUrl = tool({
+  name: 'fetch_url',
+  description: 'Fetches a web page',
+  parameters: { type: 'object', properties: { url: { type: 'string' } } },
+  capabilities: (args) => [`network:${args.url}`],
+  execute: ({ url }) => fetch(String(url)).then((response) => response.text()),
+});
+```
+
+**A permission policy.** `permissionPolicy()` builds a `PermissionPolicy` from `PermissionRules`:
+
+| Rule | Grants |
+| --- | --- |
+| `filesystem` | `read` and `write` globs: `/workspace/**` is the workspace and everything in it. A write grant also allows reading. |
+| `network` | `allow` hosts: `api.github.com`, `*.openai.com` for its subdomains, `*` for any. |
+| `shell` | `allow` command prefixes: `git` allows every git command, `npm test` only that. A command line that chains, pipes, redirects, or substitutes is never granted by a prefix. |
+| `code` | A decision for running code: `deny` by default. |
+| `custom` | Decisions for your own capabilities, by kind or in full: `{ payments: 'ask', 'payments:refund': 'deny' }`. |
+| `ask` | Patterns that need approval even when granted: `shell`, `filesystem:write`, `network:*.stripe.com`. |
+| `undeclared`, `ungranted` | What happens to a tool with no capabilities, and to a capability no grant covers: `deny` by default. |
+| `tools` | A decision per tool name, applied first. |
+| `root` | What relative paths resolve against. |
+
+Paths are normalized before any grant sees them — `normalizePath()` resolves `.` and `..` and
+backslashes — so `/workspace/output/../../etc/passwd` is judged as `/etc/passwd`.
+
+```ts
+import { permissionPolicy } from 'nexus-ai-pro/agent/permissions';
+
+const agent = createAgent({
+  client: ai,
+  tools,
+  checkpointer,
+  permissions: permissionPolicy({
+    filesystem: { read: ['/workspace/**'], write: ['/workspace/output/**'] },
+    network: { allow: ['api.github.com'] },
+    shell: { allow: ['git', 'npm test'] },
+    ask: ['shell'],
+  }),
+});
+```
+
+`decide()` takes a `PermissionRequest` — the tool, its arguments, its capabilities — and returns a
+`PermissionVerdict`: a `PermissionDecision` of `allow`, `ask`, or `deny`, and a reason. A call is
+denied when any capability is, asked about when any needs approval, and allowed only when every
+one is granted. In `createAgent({ permissions })`, which takes any `PermissionPolicyLike`, a denied
+call never runs and the model reads `Permission denied: <reason>`; an `ask` interrupts exactly as
+`interruptOn` does, with the call's `capabilities` and the policy's reason on the `AgentToolCall`
+it asks about. Arguments an approver corrects are decided again, so an edit cannot reach what the
+policy denies.
+
+**A sandbox.** Commands and code belong in a sandbox the application provides — a container, a VM,
+a remote interpreter — through the `Sandbox` interface on `nexus-ai-pro/agent/sandbox`: `exec()`
+with `SandboxExecOptions` (a working directory, variables, standard input, a timeout, a signal),
+returning a `SandboxExecResult`; file reads and writes; and its `SandboxIsolation`, what it claims
+to isolate. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and
+`list_files`, each declaring exactly what one call does, with files under the `mount` a policy sees
+(`/workspace` by default); `SandboxToolsOptions` chooses them.
+
+`runSandboxConformance()` checks any sandbox against the contract, with no test framework, and
+returns a `SandboxConformanceReport` of `SandboxConformanceCheck`s: output, errors, and exit codes;
+standard input and variables, with none of the host's; a timeout that stops the command; files that
+round-trip where commands run; and paths outside the sandbox refused, as `SandboxPathError`.
+`SandboxConformanceOptions` names the JavaScript command and the timeout it tests.
+
+`processSandbox()` is a reference for development: commands run as ordinary processes in a
+directory, with only `PATH` and the variables given, and its file methods refuse any path outside
+`root` (`ProcessSandboxOptions`). A command it runs can still touch anything you can, and its
+`isolation` says so. It is never a security boundary.
+
+```ts
+import { processSandbox, runSandboxConformance, sandboxTools } from 'nexus-ai-pro/agent/sandbox';
+
+const sandbox = processSandbox({ root: './.agent-workspace' });   // development only
+const report = await runSandboxConformance(() => mySandbox());    // prove your own
+const agent = createAgent({ client: ai, tools: sandboxTools(sandbox), permissions, checkpointer });
+```
 
 ## Middleware
 
@@ -9577,8 +9687,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime` | 158 KB | 47% | none |
 | `nexus-ai-pro/server` | 116 KB | 35% | none |
 | `nexus-ai-pro/batch` | 113 KB | 34% | none |
+| `nexus-ai-pro/agent` | 98 KB | 29% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 29% | none |
-| `nexus-ai-pro/agent` | 94 KB | 28% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/groq` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/mistral` | 82 KB | 24% | none |
@@ -9588,7 +9698,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/openai` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/openrouter` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 80 KB | 24% | none |
-| `nexus-ai-pro/graph` | 78 KB | 23% | none |
+| `nexus-ai-pro/graph` | 79 KB | 24% | none |
 | `nexus-ai-pro/postgres` | 78 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 74 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 68 KB | 20% | none |
@@ -9654,6 +9764,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
+| `nexus-ai-pro/agent/sandbox` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/store` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/testing/record` | 11 KB | 3% | none |
@@ -9672,14 +9783,15 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/moderation` | 9 KB | 3% | none |
 | `nexus-ai-pro/sqlite/migrations` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
+| `nexus-ai-pro/graph/lint` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
+| `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
 | `nexus-ai-pro/ops/rate-limit-adapters` | 7 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
 | `nexus-ai-pro/evals/judge` | 7 KB | 2% | none |
-| `nexus-ai-pro/graph/lint` | 6 KB | 2% | none |
 | `nexus-ai-pro/store` | 6 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/evaluate` | 6 KB | 2% | none |

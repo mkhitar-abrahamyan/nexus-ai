@@ -249,6 +249,14 @@ export interface NodeOptions<S extends ChannelSchema = ChannelSchema> {
    */
   idempotent?: boolean;
   /**
+   * What the node does to the world, as capabilities: `payments:charge`, `network:api.stripe.com`,
+   * `filesystem:write`. Declared for the linter, which reports a node with effects that also
+   * interrupts, since the node runs again from the top when the answer comes.
+   */
+  effects?: readonly string[];
+  /** True when the node may call `context.interrupt()`. Declared for the linter. */
+  interrupts?: boolean;
+  /**
    * Nodes this one may reach through `Send` or a `Command`. Declaring them keeps compile-time
    * reachability checks and diagrams exact, so a node reached only that way is not reported as
    * unreachable.
@@ -822,6 +830,10 @@ export interface GraphDescription {
     idempotent?: boolean;
     /** True when the node reuses results through `cache`. */
     cache?: boolean;
+    /** The capabilities its work uses, when it declares them. */
+    effects?: string[];
+    /** True when it declares that it may interrupt. */
+    interrupts?: boolean;
     /** The graph this node runs, when it is a compiled graph used through `asNode()`. */
     subgraph?: GraphDescription;
   }>;
@@ -845,6 +857,20 @@ export interface GraphDescription {
   checkpointer?: 'memory' | 'custom' | 'none';
   /** Tasks a superstep runs at once. */
   maxConcurrency?: number;
+  /** The tools the graph's nodes call, when it was compiled with them, as an agent is. */
+  tools?: GraphToolDescription[];
+}
+
+/** A tool a graph calls, as the linter reads it. */
+export interface GraphToolDescription {
+  /** The tool's name. */
+  name: string;
+  /** Its capabilities, when it declares a fixed list. */
+  capabilities?: string[];
+  /** True when it computes its capabilities from each call's arguments. */
+  dynamic?: boolean;
+  /** How its calls are approved: an interrupt for each, a permission policy, or not at all. */
+  approval: 'interrupt' | 'policy' | 'none';
 }
 
 /**
@@ -868,6 +894,8 @@ export interface CompileOptions {
   maxConcurrency?: number;
   /** Default retry policy for every node. A node's own policy wins. */
   retry?: RetryPolicy;
+  /** The tools the graph's nodes call, for `describe()` and the linter. `createAgent()` fills it. */
+  tools?: GraphToolDescription[];
   /**
    * Defaults for every node: a retry policy, timeouts, and an `onError`. A node's own options win,
    * field by field. `retry` here is the same as `compile({ retry })`, and wins over it.

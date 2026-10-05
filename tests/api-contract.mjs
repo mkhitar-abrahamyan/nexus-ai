@@ -98,6 +98,8 @@ const expectedSubpaths = [
   './sqlite/vectors',
   './sqlite/migrations',
   './agent',
+  './agent/permissions',
+  './agent/sandbox',
   './store',
   './store/redis',
   './mcp',

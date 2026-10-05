@@ -6,6 +6,8 @@ import { Command, END, Send } from '../types/graph.js';
 import type { CompletionRequest, Message, ToolDefinition } from '../types/messages.js';
 import type { NexusResponse, ResponseMeta, StreamChunk, ToolCall } from '../types/response.js';
 import type { Store } from '../types/store.js';
+import { capabilitiesOf } from './capabilities.js';
+import type { PermissionPolicyLike } from './permissions.js';
 import { ToolExecutor, toolMessageContent } from './tool.js';
 
 /**
@@ -34,6 +36,10 @@ export interface AgentToolCall {
   name: string;
   /** Arguments, parsed from the model's JSON. */
   args: Record<string, unknown>;
+  /** What the call declares it does, when the tool declares capabilities. */
+  capabilities?: readonly string[];
+  /** Why the permission policy asked for approval, when it did. */
+  permission?: string;
 }
 
 /** What an approver may answer: allow, refuse with a reason, or allow with corrected arguments. */
@@ -98,6 +104,13 @@ export interface CreateAgentOptions {
   interruptOn?: Record<string, AgentApprovalPolicy | true>;
   /** Hooks around model and tool calls, applied in order. */
   middleware?: AgentMiddleware[];
+  /**
+   * Decides every tool call from the capabilities it declares, before it runs: allow it, deny it,
+   * or interrupt for a person's approval, as `interruptOn` does. A denied call reaches the model as a
+   * failed tool result naming the reason, and never runs. See `permissionPolicy()` in
+   * `nexus-ai-pro/agent/permissions`.
+   */
+  permissions?: PermissionPolicyLike;
   /** Long-term memory, available to tools and middleware as `store`. */
   store?: Store;
   /**
@@ -245,20 +258,50 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
         }
 
         let args = parsed.args;
-        const description: AgentToolCall = { id: call.id, name: call.function.name, args };
+        const definition = executor.get(call.function.name);
+        const capabilities = capabilitiesOf(definition, args);
+        const description: AgentToolCall = {
+          id: call.id,
+          name: call.function.name,
+          args,
+          ...(capabilities ? { capabilities } : {}),
+        };
+        const refuse = (error: string) => {
+          context.tool({ phase: 'error', id: call.id, name: description.name, error });
+          return { messages: [toolMessage(call, { ok: false, error })] };
+        };
+
+        // The policy decides before anything runs; a denial never reaches the tool.
+        let permission: string | undefined;
+        if (options.permissions) {
+          const verdict = await options.permissions.decide({ tool: description.name, args, capabilities });
+          if (verdict.decision === 'deny') return refuse(`Permission denied: ${verdict.reason}`);
+          if (verdict.decision === 'ask') permission = verdict.reason;
+        }
+
         const policy = approvals[description.name];
-        if (policy) {
+        if (policy || permission) {
+          const asked: AgentToolCall = permission ? { ...description, permission } : description;
           const decision = context.interrupt<AgentApproval>({
-            reason: (policy === true ? undefined : policy.reason?.(description)) ?? defaultReason(description),
-            payload: description,
+            reason:
+              (policy && policy !== true ? policy.reason?.(asked) : undefined) ??
+              (permission ? `${defaultReason(asked)} (${permission})` : defaultReason(asked)),
+            payload: asked,
           });
           const verdict = normalizeApproval(decision);
-          if (!verdict.approved) {
-            return {
-              messages: [toolMessage(call, { ok: false, error: verdict.reason ?? 'A human refused this tool call' })],
-            };
+          if (!verdict.approved) return refuse(verdict.reason ?? 'A human refused this tool call');
+          if (verdict.args) {
+            args = verdict.args;
+            // Arguments an approver changed are checked again: an edit cannot reach what the policy denies.
+            if (options.permissions) {
+              const recheck = await options.permissions.decide({
+                tool: description.name,
+                args,
+                capabilities: capabilitiesOf(definition, args),
+              });
+              if (recheck.decision === 'deny') return refuse(`Permission denied: ${recheck.reason}`);
+            }
           }
-          if (verdict.args) args = verdict.args;
         }
 
         const run = async (): Promise<AgentToolResult> => executor.execute(description.name, args);
@@ -291,6 +334,13 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
     ...(options.store ? { store: options.store } : {}),
     ...(options.name ? { name: options.name } : {}),
     ...(options.lifecycle ? { lifecycle: options.lifecycle, lifecycleFamily: 'agent' as const } : {}),
+    // What each tool declares and how its calls are approved, for describe() and the linter.
+    tools: executor.list().map((definition) => ({
+      name: definition.name,
+      ...(Array.isArray(definition.capabilities) ? { capabilities: [...definition.capabilities] } : {}),
+      ...(typeof definition.capabilities === 'function' ? { dynamic: true } : {}),
+      approval: approvals[definition.name] ? 'interrupt' : options.permissions ? 'policy' : 'none',
+    })),
   });
 }
 
