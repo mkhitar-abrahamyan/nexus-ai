@@ -231,10 +231,14 @@ export interface SandboxToolsOptions {
  */
 export function sandboxTools(sandbox: Sandbox, options: SandboxToolsOptions = {}): ToolDefinition[] {
   const mount = (options.mount ?? '/workspace').replace(/\/+$/, '');
-  const mounted = (file: unknown) =>
-    `${mount}/${String(file ?? '.')
-      .replace(/\\/g, '/')
-      .replace(/^\/+/, '')}`;
+  // A model may name a file as `notes.txt` or as `/workspace/notes.txt`; both are the same file.
+  const local = (file: unknown): string => {
+    const unified = String(file ?? '.').replace(/\\/g, '/');
+    const relative =
+      unified === mount ? '.' : unified.startsWith(`${mount}/`) ? unified.slice(mount.length + 1) : unified;
+    return relative.replace(/^\/+/, '') || '.';
+  };
+  const mounted = (file: unknown) => `${mount}/${local(file)}`;
   const tools: ToolDefinition[] = [];
   if (options.shell !== false) {
     tools.push({
@@ -258,14 +262,14 @@ export function sandboxTools(sandbox: Sandbox, options: SandboxToolsOptions = {}
     tools.push(
       {
         name: 'read_file',
-        description: 'Reads a text file in the sandbox.',
+        description: `Reads a text file in the sandbox. Paths are relative to ${mount}.`,
         parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
         capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
-        execute: async (args) => sandbox.readFile(String(args.path)),
+        execute: async (args) => sandbox.readFile(local(args.path)),
       },
       {
         name: 'write_file',
-        description: 'Writes a text file in the sandbox, creating its directory.',
+        description: `Writes a text file in the sandbox, creating its directory. Paths are relative to ${mount}.`,
         parameters: {
           type: 'object',
           properties: { path: { type: 'string' }, content: { type: 'string' } },
@@ -273,8 +277,8 @@ export function sandboxTools(sandbox: Sandbox, options: SandboxToolsOptions = {}
         },
         capabilities: (args) => [`filesystem:write:${mounted(args.path)}`],
         execute: async (args) => {
-          await sandbox.writeFile(String(args.path), String(args.content ?? ''));
-          return { written: String(args.path) };
+          await sandbox.writeFile(local(args.path), String(args.content ?? ''));
+          return { written: local(args.path) };
         },
       },
     );
@@ -285,7 +289,7 @@ export function sandboxTools(sandbox: Sandbox, options: SandboxToolsOptions = {}
         description: 'Lists the entries of a directory in the sandbox.',
         parameters: { type: 'object', properties: { path: { type: 'string' } } },
         capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
-        execute: async (args) => list(args.path === undefined ? '.' : String(args.path)),
+        execute: async (args) => list(local(args.path)),
       });
     }
   }

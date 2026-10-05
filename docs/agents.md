@@ -1,6 +1,6 @@
 # Agents and tools
 
-<!-- covers: ./agent ./agent/permissions ./agent/sandbox ./connectors -->
+<!-- covers: ./agent ./agent/middleware ./agent/permissions ./agent/sandbox ./connectors -->
 <!-- sources: src/agent src/connectors -->
 
 Tool-calling agents, from `nexus-ai-pro/agent`. There are two:
@@ -87,7 +87,7 @@ const agent = createAgent({
 
 const run = await agent.invoke(agentInput('Refund order 1182 and tell the customer'), { threadId });
 run.state.answer;      // the final text
-run.state.stopReason;  // 'completed' | 'max_iterations'
+run.state.stopReason;  // 'completed' | 'max_iterations' | 'stopped'
 ```
 
 **Tool calls run in parallel.** Each call the model asks for becomes its own task, up to
@@ -229,36 +229,193 @@ const agent = createAgent({ client: ai, tools: sandboxTools(sandbox), permission
 
 ## Middleware
 
-`AgentMiddleware` wraps the parts of a run worth controlling. It has three hooks, each optional,
+`AgentMiddleware` wraps the parts of a run worth controlling. It has four hooks, each optional,
 applied in order:
 
 | Hook | What it can do |
 | --- | --- |
-| `beforeModel` | Adjust the request. |
+| `beforeModel` | Adjust the request: trim history, add context, change the model or the tools. |
+| `wrapModelCall` | Surround the model call itself: retry it, fall back to another model, or end the run without it. |
 | `afterModel` | Inspect or replace the response. |
-| `wrapToolCall` | Surround each tool call, for logging, timing, or policy. |
+| `wrapToolCall` | Surround each tool call: log, time, retry, refuse, or change its arguments. |
 
-Three middleware ship. Each is ordinary middleware you can read and copy:
+Every hook receives an `AgentMiddlewareContext`: the state at that step, the store, the thread
+and tenant, the run's signal, and `interrupt()`, which suspends the run for a person exactly as
+`interruptOn` does. `wrapModelCall` receives an `AgentModelCallContext`, which adds `stop()`: it
+ends the run with an answer and `stopReason: 'stopped'`, with no model call. `next()` may be called
+more than once in either wrapper. When a `wrapToolCall` passes `next()` a call with changed
+arguments, the permission policy decides them again before the tool runs. A middleware can
+therefore never reach what the policy denies.
+
+```ts
+const timing: AgentMiddleware = {
+  name: 'timing',
+  async wrapModelCall(request, next) {
+    const started = performance.now();
+    try {
+      return await next(request);
+    } finally {
+      metrics.observe('model_ms', performance.now() - started);
+    }
+  },
+};
+```
+
+Three small middleware come with `nexus-ai-pro/agent`:
 
 | Middleware | What it does |
 | --- | --- |
-| `limitToolCalls()` | Caps how often a tool may be called in one run, so a loop cannot bill forever. |
+| `limitToolCalls()` | Caps how often a tool may be called in one run, so a loop cannot bill forever. Calls are counted from the transcript, so the count survives a restart and two threads never share one. |
 | `redactMessages()` | Removes matching text before it reaches a provider or a log. `RedactOptions` sets the patterns, the replacement, and whether responses are redacted too. |
 | `summarizeHistory()` | Replaces the older half of a long transcript with a summary, so a long thread fits the context window. `SummarizeOptions` sets how many messages stay verbatim, when summarizing starts, and the `summarize` function. |
 
+`nexus-ai-pro/agent/middleware` has those three and ten more. Each is a separate import, and a
+bundler keeps only the ones you use:
+
+| Middleware | What it does |
+| --- | --- |
+| `modelRetry()` | Tries a failed model call again, with backoff. |
+| `modelFallback()` | Tries other models, or other clients, when the model call fails. |
+| `dynamicModel()` | Chooses the model for each call from the run so far. |
+| `toolRetry()` | Runs a failed tool call again, only when repeating it is safe. |
+| `toolSelector()` | Sends the model only the tools relevant to the turn. |
+| `contextEditor()` | Clears old tool results from what the model is sent. |
+| `piiMiddleware()` | Redacts, masks, hashes, or blocks personal data and secrets. |
+| `humanApproval()` | Asks a person before a call that a rule picks. |
+| `modelCallLimit()` | Caps the model calls of a run, of a thread, or both. |
+| `filesystemContext()` | Puts instruction files in context, and moves large results out of it. |
+
 ```ts
-import { createAgent, limitToolCalls, redactMessages, summarizeHistory } from 'nexus-ai-pro/agent';
+import { createAgent } from 'nexus-ai-pro/agent';
+import { contextEditor, humanApproval, modelRetry, toolRetry, toolSelector } from 'nexus-ai-pro/agent/middleware';
 
 const agent = createAgent({
   client: ai,
-  tools: [refundTool, searchTool],
+  tools: mcpTools,                       // 150 of them
+  checkpointer,
   middleware: [
-    redactMessages({ patterns: [/\bsk-[A-Za-z0-9]{20,}\b/g], redactOutput: true }),
-    limitToolCalls({ refund: 1 }),
-    summarizeHistory({ keepLast: 10, summarize: async (messages) => (await ai.complete(summaryRequest(messages))).content }),
+    modelRetry(),
+    toolSelector({ embed, maxTools: 12, always: ['search_docs'] }),
+    contextEditor({ triggerTokens: 40_000 }),
+    humanApproval({ when: (call) => call.name === 'refund' && Number(call.args.amount) > 100 }),
+    toolRetry(),
   ],
 });
 ```
+
+**Retries.** `modelRetry()` retries the agent's step after the client's own retries gave up.
+`ModelRetryOptions` sets the attempts, the `RetryBackoff` (an initial wait, a maximum, a factor,
+and jitter), `retryOn` for which errors to retry, and `retryResponse` for retrying a response that
+arrived but is unusable, such as an empty one. An error marked `retryable: false`, such as a
+provider's authentication error, is never retried, and neither is a cancellation. Waits stop when
+the run is cancelled. `onRetry` receives a `RetryEvent` before each new attempt.
+
+`toolRetry()` repeats a failed tool call. By default it repeats only a call whose tool declares
+capabilities and nothing beyond reading, because retrying a payment or a write that timed out
+after it landed would do it twice. `ToolRetryOptions.tools` names the tools that are idempotent, or
+says `'all'`, or takes a function of the call. Put `humanApproval()` before `toolRetry()`, so a
+retried call is not asked about twice.
+
+**Models.** `modelFallback()` tries each `ModelFallbackTarget` in order when the call fails: a
+model name for the agent's own client, or `{ client, model }` for another one. That covers what the
+router cannot: a client of a different kind, or a fallback after the client's own routes are used
+up. `ModelFallbackOptions` sets which errors fall back, and `onFallback` receives a
+`ModelFallbackEvent`. `dynamicModel()` takes a function of a `DynamicModelContext`, the step's
+context plus the request about to go out, and returns the model to use. For example, a cheap model
+for the first steps and a stronger one once the task proves hard:
+
+```ts
+dynamicModel(({ state }) => (state.iterations >= 4 ? 'gpt-5' : 'gpt-5-mini'))
+```
+
+**Tool selection.** An agent with 150 tools otherwise sends 150 schemas on every call. Those tokens
+are paid every time, the call is slower, and a model choosing among that many picks worse.
+`toolSelector()` chooses a dozen, by a rule, by embedding similarity, or by both
+(`ToolSelectorOptions`):
+
+- A rule, `select`, receives a `ToolSelectionContext`: the step's context, the request, the
+  tools offered, and the query.
+- `embed` is any embedding function. Each tool is embedded once, from its name and description;
+  the query once per turn.
+
+The tools named in `always`, a tool that `toolChoice` forces, and the tools the model already
+called this turn are always kept. The agent can still run every tool; only what the model is
+offered changes. `onSelect` receives a `ToolSelection`: the query, the tools sent, how many were
+offered, and each tool's similarity score.
+
+In the benchmark in the test suite, `toolSelector()` sends 12 tools instead of 150 over 40 tasks:
+- every task still succeeds;
+- input tokens per task fall from about 64,000 to about 5,200;
+- latency per task falls by more than half.
+
+`compareExperiments()` reports the comparison.
+
+**Context.** `contextEditor()` replaces old tool results with a short placeholder once the request
+passes `triggerTokens`, keeping the most recent few whole. Results are cleared in batches, so the
+edited prefix stays the same between edits and a provider's prompt cache keeps working. Only the
+request changes: the transcript in state keeps every result. `ContextEditorOptions` also sets the
+batch, the tools never cleared, whether arguments are cleared too, and the placeholder, which a
+function can build from a `ClearedToolResult`. `onEdit` receives a `ContextEdit` with the tokens
+before and after. `estimateRequestTokens()` is the default estimate, about four characters a
+token over messages, tool calls, and tool schemas.
+
+`filesystemContext()` treats the filesystem as context, from a `FilesystemContextSource`: a
+`Sandbox`, or anything with its file methods. Through `FilesystemContextOptions`, it does two
+things:
+
+- Instruction files such as `AGENTS.md` reach the model on every call, right after the system
+  prompt, with an optional listing of a directory. They are read once per run.
+- With `offload` (`ContextOffloadOptions`), a tool result larger than the limit is written to a file
+  instead. The model reads a preview and a path it can open with `read_file`.
+
+The transcript stays small however much a tool returns, and nothing is lost.
+
+```ts
+filesystemContext({ source: sandbox, include: ['AGENTS.md'], listing: {}, offload: { overChars: 20_000 } })
+```
+
+**Personal data.** `piiMiddleware()` finds each `PiiKind`:
+- emails and phone numbers;
+- card numbers, checked with Luhn;
+- US social security numbers;
+- IBANs, checked with their checksum;
+- IP addresses;
+- common API keys and private keys;
+- any patterns of your own.
+
+The checksums keep false positives low: an order number is not taken for a card. Each match gets a
+`PiiStrategy`, for every kind or per kind:
+- `redact` replaces it with its kind;
+- `mask` keeps its last four characters;
+- `hash` gives a stable token, so the model can still tell two values apart;
+- `block` refuses the message with a `PiiBlockedError`.
+
+`PiiMiddlewareOptions.apply` chooses where it looks:
+- the model's input, which is everything but the system prompt;
+- its output;
+- tool results, which are cleaned before they enter the transcript, so they are never checkpointed.
+
+`onDetect` receives a `PiiFinding`, which gives the kind and its `PiiWhere` but never the value.
+
+```ts
+piiMiddleware({ strategy: { email: 'hash', 'credit-card': 'block' }, apply: { input: true, toolResults: true } })
+```
+
+**Approvals and limits.** `humanApproval()` asks before the calls a rule picks: a refund over a
+limit, or a write outside a draft folder. `interruptOn` instead asks before every call to a named
+tool. By default it asks about every call that declares nothing, or declares more than reading.
+`HumanApprovalOptions.approve` asks out of band, by posting to a chat and waiting for the answer,
+instead of suspending the run. An approver who corrects the arguments has them decided again by the
+permission policy.
+
+`modelCallLimit()` caps model calls per run, per thread across runs, or both
+(`ModelCallLimitOptions`):
+- The run count is read from the transcript.
+- The thread count is kept in the agent's store when it has one, so every process shares it.
+
+At a limit, the run ends with an answer and `stopReason: 'stopped'`. With `onLimit: 'error'`, it
+fails with a `ModelCallLimitError` instead. `maxIterations` still stops a single run that keeps
+calling tools.
 
 ## An agent as a tool
 
@@ -296,7 +453,7 @@ thrown error, so one bad call does not end a run. An unknown tool name is report
 | --- | --- |
 | `CreateAgentOptions` | What `createAgent()` takes. |
 | `AgentGraph` | What it returns: a compiled graph over `AgentChannels`. |
-| `AgentState` | The graph's state: the transcript, the iterations used, the final answer, and an `AgentStopReason`. |
+| `AgentState` | The graph's state: the transcript, the iterations used, the final answer, and an `AgentStopReason`: `completed`, `max_iterations`, or `stopped` when a middleware ended the run. |
 | `agentInput()` | Wraps a question into that state. |
 | `AgentApprovalPolicy` | Decides which tools pause for a person. |
 | `AgentApproval` | A person's answer: allow, refuse with a reason the model sees, or allow with corrected arguments. |
@@ -326,27 +483,71 @@ specific entry point that provides it.
 | `agentInput` | function | Wraps a question into the state an agent starts from. |
 | `AgentLoop` | class | A simple tool-calling loop: calls the model, runs the tools it asks for, and repeats until it answers or runs out of iterations. |
 | `AgentLoopModelClient` | interface | The part of a client the agent loop needs. |
-| `AgentMiddleware` | interface | Hooks around the agent's model calls and tool calls. |
 | `AgentModelClient` | interface | The model call an agent makes. |
 | `AgentResult` | interface | The outcome of an `AgentLoop` run. |
 | `AgentState` | type | The agent's state. |
 | `AgentStep` | interface | One step of an `AgentLoop` run. |
-| `AgentStopReason` | type | `completed` when the model answered, `max_iterations` when it ran out of model calls. |
-| `AgentToolCall` | interface | A tool call the agent is about to make. |
-| `AgentToolResult` | interface | What a tool call produced. |
+| `AgentStopReason` | type | `completed` when the model answered, `max_iterations` when it ran out of model calls, `stopped` when a middleware ended the run through `context.stop()`. |
 | `createAgent` | function | Builds an agent and returns it as a compiled graph. |
 | `CreateAgentOptions` | interface | Options for `createAgent()`. |
 | `isToolOutput` | function | True for a result built with `toolOutput()`. |
-| `limitToolCalls` | function | Caps how often a tool may be called in one run. |
-| `redactMessages` | function | Redacts matching text from requests, and optionally from responses. |
-| `RedactOptions` | interface | Options for `redactMiddleware()`. |
-| `summarizeHistory` | function | Replaces the older half of a long transcript with a summary. |
-| `SummarizeOptions` | interface | Middleware that ships with the agent. |
 | `tool` | function | Defines a tool the model can call, typing its arguments. |
 | `ToolExecutionResult` | interface | What running one tool produced. |
 | `ToolExecutor` | class | Runs tool calls by name, reporting failures as results rather than throwing. |
 | `toolMessageContent` | function | What the model reads for a tool's result: the parts of a `toolOutput()`, or anything else as JSON. |
 | `toolOutput` | function | Builds a tool's result as content: text, images, and asset references, in order. |
+
+### `nexus-ai-pro/agent/middleware`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `AgentMiddleware` | interface | Hooks around the agent's model calls and tool calls. |
+| `AgentMiddlewareContext` | interface | What every middleware hook can read about the step it runs in. |
+| `AgentModelCallContext` | interface | What `wrapModelCall` can read, and how it ends the run without calling the model. |
+| `AgentToolCall` | interface | A tool call the agent is about to make. |
+| `AgentToolResult` | interface | What a tool call produced. |
+| `ClearedToolResult` | interface | One cleared result, for a custom placeholder. |
+| `ContextEdit` | interface | What one edit did, for logs and for measuring what it saves. |
+| `contextEditor` | function | Clears old tool results from what the model is sent, once the request grows past a threshold. |
+| `ContextEditorOptions` | interface | Options for `contextEditor()`. |
+| `ContextOffloadOptions` | interface | Where large tool results go instead of the transcript. |
+| `dynamicModel` | function | Chooses the model for each call from the run so far. |
+| `DynamicModelContext` | type | What `dynamicModel()` decides from: the step's context and the request about to be sent. |
+| `estimateRequestTokens` | function | About four characters a token, over the messages, the tool calls, and the tool schemas. |
+| `filesystemContext` | function | The filesystem as the agent's context: files in, large results out. |
+| `FilesystemContextOptions` | interface | Options for `filesystemContext()`. |
+| `FilesystemContextSource` | type | Where `filesystemContext()` reads and writes: a `Sandbox`, or anything with the same file methods. |
+| `humanApproval` | function | Asks a person before a tool call runs, decided per call rather than per tool name. |
+| `HumanApprovalOptions` | interface | Options for `humanApproval()`. |
+| `limitToolCalls` | function | Caps how often a tool may be called in one run: one turn, from a user message to the answer. |
+| `modelCallLimit` | function | Caps the model calls of a run, of a thread, or both. |
+| `ModelCallLimitError` | class | Thrown by `modelCallLimit()` under `onLimit: 'error'`. |
+| `ModelCallLimitOptions` | interface | Options for `modelCallLimit()`. |
+| `modelFallback` | function | Tries other models, in order, when the model call fails. |
+| `ModelFallbackEvent` | interface | One fallback about to happen. |
+| `ModelFallbackOptions` | interface | Options for `modelFallback()`. |
+| `ModelFallbackTarget` | type | A model to fall back to: a model name for the agent's own client, or another client. |
+| `modelRetry` | function | Tries a failed model call again, with exponential backoff. |
+| `ModelRetryOptions` | interface | Options for `modelRetry()`. |
+| `PiiBlockedError` | class | Thrown when a match under the `block` strategy is found in the model's input or output. |
+| `PiiFinding` | interface | One match, as `onDetect` sees it: never the value itself. |
+| `PiiKind` | type | The personal data and secrets `piiMiddleware()` finds on its own. |
+| `piiMiddleware` | function | Keeps personal data and secrets away from the model, the transcript, or both. |
+| `PiiMiddlewareOptions` | interface | Options for `piiMiddleware()`. |
+| `PiiStrategy` | type | What happens to a match: `redact` replaces it with its kind, `mask` keeps its last four characters, `hash` replaces it with a stable token so two values stay distinguishable, and `block` refuses the whole message. |
+| `PiiWhere` | type | Where a match was found. |
+| `redactMessages` | function | Redacts matching text from requests, and optionally from responses. |
+| `RedactOptions` | interface | Options for `redactMiddleware()`. |
+| `RetryBackoff` | interface | How long to wait between attempts. |
+| `RetryEvent` | interface | One retry about to happen. |
+| `summarizeHistory` | function | Replaces the older half of a long transcript with a summary. |
+| `SummarizeOptions` | interface | Middleware that ships with the agent. |
+| `toolRetry` | function | Runs a failed tool call again, with exponential backoff. |
+| `ToolRetryOptions` | interface | Options for `toolRetry()`. |
+| `ToolSelection` | interface | What `toolSelector()` sent for one call. |
+| `ToolSelectionContext` | interface | What a rule chooses tools from. |
+| `toolSelector` | function | Sends a model only the tools relevant to the turn. |
+| `ToolSelectorOptions` | interface | Options for `toolSelector()`. |
 
 ### `nexus-ai-pro/agent/permissions`
 

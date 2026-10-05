@@ -1,5 +1,6 @@
-import type { Message } from '../types/messages.js';
-import type { AgentMiddleware } from './create-agent.js';
+import type { Message } from '../../types/messages.js';
+import type { AgentMiddleware } from '../create-agent.js';
+import { callPosition } from './shared.js';
 
 /**
  * Middleware that ships with the agent.
@@ -97,23 +98,21 @@ export function redactMessages(options: RedactOptions): AgentMiddleware {
 }
 
 /**
- * Caps how often a tool may be called in one run.
+ * Caps how often a tool may be called in one run: one turn, from a user message to the answer.
  *
  * A model that loops on the same call otherwise burns the iteration budget, and with an expensive
- * tool it burns money too.
+ * tool it burns money too. Calls are counted from the transcript, so the count survives a restart
+ * and a resumed approval, and two threads never share one.
  */
 export function limitToolCalls(limits: Record<string, number>): AgentMiddleware {
-  const counts = new Map<string, number>();
   return {
     name: 'limit-tool-calls',
-    async wrapToolCall(call, next) {
+    async wrapToolCall(call, next, context) {
       const limit = limits[call.name];
       if (limit === undefined) return next();
-      const used = counts.get(call.name) ?? 0;
-      if (used >= limit) {
+      if (callPosition(context.state.messages, call) > limit) {
         return { ok: false, error: `Tool "${call.name}" has already run ${limit} times in this run` };
       }
-      counts.set(call.name, used + 1);
       return next();
     },
   };

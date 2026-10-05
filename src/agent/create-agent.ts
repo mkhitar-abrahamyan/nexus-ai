@@ -1,7 +1,7 @@
 import type { OperationLifecycleLike } from '../types/lifecycle.js';
 import { appendList, counter, lastValue } from '../graph/channels.js';
 import { type CompiledGraph, createGraph } from '../graph/graph.js';
-import type { GraphCheckpointer, NodeContext } from '../types/graph.js';
+import type { GraphCheckpointer, InterruptRequest, NodeContext } from '../types/graph.js';
 import { Command, END, Send } from '../types/graph.js';
 import type { CompletionRequest, Message, ToolDefinition } from '../types/messages.js';
 import type { NexusResponse, ResponseMeta, StreamChunk, ToolCall } from '../types/response.js';
@@ -54,26 +54,68 @@ export interface AgentApprovalPolicy {
   reason?: (call: AgentToolCall) => string;
 }
 
+/** What every middleware hook can read about the step it runs in. */
+export interface AgentMiddlewareContext {
+  /** The agent's state at this step: the whole transcript, tool calls and results included. */
+  state: AgentState;
+  /** Long-term memory, when the agent has a store. */
+  store?: Store;
+  /** The thread the run belongs to. */
+  threadId: string;
+  /** The tenant the run is for, when it has one. */
+  tenantId?: string;
+  /** Aborted when the run is cancelled or the step times out. A hook that waits should stop with it. */
+  signal: AbortSignal;
+  /**
+   * Suspends the run until a person answers, as `interruptOn` does. When the run resumes, the step
+   * runs again and this returns the answer instead of suspending.
+   */
+  interrupt<T = unknown>(request: InterruptRequest): T;
+}
+
+/** What `wrapModelCall` can read, and how it ends the run without calling the model. */
+export interface AgentModelCallContext extends AgentMiddlewareContext {
+  /**
+   * Ends the run with this answer and `stopReason: 'stopped'`, without another model call. Return
+   * what it returns: `return context.stop('The model call limit was reached.')`.
+   */
+  stop(answer: string): NexusResponse;
+}
+
 /** Hooks around the agent's model calls and tool calls. Each hook is optional. */
 export interface AgentMiddleware {
   /** Names the middleware in traces and errors. */
   name?: string;
   /** Adjusts the request before it is sent: trim history, add context, swap the model. */
-  beforeModel?(context: {
-    request: CompletionRequest;
-    state: AgentState;
-    store?: Store;
+  beforeModel?(
+    context: AgentMiddlewareContext & { request: CompletionRequest },
     // biome-ignore lint/suspicious/noConfusingVoidType: returning nothing means "leave the request as it is", which is the common case.
-  }): CompletionRequest | void | Promise<CompletionRequest | void>;
+  ): CompletionRequest | void | Promise<CompletionRequest | void>;
   /** Inspects or replaces the response: redact, validate, count. */
-  afterModel?(context: {
-    response: NexusResponse;
-    state: AgentState;
-    store?: Store;
+  afterModel?(
+    context: AgentMiddlewareContext & { response: NexusResponse },
     // biome-ignore lint/suspicious/noConfusingVoidType: returning nothing means "leave the response as it is".
-  }): NexusResponse | void | Promise<NexusResponse | void>;
-  /** Wraps a tool call, so a policy can log it, time it, or refuse it. */
-  wrapToolCall?(call: AgentToolCall, next: () => Promise<AgentToolResult>): Promise<AgentToolResult> | AgentToolResult;
+  ): NexusResponse | void | Promise<NexusResponse | void>;
+  /**
+   * Wraps the model call itself, after every `beforeModel` and before every `afterModel`. `next`
+   * sends a request and may be called again, with the same request or a changed one, to retry or to
+   * fall back to another model. The first middleware is the outermost.
+   */
+  wrapModelCall?(
+    request: CompletionRequest,
+    next: (request: CompletionRequest) => Promise<NexusResponse>,
+    context: AgentModelCallContext,
+  ): Promise<NexusResponse> | NexusResponse;
+  /**
+   * Wraps a tool call, so a policy can log it, time it, retry it, or refuse it. `next` runs the
+   * rest of the chain and may be called again; given a call, it runs that call's arguments instead,
+   * and the permission policy decides them again first. The first middleware is the outermost.
+   */
+  wrapToolCall?(
+    call: AgentToolCall,
+    next: (call?: AgentToolCall) => Promise<AgentToolResult>,
+    context: AgentMiddlewareContext,
+  ): Promise<AgentToolResult> | AgentToolResult;
 }
 
 /** What a tool call produced. */
@@ -161,8 +203,11 @@ export type AgentState = {
   /** Why the agent stopped. */
   stopReason?: AgentStopReason;
 };
-/** `completed` when the model answered, `max_iterations` when it ran out of model calls. */
-export type AgentStopReason = 'completed' | 'max_iterations';
+/**
+ * `completed` when the model answered, `max_iterations` when it ran out of model calls, `stopped`
+ * when a middleware ended the run through `context.stop()`.
+ */
+export type AgentStopReason = 'completed' | 'max_iterations' | 'stopped';
 /** An agent: a compiled graph over the agent's channels. */
 export type AgentGraph = CompiledGraph<AgentChannels>;
 
@@ -205,28 +250,52 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
           ...(options.metadata ? { metadata: options.metadata } : {}),
         };
 
+        const hooks = hookContext(context, state, options.store);
         for (const item of middleware) {
-          request = (await item.beforeModel?.({ request, state, store: options.store })) ?? request;
+          request = (await item.beforeModel?.({ ...hooks, request })) ?? request;
         }
 
-        let response =
-          options.streamTokens && options.client.stream
-            ? await streamed(options.client.stream(request), (chunk) => context.message(chunk))
-            : await options.client.complete(request);
-        if (!(options.streamTokens && options.client.stream) && response.content) {
+        const streaming = Boolean(options.streamTokens && options.client.stream);
+        const send = (next: CompletionRequest): Promise<NexusResponse> =>
+          streaming && options.client.stream
+            ? streamed(options.client.stream(next), (chunk) => context.message(chunk))
+            : options.client.complete(next);
+        // A response made by context.stop() is recognized by identity, before afterModel can replace it.
+        const stops = new WeakSet<NexusResponse>();
+        const modelContext: AgentModelCallContext = {
+          ...hooks,
+          stop: (answer) => {
+            const stopped = stopResponse(answer, request.model);
+            stops.add(stopped);
+            return stopped;
+          },
+        };
+        const wrapped = middleware.reduceRight<(request: CompletionRequest) => Promise<NexusResponse>>((next, item) => {
+          const wrap = item.wrapModelCall?.bind(item);
+          return wrap ? (current) => Promise.resolve(wrap(current, next, modelContext)) : next;
+        }, send);
+        let response = await wrapped(request);
+        const stopped = stops.has(response);
+        if ((!streaming || stopped) && response.content) {
           context.message({ content: response.content });
         }
         for (const item of middleware) {
-          response = (await item.afterModel?.({ response, state, store: options.store })) ?? response;
+          response = (await item.afterModel?.({ ...hooks, response })) ?? response;
         }
 
         const assistant: Message = {
           role: 'assistant',
           content: response.content,
-          ...(response.toolCalls?.length ? { toolCalls: response.toolCalls } : {}),
+          ...(response.toolCalls?.length && !stopped ? { toolCalls: response.toolCalls } : {}),
         };
-        const calls = response.toolCalls ?? [];
+        const calls = stopped ? [] : (response.toolCalls ?? []);
 
+        if (stopped) {
+          return new Command({
+            update: { messages: [assistant], iterations: 1, answer: response.content, stopReason: 'stopped' },
+            goto: END,
+          });
+        }
         if (calls.length === 0) {
           return new Command({
             update: { messages: [assistant], iterations: 1, answer: response.content, stopReason: 'completed' },
@@ -304,15 +373,27 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
           }
         }
 
-        const run = async (): Promise<AgentToolResult> => executor.execute(description.name, args);
+        // The tool that runs is always the one the model named; a middleware can change only the arguments,
+        // and changed arguments are decided again, so no middleware can reach what the policy denies.
+        const run = async (current: AgentToolCall): Promise<AgentToolResult> => {
+          if (options.permissions && current.args !== args) {
+            const recheck = await options.permissions.decide({
+              tool: description.name,
+              args: current.args,
+              capabilities: capabilitiesOf(definition, current.args),
+            });
+            if (recheck.decision === 'deny') return { ok: false, error: `Permission denied: ${recheck.reason}` };
+          }
+          return executor.execute(description.name, current.args);
+        };
         context.tool({ phase: 'start', id: call.id, name: description.name, args });
-        const result = await middleware.reduceRight<() => Promise<AgentToolResult>>(
-          (next, item) =>
-            item.wrapToolCall
-              ? () => Promise.resolve(item.wrapToolCall?.({ ...description, args }, next) as AgentToolResult)
-              : next,
-          run,
-        )();
+        const hooks = hookContext(context, context.state as AgentState, options.store);
+        const result = await middleware.reduceRight<(call: AgentToolCall) => Promise<AgentToolResult>>((next, item) => {
+          const wrap = item.wrapToolCall?.bind(item);
+          return wrap
+            ? (current) => Promise.resolve(wrap(current, (changed) => next(changed ?? current), hooks))
+            : next;
+        }, run)({ ...description, args });
         context.tool(
           result.ok
             ? { phase: 'result', id: call.id, name: description.name, result: result.result }
@@ -419,6 +500,42 @@ function parseArguments(raw: string): ParsedArguments {
 }
 
 export type { NodeContext };
+
+/** What a middleware hook reads about its step, from the node it runs in. */
+function hookContext(
+  context: NodeContext<AgentChannels>,
+  state: AgentState,
+  store: Store | undefined,
+): AgentMiddlewareContext {
+  return {
+    state,
+    ...((context.store ?? store) ? { store: context.store ?? store } : {}),
+    threadId: context.threadId,
+    ...(context.tenantId ? { tenantId: context.tenantId } : {}),
+    signal: context.signal,
+    interrupt: <T>(request: InterruptRequest) => context.interrupt<T>(request),
+  };
+}
+
+/** The answer `context.stop()` ends a run with: no model was called, so nothing was spent. */
+function stopResponse(answer: string, model: string): NexusResponse {
+  return {
+    content: answer,
+    role: 'assistant',
+    finishReason: 'stop',
+    meta: {
+      requestId: '',
+      providerUsed: 'none',
+      modelUsed: model,
+      latencyMs: 0,
+      tokensInput: 0,
+      tokensOutput: 0,
+      tokensSaved: 0,
+      cacheHit: false,
+      guardrailsApplied: ['stopped-by-middleware'],
+    },
+  };
+}
 
 /**
  * Reads a streamed completion into a response, handing each piece of text to `onChunk` as it

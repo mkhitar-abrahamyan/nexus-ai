@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { agentAsTool, agentInput, createAgent } from '../src/agent/create-agent.js';
-import { limitToolCalls, redactMessages, summarizeHistory } from '../src/agent/middleware.js';
+import { limitToolCalls, redactMessages, summarizeHistory } from '../src/agent/middleware/basic.js';
 import { tool } from '../src/agent/tool.js';
 import { appendList, counter } from '../src/graph/channels.js';
 import { createGraph } from '../src/graph/graph.js';

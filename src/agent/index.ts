@@ -6,7 +6,7 @@ export {
   type RedactOptions,
   summarizeHistory,
   type SummarizeOptions,
-} from './middleware.js';
+} from './middleware/basic.js';
 export {
   agentAsTool,
   agentInput,
@@ -15,6 +15,8 @@ export {
   type AgentChannels,
   type AgentGraph,
   type AgentMiddleware,
+  type AgentMiddlewareContext,
+  type AgentModelCallContext,
   type AgentModelClient,
   type AgentState,
   type AgentStopReason,

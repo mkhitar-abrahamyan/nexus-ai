@@ -99,7 +99,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime` | 158 KB | 47% | none |
 | `nexus-ai-pro/server` | 116 KB | 35% | none |
 | `nexus-ai-pro/batch` | 113 KB | 34% | none |
-| `nexus-ai-pro/agent` | 98 KB | 29% | none |
+| `nexus-ai-pro/agent` | 102 KB | 30% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 29% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/groq` | 82 KB | 24% | none |
@@ -131,6 +131,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
 | `nexus-ai-pro/graph/functional` | 32 KB | 10% | none |
+| `nexus-ai-pro/agent/middleware` | 32 KB | 10% | none |
 | `nexus-ai-pro/context-hub` | 32 KB | 10% | none |
 | `nexus-ai-pro/voice` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 30 KB | 9% | none |

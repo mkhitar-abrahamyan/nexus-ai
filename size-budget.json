@@ -3,7 +3,8 @@
   "measuredAt": "2026-10-05",
   "maxKb": {
     ".": 370,
-    "./agent": 108,
+    "./agent": 114,
+    "./agent/middleware": 36,
     "./agent/permissions": 10,
     "./agent/sandbox": 14,
     "./batch": 126,

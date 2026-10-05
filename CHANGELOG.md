@@ -26,6 +26,27 @@ Agents that act safely, on production retrieval.
   `UNDECLARED_TOOL_CAPABILITIES` a tool whose effects cannot be judged; and
   `SIDE_EFFECT_BEFORE_INTERRUPT` a node that declares `effects` and `interrupts`. An agent's graph
   describes its tools for it.
+- **A middleware catalog**, on the new `nexus-ai-pro/agent/middleware`, each a separate import:
+  `modelRetry()`, `modelFallback()` (to another model or another client), `dynamicModel()`,
+  `toolRetry()` (which by default repeats only a call that cannot have changed anything),
+  `toolSelector()` (by rule, embedding similarity, or both), `contextEditor()` (clears old tool
+  results in batches, so a prompt cache keeps working), `piiMiddleware()` (validated card numbers
+  and IBANs; redact, mask, hash, or block), `humanApproval()` (per call, in band or out of band),
+  `modelCallLimit()` (per run and per thread, the thread count shared through the store), and
+  `filesystemContext()` (instruction files in, large results out to a file). The three existing
+  middleware are there too.
+- **A wider middleware seam.** `wrapModelCall` wraps the model call itself, and may call `next()`
+  again to retry or fall back. Every hook receives an `AgentMiddlewareContext`: the state, the
+  store, the thread and tenant, the run's signal, and `interrupt()`. `context.stop()` ends a run
+  with an answer and the new `stopReason: 'stopped'`. A `wrapToolCall` can pass `next()` changed
+  arguments, which the permission policy decides again.
+
+### Fixed
+
+- `limitToolCalls()` counted calls in memory shared by every run of an agent, so one thread's calls
+  used up another's limit, and the count never reset. It now counts per run from the transcript.
+- `sandboxTools()` file tools accept a path that names the mount, such as `/workspace/notes.txt`,
+  as well as one relative to it, and say in their descriptions which to use.
 
 ### Proof
 
@@ -33,6 +54,15 @@ Agents that act safely, on production retrieval.
   refused before their tools run, and a granted command that needs approval waits for a person.
 - The process sandbox passes the conformance suite, and a sandbox that leaks the host's environment
   and writes outside its root fails exactly those two checks.
+- An agent over 150 tools completes 40 tasks, a third of them needing two tools, with
+  `toolSelector()` at equal quality: every task succeeds either way. Input tokens per task fall from
+  about 64,000 to about 5,200 and latency by more than half. Two experiments, reported by
+  `compareExperiments()`, show it.
+- Each middleware is proved in a real agent loop. For example:
+  - a charge that timed out is never retried;
+  - an approver who raises a refund past what the policy allows has the edit refused;
+  - two agents sharing a store share one thread budget;
+  - a 45,000-character tool result reaches the transcript as a preview and a file.
 
 ## [2.2.0] - 2026-10-05
 

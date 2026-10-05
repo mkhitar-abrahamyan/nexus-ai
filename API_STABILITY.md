@@ -54,7 +54,12 @@ Everything 2.3 adds is stable from the start and additive: no default changes me
   `processSandbox()` is a development reference and may change; conformance checks may be added;
 - `NodeOptions.effects` and `interrupts`, `CompileOptions.tools`, `GraphToolDescription`, and the lint
   codes `SENSITIVE_TOOL_WITHOUT_APPROVAL`, `UNDECLARED_TOOL_CAPABILITIES`, and
-  `SIDE_EFFECT_BEFORE_INTERRUPT`.
+  `SIDE_EFFECT_BEFORE_INTERRUPT`;
+- `nexus-ai-pro/agent/middleware` and every middleware and option type on it;
+  `AgentMiddleware.wrapModelCall`, `AgentMiddlewareContext`, `AgentModelCallContext`, the third
+  argument of `wrapToolCall`, `next(call)`, and `AgentStopReason` `'stopped'`. The PII patterns
+  may be tightened in a minor release to cut false positives, and new `PiiKind` members may be
+  added.
 
 ## 2.2 stage (2.2.0)
 
