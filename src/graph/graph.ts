@@ -30,6 +30,7 @@ import type {
   StateUpdate,
 } from '../types/graph.js';
 import { Command, END, Send, START } from '../types/graph.js';
+import { tenantStore } from '../store/tenant.js';
 import { MemoryGraphCheckpointer } from './checkpointer.js';
 import { type CheckpointDraft, migrateCheckpoint, toCheckpoint } from './checkpoint-migration.js';
 import { CheckpointWriter } from './durability.js';
@@ -270,6 +271,12 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     const threadId = resolveThreadId(runOptions.threadId);
     return this.run(threadId, runOptions, async () => {
       this.assertInput(input);
+      if (runOptions.tenantId !== undefined) {
+        const existing = await this.checkpointer()?.get(threadId);
+        if (existing && !ownedBy(existing, runOptions.tenantId)) {
+          throw new GraphValidationError(`Thread "${threadId}" cannot be used by this tenant; choose another id`);
+        }
+      }
       const state = this.seedState(input as StateUpdate<S>);
       const next = this.entryNodes();
       return { threadId, step: 0, state, next, status: 'running', createdAt: this.now().toISOString() };
@@ -417,15 +424,28 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     });
   }
 
-  /** Latest checkpoint, or the one at `step`. */
-  async state(threadId: string, step?: number): Promise<GraphCheckpoint<S> | undefined> {
+  /**
+   * Latest checkpoint, or the one at `step`. With a `tenantId`, a thread another tenant owns reads
+   * as absent.
+   */
+  async state(
+    threadId: string,
+    step?: number,
+    options: { tenantId?: string } = {},
+  ): Promise<GraphCheckpoint<S> | undefined> {
     const stored = await this.checkpointer()?.get(threadId, step);
-    return stored ? (migrateCheckpoint(stored) as GraphCheckpoint<S>) : undefined;
+    if (!stored || !ownedBy(stored, options.tenantId)) return undefined;
+    return migrateCheckpoint(stored) as GraphCheckpoint<S>;
   }
 
-  /** Checkpoints for a thread, newest first. */
-  async history(threadId: string, limit?: number): Promise<Array<GraphCheckpoint<S>>> {
+  /** Checkpoints for a thread, newest first. With a `tenantId`, another tenant's thread has none. */
+  async history(
+    threadId: string,
+    limit?: number,
+    options: { tenantId?: string } = {},
+  ): Promise<Array<GraphCheckpoint<S>>> {
     const stored = (await this.checkpointer()?.history(threadId, limit)) ?? [];
+    if (stored[0] && !ownedBy(stored[0], options.tenantId)) return [];
     return stored.map((item) => migrateCheckpoint(item) as GraphCheckpoint<S>);
   }
 
@@ -563,9 +583,9 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   async updateState(
     threadId: string,
     update: StateUpdate<S>,
-    options: { asNode?: string } = {},
+    options: { asNode?: string; tenantId?: string } = {},
   ): Promise<GraphCheckpoint<S>> {
-    const checkpoint = await this.requireCheckpoint(threadId);
+    const checkpoint = await this.requireCheckpoint(threadId, options.tenantId);
     const state = this.reduce(checkpoint.state, [update]);
     const createdAt = this.now().toISOString();
 
@@ -605,13 +625,16 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
    *
    * Rewinding with `resumeFrom()` replaces the original timeline. A fork keeps it: both threads stay
    * readable and runnable, so two answers to the same question can be compared side by side. Every
-   * copied checkpoint records `metadata.forkedFrom`.
+   * copied checkpoint records `metadata.forkedFrom`, and keeps the tenant of the thread it came from.
+   * With a `tenantId`, another tenant's thread is not found.
    */
-  async fork(threadId: string, options: { step?: number; threadId?: string } = {}): Promise<string> {
+  async fork(threadId: string, options: { step?: number; threadId?: string; tenantId?: string } = {}): Promise<string> {
     const store = this.checkpointer();
     if (!store) throw new GraphValidationError('fork() needs a checkpointer to copy history from');
     const history = (await store.history(threadId, Number.MAX_SAFE_INTEGER)).map((item) => migrateCheckpoint(item));
-    if (history.length === 0) throw new GraphThreadNotFoundError(threadId);
+    if (history.length === 0 || !ownedBy(history[0] as GraphCheckpoint, options.tenantId)) {
+      throw new GraphThreadNotFoundError(threadId);
+    }
 
     const cutoff = options.step ?? (history[0] as GraphCheckpoint).step;
     const lineage = history.filter((item) => item.step <= cutoff).reverse();
@@ -725,6 +748,16 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     const stopAfter = runOptions.interruptAfter ?? this.options.interruptAfter ?? [];
 
     let checkpoint: CheckpointDraft<S> = await seed();
+    const owner = tenantOf(checkpoint);
+    if (runOptions.tenantId !== undefined && owner !== undefined && owner !== runOptions.tenantId) {
+      throw new GraphThreadNotFoundError(threadId);
+    }
+    const tenantId = runOptions.tenantId ?? owner;
+    if (tenantId !== undefined) {
+      runOptions = { ...runOptions, tenantId, metadata: { ...runOptions.metadata, tenantId } };
+      // Checkpoints that pause within a step copy this one, so it carries the tenant too.
+      if (owner === undefined) checkpoint = { ...checkpoint, metadata: { ...checkpoint.metadata, tenantId } };
+    }
     // continue() from a "before" breakpoint must run the step it paused in front of, not pause again.
     let passBreakpoint = checkpoint.breakpoint?.when === 'before';
     if (checkpoint.breakpoint) checkpoint = { ...checkpoint, breakpoint: undefined };
@@ -1167,11 +1200,19 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       node,
       step,
       threadId,
+      ...(runOptions.tenantId !== undefined ? { tenantId: runOptions.tenantId } : {}),
       taskId: task.id,
       input: task.input,
       attempt,
       signal,
-      ...(this.options.store ? { store: this.options.store } : {}),
+      ...(this.options.store
+        ? {
+            store:
+              runOptions.tenantId !== undefined
+                ? tenantStore(this.options.store, runOptions.tenantId)
+                : this.options.store,
+          }
+        : {}),
       interrupt: <T>(request: Parameters<NodeContext<S>['interrupt']>[0]): T => {
         const index = interruptIndex++;
         const key = interruptKey({ node, taskId: task.id, step, index });
@@ -1347,9 +1388,9 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     return this.reduce(state as StateOf<S>, [input]);
   }
 
-  private async requireCheckpoint(threadId: string): Promise<GraphCheckpoint<S>> {
+  private async requireCheckpoint(threadId: string, tenantId?: string): Promise<GraphCheckpoint<S>> {
     const checkpoint = await this.checkpointer()?.get(threadId);
-    if (!checkpoint) throw new GraphThreadNotFoundError(threadId);
+    if (!checkpoint || !ownedBy(checkpoint, tenantId)) throw new GraphThreadNotFoundError(threadId);
     return migrateCheckpoint(checkpoint) as GraphCheckpoint<S>;
   }
 
@@ -1651,3 +1692,19 @@ function isRetryable(error: unknown): boolean {
 }
 
 export type { GraphProgress, GraphStatus };
+
+/** The tenant a checkpoint's run recorded, if any. */
+function tenantOf(checkpoint: { metadata?: Record<string, unknown> }): string | undefined {
+  const tenantId = checkpoint.metadata?.tenantId;
+  return typeof tenantId === 'string' ? tenantId : undefined;
+}
+
+/**
+ * Whether a caller may use a thread: always without a tenant of its own, and with one, when the
+ * thread is that tenant's or was written with no tenant at all.
+ */
+function ownedBy(checkpoint: { metadata?: Record<string, unknown> }, tenantId: string | undefined): boolean {
+  if (tenantId === undefined) return true;
+  const owner = tenantOf(checkpoint);
+  return owner === undefined || owner === tenantId;
+}

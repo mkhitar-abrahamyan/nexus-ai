@@ -172,6 +172,16 @@ A routing strategy sees a `RouterContext`: the request, the configuration, the p
 health, and the providers whose circuit is open. Providers with an open circuit are excluded, not
 just ranked lower.
 
+The auto-router plans once per configuration. Which models are candidates, which pass the allow and
+deny lists and `requiredCapabilities` (its boolean requirements checked as bitmasks), and how each
+scores for the strategy are computed into a plan the first time a configuration routes, and kept
+until the routing settings, the model settings, or the providers change. A request then pays only
+for open circuits and provider health: health moves a whole provider up or down, so the plan's
+per-provider lists are merged rather than re-sorted. Over 1,000 models a warm plan routes in about
+15 µs at p50; 2.1 took most of a second, rebuilding the registry for every candidate. Decisions are
+exactly those 2.1 made, which a test checks against the 2.1.0 router on 300 random configurations.
+A registry changed in place keeps the old plan; replace `models.registry` to change it.
+
 It returns a `RouteDecision`: the provider and model to try first, why, limits for that first attempt,
 and the fallbacks in order. Each fallback is a `RouteAttempt`. `FailoverExecutor` runs the decision.
 It tries each attempt with its own timeout, rate-limit retries, and circuit check. If none succeeds, it
@@ -267,8 +277,6 @@ It applies when a model declares no cached-read or cache-write price of its own.
   provider can change either between releases; override entries with `models.registry`.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
-- When the model is already known, use `direct` or `rules` routing: the auto-router ranks every
-  candidate on each request, which is work a known choice does not need.
 
 <!-- reference:start -->
 ## Reference

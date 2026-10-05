@@ -262,6 +262,11 @@ export interface CompletionRequest {
   /** Provider-side prompt caching controls. */
   cache?: PromptCacheConfig;
   /**
+   * Skips this client's response cache for this request: `bypass` neither reads nor writes it, and
+   * `refresh` skips the read and stores the fresh answer. Either is recorded as a `bypass` outcome.
+   */
+  responseCache?: 'bypass' | 'refresh';
+  /**
    * Overrides the configured capability policy for this request. `'strict'` fails on an option the
    * model cannot honor, `'warn'` drops it and records a warning, and `'off'` sends the request
    * unchanged so a newer provider feature is never blocked by stale registry data.

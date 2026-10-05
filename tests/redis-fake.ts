@@ -24,6 +24,8 @@ cjson = {
 export class FakeRedis {
   readonly hashes = new Map<string, Map<string, string>>();
   readonly strings = new Map<string, { value: string; expiresAt?: number }>();
+  readonly sets = new Map<string, Set<string>>();
+  readonly lists = new Map<string, string[]>();
   /** Each sorted set as member → score, with its members kept in score order for range reads. */
   private readonly zsets = new Map<string, { scores: Map<string, number>; order: Array<[number, string]> }>();
   /** Hash values read, by any command: what a test counts to show how much a read touched. */
@@ -69,6 +71,62 @@ export class FakeRedis {
   hdel(key: string, field: string): number {
     this.commands += 1;
     return this.hashes.get(key)?.delete(field) ? 1 : 0;
+  }
+
+  hsetnx(key: string, field: string, value: string): number {
+    this.commands += 1;
+    const hash = this.hash(key);
+    if (hash.has(field)) return 0;
+    hash.set(field, String(value));
+    return 1;
+  }
+
+  // ── Sets and lists ──────────────────────────────────────────────
+
+  sadd(key: string, ...members: string[]): number {
+    this.commands += 1;
+    const set = this.sets.get(key) ?? new Set<string>();
+    this.sets.set(key, set);
+    let added = 0;
+    for (const member of members)
+      if (!set.has(member)) {
+        set.add(member);
+        added += 1;
+      }
+    return added;
+  }
+
+  srem(key: string, ...members: string[]): number {
+    this.commands += 1;
+    const set = this.sets.get(key);
+    return members.filter((member) => set?.delete(member)).length;
+  }
+
+  smembers(key: string): string[] {
+    this.commands += 1;
+    return [...(this.sets.get(key) ?? [])];
+  }
+
+  lpush(key: string, ...values: string[]): number {
+    this.commands += 1;
+    const list = this.lists.get(key) ?? [];
+    this.lists.set(key, list);
+    for (const value of values) list.unshift(String(value));
+    return list.length;
+  }
+
+  lrange(key: string, start: number | string, stop: number | string): string[] {
+    this.commands += 1;
+    const list = this.lists.get(key) ?? [];
+    const from = Number(start) < 0 ? Math.max(0, list.length + Number(start)) : Number(start);
+    const to = Number(stop) < 0 ? list.length + Number(stop) : Number(stop);
+    return list.slice(from, to + 1);
+  }
+
+  ltrim(key: string, start: number | string, stop: number | string): 'OK' {
+    this.commands += 1;
+    this.lists.set(key, this.lrange(key, start, stop));
+    return 'OK';
   }
 
   hexists(key: string, field: string): number {
@@ -132,7 +190,12 @@ export class FakeRedis {
 
   del(key: string): number {
     this.commands += 1;
-    const removed = Number(this.strings.delete(key)) + Number(this.hashes.delete(key)) + Number(this.zsets.delete(key));
+    const removed =
+      Number(this.strings.delete(key)) +
+      Number(this.hashes.delete(key)) +
+      Number(this.zsets.delete(key)) +
+      Number(this.sets.delete(key)) +
+      Number(this.lists.delete(key));
     return removed > 0 ? 1 : 0;
   }
 

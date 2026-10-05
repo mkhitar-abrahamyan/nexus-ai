@@ -35,6 +35,42 @@ Caching is off until `enabled` is set, so nothing is reused by accident. `ai.cle
 removes lapsed entries and returns how many went; `ai.getCacheStats()` reports size, capacity, and
 expired entries not yet swept.
 
+## Namespaces and outcomes
+
+A cached response is reused only within its namespace. `CacheConfig.namespace` sets one, fixed or
+computed per request, as a `CacheNamespace`: the `tenant` (the request's `tenantId` by default), the
+`environment`, a `modelRevision`, and a `contextVersion`. Changing the revision or the context
+version starts from an empty cache, so a prompt or model change never serves answers written for the
+old one. Without a namespace, exact-cache keys are what they were before 2.2.
+
+```ts
+const ai = new NexusAI({
+  providers,
+  cache: {
+    enabled: true,
+    strategy: 'hybrid',
+    namespace: (request) => ({ environment: 'production', contextVersion: String(request.metadata?.context ?? '') }),
+  },
+});
+```
+
+The semantic cache only ever matches entries of the same tenant, namespace or not: before 2.2, a
+tenant asking another tenant's question could be answered with that tenant's response.
+
+Every response carries what the cache did as `meta.cache`, a `CacheOutcome`, which the request's
+trace records too:
+
+| `outcome` | Meaning |
+| --- | --- |
+| `hit` | Answered from the exact or the semantic `layer`. |
+| `miss` | Looked, found nothing. |
+| `stale` | Found an entry that had expired. |
+| `bypass` | The request skipped the lookup: `responseCache: 'bypass'` neither reads nor writes, and `'refresh'` writes the fresh answer. |
+| `error` | The cache failed; the request went to the provider as on a miss. |
+
+Each has a `reason` and the `namespace` it ran in, and `writeError` says when storing the answer
+failed — the answer is returned either way. A cache that throws never fails a request.
+
 This is the library's own cache, which stores whole responses. It is unrelated to provider-side
 prompt caching, which discounts the *input* tokens of a long shared prefix and is covered in the
 [client guide](./core.md).
@@ -44,7 +80,7 @@ prompt caching, which discounts the *input* tokens of a long shared prefix and i
 `MemoryCache` is the store behind it: a bounded cache with per-entry expiry that evicts the least
 recently used entry when full, holding 500 entries by default. `CacheEntry` is what it holds — the
 value and when it expires — and its `get`, `set`, `delete`, `clear`, `clearExpired`, and `stats`
-methods are the whole surface.
+methods are the whole surface, with `lookup()`, which also says whether a missing value had expired.
 
 The key is what decides whether two requests are "the same". `createCacheKey()` builds it from any
 value with object keys sorted, so two requests that differ only in property order share a key, and
@@ -62,7 +98,9 @@ cache.set(createCacheKey({ model, messages }), answer, 300);
 `SemanticCache` answers a request that means nearly the same as an earlier one. It embeds the
 request, compares it with what it holds, and returns the closest entry above `similarityThreshold`.
 The default, 0.88, is high enough that "reset my password" never answers "cancel my account".
-`SemanticCacheOptions` also sets `maxEntries`, `ttlSeconds`, and `embed`.
+`SemanticCacheOptions` also sets `maxEntries`, `ttlSeconds`, and `embed`. `get()` and `set()` take a
+`scope`, and a lookup compares only entries stored under the same one; the client passes the
+request's tenant and namespace.
 
 `embed` is the part worth configuring. The default is hashed term vectors, which need no provider and
 suit tests; for production, pass an embedding function so similarity means what you expect:

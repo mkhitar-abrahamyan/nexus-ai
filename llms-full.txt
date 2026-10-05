@@ -170,6 +170,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Studio](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md) | A shared UI for traces, threads, approvals, experiments, prompts, deployments, costs, and health, as a separate package |
 | [Agent server](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md) | Self-hosted HTTP server for assistants: threads, durable runs, resumable streams, cron, a worker queue, and metrics |
 | [Deployments](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md) | Revisions and canaries with automatic rollback, autoscaling on Kubernetes and Helm, and per-tenant limits |
+| [Tenancy](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tenancy.md) | One tenant model: a tenant's view of every store, tenant graph runs, and the isolation suite |
 | [Workflows](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md) | Ready-made chains and domain workflows |
 | [Command line](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) | The `nexus` command |
 | [Packaging and install weight](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md) | Every entry point and what it costs |
@@ -1284,6 +1285,16 @@ A routing strategy sees a `RouterContext`: the request, the configuration, the p
 health, and the providers whose circuit is open. Providers with an open circuit are excluded, not
 just ranked lower.
 
+The auto-router plans once per configuration. Which models are candidates, which pass the allow and
+deny lists and `requiredCapabilities` (its boolean requirements checked as bitmasks), and how each
+scores for the strategy are computed into a plan the first time a configuration routes, and kept
+until the routing settings, the model settings, or the providers change. A request then pays only
+for open circuits and provider health: health moves a whole provider up or down, so the plan's
+per-provider lists are merged rather than re-sorted. Over 1,000 models a warm plan routes in about
+15 µs at p50; 2.1 took most of a second, rebuilding the registry for every candidate. Decisions are
+exactly those 2.1 made, which a test checks against the 2.1.0 router on 300 random configurations.
+A registry changed in place keeps the old plan; replace `models.registry` to change it.
+
 It returns a `RouteDecision`: the provider and model to try first, why, limits for that first attempt,
 and the fallbacks in order. Each fallback is a `RouteAttempt`. `FailoverExecutor` runs the decision.
 It tries each attempt with its own timeout, rate-limit retries, and circuit check. If none succeeds, it
@@ -1379,8 +1390,6 @@ It applies when a model declares no cached-read or cache-write price of its own.
   provider can change either between releases; override entries with `models.registry`.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
-- When the model is already known, use `direct` or `rules` routing: the auto-router ranks every
-  candidate on each request, which is work a known choice does not need.
 
 ---
 
@@ -1959,6 +1968,24 @@ was asked.
 
 `interruptKey()` is the stable key an answer is stored under: task, step, and index. That is how
 several `Send` tasks of one node keep their own answers.
+
+### A run for one tenant
+
+A `tenantId` run option ties a thread to a tenant. It is recorded on every checkpoint as
+`metadata.tenantId`, nodes read it as `context.tenantId`, and `context.store` becomes the tenant's own
+view of the graph's store. Another tenant cannot use the thread: `resume()`, `continue()`,
+`resumeFrom()`, `fork()`, and `updateState()` with a different `tenantId` throw
+`GraphThreadNotFoundError` before anything runs, `state()` and `history()` given one read it as
+absent, and a new run on its id is refused. A run that names no tenant carries on the thread's, so the
+owner resumes as before.
+
+```ts
+await graph.invoke(input, { threadId, tenantId: principal.tenantId });
+await graph.resumeWith(threadId, answer, { tenantId: principal.tenantId });
+const checkpoint = await graph.state(threadId, undefined, { tenantId: principal.tenantId });
+```
+
+The [tenancy guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tenancy.md) covers the tenant model across every store.
 
 ## Streaming events
 
@@ -5484,6 +5511,42 @@ Caching is off until `enabled` is set, so nothing is reused by accident. `ai.cle
 removes lapsed entries and returns how many went; `ai.getCacheStats()` reports size, capacity, and
 expired entries not yet swept.
 
+## Namespaces and outcomes
+
+A cached response is reused only within its namespace. `CacheConfig.namespace` sets one, fixed or
+computed per request, as a `CacheNamespace`: the `tenant` (the request's `tenantId` by default), the
+`environment`, a `modelRevision`, and a `contextVersion`. Changing the revision or the context
+version starts from an empty cache, so a prompt or model change never serves answers written for the
+old one. Without a namespace, exact-cache keys are what they were before 2.2.
+
+```ts
+const ai = new NexusAI({
+  providers,
+  cache: {
+    enabled: true,
+    strategy: 'hybrid',
+    namespace: (request) => ({ environment: 'production', contextVersion: String(request.metadata?.context ?? '') }),
+  },
+});
+```
+
+The semantic cache only ever matches entries of the same tenant, namespace or not: before 2.2, a
+tenant asking another tenant's question could be answered with that tenant's response.
+
+Every response carries what the cache did as `meta.cache`, a `CacheOutcome`, which the request's
+trace records too:
+
+| `outcome` | Meaning |
+| --- | --- |
+| `hit` | Answered from the exact or the semantic `layer`. |
+| `miss` | Looked, found nothing. |
+| `stale` | Found an entry that had expired. |
+| `bypass` | The request skipped the lookup: `responseCache: 'bypass'` neither reads nor writes, and `'refresh'` writes the fresh answer. |
+| `error` | The cache failed; the request went to the provider as on a miss. |
+
+Each has a `reason` and the `namespace` it ran in, and `writeError` says when storing the answer
+failed — the answer is returned either way. A cache that throws never fails a request.
+
 This is the library's own cache, which stores whole responses. It is unrelated to provider-side
 prompt caching, which discounts the *input* tokens of a long shared prefix and is covered in the
 [client guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/core.md).
@@ -5493,7 +5556,7 @@ prompt caching, which discounts the *input* tokens of a long shared prefix and i
 `MemoryCache` is the store behind it: a bounded cache with per-entry expiry that evicts the least
 recently used entry when full, holding 500 entries by default. `CacheEntry` is what it holds — the
 value and when it expires — and its `get`, `set`, `delete`, `clear`, `clearExpired`, and `stats`
-methods are the whole surface.
+methods are the whole surface, with `lookup()`, which also says whether a missing value had expired.
 
 The key is what decides whether two requests are "the same". `createCacheKey()` builds it from any
 value with object keys sorted, so two requests that differ only in property order share a key, and
@@ -5511,7 +5574,9 @@ cache.set(createCacheKey({ model, messages }), answer, 300);
 `SemanticCache` answers a request that means nearly the same as an earlier one. It embeds the
 request, compares it with what it holds, and returns the closest entry above `similarityThreshold`.
 The default, 0.88, is high enough that "reset my password" never answers "cancel my account".
-`SemanticCacheOptions` also sets `maxEntries`, `ttlSeconds`, and `embed`.
+`SemanticCacheOptions` also sets `maxEntries`, `ttlSeconds`, and `embed`. `get()` and `set()` take a
+`scope`, and a lookup compares only entries stored under the same one; the client passes the
+request's tenant and namespace.
 
 `embed` is the part worth configuring. The default is hashed term vectors, which need no provider and
 suit tests; for production, pass an embedding function so similarity means what you expect:
@@ -8971,6 +9036,97 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
 
 ---
 
+Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tenancy.md
+
+# Tenancy
+
+
+One tenant model for everything that stores data. A request, a graph run, and a server run carry a
+`tenantId`, and every store has a tenant view that implements the store's own contract: a tenant's
+code takes a `TraceStore`, a `PromptStore`, or a `VectorStore` as it always did, and cannot reach
+past its tenant.
+
+```ts
+import { tenantScope } from 'nexus-ai-pro/tenancy';
+
+// In a request handler, once the principal is known:
+const scoped = tenantScope(principal.tenantId, { store, traces, prompts, vectors, cache });
+const answer = await scoped.vectors.search(question, { topK: 5 });
+```
+
+The views work over the memory, Redis, Postgres, SQLite, and file stores alike, with no schema
+change. They are checked by an isolation suite that runs against every storage adapter and fails on
+any cross-tenant get, list, search, delete, fork, resume, trace query, vector search, or cache hit.
+
+## Tenant ids
+
+A tenant id is 1 to 128 letters, digits, underscores, and hyphens. `assertTenantId()` returns a valid
+one unchanged and throws `TenantIdError` otherwise, and every view checks its id the same way. The
+rule is what makes prefixing safe: a scoped name is `tenant/<id>/<name>`, and since no id holds a
+`/`, no tenant's prefix is the start of another's — `acme` can never read `acme-x`'s names.
+
+## Scoped views
+
+Each function takes a store and a tenant id and returns that tenant's view of it:
+
+| Function | Scopes | How |
+| --- | --- | --- |
+| `tenantStore()` | long-term memory | every namespace placed under `['nexus:tenant', tenantId]` (`TENANT_NAMESPACE` is the first part); searches and namespace listings cannot reach past it |
+| `tenantTraceStore()` | traces | runs saved through it are stamped `metadata.tenantId`; `get()`, `query()`, `tree()`, and feedback see only stamped runs |
+| `tenantOperationStore()` | operations | records carry `tenantId`, idempotency keys are prefixed so two tenants' keys never collide, and queue reads pass the tenant as a filter |
+| `tenantPromptStore()` | prompts, and context hub bundles | names prefixed on the way in and taken off on the way out |
+| `tenantDatasetStore()`, `tenantExperimentStore()` | datasets, experiments | names, ids, and dataset names prefixed |
+| `tenantVectorStore()` | retrieval chunks | ids prefixed, metadata stamped `tenantId`, and every search filtered by it |
+| `tenantCache()` | a cache adapter | keys prefixed |
+| `tenantAssetStore()` | assets | the tenant bound once, so no call can name another; a `TenantAssetStore` |
+| `tenantRollupStore()` | dashboard rollups | rows added and read under the tenant |
+
+`tenantScope()` builds every view at once from a `TenantStores` object, keeping each store's type
+and passing through anything it was not asked to scope.
+
+What a view refuses is the same everywhere: another tenant's record reads as missing, a delete or
+an update reaches only the caller's own, and a listing or search never returns another tenant's
+item. Methods that would act on every tenant at once — `TraceStore.prune()` and `CacheAdapter.clear()`
+— are left off the views; run them against the shared store from operations code.
+
+A context hub needs nothing of its own: give a `ContextHub` the tenant's prompt store, and its
+bundles, labels, and history are the tenant's.
+
+```ts
+const hub = new ContextHub({ store: tenantPromptStore(prompts, tenantId) });
+```
+
+## Where the tenant flows
+
+- **Requests.** `CompletionRequest.tenantId` charges a shared budget to the tenant and is recorded on
+  the request's trace as `metadata.tenantId`, which hourly rollups count by. The semantic response
+  cache only matches entries of the same tenant; see the [caching guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/caching.md) for cache
+  namespaces.
+- **Graph runs.** `tenantId` is a run option. It is recorded on every checkpoint as
+  `metadata.tenantId`, nodes read it as `context.tenantId`, and `context.store` is the tenant's view of
+  the graph's store. A thread another tenant owns is not found: resuming, continuing, forking, or
+  editing it under a different tenant fails with `GraphThreadNotFoundError` before anything runs, and
+  `state()` and `history()` given a `tenantId` read it as absent. A run without a `tenantId` carries
+  on its thread's. The [graphs guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/graphs.md) has the details.
+- **The agent server.** `graphAssistant()` passes the principal's tenant into every graph run, so a
+  server run's checkpoints and store are the tenant's own. The server already scopes threads and runs
+  by tenant, and `tenantLimits()` caps each tenant's active runs, rate, and spend; the
+  [deployments guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md) covers them.
+- **Operations.** `OperationSubmitOptions.tenantId` records the tenant on an operation, and
+  `OperationStoreFilter.tenantId` narrows `listQueued()` and `stats()`, which Postgres and SQLite
+  answer from an index of queued work by tenant.
+
+## Limitations
+
+- A view is a boundary for code that is handed the view. Code holding the shared store can still
+  read every tenant; give a tenant's handlers only its views.
+- Prefixing changes what is stored: a prompt named `support` is stored as `tenant/acme/support`.
+  Data written before a view was used is not the tenant's until it is copied under its prefix.
+- A tenant's trace queries in Postgres use the index version 2 of the trace schema adds; other stores
+  filter as they always do.
+
+---
+
 Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md
 
 # Workflows
@@ -9321,39 +9477,39 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 326 KB | 100% | none |
-| `nexus-ai-pro/config` | 318 KB | 98% | none |
-| `nexus-ai-pro/core` | 314 KB | 96% | none |
-| `nexus-ai-pro/realtime` | 158 KB | 48% | none |
-| `nexus-ai-pro/server` | 115 KB | 35% | none |
-| `nexus-ai-pro/batch` | 113 KB | 35% | none |
+| `nexus-ai-pro` | 334 KB | 100% | none |
+| `nexus-ai-pro/config` | 327 KB | 98% | none |
+| `nexus-ai-pro/core` | 323 KB | 97% | none |
+| `nexus-ai-pro/realtime` | 158 KB | 47% | none |
+| `nexus-ai-pro/server` | 115 KB | 34% | none |
+| `nexus-ai-pro/batch` | 113 KB | 34% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 29% | none |
-| `nexus-ai-pro/agent` | 89 KB | 27% | none |
+| `nexus-ai-pro/agent` | 93 KB | 28% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 25% | none |
 | `nexus-ai-pro/providers/groq` | 82 KB | 25% | none |
 | `nexus-ai-pro/providers/mistral` | 82 KB | 25% | none |
-| `nexus-ai-pro/providers/deepseek` | 81 KB | 25% | none |
-| `nexus-ai-pro/providers/llamacpp` | 81 KB | 25% | none |
-| `nexus-ai-pro/providers/lmstudio` | 81 KB | 25% | none |
-| `nexus-ai-pro/providers/openai` | 81 KB | 25% | none |
-| `nexus-ai-pro/providers/openrouter` | 81 KB | 25% | none |
-| `nexus-ai-pro/postgres` | 78 KB | 24% | none |
-| `nexus-ai-pro/router` | 76 KB | 23% | none |
-| `nexus-ai-pro/providers/anthropic` | 74 KB | 23% | none |
-| `nexus-ai-pro/graph` | 73 KB | 22% | none |
-| `nexus-ai-pro/providers/google` | 68 KB | 21% | none |
-| `nexus-ai-pro/providers/cohere` | 58 KB | 18% | none |
+| `nexus-ai-pro/providers/deepseek` | 81 KB | 24% | none |
+| `nexus-ai-pro/providers/llamacpp` | 81 KB | 24% | none |
+| `nexus-ai-pro/providers/lmstudio` | 81 KB | 24% | none |
+| `nexus-ai-pro/providers/openai` | 81 KB | 24% | none |
+| `nexus-ai-pro/providers/openrouter` | 81 KB | 24% | none |
+| `nexus-ai-pro/router` | 80 KB | 24% | none |
+| `nexus-ai-pro/postgres` | 78 KB | 23% | none |
+| `nexus-ai-pro/graph` | 77 KB | 23% | none |
+| `nexus-ai-pro/providers/anthropic` | 74 KB | 22% | none |
+| `nexus-ai-pro/providers/google` | 68 KB | 20% | none |
+| `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 57 KB | 17% | none |
-| `nexus-ai-pro/operations` | 55 KB | 17% | none |
+| `nexus-ai-pro/operations` | 56 KB | 17% | none |
 | `nexus-ai-pro/security` | 53 KB | 16% | none |
 | `nexus-ai-pro/images` | 53 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 14% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 14% | none |
-| `nexus-ai-pro/sqlite` | 41 KB | 13% | none |
+| `nexus-ai-pro/sqlite` | 41 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
-| `nexus-ai-pro/evaluate` | 38 KB | 12% | none |
+| `nexus-ai-pro/evaluate` | 38 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
@@ -9363,21 +9519,21 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/tracing` | 29 KB | 9% | none |
 | `nexus-ai-pro/server/deployments` | 29 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 29 KB | 9% | none |
-| `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 9% | none |
+| `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evals` | 27 KB | 8% | none |
 | `nexus-ai-pro/graph/functional` | 26 KB | 8% | none |
-| `nexus-ai-pro/insights` | 25 KB | 8% | none |
-| `nexus-ai-pro/testing` | 25 KB | 8% | none |
+| `nexus-ai-pro/insights` | 25 KB | 7% | none |
+| `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 23 KB | 7% | none |
 | `nexus-ai-pro/images/stores` | 21 KB | 6% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
-| `nexus-ai-pro/mcp/registry` | 18 KB | 6% | none |
-| `nexus-ai-pro/connectors` | 18 KB | 6% | none |
-| `nexus-ai-pro/realtime/mock` | 18 KB | 6% | none |
+| `nexus-ai-pro/mcp/registry` | 18 KB | 5% | none |
+| `nexus-ai-pro/connectors` | 18 KB | 5% | none |
+| `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
 | `nexus-ai-pro/images/evals` | 17 KB | 5% | none |
 | `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
@@ -9386,10 +9542,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 16 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 5% | none |
-| `nexus-ai-pro/mcp` | 15 KB | 5% | none |
-| `nexus-ai-pro/tracing/otlp` | 15 KB | 5% | none |
-| `nexus-ai-pro/grounding` | 15 KB | 5% | none |
-| `nexus-ai-pro/prompts/client` | 15 KB | 5% | none |
+| `nexus-ai-pro/mcp` | 15 KB | 4% | none |
+| `nexus-ai-pro/tracing/otlp` | 15 KB | 4% | none |
+| `nexus-ai-pro/grounding` | 15 KB | 4% | none |
+| `nexus-ai-pro/prompts/client` | 15 KB | 4% | none |
 | `nexus-ai-pro/context` | 14 KB | 4% | none |
 | `nexus-ai-pro/images/assets` | 14 KB | 4% | none |
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
@@ -9398,6 +9554,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
+| `nexus-ai-pro/tenancy` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 3% | none |
@@ -9436,12 +9593,12 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/ops/circuit-store` | 6 KB | 2% | none |
 | `nexus-ai-pro/ops/rate-limit-adapters` | 6 KB | 2% | none |
 | `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 2% | none |
-| `nexus-ai-pro/providers/errors` | 5 KB | 2% | none |
-| `nexus-ai-pro/embeddings/mock` | 5 KB | 2% | none |
-| `nexus-ai-pro/tracing/rollups` | 5 KB | 2% | none |
-| `nexus-ai-pro/cache/semantic-cache` | 5 KB | 2% | none |
-| `nexus-ai-pro/rag` | 5 KB | 2% | none |
-| `nexus-ai-pro/loaders/html` | 5 KB | 2% | none |
+| `nexus-ai-pro/providers/errors` | 5 KB | 1% | none |
+| `nexus-ai-pro/embeddings/mock` | 5 KB | 1% | none |
+| `nexus-ai-pro/tracing/rollups` | 5 KB | 1% | none |
+| `nexus-ai-pro/cache/semantic-cache` | 5 KB | 1% | none |
+| `nexus-ai-pro/rag` | 5 KB | 1% | none |
+| `nexus-ai-pro/loaders/html` | 5 KB | 1% | none |
 | `nexus-ai-pro/pipeline` | 4 KB | 1% | none |
 | `nexus-ai-pro/prompts/file` | 4 KB | 1% | none |
 | `nexus-ai-pro/prompts/redis` | 4 KB | 1% | none |

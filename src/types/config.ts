@@ -15,6 +15,7 @@ import type {
 } from './providers.js';
 import type { CapabilityConfig } from './capabilities.js';
 import type { LifecycleConfig, OperationFamily } from './lifecycle.js';
+import type { CompletionRequest } from './messages.js';
 import type { PipelineConfig } from '../pipeline/types.js';
 import type { CacheAdapter } from '../cache/adapters.js';
 import type { SemanticCacheOptions } from '../cache/semantic-cache.js';
@@ -253,6 +254,25 @@ export interface CacheConfig {
   strategy?: 'exact' | 'semantic' | 'hybrid';
   adapter?: CacheAdapter;
   semantic?: SemanticCacheOptions;
+  /**
+   * What cached responses are kept apart by, fixed or per request. A response is reused only within
+   * its namespace, so a new model revision or context version starts from an empty cache, and no
+   * tenant is answered from another's. The tenant defaults to the request's `tenantId`. Without it,
+   * exact-cache keys are what they were before 2.2; semantic matches are always kept to one tenant.
+   */
+  namespace?: CacheNamespace | ((request: CompletionRequest) => CacheNamespace);
+}
+
+/** What a cached response is kept apart by. Each field narrows the namespace. */
+export interface CacheNamespace {
+  /** The tenant. Defaults to the request's `tenantId`. */
+  tenant?: string;
+  /** The deployment environment, such as `staging`. */
+  environment?: string;
+  /** A revision of the model or its prompts; changing it retires every earlier entry. */
+  modelRevision?: string;
+  /** The version of the context an answer depends on, such as a context hub bundle's. */
+  contextVersion?: string;
 }
 
 /** A response format applied to every request that does not set its own. */

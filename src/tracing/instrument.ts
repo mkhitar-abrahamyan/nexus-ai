@@ -208,6 +208,9 @@ export function traceModelClient<T extends ModelClientLike>(
             finishReason: response.finishReason,
             // A request rendered from a prompt carries its version, so a trace answers "which prompt ran".
             ...(request.metadata?.prompt === undefined ? {} : { prompt: request.metadata.prompt }),
+            // What the response cache did, and why: a hit, a miss, a stale entry, a bypass, or an error.
+            ...(response.meta?.cache ? { cache: response.meta.cache } : {}),
+            ...(request.tenantId ? { tenantId: request.tenantId } : {}),
           },
         });
         return response;

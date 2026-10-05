@@ -30,6 +30,20 @@ export class MemoryCache<T> {
     return entry.value;
   }
 
+  /**
+   * Like `get()`, also saying whether an entry was there but had expired, which a caller can report
+   * as stale rather than missing. The expired entry is removed either way.
+   */
+  lookup(key: string): { value?: T; stale: boolean } {
+    const entry = this.entries.get(key);
+    if (entry && entry.expiresAt < Date.now()) {
+      this.entries.delete(key);
+      return { stale: true };
+    }
+    const value = this.get(key);
+    return value === undefined ? { stale: false } : { value, stale: false };
+  }
+
   /** Stores a value. Defaults to 5 minutes. */
   set(key: string, value: T, ttlSeconds = 300): void {
     if (this.entries.size >= this.maxEntries) {

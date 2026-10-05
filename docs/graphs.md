@@ -344,6 +344,24 @@ was asked.
 `interruptKey()` is the stable key an answer is stored under: task, step, and index. That is how
 several `Send` tasks of one node keep their own answers.
 
+### A run for one tenant
+
+A `tenantId` run option ties a thread to a tenant. It is recorded on every checkpoint as
+`metadata.tenantId`, nodes read it as `context.tenantId`, and `context.store` becomes the tenant's own
+view of the graph's store. Another tenant cannot use the thread: `resume()`, `continue()`,
+`resumeFrom()`, `fork()`, and `updateState()` with a different `tenantId` throw
+`GraphThreadNotFoundError` before anything runs, `state()` and `history()` given one read it as
+absent, and a new run on its id is refused. A run that names no tenant carries on the thread's, so the
+owner resumes as before.
+
+```ts
+await graph.invoke(input, { threadId, tenantId: principal.tenantId });
+await graph.resumeWith(threadId, answer, { tenantId: principal.tenantId });
+const checkpoint = await graph.state(threadId, undefined, { tenantId: principal.tenantId });
+```
+
+The [tenancy guide](./tenancy.md) covers the tenant model across every store.
+
 ## Streaming events
 
 `stream()` yields one event per superstep. A chat window, a progress view, or a live trace needs more

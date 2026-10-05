@@ -173,6 +173,7 @@ export class OperationRunner<TResult = unknown> {
       expiresAt: options.expiresAt,
       idempotencyKey: options.idempotencyKey,
       kind: options.kind,
+      ...(options.tenantId ? { tenantId: options.tenantId } : {}),
       traceContext: options.traceContext,
       metadata: options.metadata,
     };

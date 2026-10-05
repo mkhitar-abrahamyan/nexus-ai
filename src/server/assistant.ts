@@ -11,13 +11,19 @@ export interface GraphLike {
   /** Runs an input, yielding one event per superstep. */
   stream(
     input: unknown,
-    options: { threadId?: string; signal?: AbortSignal; metadata?: Record<string, unknown>; control?: DrainSwitch },
+    options: {
+      threadId?: string;
+      signal?: AbortSignal;
+      metadata?: Record<string, unknown>;
+      tenantId?: string;
+      control?: DrainSwitch;
+    },
   ): AsyncIterable<unknown>;
   /** Answers an interrupt and continues the thread. */
   resume(
     threadId: string,
     value: unknown,
-    options: { signal?: AbortSignal; metadata?: Record<string, unknown>; control?: DrainSwitch },
+    options: { signal?: AbortSignal; metadata?: Record<string, unknown>; tenantId?: string; control?: DrainSwitch },
   ): AsyncIterable<unknown>;
   /** The thread's checkpoint, at its latest step or at one given. */
   state(
@@ -27,7 +33,7 @@ export interface GraphLike {
   /** Runs a thread on from its latest checkpoint, which is how a recovered run resumes at its last step. */
   continue?(
     threadId: string,
-    options: { signal?: AbortSignal; metadata?: Record<string, unknown>; control?: DrainSwitch },
+    options: { signal?: AbortSignal; metadata?: Record<string, unknown>; tenantId?: string; control?: DrainSwitch },
   ): AsyncIterable<unknown>;
   /** Writes values into a thread's state, which is how a rollback is applied. */
   updateState?(threadId: string, values: Record<string, unknown>, options?: { asNode?: string }): Promise<unknown>;
@@ -42,6 +48,7 @@ export interface GraphLike {
 /** The options of a graph's `events()` the adapter passes. */
 type GraphEventOptionsLike = {
   threadId?: string;
+  tenantId?: string;
   signal?: AbortSignal;
   metadata?: Record<string, unknown>;
   control?: DrainSwitch;
@@ -88,6 +95,7 @@ export function graphAssistant(graph: GraphLike, options: GraphAssistantOptions 
     ...(threadId ? { threadId } : {}),
     signal: context.signal,
     metadata: { ...options.metadata, runId: context.runId },
+    ...tenantOf(context),
     ...(context.control ? { control: context.control } : {}),
     include: [...(projections ?? []), 'values'],
   });
@@ -101,6 +109,7 @@ export function graphAssistant(graph: GraphLike, options: GraphAssistantOptions 
         threadId: context.threadId,
         signal: context.signal,
         metadata: { ...options.metadata, runId: context.runId },
+        ...tenantOf(context),
         ...(context.control ? { control: context.control } : {}),
       });
     },
@@ -111,6 +120,7 @@ export function graphAssistant(graph: GraphLike, options: GraphAssistantOptions 
       return graph.resume(threadId, value, {
         signal: context.signal,
         metadata: { ...options.metadata, runId: context.runId },
+        ...tenantOf(context),
         ...(context.control ? { control: context.control } : {}),
       });
     },
@@ -133,6 +143,7 @@ export function graphAssistant(graph: GraphLike, options: GraphAssistantOptions 
       return graph.continue(threadId, {
         signal: context.signal,
         metadata: { ...options.metadata, runId: context.runId },
+        ...tenantOf(context),
         ...(context.control ? { control: context.control } : {}),
       });
     },
@@ -167,6 +178,12 @@ export function functionAssistant(
       yield { type: 'done', status: 'succeeded', state: await result };
     },
   };
+}
+
+/** The run's tenant, as the graph takes it, so a graph's checkpoints and store are the tenant's own. */
+function tenantOf(context: AssistantRunContext): { tenantId?: string } {
+  const tenantId = context.principal?.tenantId;
+  return tenantId ? { tenantId } : {};
 }
 
 /**

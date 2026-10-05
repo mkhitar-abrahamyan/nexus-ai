@@ -19,6 +19,7 @@ export function isUnheldQueued(record: OperationRecord<unknown>, now: string): b
 
 /** Whether a record passes a store filter. */
 export function matchesFilter(record: OperationRecord<unknown>, filter?: OperationStoreFilter): boolean {
+  if (filter?.tenantId !== undefined && record.tenantId !== filter.tenantId) return false;
   return !filter?.kindPrefix || (record.kind ?? '').startsWith(filter.kindPrefix);
 }
 
@@ -52,7 +53,13 @@ export async function operationStats(
   options: OperationStoreFilter & { now?: Date } = {},
 ): Promise<OperationStoreStats> {
   const now = (options.now ?? new Date()).toISOString();
-  const filter = options.kindPrefix ? { kindPrefix: options.kindPrefix } : undefined;
+  const filter =
+    options.kindPrefix || options.tenantId !== undefined
+      ? {
+          ...(options.kindPrefix ? { kindPrefix: options.kindPrefix } : {}),
+          ...(options.tenantId !== undefined ? { tenantId: options.tenantId } : {}),
+        }
+      : undefined;
   if (store.stats) return store.stats(now, filter);
   if (store.list) return countRecords(await store.list(), now, filter);
   return { byStatus: {}, lapsedLeases: 0 };

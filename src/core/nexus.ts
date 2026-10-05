@@ -1,8 +1,8 @@
-import type { NexusAIConfig } from '../types/config.js';
+import type { CacheNamespace, NexusAIConfig } from '../types/config.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { ContextSummaryInput, ContextWindowResult } from '../types/context-window.js';
 import type { CostEstimate, NexusPlan } from '../types/planning.js';
-import type { NexusResponse, NexusStream, ResponseMeta, StreamChunk } from '../types/response.js';
+import type { CacheOutcome, NexusResponse, NexusStream, ResponseMeta, StreamChunk } from '../types/response.js';
 import type { AgentConfig, AgentResult } from '../types/agent.js';
 import type { OperationDescriptor, OperationStartOptions, OperationTicket } from '../types/lifecycle.js';
 import type {
@@ -253,16 +253,30 @@ export class NexusAI {
       await this.applyBudgets(context, ticket);
 
       const responseFormat = context.request.responseFormat || this.config.responseFormat;
-      const cacheKey = this.isCacheEnabled() ? createCacheKey({ request: context.request, responseFormat }) : undefined;
-      if (cacheKey) {
-        const cached = await this.pipeline.trace(context, 'cacheLookup', () =>
-          this.getCachedResponse(cacheKey, context.request),
+      const cachePlan = this.isCacheEnabled() ? this.cachePlan(context.request, responseFormat) : undefined;
+      let cacheOutcome: CacheOutcome | undefined;
+      if (cachePlan && !cachePlan.read) {
+        cacheOutcome = {
+          outcome: 'bypass',
+          reason:
+            context.request.responseCache === 'refresh'
+              ? 'the request asked for a fresh answer'
+              : 'the request skipped the cache',
+          ...(cachePlan.namespace ? { namespace: cachePlan.namespace } : {}),
+        };
+      }
+      if (cachePlan?.read) {
+        const plan = cachePlan;
+        const lookup = await this.pipeline.trace(context, 'cacheLookup', () =>
+          this.getCachedResponse(plan, context.request),
         );
+        cacheOutcome = lookup.outcome;
+        const cached = lookup.response;
         if (cached) {
           let cachedResponse = this.attachTrace(
             {
               ...cached,
-              meta: { ...cached.meta, requestId: ticket.descriptor.requestId, cacheHit: true },
+              meta: { ...cached.meta, requestId: ticket.descriptor.requestId, cacheHit: true, cache: lookup.outcome },
             },
             this.pipeline.finish(context),
           );
@@ -335,14 +349,26 @@ export class NexusAI {
         context.response = formattedResponse;
       }
 
-      if (cacheKey) {
+      if (cachePlan?.write) {
         const responseToCache = context.response;
         if (!responseToCache) {
           throw new Error('Cannot cache an empty response.');
         }
-        await this.pipeline.trace(context, 'cacheWrite', () =>
-          this.setCachedResponse(cacheKey, context.request, responseToCache),
-        );
+        const plan = cachePlan;
+        try {
+          await this.pipeline.trace(context, 'cacheWrite', () =>
+            this.setCachedResponse(plan, context.request, responseToCache),
+          );
+        } catch (error) {
+          // The answer is good; only storing it failed, which must not cost the caller the answer.
+          cacheOutcome = {
+            ...(cacheOutcome ?? { outcome: 'miss', reason: 'no entry for this request' }),
+            writeError: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
+      if (cacheOutcome && context.response) {
+        context.response = { ...context.response, meta: { ...context.response.meta, cache: cacheOutcome } };
       }
 
       context = await this.pipeline.runHook('beforeReturn', context);
@@ -1195,38 +1221,96 @@ export class NexusAI {
     return this.semanticCacheLoading;
   }
 
-  private async getCachedResponse(cacheKey: string, request: CompletionRequest): Promise<NexusResponse | undefined> {
-    if (!this.config.cache?.enabled) return undefined;
-    if (this.usesSemanticCache()) {
-      const semantic = await (await this.loadSemanticCache()).get(request);
-      if (semantic) return semantic;
-    }
-
-    if (this.config.cache.strategy === 'semantic') return undefined;
-    if (this.config.cache.adapter) {
-      return (await this.config.cache.adapter.get(cacheKey)) as NexusResponse | undefined;
-    }
-    return this.cache.get(cacheKey);
+  /**
+   * Where a request's cached response lives: its key, its namespace, and the scope a semantic match
+   * must share, which is always at least the request's tenant.
+   */
+  private cachePlan(request: CompletionRequest, responseFormat: unknown): CachePlan {
+    const configured = this.config.cache?.namespace;
+    const chosen = typeof configured === 'function' ? configured(request) : configured;
+    const namespace = chosen ? namespaceKey({ ...chosen, tenant: chosen.tenant ?? request.tenantId }) : undefined;
+    // The per-request switch is not part of what was asked, so a refreshed answer serves later requests.
+    const base = createCacheKey({ request: { ...request, responseCache: undefined }, responseFormat });
+    return {
+      key: namespace ? `${namespace}\u0000${base}` : base,
+      ...(namespace ? { namespace } : {}),
+      scope: namespace ?? namespaceKey({ tenant: request.tenantId }),
+      read: request.responseCache === undefined,
+      write: request.responseCache !== 'bypass',
+    };
   }
 
-  private async setCachedResponse(
-    cacheKey: string,
+  /** Looks a request up in the cache. A cache that fails is reported as an `error` outcome and treated as a miss. */
+  private async getCachedResponse(
+    plan: CachePlan,
     request: CompletionRequest,
-    response: NexusResponse,
-  ): Promise<void> {
+  ): Promise<{ response?: NexusResponse; outcome: CacheOutcome }> {
+    const namespace = plan.namespace ? { namespace: plan.namespace } : {};
+    const cache = this.config.cache ?? {};
+    let layer: CacheOutcome['layer'] = this.usesSemanticCache() ? 'semantic' : 'exact';
+    try {
+      if (this.usesSemanticCache()) {
+        const semantic = await (await this.loadSemanticCache()).get(request, plan.scope);
+        if (semantic) {
+          return {
+            response: semantic,
+            outcome: { outcome: 'hit', layer: 'semantic', reason: 'a similar request was answered', ...namespace },
+          };
+        }
+        if (cache.strategy === 'semantic') {
+          return {
+            outcome: {
+              outcome: 'miss',
+              layer: 'semantic',
+              reason: 'no similar request above the threshold',
+              ...namespace,
+            },
+          };
+        }
+      }
+      layer = 'exact';
+      if (cache.adapter) {
+        const value = (await cache.adapter.get(plan.key)) as NexusResponse | undefined;
+        return value
+          ? { response: value, outcome: { outcome: 'hit', layer, reason: 'this request was answered', ...namespace } }
+          : { outcome: { outcome: 'miss', layer, reason: 'no entry for this request', ...namespace } };
+      }
+      const { value, stale } = this.cache.lookup(plan.key);
+      if (value) {
+        return {
+          response: value,
+          outcome: { outcome: 'hit', layer, reason: 'this request was answered', ...namespace },
+        };
+      }
+      return stale
+        ? { outcome: { outcome: 'stale', layer, reason: 'the entry for this request had expired', ...namespace } }
+        : { outcome: { outcome: 'miss', layer, reason: 'no entry for this request', ...namespace } };
+    } catch (error) {
+      return {
+        outcome: {
+          outcome: 'error',
+          layer,
+          reason: error instanceof Error ? error.message : String(error),
+          ...namespace,
+        },
+      };
+    }
+  }
+
+  private async setCachedResponse(plan: CachePlan, request: CompletionRequest, response: NexusResponse): Promise<void> {
     if (!this.config.cache?.enabled) return;
     const ttl = this.config.cache.ttlSeconds || 300;
 
     if (this.usesSemanticCache()) {
-      await (await this.loadSemanticCache()).set(cacheKey, request, response);
+      await (await this.loadSemanticCache()).set(plan.key, request, response, plan.scope);
     }
 
     if (this.config.cache.strategy === 'semantic') return;
     if (this.config.cache.adapter) {
-      await this.config.cache.adapter.set(cacheKey, response, ttl);
+      await this.config.cache.adapter.set(plan.key, response, ttl);
       return;
     }
-    this.cache.set(cacheKey, response, ttl);
+    this.cache.set(plan.key, response, ttl);
   }
 
   private estimateRequestCost(request: CompletionRequest): CostEstimate {
@@ -1271,4 +1355,21 @@ function streamStopped(): Error {
   const error = new Error('The stream was stopped before it finished');
   error.name = 'AbortError';
   return error;
+}
+
+/** Where one request's cached response lives, and whether it may be read and written. */
+interface CachePlan {
+  key: string;
+  namespace?: string;
+  /** What a semantic match must share: the namespace, or at least the tenant. */
+  scope: string;
+  read: boolean;
+  write: boolean;
+}
+
+/** A namespace as one string, each part encoded so no value can be mistaken for another's. */
+function namespaceKey(namespace: CacheNamespace): string {
+  return [namespace.tenant, namespace.environment, namespace.modelRevision, namespace.contextVersion]
+    .map((part) => encodeURIComponent(part ?? ''))
+    .join('/');
 }

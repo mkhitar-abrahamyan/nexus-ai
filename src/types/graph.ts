@@ -383,6 +383,8 @@ export interface NodeContext<S extends ChannelSchema> {
   readonly step: number;
   /** The thread this run belongs to. */
   readonly threadId: string;
+  /** The tenant the run is for, when it has one. */
+  readonly tenantId?: string;
   /** Identifies this task. Equal to `node` unless the task came from a `Send`. */
   readonly taskId: string;
   /** Input carried by a `Send`. Undefined for a node reached through an ordinary edge. */
@@ -406,7 +408,8 @@ export interface NodeContext<S extends ChannelSchema> {
    * Long-term memory, present when the graph was compiled with a store.
    *
    * State is this thread's; the store is everything else the application remembers — across threads,
-   * users, and runs.
+   * users, and runs. In a run with a `tenantId`, it is that tenant's view of the store, and nothing
+   * another tenant stored can be read through it.
    */
   readonly store?: Store;
   /** Reports progress without writing to state. Refreshes an idle timeout. */
@@ -583,6 +586,13 @@ export interface GraphRunOptions {
   signal?: AbortSignal;
   /** Application data recorded on every checkpoint of the run. */
   metadata?: Record<string, unknown>;
+  /**
+   * The tenant the run is for. It is recorded on every checkpoint as `metadata.tenantId`, nodes read
+   * it as `context.tenantId`, and `context.store` becomes the tenant's own view of the store. A thread
+   * another tenant owns is not found: resuming, continuing, forking, or editing it with a different
+   * `tenantId` is refused before anything runs. A run without one carries on the thread's tenant.
+   */
+  tenantId?: string;
   /** Overrides the compiled `maxConcurrency` for this run. */
   maxConcurrency?: number;
   /** Breakpoints for this run only, replacing the compiled ones. */

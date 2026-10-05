@@ -75,6 +75,8 @@ export interface ResponseMeta {
   capabilityWarnings?: CapabilityWarning[];
   /** True when the response came from the response cache and no provider was called. */
   cacheHit: boolean;
+  /** What the response cache did for this request, and why. Present when the cache is enabled. */
+  cache?: CacheOutcome;
   /** Guardrails and techniques applied, such as redaction, trimming, or a retry. */
   guardrailsApplied: string[];
   /** Why the router chose the provider, and how many fallbacks were available. */
@@ -172,4 +174,23 @@ export interface NexusStream extends AsyncIterable<StreamChunk> {
   [Symbol.asyncIterator](): AsyncIterator<StreamChunk>;
   /** Stops the stream and the provider request behind it. */
   abort(): void;
+}
+
+/**
+ * What the response cache did for one request: `hit` (answered from it), `miss` (looked, found
+ * nothing), `stale` (found an entry that had expired), `bypass` (the request skipped the lookup), or
+ * `error` (the cache failed, and the request went to the provider as on a miss). Recorded on
+ * `response.meta.cache` and on the request's trace.
+ */
+export interface CacheOutcome {
+  /** What happened. */
+  outcome: 'hit' | 'miss' | 'stale' | 'bypass' | 'error';
+  /** Which layer answered or was asked last: the exact cache or the semantic one. */
+  layer?: 'exact' | 'semantic';
+  /** Why, in a few words, such as `no entry for this request` or the cache's error message. */
+  reason: string;
+  /** The namespace the lookup ran in, when one applies. */
+  namespace?: string;
+  /** Set when storing the response failed; the response was still returned. */
+  writeError?: string;
 }

@@ -18,6 +18,8 @@ export interface SemanticCacheOptions {
 
 interface SemanticCacheEntry {
   key: string;
+  /** The namespace it was stored in; a lookup only reads entries of its own. */
+  scope: string;
   text: string;
   embedding: number[];
   response: NexusResponse;
@@ -38,8 +40,11 @@ export class SemanticCache {
 
   /**
    * The cached response for the most similar earlier request above the threshold, or `undefined`.
+   * Only entries stored under the same `scope` are compared: the client passes the request's tenant
+   * and cache namespace, so one tenant is never answered from another's entry however alike the
+   * questions are.
    */
-  async get(request: CompletionRequest): Promise<NexusResponse | undefined> {
+  async get(request: CompletionRequest, scope = ''): Promise<NexusResponse | undefined> {
     if (!this.options.enabled) return undefined;
     const text = requestToSearchText(request);
     const [embedding] = await this.embed([text]);
@@ -50,6 +55,7 @@ export class SemanticCache {
     this.entries = this.entries.filter((entry) => entry.expiresAt > now);
 
     for (const entry of this.entries) {
+      if (entry.scope !== scope) continue;
       const score = cosineSimilarity(embedding, entry.embedding);
       if (score >= threshold && (!best || score > best.score)) {
         best = { entry, score };
@@ -71,8 +77,8 @@ export class SemanticCache {
     };
   }
 
-  /** Caches a response under its request's embedding. */
-  async set(key: string, request: CompletionRequest, response: NexusResponse): Promise<void> {
+  /** Caches a response under its request's embedding, in a `scope` lookups must match. */
+  async set(key: string, request: CompletionRequest, response: NexusResponse, scope = ''): Promise<void> {
     if (!this.options.enabled) return;
     const text = requestToSearchText(request);
     const [embedding] = await this.embed([text]);
@@ -81,6 +87,7 @@ export class SemanticCache {
 
     this.entries.push({
       key,
+      scope,
       text,
       embedding,
       response,

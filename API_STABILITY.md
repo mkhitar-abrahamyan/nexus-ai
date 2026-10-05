@@ -56,11 +56,21 @@ Everything 2.2 adds is stable from the start and additive: no default changes me
 - `RedisOperationStoreOptions.index` and `reindex()`;
 - `CircuitBreakerConfig.shareObservations`, `CircuitStateStore.observe()`, `CircuitObservation`,
   `CircuitWindow`, and `CircuitSnapshot.shared`;
-- `PostgresRollupStore` (`nexus-ai-pro/postgres/rollups`).
+- `PostgresRollupStore` (`nexus-ai-pro/postgres/rollups`);
+- the tenant model (`nexus-ai-pro/tenancy`): every `tenant…()` view, `tenantScope()`,
+  `TenantAssetStore`, `TenantStores`, `assertTenantId()`, `TenantIdError`, and `TENANT_NAMESPACE`.
+  The prefix a view stores names under (`tenant/<id>/`) is part of the contract and does not change
+  within 2.x; `GraphRunOptions.tenantId`, `NodeContext.tenantId`, the `tenantId` options of `state()`,
+  `history()`, `fork()`, and `updateState()`, `OperationRecord.tenantId`,
+  `OperationSubmitOptions.tenantId`, and `OperationStoreFilter.tenantId`;
+- `CacheConfig.namespace`, `CacheNamespace`, `CacheOutcome` and `ResponseMeta.cache`,
+  `CompletionRequest.responseCache`, `MemoryCache.lookup()`, and the `scope` of `SemanticCache`'s
+  `get()` and `set()`.
 
 Three races are closed rather than added: a busy thread is claimed atomically, and the in-memory and
 Redis operation stores refuse a second record under a held idempotency key, as the SQL stores
-already did.
+already did. The semantic cache no longer matches across tenants, and a failing response cache no
+longer fails a request.
 
 ## 2.1 stage (2.1.0)
 

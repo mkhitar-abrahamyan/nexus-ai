@@ -204,15 +204,11 @@ export class SqliteOperationStore<TResult = unknown> implements OperationStore<T
   /** Queued records no worker holds, oldest first, in one indexed query. */
   async listQueued(limit: number, filter?: OperationStoreFilter): Promise<Array<OperationRecord<TResult>>> {
     const params: Array<string | number> = [new Date().toISOString()];
-    let kind = '';
-    if (filter?.kindPrefix) {
-      params.push(filter.kindPrefix, filter.kindPrefix);
-      kind = ' AND substr(kind, 1, length(?)) = ?';
-    }
+    const narrowed = filterSql(filter, params);
     params.push(limit);
     return this.many(
       `SELECT doc FROM ${this.table}
-       WHERE status = 'queued' AND (lease_expires_at IS NULL OR lease_expires_at <= ?)${kind}
+       WHERE status = 'queued' AND (lease_expires_at IS NULL OR lease_expires_at <= ?)${narrowed}
        ORDER BY created_at, id
        LIMIT ?`,
       params,
@@ -222,17 +218,13 @@ export class SqliteOperationStore<TResult = unknown> implements OperationStore<T
   /** Counts unfinished records by status in one grouped query. */
   async stats(now: string, filter?: OperationStoreFilter): Promise<OperationStoreStats> {
     const params: Array<string | number> = [now];
-    let kind = '';
-    if (filter?.kindPrefix) {
-      params.push(filter.kindPrefix, filter.kindPrefix);
-      kind = ' AND substr(kind, 1, length(?)) = ?';
-    }
+    const narrowed = filterSql(filter, params);
     const rows = (await this.client.all(
       `SELECT status, count(*) AS count,
          min(CASE WHEN status = 'queued' THEN created_at END) AS oldest,
          sum(CASE WHEN status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= ?) THEN 1 ELSE 0 END) AS lapsed
        FROM ${this.table}
-       WHERE status NOT IN (${TERMINAL})${kind}
+       WHERE status NOT IN (${TERMINAL})${narrowed}
        GROUP BY status`,
       params,
     )) as Array<{ status: OperationStatus; count: number; oldest: string | null; lapsed: number }>;
@@ -263,4 +255,21 @@ export class SqliteOperationStore<TResult = unknown> implements OperationStore<T
     const rows = (await this.client.all(sql, params)) as Array<{ doc: string }>;
     return rows.map((row) => JSON.parse(row.doc) as OperationRecord<TResult>);
   }
+}
+
+/**
+ * The conditions a store filter adds, with their parameters appended. The tenant is read as
+ * `json_extract(doc, '$.tenantId')`, the expression the tenant index of queued work covers.
+ */
+function filterSql(filter: OperationStoreFilter | undefined, params: Array<string | number>): string {
+  let sql = '';
+  if (filter?.kindPrefix) {
+    params.push(filter.kindPrefix, filter.kindPrefix);
+    sql += ' AND substr(kind, 1, length(?)) = ?';
+  }
+  if (filter?.tenantId !== undefined) {
+    params.push(filter.tenantId);
+    sql += " AND json_extract(doc, '$.tenantId') = ?";
+  }
+  return sql;
 }

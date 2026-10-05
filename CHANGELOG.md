@@ -6,9 +6,10 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 Production scale and safe upgrades. Every database schema is versioned, so an upgrade applies only
 what changed, and a worker of the previous release keeps running beside the new one. A claim costs
-the same however long the queue is, a circuit breaker counts every worker's failures, and work that
-several replicas race for is taken by exactly one. Nothing changes until it is opted into, except
-three races that are now closed.
+the same however long the queue is, routing costs the same however many models are configured, a
+circuit breaker counts every worker's failures, and work that several replicas race for is taken by
+exactly one. One tenant model reaches every store. Nothing changes until it is opted into, except
+races and leaks that are now closed.
 
 ### Added
 
@@ -36,6 +37,31 @@ three races that are now closed.
   stores, and `CircuitSnapshot.shared` reports the window.
 - **`PostgresRollupStore`**, on the new `nexus-ai-pro/postgres/rollups`: hourly rollups beside the
   traces, summed in one statement so two workers adding to one hour both count.
+- **A routing index.** The auto-router plans once per configuration — candidates, allow and deny
+  lists, capability requirements as bitmasks, and strategy scores — and a request pays only for open
+  circuits and health. Over 1,000 models a warm route takes about 15 µs at p50 and 23 µs at p99.
+- **One tenant model**, on the new `nexus-ai-pro/tenancy`: a tenant's view of every store —
+  `tenantStore()`, `tenantTraceStore()`, `tenantOperationStore()`, `tenantPromptStore()` (and with it
+  the context hub), `tenantDatasetStore()`, `tenantExperimentStore()`, `tenantVectorStore()`,
+  `tenantCache()`, `tenantAssetStore()`, `tenantRollupStore()` — each implementing the store's own
+  contract over any backend, and `tenantScope()` for all of them at once. Graph runs take a
+  `tenantId`: recorded on every checkpoint, read as `context.tenantId`, scoping `context.store`, and
+  refusing another tenant's resume, continue, fork, or edit. `graphAssistant()` passes the
+  principal's tenant. Operations carry `tenantId`, and `OperationStoreFilter.tenantId` narrows queue
+  reads. Model calls are traced with their `tenantId`, so rollups count model spend per tenant.
+- **Cache namespaces and outcomes.** `cache.namespace` keeps responses apart by tenant, environment,
+  model revision, and context version. Every response reports `meta.cache` — `hit`, `miss`, `stale`,
+  `bypass`, or `error`, with its layer and reason — and the request's trace records it.
+  `CompletionRequest.responseCache` skips the cache (`bypass`) or refreshes it (`refresh`).
+
+### Changed
+
+- `migrate()` on every Postgres and SQLite adapter resolves to a `MigrationResult` instead of
+  nothing, records what it applied, and loads the migration runner only when called.
+- `nexus db sql` and `postgresMigration()` include the rollups table and the new indexes by
+  default; every statement stays idempotent.
+- The root import grew by 8 KB, to 334 KB, with the routing plan and cache outcomes, and
+  `nexus-ai-pro/graph` by 4 KB, to 77 KB, with tenant runs.
 
 ### Fixed
 
@@ -48,6 +74,13 @@ three races that are now closed.
   holds, as Postgres and SQLite do, and Redis checks and writes in one Lua call.
 - A circuit breaker's calls recorded before its shared-state module finished loading were not
   shared.
+- **Security: the semantic response cache answered one tenant with another's response** when their
+  questions were alike, because it compared every entry regardless of tenant. A semantic match is
+  now kept to the request's tenant and cache namespace.
+- A response cache that threw failed the request, and one that failed to store an answer failed it
+  after the provider had answered. Both are now reported in `meta.cache`, and the request goes on.
+- The auto-router rebuilt the model registry for every candidate on every request: over 1,000 models
+  a request took most of a second.
 
 ### Proof
 
@@ -58,6 +91,11 @@ three races that are now closed.
 - A Redis claim reads the same number of records at 1,000 and 100,000 queued; Postgres and SQLite
   plan a claim through the age index with no sort.
 - The Redis stores' Lua runs for real in the tests, in a Lua VM over an in-memory Redis.
+- The routing index decides exactly as the published 2.1.0 router on 300 random configurations, and
+  a warm route over 1,000 models stays under 100 µs at p50 and 1 ms at p99.
+- A tenant-isolation suite runs against every storage adapter — memory, Redis, Postgres, SQLite, and
+  files — and fails on any cross-tenant get, list, search, delete, fork, resume, trace query, vector
+  search, or cache hit.
 
 ## [2.1.0] - 2026-10-04
 

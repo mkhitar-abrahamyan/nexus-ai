@@ -840,6 +840,16 @@
         "default": "./dist-cjs/server/tenancy.js"
       }
     },
+    "./tenancy": {
+      "import": {
+        "types": "./dist/tenancy/index.d.ts",
+        "default": "./dist/tenancy/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/tenancy/index.d.ts",
+        "default": "./dist-cjs/tenancy/index.js"
+      }
+    },
     "./prompts": {
       "import": {
         "types": "./dist/prompts/index.d.ts",
@@ -1874,6 +1884,9 @@
       ],
       "server/tenancy": [
         "dist-cjs/server/tenancy.d.ts"
+      ],
+      "tenancy": [
+        "dist-cjs/tenancy/index.d.ts"
       ],
       "prompts": [
         "dist-cjs/prompts/index.d.ts"

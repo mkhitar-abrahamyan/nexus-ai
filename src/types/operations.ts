@@ -177,6 +177,8 @@ export interface OperationRecord<TResult = unknown> {
   idempotencyKey?: string;
   /** Family and operation, such as `image.generate`, for filtering and metrics. */
   kind?: string;
+  /** The tenant it belongs to. A tenant-scoped store reads and lists only its own. */
+  tenantId?: string;
   /** Trace propagation headers, carried to the worker that runs it. */
   traceContext?: Record<string, string>;
   /** Application data. Must be serializable. */
@@ -228,6 +230,8 @@ export interface OperationStore<TResult = unknown> {
 export interface OperationStoreFilter {
   /** Only records whose `kind` starts with this, such as `assistant:` for the agent server's runs. */
   kindPrefix?: string;
+  /** Only records of this tenant. Postgres and SQLite read it through an index on queued work. */
+  tenantId?: string;
 }
 
 /** What an operation store holds, counted: the numbers a queue dashboard and an autoscaler read. */
@@ -322,6 +326,8 @@ export interface OperationSubmitOptions {
   id?: string;
   /** Family and operation, such as `image.generate`. */
   kind?: string;
+  /** The tenant it belongs to, recorded on the operation. */
+  tenantId?: string;
   /** Replays the operation already accepted under this key instead of starting another. */
   idempotencyKey?: string;
   /** Overrides the runner's attempt budget for this operation. */
