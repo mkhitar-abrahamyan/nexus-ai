@@ -10,6 +10,7 @@ import type {
 import { createHash } from 'node:crypto';
 import type { DatasetExample, EvaluationScore, Experiment, ExperimentStore } from '../types/evaluate.js';
 import type { RgbaImage } from './codec.js';
+import { linkSignals } from '../utils/signals.js';
 import { ImageValidationError } from './errors.js';
 
 /**
@@ -261,7 +262,8 @@ export class MediaEvalRunner {
     // A configuration error — a case that needs a scorer nobody configured — must stop the whole
     // evaluation rather than be recorded as one failed run, so it aborts with itself as the reason.
     const stop = new AbortController();
-    const signal = runOptions.signal ? AbortSignal.any([stop.signal, runOptions.signal]) : stop.signal;
+    const linked = linkSignals([stop.signal, runOptions.signal]);
+    const signal = linked.signal;
     // Loaded on first use, so the media evaluation entry point stays the size it was.
     const { evaluate } = await import('../evaluate/run.js');
 
@@ -292,7 +294,7 @@ export class MediaEvalRunner {
         ...(runOptions.store ? { store: runOptions.store } : {}),
         ...(runOptions.metadata ? { metadata: runOptions.metadata } : {}),
       },
-    );
+    ).finally(linked.dispose);
 
     const caseReports: MediaEvalCaseReport[] = [];
     const allScores: Record<string, number[]> = {};

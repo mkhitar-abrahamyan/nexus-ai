@@ -19,6 +19,7 @@ export {
   BadRequestError,
   ForbiddenError,
   NotFoundError,
+  RunHandOffError,
   ServerError,
   type TenantLimit,
   TenantLimitError,

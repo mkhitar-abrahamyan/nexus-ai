@@ -73,6 +73,9 @@ const hub = new ContextHub({ store: tenantPromptStore(prompts, tenantId) });
   server run's checkpoints and store are the tenant's own. The server already scopes threads and runs
   by tenant, and `tenantLimits()` caps each tenant's active runs, rate, and spend; the
   [deployments guide](./deployments.md) covers them.
+- **Rate limits and budgets.** A client's `rateLimit.key: 'tenantId'` gives each tenant its own
+  limit, so one tenant cannot spend another's share, and a shared spend budget charges each
+  operation to its `tenantId` by default.
 - **Operations.** `OperationSubmitOptions.tenantId` records the tenant on an operation, and
   `OperationStoreFilter.tenantId` narrows `listQueued()` and `stats()`, which Postgres and SQLite
   answer from an index of queued work by tenant.

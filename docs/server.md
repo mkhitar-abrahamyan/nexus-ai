@@ -175,6 +175,34 @@ process.on('SIGTERM', async () => {
 });
 ```
 
+## Handing a run off on a drain
+
+When a replica drains with a queue to hand work to, it sets each run's `context.control.draining`. A
+graph or a workflow served through `graphAssistant()` stops at its next boundary and is continued by
+the next worker from its checkpoint. A function assistant does the same with three pieces of its
+context:
+
+- `context.control?.draining`, checked between its own steps;
+- `context.saveProgress(details)`, which records how far it got — the last item finished, a cursor —
+  and extends the run's lease, as a heartbeat does;
+- `context.progress`, which the next attempt reads back.
+
+Throwing `RunHandOffError` while draining puts the run back on the queue as its next attempt, at
+once, instead of waiting for the drain's timeout; thrown when the replica is not draining, it fails
+the run like any error.
+
+```ts
+const batch = functionAssistant(async (input, context) => {
+  let next = typeof context.progress === 'number' ? context.progress : 0;
+  for (; next < items.length; next += 1) {
+    if (context.control?.draining) throw new RunHandOffError();
+    await process(items[next]);
+    await context.saveProgress?.(next + 1);
+  }
+  return { processed: next };
+});
+```
+
 ## A busy thread
 
 One thread runs one thing at a time. `onBusy`, set per server or per run, decides what a second
@@ -370,6 +398,7 @@ specific entry point that provides it.
 | `RedisRunEventLogOptions` | interface | Options for the Redis run event log. |
 | `RunEvent` | interface | One event of a run, as the event log stores it and the event stream sends it. |
 | `RunEventLog` | interface | Where run events are kept so a disconnected client can catch up. |
+| `RunHandOffError` | class | Thrown by an assistant to hand its run to another worker while this replica drains: the server puts the run back on the queue as its next attempt instead of failing it. |
 | `RunManager` | class | Runs assistants, records threads and runs, and keeps the event log a client streams from. |
 | `RunManagerOptions` | interface | Options for the run manager. |
 | `RunQueueOptions` | interface | Runs in a queue that any replica's workers claim, instead of on the replica that accepted them. |

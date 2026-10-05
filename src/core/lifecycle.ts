@@ -15,6 +15,7 @@ import type { AuditLogger } from '../ops/audit-logger.js';
 import type { MetricsCollector } from '../ops/metrics.js';
 import { NexusRateLimitError, type RateLimiter } from '../ops/rate-limiter.js';
 import { generateRequestId } from '../utils/ids.js';
+import { linkSignals } from '../utils/signals.js';
 
 /** Every lifecycle stage, in the order an operation passes through them. */
 export const LIFECYCLE_STAGES: readonly LifecycleStage[] = [
@@ -126,14 +127,15 @@ export class OperationLifecycle implements OperationLifecycleLike {
     const timeoutMs = options.timeoutMs ?? this.runtime.timeoutMs;
     const deadline =
       timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0 ? startedAt + timeoutMs : undefined;
+    const call = callSignal(options.signal, deadline === undefined ? undefined : deadline - startedAt);
     const context: ProviderCallContext = {
       requestId: descriptor.requestId,
-      signal: callSignal(options.signal, deadline === undefined ? undefined : deadline - startedAt),
+      signal: call.signal,
       ...(deadline !== undefined ? { deadline } : {}),
       ...(options.traceContext ? { traceContext: options.traceContext } : {}),
       ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
     };
-    const ticket = new Ticket(this.runtime, descriptor, context, startedAt);
+    const ticket = new Ticket(this.runtime, descriptor, context, startedAt, call.dispose);
 
     try {
       await this.runtime.metrics?.recordRequest(labelsOf(descriptor));
@@ -195,6 +197,7 @@ export class OperationLifecycle implements OperationLifecycleLike {
     const bucket = {
       model: descriptor.model ?? `${descriptor.family}:${descriptor.operation}`,
       userId: descriptor.userId,
+      tenantId: descriptor.tenantId,
     };
     if (rateLimit.store) await rateLimiter.checkAsync(bucket, rateLimit);
     else rateLimiter.check(bucket, rateLimit);
@@ -225,6 +228,8 @@ class Ticket implements OperationTicket {
     readonly descriptor: OperationDescriptor,
     readonly context: ProviderCallContext,
     private readonly startedAt: number,
+    /** Releases the call signal's hold on the caller's, once the operation has finished. */
+    private readonly release: () => void = () => undefined,
   ) {}
 
   async reserve(estimate: number | undefined): Promise<void> {
@@ -293,15 +298,21 @@ class Ticket implements OperationTicket {
   }
 
   private async finish(outcome: OperationOutcome): Promise<void> {
+    this.release();
     await runHook(() => this.runtime.config?.hooks?.onFinish?.(this.descriptor, outcome));
   }
 }
 
-/** The caller's signal, with the deadline added when there is one. */
-function callSignal(signal: AbortSignal | undefined, timeoutMs: number | undefined): AbortSignal {
-  if (timeoutMs === undefined) return signal ?? new AbortController().signal;
-  const timeout = AbortSignal.timeout(timeoutMs);
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+/**
+ * The caller's signal, with the deadline added when there is one, and how to let go of the caller's
+ * signal once the operation finishes: a caller's signal often outlives thousands of operations.
+ */
+function callSignal(
+  signal: AbortSignal | undefined,
+  timeoutMs: number | undefined,
+): { signal: AbortSignal; dispose(): void } {
+  if (timeoutMs === undefined) return { signal: signal ?? new AbortController().signal, dispose: () => undefined };
+  return linkSignals([signal, AbortSignal.timeout(timeoutMs)]);
 }
 
 function outcomeOf(error: unknown, signal: AbortSignal): OperationOutcome['status'] {

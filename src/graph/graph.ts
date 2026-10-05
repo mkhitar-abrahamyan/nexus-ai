@@ -31,6 +31,7 @@ import type {
 } from '../types/graph.js';
 import { Command, END, Send, START } from '../types/graph.js';
 import { tenantStore } from '../store/tenant.js';
+import { linkSignals } from '../utils/signals.js';
 import { MemoryGraphCheckpointer } from './checkpointer.js';
 import { type CheckpointDraft, migrateCheckpoint, toCheckpoint } from './checkpoint-migration.js';
 import { CheckpointWriter } from './durability.js';
@@ -313,17 +314,22 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     run: (runOptions: GraphRunOptions) => AsyncIterable<GraphStepEvent<S>>,
   ): GraphEventStream<S, O> {
     return new GraphEventStream<S, O>(
-      (onEvent, signal) =>
-        run({
-          ...options,
-          threadId,
-          signal: options.signal ? AbortSignal.any([options.signal, signal]) : signal,
-          ...(options.subgraphs ? { subgraphEvents: true } : {}),
-          onEvent: (event) => {
-            options.onEvent?.(event);
-            onEvent(event);
-          },
-        }),
+      (onEvent, signal) => {
+        const linked = linkSignals([options.signal, signal]);
+        return releasing(
+          run({
+            ...options,
+            threadId,
+            signal: linked.signal,
+            ...(options.subgraphs ? { subgraphEvents: true } : {}),
+            onEvent: (event) => {
+              options.onEvent?.(event);
+              onEvent(event);
+            },
+          }),
+          linked.dispose,
+        );
+      },
       (last) => this.toResult(threadId, last),
       streamSettings(options),
     );
@@ -1006,8 +1012,10 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       attempts += 1;
       notify(runOptions, { type: 'task_start', step, taskId: task.id, node: task.node, attempt: attempts });
       const timer = attemptTimer(task.node, limits);
-      const sources = [stepSignal, ...(runOptions.signal ? [runOptions.signal] : []), ...(timer ? [timer.signal] : [])];
-      const signal = sources.length === 1 ? (sources[0] as AbortSignal) : AbortSignal.any(sources);
+      // Linked rather than composed with AbortSignal.any(), and released when the attempt ends, so a
+      // long-lived run signal keeps nothing for each attempt it outlives.
+      const linked = linkSignals([stepSignal, runOptions.signal, timer?.signal]);
+      const signal = linked.signal;
 
       try {
         const running = this.runNode(
@@ -1094,6 +1102,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
         await delay(backoffDelay(policy, attempts), runOptions.signal);
       } finally {
         timer?.stop();
+        linked.dispose();
       }
     }
   }
@@ -1707,4 +1716,13 @@ function ownedBy(checkpoint: { metadata?: Record<string, unknown> }, tenantId: s
   if (tenantId === undefined) return true;
   const owner = tenantOf(checkpoint);
   return owner === undefined || owner === tenantId;
+}
+
+/** Yields everything a stream yields, then releases what it held, however the stream ends. */
+async function* releasing<T>(source: AsyncIterable<T>, release: () => void): AsyncGenerator<T, void, void> {
+  try {
+    yield* source;
+  } finally {
+    release();
+  }
 }

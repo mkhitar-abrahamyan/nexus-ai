@@ -8,8 +8,8 @@ Production scale and safe upgrades. Every database schema is versioned, so an up
 what changed, and a worker of the previous release keeps running beside the new one. A claim costs
 the same however long the queue is, routing costs the same however many models are configured, a
 circuit breaker counts every worker's failures, and work that several replicas race for is taken by
-exactly one. One tenant model reaches every store. Nothing changes until it is opted into, except
-races and leaks that are now closed.
+exactly one. One tenant model reaches every store, and a deployment can check itself. Nothing
+changes until it is opted into, except races and leaks that are now closed.
 
 ### Added
 
@@ -48,11 +48,30 @@ races and leaks that are now closed.
   `tenantId`: recorded on every checkpoint, read as `context.tenantId`, scoping `context.store`, and
   refusing another tenant's resume, continue, fork, or edit. `graphAssistant()` passes the
   principal's tenant. Operations carry `tenantId`, and `OperationStoreFilter.tenantId` narrows queue
-  reads. Model calls are traced with their `tenantId`, so rollups count model spend per tenant.
+  reads. Model calls are traced with their `tenantId`, so rollups count model spend per tenant, and
+  `rateLimit.key: 'tenantId'` gives each tenant its own share of a client's rate limit.
 - **Cache namespaces and outcomes.** `cache.namespace` keeps responses apart by tenant, environment,
   model revision, and context version. Every response reports `meta.cache` — `hit`, `miss`, `stale`,
   `bypass`, or `error`, with its layer and reason — and the request's trace records it.
   `CompletionRequest.responseCache` skips the cache (`bypass`) or refreshes it (`refresh`).
+- **`nexus doctor`**, and `diagnose()` on the new `nexus-ai-pro/doctor`: the Node.js version,
+  optional packages, provider credentials (by name only), database connectivity and pending or
+  changed migrations, Redis, lapsed leases and a stalled queue, the registry's age, stale provider
+  health, and process-local stores behind several replicas. It exits 1 on a failure, or with
+  `--strict` on a warning.
+- **Runtime budgets.** `npm run bench:runtime`, part of the release gate, times fourteen paths — graph
+  creation, a 1,000-node compile, `Send`, checkpoints, routing at three registry sizes, a
+  20-middleware agent, traces, the event stream, server event fan-out, claims, and cache lookups —
+  as ratios to a calibration loop, so a budget holds across machines, and checks that 100,000
+  checkpoints and 10,000 runs leave the heap where it was.
+- **Workflow steps have what graph nodes have.** `timeout: { runMs, idleMs }` with
+  `context.heartbeat()`, an `onError` that decides once retries run out — recorded as `recovered`,
+  so a resume repeats neither the step nor its recovery — `stepDefaults`, a `control` that drains
+  between steps and ends in `GraphDrainedError`, and `tenantId`. A workflow the agent server serves
+  is handed off on a drain like a graph.
+- **A function assistant hands its run off on a drain**: it checks `context.control?.draining`,
+  saves how far it got with `context.saveProgress()`, and throws `RunHandOffError`; the next worker
+  reads `context.progress` and carries on.
 
 ### Changed
 
@@ -60,8 +79,10 @@ races and leaks that are now closed.
   nothing, records what it applied, and loads the migration runner only when called.
 - `nexus db sql` and `postgresMigration()` include the rollups table and the new indexes by
   default; every statement stays idempotent.
-- The root import grew by 8 KB, to 334 KB, with the routing plan and cache outcomes, and
-  `nexus-ai-pro/graph` by 4 KB, to 77 KB, with tenant runs.
+- The root import grew by 11 KB, to 336 KB, with the routing plan, cache outcomes, and linked
+  signals; `nexus-ai-pro/graph` by 5 KB, to 78 KB, with tenant runs; and
+  `nexus-ai-pro/graph/functional` by 6 KB, to 32 KB, with step timeouts, recovery, drain, and
+  tenants.
 
 ### Fixed
 
@@ -81,6 +102,11 @@ races and leaks that are now closed.
   after the provider had answered. Both are now reported in `meta.cache`, and the request goes on.
 - The auto-router rebuilt the model registry for every candidate on every request: over 1,000 models
   a request took most of a second.
+- **Memory grew with every run that shared a signal.** `AbortSignal.any()`, which composed each task
+  attempt's signal, keeps a reference per call for as long as any source lives in Node 22, so a
+  server's or a worker's long-lived signal held about 5 KB per graph run, and every client operation
+  with a deadline held one too. Signals are now linked and released when their work ends; 10,000
+  runs leave the heap within 0.3 MB of where it started, down from 52 MB.
 
 ### Proof
 
@@ -96,6 +122,28 @@ races and leaks that are now closed.
 - A tenant-isolation suite runs against every storage adapter — memory, Redis, Postgres, SQLite, and
   files — and fails on any cross-tenant get, list, search, delete, fork, resume, trace query, vector
   search, or cache hit.
+- `nexus doctor` reports each misconfiguration a fixture deployment is seeded with — an old Node.js,
+  no credentials, an old registry, pending migrations, an unreachable Redis, a lapsed lease and a
+  stalled queue, stale health, and memory stores behind three replicas — and passes it once fixed.
+- A workflow and a function assistant are each drained on one worker and finished on the next, with
+  every step and every item run exactly once.
+
+### Not in this release, and why
+
+- **The migration lock is a row with a lease, not a session advisory lock.** A session lock does not
+  hold through a connection pool or a serverless driver, where each statement may reach another
+  connection; a lease row does, everywhere. Without a `transaction` function, statements run one at a
+  time, which is safe because every bundled statement is idempotent.
+- **The Redis dispatch index is opt-in**, since a 2.1 worker writes records without index entries;
+  `stats()` on Redis still reads every record.
+- **Consecutive failures across workers are counted as failures since any worker's last success.**
+  Calls are reported in batches, so two workers' failures and successes in the same second may be
+  ordered differently than they happened.
+- **Tenant views scope by prefix and stamp, not by a column**, so they work over every backend
+  unchanged; data written before a view was used is not the tenant's until it is copied under its
+  prefix.
+- **Runtime budgets compare ratios to a calibration loop**, which catches a cliff, not a 10% drift;
+  the tolerance is three times the recorded ratio.
 
 ## [2.1.0] - 2026-10-04
 

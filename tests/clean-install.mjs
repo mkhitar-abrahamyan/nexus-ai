@@ -67,13 +67,18 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // Raised again in 2.1.0 for fault-tolerant graphs and crash-safe observability: durability, recovery,
 // timeouts, and drain in the graph runtime, the graph/lint entry point, incremental and OTLP tracing,
 // the event stream, rollups, and timed replay, each documented in both declaration builds.
-const MAX_PACKED_BYTES = 1_000_000;
-const MAX_UNPACKED_BYTES = 5_900_000;
+// Raised again in 2.2.0 for production scale: versioned migrations and their runners, the Redis
+// dispatch index, the shared circuit window, the Postgres rollup store, the routing plan, the
+// tenancy and doctor entry points, cache outcomes, and workflow step recovery — about 500KB unpacked
+// across both builds and their declarations, nearly all in opt-in subpaths.
+const MAX_PACKED_BYTES = 1_080_000;
+const MAX_UNPACKED_BYTES = 6_500_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
-// came down from 13 MB to hold that.
-const MAX_INSTALLED_BYTES = 6_000_000;
+// came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0, for
+// the same reasons, and still nothing but the package itself.
+const MAX_INSTALLED_BYTES = 6_600_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

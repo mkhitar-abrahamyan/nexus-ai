@@ -291,8 +291,11 @@ export interface RateLimitConfig {
   maxRequests: number;
   /** Window length in milliseconds. */
   windowMs: number;
-  /** What a budget is counted per: each user, each model, or everything together. */
-  key?: 'userId' | 'model' | 'global';
+  /**
+   * What a budget is counted per: each user, each model, each tenant (the request's `tenantId`), or
+   * everything together. Per tenant, one tenant cannot spend another's share of a shared client.
+   */
+  key?: 'userId' | 'model' | 'tenantId' | 'global';
   /**
    * How calls are counted. `fixed-window` (the default) counts per window, so a burst at the end of
    * one window and another at the start of the next can pass twice the limit in a moment. `gcra` is

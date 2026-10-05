@@ -504,3 +504,20 @@ class Echo extends BaseProvider {
     throw new Error('not streamed');
   }
 }
+
+test("a client rate limit per tenant: one tenant spending its share leaves another's untouched", async () => {
+  const ai = new NexusAI({
+    providers: {},
+    security: 'off',
+    rateLimit: { enabled: true, maxRequests: 1, windowMs: 60_000, key: 'tenantId' },
+  });
+  ai.registerProvider('openai', new Echo(() => undefined));
+  const ask = (tenantId: string): CompletionRequest => ({
+    model: 'gpt-4o',
+    messages: [{ role: 'user', content: 'hi' }],
+    tenantId,
+  });
+  await ai.complete(ask(A));
+  await assert.rejects(ai.complete(ask(A)), (error: unknown) => (error as Error).name === 'NexusRateLimitError');
+  assert.equal((await ai.complete(ask(B))).content, `answer for ${B}`);
+});

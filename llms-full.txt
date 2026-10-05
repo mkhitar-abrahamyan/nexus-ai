@@ -213,7 +213,8 @@ npm run check:release
 
 `check` runs formatting and lint gates, source/test/example type checks, the build, unit and mock
 conformance tests, coverage thresholds, package import checks, and an external type-consumer test.
-`check:release` additionally verifies the dry-run tarball and a clean packed-package install.
+`check:release` additionally holds the scheduling and runtime budgets — speed against a calibration
+loop, and memory by retention — and verifies the dry-run tarball and a clean packed-package install.
 
 `npm run docs:check` fails when any public export, or any public member of an exported class,
 interface, or enum, has no doc comment, and `npm run docs:guides` fails when a guide does not name
@@ -2342,8 +2343,8 @@ The function receives its input and a `WorkflowContext`: the thread id, a signal
 `store`, `step()`, `interrupt()`, and `emit()` for custom events. A `WorkflowFn` is that function.
 
 - **`step(name, run, options)`** runs `run` once per thread. It receives a `StepContext` — the step's
-  name, the key its result is recorded under, the attempt, and a signal — and `StepOptions` set a
-  `retry` policy and a `timeoutMs`, which raises `WorkflowStepTimeoutError`. Name steps so the same
+  name, the key its result is recorded under, the attempt, a signal, and `heartbeat()` — and
+  `StepOptions` set a `retry` policy, the limits below, and an `onError`. Name steps so the same
   call has the same name every time; a name used more than once is numbered in call order, `name#2`.
   Steps started together run in parallel, up to the workflow's `maxConcurrency`, and when one fails
   its siblings still finish and are recorded, so a retry repeats only the failure.
@@ -2358,6 +2359,7 @@ The function receives its input and a `WorkflowContext`: the thread id, a signal
 | `checkpointer` | memory | Where step results are kept. `false` keeps none. |
 | `store` | — | Long-term memory for steps. |
 | `retry` | — | A default retry policy for every step. |
+| `stepDefaults` | — | Defaults for every step's `retry`, `timeout`, and `onError`; a step's own options win, field by field. |
 | `maxConcurrency` | 16 | Steps running at once. |
 | `lifecycle` | — | Runs each invocation as one operation of a client: `ai.lifecycle`. |
 | clock | — | For tests. |
@@ -2375,6 +2377,31 @@ The `Workflow` it returns has these methods:
 
 `WorkflowRunOptions` sets the thread id, a signal, and metadata for every checkpoint. Its `onEvent`
 receives the same step events a graph's tasks produce, so `traceGraph()` records a workflow too.
+
+### Steps that survive failure
+
+Workflow steps have what graph nodes have:
+
+- **Run and idle timeouts.** `timeout: { runMs, idleMs }`, a `StepTimeout`, caps an attempt and the
+  time it may go without calling `context.heartbeat()`. `timeoutMs` is `runMs` by its older name.
+  Either raises `WorkflowStepTimeoutError`, whose `kind` is `run` or `idle`.
+- **Recovery after retries.** A step's `onError` receives a `StepFailure` — the name, key, attempts,
+  and last error — once its retries run out. What it returns becomes the step's result, recorded
+  with a `StepRecovery` under `recovered`, so a resumed run neither repeats the step nor its
+  recovery; throwing fails the step. A `task_failed` event reports it.
+- **Drain.** `control`, a `RunControl`, stops the run between steps: steps in flight finish and are
+  recorded, no new one starts, and the run ends with `GraphDrainedError`. `continue()` runs only what
+  was left, on this worker or another, and the agent server drains a workflow it serves this way.
+- **Tenants.** `tenantId` is recorded on every checkpoint and read as `context.tenantId`; the
+  workflow's store becomes the tenant's view of it, and another tenant's thread is not found.
+
+```ts
+const charge = await step('charge', () => payments.charge(order), {
+  retry: { maxAttempts: 3 },
+  timeout: { runMs: 30_000, idleMs: 5_000 },
+  onError: async ({ error }) => ({ charged: false, refunded: await payments.refund(order), reason: String(error) }),
+});
+```
 
 `invoke()` returns a `WorkflowResult`: the thread, the status, the `output`, the `WorkflowState` —
 the input, every recorded step result, and the output — the number of recorded steps, and any
@@ -5216,8 +5243,8 @@ stale change can briefly win; it heals after one cooldown.
 
 ## Rate limits in detail
 
-`RateLimiter` counts calls keyed per user, per model, or globally as the client's `rateLimit.key`
-says, from a `RateLimitedRequest` (the model and user). `check()` counts in memory, synchronously;
+`RateLimiter` counts calls keyed per user, per model, per tenant, or globally as the client's
+`rateLimit.key` says, from a `RateLimitedRequest` (the model, user, and tenant). `check()` counts in memory, synchronously;
 `checkAsync()` counts through the configured store. Both throw `NexusRateLimitError` once a bucket
 is full, with `resetAt` set to when a call would pass again.
 
@@ -8520,6 +8547,34 @@ process.on('SIGTERM', async () => {
 });
 ```
 
+## Handing a run off on a drain
+
+When a replica drains with a queue to hand work to, it sets each run's `context.control.draining`. A
+graph or a workflow served through `graphAssistant()` stops at its next boundary and is continued by
+the next worker from its checkpoint. A function assistant does the same with three pieces of its
+context:
+
+- `context.control?.draining`, checked between its own steps;
+- `context.saveProgress(details)`, which records how far it got — the last item finished, a cursor —
+  and extends the run's lease, as a heartbeat does;
+- `context.progress`, which the next attempt reads back.
+
+Throwing `RunHandOffError` while draining puts the run back on the queue as its next attempt, at
+once, instead of waiting for the drain's timeout; thrown when the replica is not draining, it fails
+the run like any error.
+
+```ts
+const batch = functionAssistant(async (input, context) => {
+  let next = typeof context.progress === 'number' ? context.progress : 0;
+  for (; next < items.length; next += 1) {
+    if (context.control?.draining) throw new RunHandOffError();
+    await process(items[next]);
+    await context.saveProgress?.(next + 1);
+  }
+  return { processed: next };
+});
+```
+
 ## A busy thread
 
 One thread runs one thing at a time. `onBusy`, set per server or per run, decides what a second
@@ -9112,6 +9167,9 @@ const hub = new ContextHub({ store: tenantPromptStore(prompts, tenantId) });
   server run's checkpoints and store are the tenant's own. The server already scopes threads and runs
   by tenant, and `tenantLimits()` caps each tenant's active runs, rate, and spend; the
   [deployments guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md) covers them.
+- **Rate limits and budgets.** A client's `rateLimit.key: 'tenantId'` gives each tenant its own
+  limit, so one tenant cannot spend another's share, and a shared spend budget charges each
+  operation to its `tenantId` by default.
 - **Operations.** `OperationSubmitOptions.tenantId` records the tenant on an operation, and
   `OperationStoreFilter.tenantId` narrows `listQueued()` and `stats()`, which Postgres and SQLite
   answer from an index of queued work by tenant.
@@ -9248,6 +9306,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
 | `nexus migrate` | Moves imports to the subpaths the 2.0 root import keeps them on. |
 | `nexus graph lint` | Checks a compiled graph's shape for designs that fail in production. |
+| `nexus doctor` | Checks a deployment: runtime, credentials, database and migrations, Redis, the queue, the registry, health, and settings that only work in one process. |
 
 `nexus help` prints every flag.
 
@@ -9307,6 +9366,38 @@ list that replaces the bundled one, for stores on custom tables. `--adapters` na
 and `--table` renames the migrations table. `status` prints each migration as applied, pending,
 changed, or written by a newer release, and with `--check` exits 1 while one is pending or changed,
 which suits a deploy step. `migrate --dry-run` prints the statements it would run.
+
+## Checking a deployment
+
+`nexus doctor` runs every check it can and exits 1 when one fails, or with `--strict` when one warns:
+
+| Check | Fails or warns when |
+| --- | --- |
+| Node.js | the version is older than 22 |
+| Optional packages | never; lists which optional peers are installed |
+| Provider credentials | no provider's API key is in the environment (warns; only names are printed, never values) |
+| Model registry | the bundled registry is older than its window (warns) |
+| Database | it cannot be reached |
+| Schema migrations | a migration is pending or changed after it ran |
+| Redis | `PING` fails |
+| Operation queue | a running operation's lease lapsed, or the oldest queued one waited past `--max-queue-age-ms` (warns) |
+| Provider health | a provider is stale or unhealthy (warns) |
+| One-process settings | with more than one replica, a store keeps its state in process memory: a memory checkpointer, operation store, server state, or tenant usage fails; a memory rate-limit, circuit, trace, prompt, cache, or rollup store warns |
+
+Without `--module` it checks what a shell can see. A module reaches the rest, exporting any of
+`database` (or `client`, so a `nexus db` module works unchanged), `redis`, `operations`, `ai`,
+`deployment` (`{ replicas, stores }`), and `close`. `--replicas` sets the replica count.
+
+```bash
+nexus doctor --module doctor.mjs --strict
+```
+
+`diagnose()`, on `nexus-ai-pro/doctor`, runs the same checks from code — at boot, or behind a health
+endpoint. `DoctorOptions` takes each input, including a `DoctorDatabase` and a
+`DoctorDeployment`, and it resolves to a `DoctorReport`: every `DoctorCheck` with its `DoctorStatus`
+(`ok`, `warn`, `fail`, or `skip`), detail, and hint, and whether the deployment is `ok`. It never
+throws: a check that cannot run is a failure with the reason, and anything heavy is loaded only when
+its check runs.
 
 ## Deployments
 
@@ -9477,32 +9568,32 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 334 KB | 100% | none |
-| `nexus-ai-pro/config` | 327 KB | 98% | none |
-| `nexus-ai-pro/core` | 323 KB | 97% | none |
+| `nexus-ai-pro` | 336 KB | 100% | none |
+| `nexus-ai-pro/config` | 328 KB | 98% | none |
+| `nexus-ai-pro/core` | 324 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 47% | none |
-| `nexus-ai-pro/server` | 115 KB | 34% | none |
+| `nexus-ai-pro/server` | 116 KB | 35% | none |
 | `nexus-ai-pro/batch` | 113 KB | 34% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 29% | none |
-| `nexus-ai-pro/agent` | 93 KB | 28% | none |
-| `nexus-ai-pro/providers/azure-openai` | 82 KB | 25% | none |
-| `nexus-ai-pro/providers/groq` | 82 KB | 25% | none |
-| `nexus-ai-pro/providers/mistral` | 82 KB | 25% | none |
+| `nexus-ai-pro/agent` | 94 KB | 28% | none |
+| `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
+| `nexus-ai-pro/providers/groq` | 82 KB | 24% | none |
+| `nexus-ai-pro/providers/mistral` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/deepseek` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/llamacpp` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/lmstudio` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/openai` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/openrouter` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 80 KB | 24% | none |
+| `nexus-ai-pro/graph` | 78 KB | 23% | none |
 | `nexus-ai-pro/postgres` | 78 KB | 23% | none |
-| `nexus-ai-pro/graph` | 77 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 74 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 68 KB | 20% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 57 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 17% | none |
+| `nexus-ai-pro/images` | 55 KB | 16% | none |
 | `nexus-ai-pro/security` | 53 KB | 16% | none |
-| `nexus-ai-pro/images` | 53 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 14% | none |
@@ -9510,19 +9601,19 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite` | 41 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/evaluate` | 38 KB | 11% | none |
+| `nexus-ai-pro/ops` | 37 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
-| `nexus-ai-pro/ops` | 36 KB | 11% | none |
+| `nexus-ai-pro/graph/functional` | 32 KB | 10% | none |
 | `nexus-ai-pro/context-hub` | 32 KB | 10% | none |
-| `nexus-ai-pro/voice` | 30 KB | 9% | none |
+| `nexus-ai-pro/voice` | 31 KB | 9% | none |
+| `nexus-ai-pro/telephony` | 30 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 29 KB | 9% | none |
 | `nexus-ai-pro/server/deployments` | 29 KB | 9% | none |
-| `nexus-ai-pro/telephony` | 29 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evals` | 27 KB | 8% | none |
-| `nexus-ai-pro/graph/functional` | 26 KB | 8% | none |
 | `nexus-ai-pro/insights` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 23 KB | 7% | none |
@@ -9531,13 +9622,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
+| `nexus-ai-pro/images/evals` | 18 KB | 5% | none |
 | `nexus-ai-pro/mcp/registry` | 18 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
-| `nexus-ai-pro/images/evals` | 17 KB | 5% | none |
+| `nexus-ai-pro/lifecycle` | 18 KB | 5% | none |
 | `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
-| `nexus-ai-pro/lifecycle` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 16 KB | 5% | none |
@@ -9555,6 +9646,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 4% | none |
+| `nexus-ai-pro/doctor` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 3% | none |
@@ -9581,6 +9673,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
+| `nexus-ai-pro/ops/rate-limit-adapters` | 7 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
 | `nexus-ai-pro/evals/judge` | 7 KB | 2% | none |
 | `nexus-ai-pro/graph/lint` | 6 KB | 2% | none |
@@ -9591,7 +9684,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/prompts` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/circuits` | 6 KB | 2% | none |
 | `nexus-ai-pro/ops/circuit-store` | 6 KB | 2% | none |
-| `nexus-ai-pro/ops/rate-limit-adapters` | 6 KB | 2% | none |
 | `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 2% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 1% | none |
 | `nexus-ai-pro/embeddings/mock` | 5 KB | 1% | none |
@@ -9622,3 +9714,19 @@ declarations, which carry every doc comment to your editor.
 
 A capability that only works by importing the whole runtime is treated as a design problem, not an
 acceptable cost.
+
+## Runtime budgets
+
+Speed and memory are held the way import size is. `npm run bench:runtime` times graph creation, a
+1,000-node compile, `Send` throughput, checkpoint latency in memory and SQLite, routing over 10, 100,
+and 1,000 models, a 20-middleware agent, trace writes, the event stream, server event fan-out,
+operation claims, and cache lookups. Each timing is divided by a calibration loop on the same
+machine and compared with `runtime-budget.json`, so a budget recorded on one machine holds on a
+slower one; the check fails when a ratio grows past three times its budget. The routing claim is
+absolute: a warm route over 1,000 models stays under 100 µs at p50 and 1 ms at p99.
+
+Memory is checked by retention: 100,000 checkpoints through one thread, and 10,000 threads run one
+after another with a long-lived signal, must each leave the heap within 8 MB of where it started
+after a collection. That check found 2.1 keeping about 5 KB per run whenever runs shared a signal.
+The release gate runs it; `npm run bench:runtime -- --update` records new budgets after a change
+that is meant to cost more.

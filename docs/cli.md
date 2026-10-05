@@ -1,6 +1,6 @@
 # The command line
 
-<!-- covers:  -->
+<!-- covers: ./doctor -->
 
 The package installs a `nexus` command. It is a thin layer over the library, for the terminal and for
 CI scripts. No library entry point imports it.
@@ -26,6 +26,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
 | `nexus migrate` | Moves imports to the subpaths the 2.0 root import keeps them on. |
 | `nexus graph lint` | Checks a compiled graph's shape for designs that fail in production. |
+| `nexus doctor` | Checks a deployment: runtime, credentials, database and migrations, Redis, the queue, the registry, health, and settings that only work in one process. |
 
 `nexus help` prints every flag.
 
@@ -85,6 +86,38 @@ list that replaces the bundled one, for stores on custom tables. `--adapters` na
 and `--table` renames the migrations table. `status` prints each migration as applied, pending,
 changed, or written by a newer release, and with `--check` exits 1 while one is pending or changed,
 which suits a deploy step. `migrate --dry-run` prints the statements it would run.
+
+## Checking a deployment
+
+`nexus doctor` runs every check it can and exits 1 when one fails, or with `--strict` when one warns:
+
+| Check | Fails or warns when |
+| --- | --- |
+| Node.js | the version is older than 22 |
+| Optional packages | never; lists which optional peers are installed |
+| Provider credentials | no provider's API key is in the environment (warns; only names are printed, never values) |
+| Model registry | the bundled registry is older than its window (warns) |
+| Database | it cannot be reached |
+| Schema migrations | a migration is pending or changed after it ran |
+| Redis | `PING` fails |
+| Operation queue | a running operation's lease lapsed, or the oldest queued one waited past `--max-queue-age-ms` (warns) |
+| Provider health | a provider is stale or unhealthy (warns) |
+| One-process settings | with more than one replica, a store keeps its state in process memory: a memory checkpointer, operation store, server state, or tenant usage fails; a memory rate-limit, circuit, trace, prompt, cache, or rollup store warns |
+
+Without `--module` it checks what a shell can see. A module reaches the rest, exporting any of
+`database` (or `client`, so a `nexus db` module works unchanged), `redis`, `operations`, `ai`,
+`deployment` (`{ replicas, stores }`), and `close`. `--replicas` sets the replica count.
+
+```bash
+nexus doctor --module doctor.mjs --strict
+```
+
+`diagnose()`, on `nexus-ai-pro/doctor`, runs the same checks from code — at boot, or behind a health
+endpoint. `DoctorOptions` takes each input, including a `DoctorDatabase` and a
+`DoctorDeployment`, and it resolves to a `DoctorReport`: every `DoctorCheck` with its `DoctorStatus`
+(`ok`, `warn`, `fail`, or `skip`), detail, and hint, and whether the deployment is `ok`. It never
+throws: a check that cannot run is a failure with the reason, and anything heavy is loaded only when
+its check runs.
 
 ## Deployments
 
@@ -158,3 +191,22 @@ Every command takes `--json`. A usage mistake exits 2, and a failed check or a r
 1, so a CI script can tell them apart. The newer commands load their code on demand, so `nexus scan`
 starts no slower.
 
+
+<!-- reference:start -->
+## Reference
+
+Generated from the doc comments by `npm run docs:update`. Each export is listed once, under the most
+specific entry point that provides it.
+
+### `nexus-ai-pro/doctor`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `diagnose` | function | Runs every check its options allow and reports each, never throwing: a check that cannot run is a failure with the reason. |
+| `DoctorCheck` | interface | One check's result. |
+| `DoctorDatabase` | interface | A database for the doctor to reach, as `nexus db` reaches one. |
+| `DoctorDeployment` | interface | What the doctor knows about how the application is deployed. |
+| `DoctorOptions` | interface | What `diagnose()` checks. |
+| `DoctorReport` | interface | Every check's result, and whether the deployment can run. |
+| `DoctorStatus` | type | How one check came out: `fail` breaks the deployment, `warn` needs a look, `skip` had nothing to check. |
+<!-- reference:end -->

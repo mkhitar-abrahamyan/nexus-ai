@@ -1,0 +1,26 @@
+{
+  "measuredAt": "2026-10-05",
+  "note": "Ratios of each timing to a calibration loop on the same machine. Regenerate with npm run bench:runtime -- --update.",
+  "tolerance": 3,
+  "calibrationMs": 16.451,
+  "ratios": {
+    "graph.create-and-run": 0.144,
+    "graph.compile-1000-nodes": 0.4097,
+    "graph.send-1000": 0.2472,
+    "checkpoint.memory": 0.1765,
+    "checkpoint.sqlite": 0.501,
+    "routing.10-models": 0.0002,
+    "routing.100-models": 0.0002,
+    "routing.1000-models": 0.0005,
+    "agent.middleware-20": 0.1133,
+    "tracing.10k-runs": 3.9124,
+    "events.10k-chunks": 0.1226,
+    "server.sse-fanout": 0.021,
+    "operations.claim-10k-queued": 0.0116,
+    "cache.lookup": 0.895
+  },
+  "retentionMb": {
+    "memory.100k-checkpoints": 8,
+    "memory.10k-threads": 8
+  }
+}

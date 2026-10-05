@@ -50,6 +50,23 @@ export class ForbiddenError extends ServerError {
   }
 }
 
+/**
+ * Thrown by an assistant to hand its run to another worker while this replica drains: the server puts
+ * the run back on the queue as its next attempt instead of failing it. A function assistant checks
+ * `context.control?.draining` between its own steps, saves where it got with `context.saveProgress()`,
+ * and throws this; the next worker reads `context.progress`. Thrown when the replica is not draining,
+ * it fails the run like any error.
+ */
+export class RunHandOffError extends Error {
+  /** Always `RUN_HANDED_OFF`. */
+  readonly code = 'RUN_HANDED_OFF';
+
+  constructor(message = 'Handed to another worker while this one drains') {
+    super(message);
+    this.name = 'RunHandOffError';
+  }
+}
+
 /** Raised when a thread is already running something and the busy policy is `reject`. */
 export class ThreadBusyError extends ServerError {
   constructor(

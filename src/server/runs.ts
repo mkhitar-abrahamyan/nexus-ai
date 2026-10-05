@@ -665,6 +665,8 @@ export class RunManager {
       metadata: plan.metadata,
       attempt: context.attempt,
       ...(plan.revision ? { revision: plan.revision.id } : {}),
+      saveProgress: (details: unknown) => context.heartbeat(details),
+      ...(context.previousHeartbeat === undefined ? {} : { progress: context.previousHeartbeat }),
       recordCost: async (usd: number) => {
         if (!Number.isFinite(usd) || usd <= 0) return;
         cost += usd;
@@ -1060,7 +1062,11 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-/** True for the error a graph throws when its run drained: `GraphDrainedError`, read by its code. */
+/**
+ * True for an error that hands a run off: a graph's `GraphDrainedError` or an assistant's
+ * `RunHandOffError`, read by their codes.
+ */
 function isDrained(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'GRAPH_DRAINED';
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return code === 'GRAPH_DRAINED' || code === 'RUN_HANDED_OFF';
 }

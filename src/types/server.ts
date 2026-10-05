@@ -320,9 +320,18 @@ export interface AssistantRunContext {
   /**
    * Set to draining when this replica drains and has a queue to hand work to. A graph served through
    * `graphAssistant()` reads it as its `RunControl`: it finishes its superstep, writes its checkpoint,
-   * and stops, and another worker continues the run from there.
+   * and stops, and another worker continues the run from there. A function assistant checks it between
+   * its own steps and throws `RunHandOffError` to hand the run off the same way.
    */
   control?: { readonly draining: boolean; readonly reason?: string };
+  /**
+   * Records how far the run got, such as the last item it finished, so the worker that continues it
+   * after a hand-off or a crash reads it as `progress` and carries on from there. Must be
+   * serializable. Extends the run's lease, as a heartbeat does.
+   */
+  saveProgress?(details: unknown): Promise<void>;
+  /** What the run saved with `saveProgress()` before this attempt, on a later attempt. */
+  progress?: unknown;
   /**
    * Records US dollars the run spent, such as a model call's cost. The amount is added to the run's
    * `cost` and to its tenant's budget; a budget that stops runs in flight cancels this one.

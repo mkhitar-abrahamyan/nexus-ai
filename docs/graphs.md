@@ -717,8 +717,8 @@ The function receives its input and a `WorkflowContext`: the thread id, a signal
 `store`, `step()`, `interrupt()`, and `emit()` for custom events. A `WorkflowFn` is that function.
 
 - **`step(name, run, options)`** runs `run` once per thread. It receives a `StepContext` — the step's
-  name, the key its result is recorded under, the attempt, and a signal — and `StepOptions` set a
-  `retry` policy and a `timeoutMs`, which raises `WorkflowStepTimeoutError`. Name steps so the same
+  name, the key its result is recorded under, the attempt, a signal, and `heartbeat()` — and
+  `StepOptions` set a `retry` policy, the limits below, and an `onError`. Name steps so the same
   call has the same name every time; a name used more than once is numbered in call order, `name#2`.
   Steps started together run in parallel, up to the workflow's `maxConcurrency`, and when one fails
   its siblings still finish and are recorded, so a retry repeats only the failure.
@@ -733,6 +733,7 @@ The function receives its input and a `WorkflowContext`: the thread id, a signal
 | `checkpointer` | memory | Where step results are kept. `false` keeps none. |
 | `store` | — | Long-term memory for steps. |
 | `retry` | — | A default retry policy for every step. |
+| `stepDefaults` | — | Defaults for every step's `retry`, `timeout`, and `onError`; a step's own options win, field by field. |
 | `maxConcurrency` | 16 | Steps running at once. |
 | `lifecycle` | — | Runs each invocation as one operation of a client: `ai.lifecycle`. |
 | clock | — | For tests. |
@@ -750,6 +751,31 @@ The `Workflow` it returns has these methods:
 
 `WorkflowRunOptions` sets the thread id, a signal, and metadata for every checkpoint. Its `onEvent`
 receives the same step events a graph's tasks produce, so `traceGraph()` records a workflow too.
+
+### Steps that survive failure
+
+Workflow steps have what graph nodes have:
+
+- **Run and idle timeouts.** `timeout: { runMs, idleMs }`, a `StepTimeout`, caps an attempt and the
+  time it may go without calling `context.heartbeat()`. `timeoutMs` is `runMs` by its older name.
+  Either raises `WorkflowStepTimeoutError`, whose `kind` is `run` or `idle`.
+- **Recovery after retries.** A step's `onError` receives a `StepFailure` — the name, key, attempts,
+  and last error — once its retries run out. What it returns becomes the step's result, recorded
+  with a `StepRecovery` under `recovered`, so a resumed run neither repeats the step nor its
+  recovery; throwing fails the step. A `task_failed` event reports it.
+- **Drain.** `control`, a `RunControl`, stops the run between steps: steps in flight finish and are
+  recorded, no new one starts, and the run ends with `GraphDrainedError`. `continue()` runs only what
+  was left, on this worker or another, and the agent server drains a workflow it serves this way.
+- **Tenants.** `tenantId` is recorded on every checkpoint and read as `context.tenantId`; the
+  workflow's store becomes the tenant's view of it, and another tenant's thread is not found.
+
+```ts
+const charge = await step('charge', () => payments.charge(order), {
+  retry: { maxAttempts: 3 },
+  timeout: { runMs: 30_000, idleMs: 5_000 },
+  onError: async ({ error }) => ({ charged: false, refunded: await payments.refund(order), reason: String(error) }),
+});
+```
 
 `invoke()` returns a `WorkflowResult`: the thread, the status, the `output`, the `WorkflowState` —
 the input, every recorded step result, and the output — the number of recorded steps, and any
@@ -874,7 +900,10 @@ specific entry point that provides it.
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `StepContext` | interface | What a step's function receives. |
+| `StepFailure` | interface | What a step's `onError` receives once its retries have run out. |
 | `StepOptions` | interface | How one step runs. |
+| `StepRecovery` | interface | How a step's result was recovered, as recorded in the workflow state. |
+| `StepTimeout` | interface | Limits on one attempt of a step: its whole run, and the time it may go without progress. |
 | `workflow` | function | Creates a durable workflow from a function. |
 | `Workflow` | class | A durable workflow: a function whose steps are checkpointed, so it survives interrupts, restarts, and a move to another worker. |
 | `WorkflowContext` | interface | What a workflow function receives besides its input. |
@@ -884,7 +913,7 @@ specific entry point that provides it.
 | `WorkflowResult` | interface | The outcome of a workflow run. |
 | `WorkflowRunOptions` | interface | Options for one run of a workflow. |
 | `WorkflowState` | interface | What a workflow checkpoint holds: the input, every completed step's result, and the output. |
-| `WorkflowStepTimeoutError` | class | Raised when a step outlives its `timeoutMs`. |
+| `WorkflowStepTimeoutError` | class | Raised when a step outlives its run timeout, or goes longer than its idle timeout without progress. |
 
 ### `nexus-ai-pro/graph/lint`
 

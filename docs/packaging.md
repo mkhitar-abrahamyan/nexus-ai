@@ -93,32 +93,32 @@ declarations, which carry every doc comment to your editor.
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 334 KB | 100% | none |
-| `nexus-ai-pro/config` | 327 KB | 98% | none |
-| `nexus-ai-pro/core` | 323 KB | 97% | none |
+| `nexus-ai-pro` | 336 KB | 100% | none |
+| `nexus-ai-pro/config` | 328 KB | 98% | none |
+| `nexus-ai-pro/core` | 324 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 47% | none |
-| `nexus-ai-pro/server` | 115 KB | 34% | none |
+| `nexus-ai-pro/server` | 116 KB | 35% | none |
 | `nexus-ai-pro/batch` | 113 KB | 34% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 29% | none |
-| `nexus-ai-pro/agent` | 93 KB | 28% | none |
-| `nexus-ai-pro/providers/azure-openai` | 82 KB | 25% | none |
-| `nexus-ai-pro/providers/groq` | 82 KB | 25% | none |
-| `nexus-ai-pro/providers/mistral` | 82 KB | 25% | none |
+| `nexus-ai-pro/agent` | 94 KB | 28% | none |
+| `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
+| `nexus-ai-pro/providers/groq` | 82 KB | 24% | none |
+| `nexus-ai-pro/providers/mistral` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/deepseek` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/llamacpp` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/lmstudio` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/openai` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/openrouter` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 80 KB | 24% | none |
+| `nexus-ai-pro/graph` | 78 KB | 23% | none |
 | `nexus-ai-pro/postgres` | 78 KB | 23% | none |
-| `nexus-ai-pro/graph` | 77 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 74 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 68 KB | 20% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 57 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 17% | none |
+| `nexus-ai-pro/images` | 55 KB | 16% | none |
 | `nexus-ai-pro/security` | 53 KB | 16% | none |
-| `nexus-ai-pro/images` | 53 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 14% | none |
@@ -126,19 +126,19 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite` | 41 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/evaluate` | 38 KB | 11% | none |
+| `nexus-ai-pro/ops` | 37 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
-| `nexus-ai-pro/ops` | 36 KB | 11% | none |
+| `nexus-ai-pro/graph/functional` | 32 KB | 10% | none |
 | `nexus-ai-pro/context-hub` | 32 KB | 10% | none |
-| `nexus-ai-pro/voice` | 30 KB | 9% | none |
+| `nexus-ai-pro/voice` | 31 KB | 9% | none |
+| `nexus-ai-pro/telephony` | 30 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 29 KB | 9% | none |
 | `nexus-ai-pro/server/deployments` | 29 KB | 9% | none |
-| `nexus-ai-pro/telephony` | 29 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evals` | 27 KB | 8% | none |
-| `nexus-ai-pro/graph/functional` | 26 KB | 8% | none |
 | `nexus-ai-pro/insights` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 23 KB | 7% | none |
@@ -147,13 +147,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
+| `nexus-ai-pro/images/evals` | 18 KB | 5% | none |
 | `nexus-ai-pro/mcp/registry` | 18 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
-| `nexus-ai-pro/images/evals` | 17 KB | 5% | none |
+| `nexus-ai-pro/lifecycle` | 18 KB | 5% | none |
 | `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
-| `nexus-ai-pro/lifecycle` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 16 KB | 5% | none |
@@ -171,6 +171,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 4% | none |
+| `nexus-ai-pro/doctor` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/voice/session` | 11 KB | 3% | none |
@@ -197,6 +198,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
+| `nexus-ai-pro/ops/rate-limit-adapters` | 7 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
 | `nexus-ai-pro/evals/judge` | 7 KB | 2% | none |
 | `nexus-ai-pro/graph/lint` | 6 KB | 2% | none |
@@ -207,7 +209,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/prompts` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/circuits` | 6 KB | 2% | none |
 | `nexus-ai-pro/ops/circuit-store` | 6 KB | 2% | none |
-| `nexus-ai-pro/ops/rate-limit-adapters` | 6 KB | 2% | none |
 | `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 2% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 1% | none |
 | `nexus-ai-pro/embeddings/mock` | 5 KB | 1% | none |
@@ -239,3 +240,19 @@ declarations, which carry every doc comment to your editor.
 
 A capability that only works by importing the whole runtime is treated as a design problem, not an
 acceptable cost.
+
+## Runtime budgets
+
+Speed and memory are held the way import size is. `npm run bench:runtime` times graph creation, a
+1,000-node compile, `Send` throughput, checkpoint latency in memory and SQLite, routing over 10, 100,
+and 1,000 models, a 20-middleware agent, trace writes, the event stream, server event fan-out,
+operation claims, and cache lookups. Each timing is divided by a calibration loop on the same
+machine and compared with `runtime-budget.json`, so a budget recorded on one machine holds on a
+slower one; the check fails when a ratio grows past three times its budget. The routing claim is
+absolute: a warm route over 1,000 models stays under 100 µs at p50 and 1 ms at p99.
+
+Memory is checked by retention: 100,000 checkpoints through one thread, and 10,000 threads run one
+after another with a long-lived signal, must each leave the heap within 8 MB of where it started
+after a collection. That check found 2.1 keeping about 5 KB per run whenever runs shared a signal.
+The release gate runs it; `npm run bench:runtime -- --update` records new budgets after a change
+that is meant to cost more.

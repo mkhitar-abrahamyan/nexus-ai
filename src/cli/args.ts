@@ -27,6 +27,7 @@ export const BOOLEAN_FLAGS = new Set([
   'print',
   'record',
   'reveal-values',
+  'strict',
   'write',
 ]);
 

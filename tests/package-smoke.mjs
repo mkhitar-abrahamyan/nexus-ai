@@ -175,6 +175,7 @@ const imports = [
     specifier: 'nexus-ai-pro/tenancy',
     exports: ['tenantScope', 'tenantStore', 'tenantTraceStore', 'tenantVectorStore', 'assertTenantId'],
   },
+  { specifier: 'nexus-ai-pro/doctor', exports: ['diagnose'] },
   {
     specifier: 'nexus-ai-pro/prompts',
     exports: ['definePrompt', 'promptVersion', 'compilePrompt', 'PromptRenderError'],

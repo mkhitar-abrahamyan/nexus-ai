@@ -201,7 +201,8 @@ npm run check:release
 
 `check` runs formatting and lint gates, source/test/example type checks, the build, unit and mock
 conformance tests, coverage thresholds, package import checks, and an external type-consumer test.
-`check:release` additionally verifies the dry-run tarball and a clean packed-package install.
+`check:release` additionally holds the scheduling and runtime budgets — speed against a calibration
+loop, and memory by retention — and verifies the dry-run tarball and a clean packed-package install.
 
 `npm run docs:check` fails when any public export, or any public member of an exported class,
 interface, or enum, has no doc comment, and `npm run docs:guides` fails when a guide does not name

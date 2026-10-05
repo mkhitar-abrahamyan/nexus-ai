@@ -12,6 +12,8 @@ export interface RateLimitedRequest {
   model?: string;
   /** Caller, for per-user limits. */
   userId?: string;
+  /** Tenant, for per-tenant limits. */
+  tenantId?: string;
 }
 
 /** Raised when a caller exceeds its rate limit. */
@@ -104,6 +106,7 @@ export class RateLimiter {
   private getKey(request: RateLimitedRequest, config: RateLimitConfig): string {
     // The two algorithms keep separate state, so switching a config never reads the other's.
     if (config.key === 'model') return `model:${request.model}`;
+    if (config.key === 'tenantId') return `tenant:${request.tenantId || 'none'}`;
     if (config.key === 'global') return 'global';
     return `user:${request.userId || 'anonymous'}`;
   }

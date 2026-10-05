@@ -62,10 +62,17 @@ Everything 2.2 adds is stable from the start and additive: no default changes me
   The prefix a view stores names under (`tenant/<id>/`) is part of the contract and does not change
   within 2.x; `GraphRunOptions.tenantId`, `NodeContext.tenantId`, the `tenantId` options of `state()`,
   `history()`, `fork()`, and `updateState()`, `OperationRecord.tenantId`,
-  `OperationSubmitOptions.tenantId`, and `OperationStoreFilter.tenantId`;
+  `OperationSubmitOptions.tenantId`, `OperationStoreFilter.tenantId`, `RateLimitedRequest.tenantId`,
+  and `rateLimit.key: 'tenantId'`;
 - `CacheConfig.namespace`, `CacheNamespace`, `CacheOutcome` and `ResponseMeta.cache`,
   `CompletionRequest.responseCache`, `MemoryCache.lookup()`, and the `scope` of `SemanticCache`'s
-  `get()` and `set()`.
+  `get()` and `set()`;
+- `diagnose()` and its types (`nexus-ai-pro/doctor`), and `nexus doctor`. Checks may be added in a
+  minor release; a check's id and what makes it fail do not change within 2.x;
+- workflow steps' `timeout`, `onError`, `StepTimeout`, `StepFailure`, `StepRecovery`,
+  `StepContext.heartbeat()`, `WorkflowOptions.stepDefaults`, `WorkflowRunOptions.control` and
+  `tenantId`, `WorkflowContext.tenantId`, and `WorkflowStepTimeoutError.kind`;
+- `RunHandOffError`, `AssistantRunContext.saveProgress()` and `progress`.
 
 Three races are closed rather than added: a busy thread is claimed atomically, and the in-memory and
 Redis operation stores refuse a second record under a held idempotency key, as the SQL stores

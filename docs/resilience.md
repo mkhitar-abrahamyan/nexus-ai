@@ -239,8 +239,8 @@ stale change can briefly win; it heals after one cooldown.
 
 ## Rate limits in detail
 
-`RateLimiter` counts calls keyed per user, per model, or globally as the client's `rateLimit.key`
-says, from a `RateLimitedRequest` (the model and user). `check()` counts in memory, synchronously;
+`RateLimiter` counts calls keyed per user, per model, per tenant, or globally as the client's
+`rateLimit.key` says, from a `RateLimitedRequest` (the model, user, and tenant). `check()` counts in memory, synchronously;
 `checkAsync()` counts through the configured store. Both throw `NexusRateLimitError` once a bucket
 is full, with `resetAt` set to when a call would pass again.
 

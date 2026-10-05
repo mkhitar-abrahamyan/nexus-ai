@@ -850,6 +850,16 @@
         "default": "./dist-cjs/tenancy/index.js"
       }
     },
+    "./doctor": {
+      "import": {
+        "types": "./dist/doctor/index.d.ts",
+        "default": "./dist/doctor/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/doctor/index.d.ts",
+        "default": "./dist-cjs/doctor/index.js"
+      }
+    },
     "./prompts": {
       "import": {
         "types": "./dist/prompts/index.d.ts",
@@ -1478,9 +1488,10 @@
     "test:conformance:real": "tsx tests/conformance.real.ts",
     "test:vectors:live": "tsx tests/vector-stores.live.ts",
     "bench:graph": "node scripts/bench-graph.mjs",
+    "bench:runtime": "node --expose-gc scripts/bench-runtime.mjs",
     "pack:dry-run": "npm pack --dry-run --cache .tmp-nexus-ai-tests/npm-cache",
     "check": "npm run format:check && npm run registry:check && npm run llms:check && npm run lint && npm test && npm run typecheck:tests && npm run studio:typecheck && npm run typecheck:examples && npm run typecheck:examples:browser && npm run test:coverage",
-    "check:release": "npm run check && npm run bench:graph && npm run pack:dry-run && npm run test:clean-install && npm run test:studio-install",
+    "check:release": "npm run check && npm run bench:graph && npm run bench:runtime && npm run pack:dry-run && npm run test:clean-install && npm run test:studio-install",
     "prepack": "npm run build",
     "prepublishOnly": "npm run check:release",
     "build:esm": "tsc --removeComments --declaration false && tsc --emitDeclarationOnly",
@@ -1887,6 +1898,9 @@
       ],
       "tenancy": [
         "dist-cjs/tenancy/index.d.ts"
+      ],
+      "doctor": [
+        "dist-cjs/doctor/index.d.ts"
       ],
       "prompts": [
         "dist-cjs/prompts/index.d.ts"

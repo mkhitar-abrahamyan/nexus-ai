@@ -71,6 +71,11 @@ async function main(): Promise<void> {
       await runTracesCommand(subcommand, { positionals: args, flags: parsed.flags });
       return;
     }
+    case 'doctor': {
+      const { runDoctorCommand } = await import('./cli/doctor.js');
+      await runDoctorCommand({ positionals: parsed.positionals.slice(1), flags: parsed.flags });
+      return;
+    }
     case 'db': {
       const [subcommand, ...args] = parsed.positionals;
       const { runDbCommand } = await import('./cli/db.js');
@@ -459,6 +464,7 @@ Usage:
   nexus db status --client <db.mjs> [--adapters ...] [--dialect postgres|sqlite] [--table t] [--check] [--json]
   nexus db migrate --client <db.mjs> [--dry-run] [--adapters ...] [--dialect postgres|sqlite] [--table t] [--json]
   nexus migrate [paths...] [--write] [--check] [--json]
+  nexus doctor [--module doctor.mjs] [--replicas n] [--max-queue-age-ms n] [--strict] [--json]
   nexus graph lint <module>[#export] [--deployed] [--strict] [--ignore CODE,CODE] [--json]
   nexus deploy status [assistant] --url <server> [--token t] [--json]
   nexus deploy canary <assistant> <revision> <percent> --url <server> [--reason r] [--version n]
@@ -472,6 +478,7 @@ Evaluation modules for "eval run" export { target, dataset, evaluators, summary?
 Trace store modules export any TraceStore as { store }, such as a PostgresTraceStore over the application's own pool.
 Database modules for "db status" and "db migrate" export { client }, and optionally { dialect, transaction, migrations, close }.
 "db status --check" exits 1 while a migration is pending or changed.
+"doctor" exits 1 when a check fails, or with --strict when one warns. Its module exports any of { database, client, redis, operations, ai, deployment, close }.
 "deploy" reads NEXUS_SERVER_URL and NEXUS_SERVER_TOKEN when --url and --token are not given.
 "migrate" moves 1.x root imports to their 2.0 subpaths and reports removed options; --check exits 1 while any remain.
 "graph lint" reads a compiled graph's shape and exits 1 on an error finding, or on a warning with --strict.`);
