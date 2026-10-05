@@ -8,7 +8,7 @@ team can share.
 Import only what you use. The root import is the client and nothing else, and every other capability
 has its own entry point with a size budget CI enforces; [the packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md)
 publishes what each one costs. The package has no required dependencies: a graph-only application
-loads 73 KB, and installs nothing but this package.
+loads 78 KB, and installs nothing but this package.
 
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
@@ -248,12 +248,15 @@ Shipped so far:
   every provider;
 - 2.1 fault tolerance and crash-safe observability: checkpoints written on your terms, recovery after
   retries, idle timeouts and a clean drain, traces that survive a crash and reach any OpenTelemetry
-  backend, one event stream, and dashboard rollups.
+  backend, one event stream, and dashboard rollups;
+- 2.2 production scale and safe upgrades: versioned database migrations, queue claims and routing
+  that cost the same at any size, a circuit breaker that counts across workers, one tenant model
+  across every store, and `nexus doctor` to check a deployment before it serves traffic.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.2 removes the scaling cliffs the guides document: versioned database migrations, indexed
-queue dispatch, a circuit breaker that counts across workers, a routing index, and one tenant model. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
+Next, 2.3 gives agents a real security boundary — capabilities, permissions, and a sandbox contract —
+with a complete middleware catalog, and retrieval that works at production scale. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
 releases after it.
 
 ## Before Production

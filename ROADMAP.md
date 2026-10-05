@@ -4,14 +4,16 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.1.0**. 138 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.2.0**. 143 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, and 98 completion
-registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 819
-unit tests pass; coverage sits at **94.3% lines / 80.0% branches / 89.6% functions** against gates of
+registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 873
+unit tests pass; coverage sits at **94.6% lines / 80.7% branches / 89.9% functions** against gates of
 82/67/73. CI verifies lint, format, build, tests, coverage, registry drift, `llms.txt` drift,
 per-subpath size, documentation and guide coverage, the root import, a graph benchmark with a
-durability budget, crash injection on five checkpointers, mock conformance, packed-package smoke, API
-contract, consumer type resolution, and clean install on Node 22 and 24.
+durability budget, runtime and memory-retention budgets, crash injection on five checkpointers, an
+upgrade from the published 2.0.0 and 2.1.0 packages, ten-worker races and tenant isolation on every
+shared store, mock conformance, packed-package smoke, API contract, consumer type resolution, and
+clean install on Node 22 and 24.
 
 ---
 
@@ -30,10 +32,14 @@ behaves under a crash, a slow database, a rolling deploy, a thousand workers, or
 
 **What every release protects:**
 
-- No required dependency, and a size budget on every entry point. Today the root import is 325 KB, and
-  an entry point costs a fraction of it: `/agent` 27%, `/graph` 22%, `/operations` 14%, `/evaluate`
-  12%, `/tracing` 9%, `/mcp` 5%, `/store` 2%. `npm run size:check` fails the build when an entry point
+- No required dependency, and a size budget on every entry point. Today the root import is 336 KB, and
+  an entry point costs a fraction of it: `/agent` 28%, `/graph` 23%, `/operations` 17%, `/evaluate`
+  11%, `/tracing` 9%, `/mcp` 4%, `/store` 2%. `npm run size:check` fails the build when an entry point
   grows past its budget or picks up a dependency.
+- A runtime and memory budget. `npm run bench:runtime` fails the release gate when a measured path
+  slows past its budget, relative to the machine it runs on, or when a run leaves memory behind.
+- An upgrade path. Every schema change is a numbered migration that only adds, and a worker of the
+  previous minor runs beside the new one during a rollout.
 - Structural adapter contracts. A vector store, database client, Redis client, or transport is an
   interface the application fills, never a bundled SDK.
 - TypeScript first, and self-hosted by default. Nothing phones home, model data included.
@@ -52,16 +58,6 @@ Each gap is written down in a guide's limitations today, and each is closed by o
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| A Postgres migration creates what is missing but never alters an existing table | Postgres guide | 2.2 |
-| The Redis operation store scans every record to find queued work | deployments guide | 2.2 |
-| Circuit-breaker failure counts stay per worker even with a shared store | resilience guide | 2.2 |
-| The auto-router ranks every candidate on every request | providers guide | 2.2 |
-| Tenants are scoped by the server and budgets, not by stores, traces, or cache keys | server and caching guides | 2.2 |
-| Nothing checks a deployment's settings before they fail in production | — | 2.2 |
-| Runtime speed and memory have no budget in CI, only import size | packaging guide | 2.2 |
-| Rollups come only in memory | tracing guide | 2.2 |
-| Functional workflow steps have no idle timeout, `onError`, or drain | graph guide | 2.2 |
-| A function assistant waits for the drain timeout; only graphs hand off at a boundary | server guide | 2.2 |
 | Three agent middleware ship: summarize, redact, and limit tool calls | agents guide | 2.3 |
 | Tool safety is by tool name; there are no capabilities, permissions, or sandbox contract | security guide | 2.3 |
 | The server's `auth` hook has no standard implementations | server guide | 2.3 |
@@ -74,59 +70,6 @@ Each gap is written down in a guide's limitations today, and each is closed by o
 | A community adapter has no kit to build and verify itself against | — | 2.4 |
 | No agent protocol beyond MCP, and the client pipeline is Node-only | README | 2.4 |
 | Grounding, ingestion, and the PII and injection classifiers are the least-tested code | coverage report | 2.4 |
-
----
-
-## 2.2.0: production scale and safe upgrades
-
-The scaling cliffs the guides document go, upgrades become safe, and a deployment can check itself.
-
-**Versioned migrations.** Each Postgres and SQLite adapter ships numbered migrations, recorded in a
-`nexus_schema_migrations` table with checksums. `nexus db status`, `nexus db migrate --dry-run`, and
-`migrate()` apply them in order under an advisory lock, in a transaction where the database allows.
-Schema changes follow expand and contract: a column is added in one minor, written by the next, and
-removed only in a major.
-
-**Indexed dispatch.** The Redis operation store keeps queued work in a sorted set by ready time and
-claims it atomically, so a claim costs O(log N) instead of a scan. The operation store stays the
-source of truth; the dispatch index only says what is ready.
-
-**A breaker that counts across workers.** Circuit-breaker observations move into the shared store as
-a rolling window, so nine failures across three workers count as nine.
-
-**A routing index.** Capability requirements become a bitmask, and the candidate shortlist for a
-normalized set of requirements is cached. Only health, budget, price overrides, and latency are
-evaluated per request.
-
-**One tenant model.** `tenantId` joins the execution context, and stores, trace stores, operations,
-asset stores, datasets, prompts, the context hub, budgets, rate limits, rollups, and cache keys scope
-by it. Cache keys gain a namespace (tenant, environment, model revision, context version), and cache
-outcomes (hit, miss, stale, bypass, error) are traced with their reason.
-
-**`nexus doctor`.** One command checks the Node version, optional peers, provider credentials,
-database and Redis connectivity, pending migrations, stuck leases, registry age, stale provider
-health, and settings that cannot work together, such as a memory checkpointer or a process-local
-tenant store behind several server replicas.
-
-**Runtime budgets.** CI tracks speed and memory the way it tracks import size, with tolerances: graph
-creation and an empty node, a 1,000-node compile, `Send` throughput, checkpoint latency per backend,
-routing over 10, 100, and 1,000 models, a 20-middleware chain, trace events, the event stream, SSE
-fan-out, operation claims, and cache lookups. Long-running tests watch for listener,
-`AbortController`, and closure retention over 100,000 checkpoints and 10,000 threads.
-
-**What 2.1 left.** A Postgres `RollupStore`, so dashboards keep their totals beside their traces.
-Functional workflow steps gain idle timeouts, `onError`, and drain, as graph nodes have. A function
-assistant can take the server's drain switch and hand its run off as a graph does.
-
-**Proof.**
-- A database created by 2.0.0 upgrades to 2.2.0 with `nexus db migrate`, and a 2.1 worker and a 2.2
-  worker run side by side during the rollout.
-- Ten workers race the same thread, operation, tenant budget, and circuit, and every invariant holds.
-- A claim stays flat from 1,000 to 100,000 queued operations.
-- A warm routing plan answers in under 100 µs at p50 and under 1 ms at p99 over 1,000 models.
-- A tenant-isolation suite runs against every storage adapter and fails on any cross-tenant get,
-  list, search, delete, fork, resume, trace query, vector search, or cache hit.
-- `nexus doctor` reports each misconfiguration a fixture deployment is seeded with.
 
 ---
 
