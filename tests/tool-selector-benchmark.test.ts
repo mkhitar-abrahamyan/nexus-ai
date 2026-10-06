@@ -4,8 +4,10 @@
  *
  * The model is an oracle that knows each task's plan but can only call a tool it was offered, so
  * quality measures exactly what the selector risks: leaving out a tool the task needs. Tokens are
- * counted on the requests actually sent. Latency is measured end to end, with model time that grows
- * with the input as a provider's time to first token does, and the selector's own work included.
+ * counted on the requests actually sent. Latency is the model's time, computed from each request's
+ * size as a provider's time to first token grows with it, plus the agent's own time, measured, the
+ * selector's work included. Computing the model's part, rather than sleeping it, keeps the result the
+ * same on a fast machine and a busy CI runner.
  * The embedding is a lexical one, so the run is deterministic and needs no network; a real
  * embedding model drops into `embed` unchanged.
  */
@@ -145,25 +147,34 @@ function lexicalEmbed(texts: string[]): number[][] {
   });
 }
 
-/** Model time grows with input: 2 ms, plus 1 ms per 2,000 input tokens, as prefill does. */
-const modelMs = (inputTokens: number) => 2 + inputTokens / 2_000;
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Model time grows with input, as prefill does: 5 ms, plus 1 ms per 1,000 input tokens. Far faster
+ * than any hosted model, so the selector's own measured work weighs more here than it would in
+ * practice.
+ */
+const modelMs = (inputTokens: number) => 5 + inputTokens / 1_000;
 
-interface RunOutput {
-  answer: string;
-  called: string[];
+interface Usage {
   inputTokens: number;
   modelCalls: number;
+  modelMs: number;
+}
+
+interface RunOutput extends Usage {
+  answer: string;
+  called: string[];
+  /** The model's computed time plus the agent's own measured time. */
+  latencyMs: number;
 }
 
 /** The oracle: calls the next tool of the task's plan when it was offered, and gives up when it was not. */
-function oracle(plans: Map<string, string[]>, usage: { inputTokens: number; modelCalls: number }) {
+function oracle(plans: Map<string, string[]>, usage: Usage) {
   return {
     complete: async (request: CompletionRequest): Promise<NexusResponse> => {
       const tokens = estimateRequestTokens(request);
       usage.inputTokens += tokens;
       usage.modelCalls += 1;
-      await sleep(modelMs(tokens));
+      usage.modelMs += modelMs(tokens);
       const task = String(request.messages.find((message) => message.role === 'user')?.content ?? '');
       const plan = plans.get(task) ?? [];
       const done = request.messages.filter((message) => message.role === 'tool').length;
@@ -207,7 +218,8 @@ test('toolSelector over 150 tools: equal quality, a fraction of the tokens, and 
   const target =
     (withSelector: boolean) =>
     async (inputs: { text: string }): Promise<RunOutput> => {
-      const usage = { inputTokens: 0, modelCalls: 0 };
+      const usage: Usage = { inputTokens: 0, modelCalls: 0, modelMs: 0 };
+      const started = performance.now();
       const agent = createAgent({
         client: oracle(plans, usage),
         tools,
@@ -217,7 +229,8 @@ test('toolSelector over 150 tools: equal quality, a fraction of the tokens, and 
       const called = result.state.messages.flatMap(
         (message) => message.toolCalls?.map((made) => made.function.name) ?? [],
       );
-      return { answer: result.state.answer, called, ...usage };
+      const ownMs = performance.now() - started;
+      return { answer: result.state.answer, called, ...usage, latencyMs: usage.modelMs + ownMs };
     };
   const evaluators = [
     ({ output, example }: { output: unknown; example: { expected?: string[] } }) => ({
@@ -229,13 +242,13 @@ test('toolSelector over 150 tools: equal quality, a fraction of the tokens, and 
           : 0,
     }),
     ({ output }: { output: unknown }) => ({ key: 'input-tokens', score: (output as RunOutput).inputTokens }),
-    ({ latencyMs }: { latencyMs: number }) => ({ key: 'latency', score: latencyMs }),
+    ({ output }: { output: unknown }) => ({ key: 'latency', score: (output as RunOutput).latencyMs }),
   ];
 
-  const all = await evaluate(target(false), dataset, evaluators, { name: 'all 150 tools', concurrency: 4 });
+  const all = await evaluate(target(false), dataset, evaluators, { name: 'all 150 tools', concurrency: 1 });
   const selected = await evaluate(target(true), dataset, evaluators, {
     name: 'toolSelector, 12 tools',
-    concurrency: 4,
+    concurrency: 1,
   });
   const comparison = compareExperiments(all, selected, { lowerIsBetter: ['latency', 'input-tokens'] });
   t.diagnostic(formatComparison(comparison));

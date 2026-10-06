@@ -116,7 +116,8 @@ Agents that act safely, on production retrieval.
   and writes outside its root fails exactly those two checks.
 - An agent over 150 tools completes 40 tasks, a third of them needing two tools, with
   `toolSelector()` at equal quality: every task succeeds either way. Input tokens per task fall from
-  about 64,000 to about 5,200 and latency by about 40%. Two experiments, reported by
+  about 64,000 to about 5,200, and latency by about 70%: the model's time computed from
+  each request's size, plus the agent's own measured time. Two experiments, reported by
   `compareExperiments()`, show it.
 - Each middleware is proved in a real agent loop. For example:
   - a charge that timed out is never retried;
