@@ -1,5 +1,6 @@
 import type { CompletionRequest, Message } from '../types/messages.js';
 import type { InjectionDetectionConfig, SecurityFinding } from '../types/security.js';
+import { normalizeForDetection } from '../utils/checksums.js';
 
 const DEFAULT_PATTERNS: Array<{ pattern: RegExp; severity: SecurityFinding['severity']; label: string }> = [
   {
@@ -46,7 +47,8 @@ export class InjectionDetector {
     const findings: SecurityFinding[] = [];
 
     request.messages.forEach((message, index) => {
-      for (const text of this.extractText(message)) {
+      // Read as the model would: full-width letters folded, and invisible splitting characters removed.
+      for (const text of this.extractText(message).map(normalizeForDetection)) {
         patterns.forEach(({ pattern, severity, label }) => {
           const match = text.match(pattern);
           if (!match) return;
@@ -86,7 +88,14 @@ export class InjectionDetector {
     return message.content.filter((part) => part.type === 'text').map((part) => part.text);
   }
 
+  /** Defuses what `detect()` finds. Text with nothing to defuse is returned exactly as it was. */
   private escapeInstructionLikeText(text: string): string {
+    const normalized = normalizeForDetection(text);
+    const escaped = this.escapeNormalized(normalized);
+    return escaped === normalized ? text : escaped;
+  }
+
+  private escapeNormalized(text: string): string {
     return text
       .replace(/ignore\s+(all\s+)?previous\s+instructions/gi, '[neutralized instruction override]')
       .replace(/disregard\s+(all\s+)?(prior|previous)\s+instructions/gi, '[neutralized instruction override]')

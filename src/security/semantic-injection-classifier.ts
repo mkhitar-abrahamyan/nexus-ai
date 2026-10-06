@@ -1,6 +1,7 @@
 import type { CompletionRequest, Message } from '../types/messages.js';
 import type { SecurityFinding } from '../types/security.js';
 import { createHashEmbeddings, cosineSimilarity, type EmbeddingProvider } from '../hallucination/retrieval.js';
+import { normalizeForDetection } from '../utils/checksums.js';
 
 /** Options for `SemanticInjectionClassifier`. */
 export interface SemanticInjectionClassifierOptions {
@@ -38,55 +39,45 @@ export class SemanticInjectionClassifier {
     this.embed = options.embed || createHashEmbeddings;
   }
 
-  /** Finds injection attempts, using the configured embedding function. */
+  /** Finds injection attempts, using the configured embedding function: one call for the whole request. */
   async detect(request: CompletionRequest): Promise<SecurityFinding[]> {
     if (this.options.enabled === false) return [];
-    const findings: SecurityFinding[] = [];
+    const texts = textsOf(request);
+    if (texts.length === 0) return [];
     const exampleEmbeddings = await this.getExampleEmbeddings();
-    const threshold = this.options.threshold ?? 0.78;
-
-    for (const [index, message] of request.messages.entries()) {
-      for (const text of extractText(message)) {
-        const [embedding] = await this.embed([text]);
-        const score = Math.max(...exampleEmbeddings.map((example) => cosineSimilarity(embedding, example)));
-        if (score >= threshold) {
-          findings.push({
-            type: 'prompt-injection',
-            severity: score > 0.88 ? 'critical' : 'high',
-            message: `Semantic prompt injection risk score ${score.toFixed(2)} exceeded threshold ${threshold}`,
-            path: `messages.${index}.content`,
-            metadata: { score, threshold, classifier: 'semantic' },
-          });
-        }
-      }
-    }
-
-    return findings;
+    const embeddings = await this.embed(texts.map((entry) => entry.text));
+    return this.findings(texts, embeddings, exampleEmbeddings);
   }
 
   /** Finds injection attempts with hashed term vectors, synchronously. */
   detectSync(request: CompletionRequest): SecurityFinding[] {
-    const findings: SecurityFinding[] = [];
-    const threshold = this.options.threshold ?? 0.78;
+    if (this.options.enabled === false) return [];
+    const texts = textsOf(request);
+    if (texts.length === 0) return [];
     this.hashedExamples ??= createHashEmbeddings(this.examples);
-    const exampleEmbeddings = this.hashedExamples;
+    return this.findings(texts, createHashEmbeddings(texts.map((entry) => entry.text)), this.hashedExamples);
+  }
 
-    for (const [index, message] of request.messages.entries()) {
-      for (const text of extractText(message)) {
-        const [embedding] = createHashEmbeddings([text]);
-        const score = Math.max(...exampleEmbeddings.map((example) => cosineSimilarity(embedding, example)));
-        if (score >= threshold) {
-          findings.push({
-            type: 'prompt-injection',
-            severity: score > 0.88 ? 'critical' : 'high',
-            message: `Semantic prompt injection risk score ${score.toFixed(2)} exceeded threshold ${threshold}`,
-            path: `messages.${index}.content`,
-            metadata: { score, threshold, classifier: 'semantic' },
-          });
-        }
+  private findings(
+    texts: Array<{ index: number; text: string }>,
+    embeddings: number[][],
+    exampleEmbeddings: number[][],
+  ): SecurityFinding[] {
+    const threshold = this.options.threshold ?? 0.78;
+    const findings: SecurityFinding[] = [];
+    texts.forEach(({ index }, position) => {
+      const embedding = embeddings[position] ?? [];
+      const score = Math.max(...exampleEmbeddings.map((example) => cosineSimilarity(embedding, example)));
+      if (score >= threshold) {
+        findings.push({
+          type: 'prompt-injection',
+          severity: score > 0.88 ? 'critical' : 'high',
+          message: `Semantic prompt injection risk score ${score.toFixed(2)} exceeded threshold ${threshold}`,
+          path: `messages.${index}.content`,
+          metadata: { score, threshold, classifier: 'semantic' },
+        });
       }
-    }
-
+    });
     return findings;
   }
 
@@ -96,6 +87,13 @@ export class SemanticInjectionClassifier {
     }
     return this.exampleEmbeddings;
   }
+}
+
+/** Every text in a request, normalized as a detector should read it, with the message it came from. */
+function textsOf(request: CompletionRequest): Array<{ index: number; text: string }> {
+  return request.messages.flatMap((message, index) =>
+    extractText(message).map((text) => ({ index, text: normalizeForDetection(text) })),
+  );
 }
 
 function extractText(message: Message): string[] {

@@ -22,7 +22,8 @@ const SECRET_PATTERNS: Array<{ pattern: RegExp; label: string; severity: Securit
 
 const SUSPICIOUS_URL_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   {
-    pattern: /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.169\.254)(?:[:/]|$)/gi,
+    pattern:
+      /https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1?\]|169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200)(?:[:/]|$)/gi,
     label: 'local or metadata URL',
   },
   { pattern: /https?:\/\/[^\s]*\.(?:onion)(?:[:/]|$)/gi, label: 'onion URL' },
@@ -128,7 +129,8 @@ export class InputGuard {
       let output = text;
       patterns.forEach(({ pattern, label, severity }) => {
         output = output.replace(pattern, (value) => {
-          findings.push({ type, severity, message: `Detected ${label}`, path, value });
+          // A finding is logged, stored, and shown: it names the secret, and never carries it.
+          findings.push({ type, severity, message: `Detected ${label}`, path, value: previewSecret(value) });
           return action === 'mask' ? '[REDACTED]' : value;
         });
       });
@@ -161,4 +163,9 @@ export class InputGuard {
     if (typeof message.content === 'string') return [message.content];
     return message.content.filter((part) => part.type === 'text').map((part) => part.text);
   }
+}
+
+/** Enough of a secret to recognize which one it was, and never enough to use it. */
+function previewSecret(value: string): string {
+  return `${value.slice(0, 4)}… (${value.length} characters)`;
 }

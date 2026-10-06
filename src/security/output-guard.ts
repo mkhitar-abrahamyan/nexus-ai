@@ -1,7 +1,16 @@
 import type { NexusResponse } from '../types/response.js';
 import type { SecurityConfig, SecurityFinding, SecurityResult } from '../types/security.js';
+import { luhn, phoneNumber } from '../utils/checksums.js';
 
-const OUTPUT_SECRET_PATTERNS: Array<{ pattern: RegExp; label: string; severity: SecurityFinding['severity'] }> = [
+/** A pattern, and the check a match must pass to count, for patterns that also match ordinary numbers. */
+type OutputPattern = {
+  pattern: RegExp;
+  label: string;
+  severity: SecurityFinding['severity'];
+  valid?: (value: string) => boolean;
+};
+
+const OUTPUT_SECRET_PATTERNS: OutputPattern[] = [
   {
     pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
     label: 'private key',
@@ -15,17 +24,19 @@ const OUTPUT_SECRET_PATTERNS: Array<{ pattern: RegExp; label: string; severity: 
   { pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g, label: 'google api key', severity: 'critical' },
   { pattern: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, label: 'jwt token', severity: 'high' },
   { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, label: 'email address', severity: 'high' },
+  // A card number is redacted before a phone number is looked for, so no part of a card stays visible.
+  { pattern: /\b(?:\d[ -]*?){13,19}\b/g, label: 'possible credit card', severity: 'high', valid: luhn },
   {
     pattern: /(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{4}\b/g,
     label: 'phone number',
     severity: 'high',
+    valid: phoneNumber,
   },
   {
     pattern: /\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g,
     label: 'ip address',
     severity: 'high',
   },
-  { pattern: /\b(?:\d[ -]*?){13,19}\b/g, label: 'possible credit card', severity: 'high' },
   {
     pattern:
       /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret|password|token)\s*[:=]\s*(?:['"][^'"\r\n]+['"]|[^\s,;]{8,})/gi,
@@ -46,8 +57,8 @@ const CONNECTION_STRING_PATTERN = /\b(?:postgres|postgresql|mysql|mongodb|redis|
  */
 export function redactSensitiveText(value: string): string {
   let redacted = value;
-  for (const { pattern } of OUTPUT_SECRET_PATTERNS) {
-    redacted = redacted.replace(pattern, '[REDACTED]');
+  for (const { pattern, valid } of OUTPUT_SECRET_PATTERNS) {
+    redacted = redacted.replace(pattern, (match) => (valid && !valid(match) ? match : '[REDACTED]'));
   }
   return redacted.replace(CONNECTION_STRING_PATTERN, '[REDACTED_CONNECTION_STRING]');
 }
@@ -82,9 +93,10 @@ export class OutputGuard {
 
     const shouldRedact = config.output?.piiRedaction !== false;
     if (shouldRedact) {
-      for (const { pattern, label, severity } of OUTPUT_SECRET_PATTERNS) {
+      for (const { pattern, label, severity, valid } of OUTPUT_SECRET_PATTERNS) {
         for (const target of textTargets) {
           target.value = target.value.replace(pattern, (value) => {
+            if (valid && !valid(value)) return value;
             findings.push({
               type: 'pii',
               severity,

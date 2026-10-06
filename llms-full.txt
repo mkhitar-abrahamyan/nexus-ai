@@ -10248,15 +10248,15 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 336 KB | 100% | none |
-| `nexus-ai-pro/config` | 328 KB | 98% | none |
-| `nexus-ai-pro/core` | 324 KB | 96% | none |
-| `nexus-ai-pro/realtime` | 158 KB | 47% | none |
-| `nexus-ai-pro/deep-agent` | 137 KB | 41% | none |
-| `nexus-ai-pro/server` | 116 KB | 35% | none |
-| `nexus-ai-pro/batch` | 113 KB | 34% | none |
+| `nexus-ai-pro` | 340 KB | 100% | none |
+| `nexus-ai-pro/config` | 333 KB | 98% | none |
+| `nexus-ai-pro/core` | 329 KB | 97% | none |
+| `nexus-ai-pro/realtime` | 158 KB | 46% | none |
+| `nexus-ai-pro/deep-agent` | 137 KB | 40% | none |
+| `nexus-ai-pro/server` | 116 KB | 34% | none |
+| `nexus-ai-pro/batch` | 113 KB | 33% | none |
 | `nexus-ai-pro/agent` | 104 KB | 31% | none |
-| `nexus-ai-pro/realtime/session` | 96 KB | 29% | none |
+| `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/groq` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/mistral` | 82 KB | 24% | none |
@@ -10272,23 +10272,23 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/google` | 68 KB | 20% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 57 KB | 17% | none |
-| `nexus-ai-pro/operations` | 56 KB | 17% | none |
+| `nexus-ai-pro/security` | 57 KB | 17% | none |
+| `nexus-ai-pro/operations` | 56 KB | 16% | none |
 | `nexus-ai-pro/images` | 55 KB | 16% | none |
-| `nexus-ai-pro/security` | 53 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 50 KB | 15% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 14% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 14% | none |
 | `nexus-ai-pro/sqlite` | 41 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
+| `nexus-ai-pro/ops` | 39 KB | 11% | none |
 | `nexus-ai-pro/evaluate` | 38 KB | 11% | none |
-| `nexus-ai-pro/ops` | 37 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
-| `nexus-ai-pro/agent/middleware` | 32 KB | 10% | none |
-| `nexus-ai-pro/context-hub` | 32 KB | 10% | none |
+| `nexus-ai-pro/agent/middleware` | 33 KB | 10% | none |
+| `nexus-ai-pro/context-hub` | 32 KB | 9% | none |
 | `nexus-ai-pro/voice` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 30 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 29 KB | 9% | none |
@@ -10331,6 +10331,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/voice/session` | 12 KB | 4% | none |
 | `nexus-ai-pro/agent/sandbox` | 12 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
+| `nexus-ai-pro/rag/files` | 12 KB | 4% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
@@ -10346,7 +10347,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/store` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/migrations` | 10 KB | 3% | none |
-| `nexus-ai-pro/rag/files` | 10 KB | 3% | none |
 | `nexus-ai-pro/prompts` | 10 KB | 3% | none |
 | `nexus-ai-pro/rag/pinecone` | 10 KB | 3% | none |
 | `nexus-ai-pro/rag/chroma` | 10 KB | 3% | none |

@@ -4,6 +4,57 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Graduation and interoperability.
+
+### Security
+
+Testing the security code to depth found these gaps, and each is closed:
+
+- **The upload scanner trusted the caller.**
+  - A declared `sizeBytes` could carry a larger file past `maxBytes`; the larger of the declared and
+    actual sizes is now checked.
+  - `run.exe.`, `run.exe ` (Windows drops the trailing dot or space), and a name with a control
+    character such as `run.exe\0.txt` passed the extension block; names are now read as the file
+    system reads them, and a control character is itself a critical finding.
+  - Content given as bytes, which is how upload middleware delivers it, was never scanned; textual
+    bytes are now decoded and scanned.
+  - A file with no MIME type passed an allowlist; an allowlist now fails closed. Types are compared
+    without parameters, so `text/plain; charset=utf-8` is `text/plain`.
+- **File ingestion read what it never scanned.** Text an extractor returns from a PDF or an image is
+  now scanned like a text file. A text file given as bytes is ingested rather than skipped.
+- **The input guard put secrets in its findings.** A finding now carries a short preview, such as
+  `ghp_… (40 characters)`, never the secret. The SSRF check also catches `[::1]`, all of
+  `127.0.0.0/8`, and the Google and Alibaba metadata hosts.
+- **Prompt hardening could be escaped.** User text holding the delimiter closed the block early; each
+  occurrence inside the text is now broken apart. The text parts of multi-part messages are wrapped
+  too.
+- **The injection detectors read text as typed, not as the model reads it.** Both now fold
+  full-width letters and drop zero-width characters first, so `ＩＧＮＯＲＥ previous instructions` and
+  `ig​nore previous instructions` are found. `neutralize()` leaves clean text exactly as it was.
+- **The PII detector and the output guard took any long number for a card or a phone.** A
+  millisecond timestamp or an order id was masked, and in the output guard a card's last digits
+  could survive because the phone pattern claimed the rest first. Card numbers must now pass Luhn,
+  and phone numbers need 10 to 15 digits with a separator or a leading `+`. Cards are claimed before
+  phones, and a span one kind has claimed is not reported again as another.
+- **Retrieved context reads as data.** `withRagContext()` now tells the model that the context is
+  data, not instructions.
+
+### Fixed
+
+- `extractCitations()` and `validateCitations()` read a Markdown link `[text](url)` as a citation,
+  and `[doc-1, doc-2]` as one id; links are ignored and lists are split.
+- The semantic injection classifier embeds a request in one call instead of one per message, and
+  `detectSync()` honours `enabled: false` as `detect()` did.
+
+### Proof
+
+- Grounding and verification, file ingestion, the upload scanner, the PII detector, and both
+  injection detectors are tested to the package's own coverage:
+  - grounding, the PII detector, prompt hardening, and the upload scanner at 100% of lines;
+  - file ingestion, which no test loaded before, at 97%.
+- Each security fix above is a test that names the attack it stops or the false positive it rules
+  out.
+
 ## [2.3.0] - 2026-10-06
 
 Agents that act safely, on production retrieval.

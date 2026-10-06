@@ -1,5 +1,6 @@
 import type { ContentPart, Message, ToolOutput } from '../../types/messages.js';
 import type { AgentMiddleware, AgentToolResult } from '../create-agent.js';
+import { ibanChecksum, luhn, phoneNumber } from '../../utils/checksums.js';
 import { shortHash } from './shared.js';
 
 /** The personal data and secrets `piiMiddleware()` finds on its own. */
@@ -80,10 +81,7 @@ const DETECTORS: Record<PiiKind, Detector> = {
   'ip-address': { pattern: /\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g },
   phone: {
     pattern: /(?<![\w+])\+?(?:\(\d{1,4}\)|\d{1,4})(?:[ .-]?(?:\(\d{1,4}\)|\d{2,4})){2,4}(?!\w)/g,
-    valid: (match) => {
-      const digits = match.replace(/\D/g, '').length;
-      return digits >= 10 && digits <= 15 && (/^\+/.test(match) || /[ .()-]/.test(match));
-    },
+    valid: phoneNumber,
   },
 };
 const ORDER: readonly PiiKind[] = ['secret', 'email', 'credit-card', 'iban', 'ssn', 'ip-address', 'phone'];
@@ -208,31 +206,4 @@ function replace(match: string, kind: string, strategy: PiiStrategy): string {
 
 function isToolOutput(value: unknown): value is ToolOutput {
   return (value as { type?: unknown } | null)?.type === 'tool_output' && Array.isArray((value as ToolOutput).content);
-}
-
-function luhn(match: string): boolean {
-  const digits = match.replace(/\D/g, '');
-  if (digits.length < 13 || digits.length > 19) return false;
-  let sum = 0;
-  for (let index = 0; index < digits.length; index += 1) {
-    let digit = Number(digits[digits.length - 1 - index]);
-    if (index % 2 === 1) {
-      digit *= 2;
-      if (digit > 9) digit -= 9;
-    }
-    sum += digit;
-  }
-  return sum % 10 === 0;
-}
-
-function ibanChecksum(match: string): boolean {
-  const iban = match.replace(/ /g, '');
-  if (iban.length < 15 || iban.length > 34) return false;
-  const rearranged = `${iban.slice(4)}${iban.slice(0, 4)}`;
-  let remainder = 0;
-  for (const char of rearranged) {
-    const value = /\d/.test(char) ? char : String(char.charCodeAt(0) - 55);
-    for (const digit of value) remainder = (remainder * 10 + Number(digit)) % 97;
-  }
-  return remainder === 1;
 }

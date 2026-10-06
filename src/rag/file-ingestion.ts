@@ -1,4 +1,10 @@
-import { scanUploads, type FileUpload, type UploadScannerOptions } from '../security/upload-scanner.js';
+import {
+  type FileUpload,
+  isTextual,
+  scanUploads,
+  textOf,
+  type UploadScannerOptions,
+} from '../security/upload-scanner.js';
 import { ingestDocuments, type DocumentSource, type IngestionOptions, type IngestionResult } from './ingestion.js';
 
 /** Turns one kind of file into text, such as PDF or an image through OCR. */
@@ -46,20 +52,36 @@ export async function ingestFilesAfterScan(
   for (const file of files) {
     const extractor = options.extractors?.find((item) => item.supports(file));
     if (extractor) {
+      const text = await extractor.extract(file);
+      // What an extractor returns was never scanned: a PDF or an image can carry a key or an
+      // instruction override as easily as a text file, so its text is scanned like one.
+      if (options.scan?.scanTextContent !== false) {
+        const extracted = scanUploads([{ name: file.name, mimeType: 'text/plain', content: text }], {
+          ...(options.scan?.forbiddenPatterns ? { forbiddenPatterns: options.scan.forbiddenPatterns } : {}),
+          blockedExtensions: [],
+        });
+        if (!extracted.ok) {
+          throw new Error(
+            `Upload scan failed on extracted text: ${extracted.findings.map((finding) => `${finding.fileName}: ${finding.message}`).join('; ')}`,
+          );
+        }
+      }
       documents.push({
         id: file.name,
         source: file.name,
-        text: await extractor.extract(file),
+        text,
         metadata: { mimeType: file.mimeType, sizeBytes: file.sizeBytes },
       });
       continue;
     }
 
-    if (typeof file.content === 'string' && isTextMime(file.mimeType)) {
+    // Text arrives as a string or, from upload middleware, as bytes; both are read the same way.
+    const text = isTextual(file.mimeType) ? textOf(file.content, file.mimeType) : undefined;
+    if (text !== undefined) {
       documents.push({
         id: file.name,
         source: file.name,
-        text: file.content,
+        text,
         metadata: { mimeType: file.mimeType, sizeBytes: file.sizeBytes },
       });
       continue;
@@ -93,11 +115,4 @@ export function createOcrExtractor(
     supports: (file) => Boolean(file.mimeType && mimeTypes.includes(file.mimeType)),
     extract: ocrImage,
   };
-}
-
-function isTextMime(mimeType?: string): boolean {
-  if (!mimeType) return true;
-  return (
-    mimeType.startsWith('text/') || ['application/json', 'application/xml', 'application/markdown'].includes(mimeType)
-  );
 }
