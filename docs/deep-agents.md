@@ -1,4 +1,4 @@
-# Deep agents
+# The deep-agent preset
 
 <!-- covers: ./deep-agent -->
 

@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-06
+
 Agents that act safely, on production retrieval.
 
 ### Added
@@ -1774,7 +1776,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v1.25.0...v2.0.0

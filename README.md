@@ -8,7 +8,7 @@ team can share.
 Import only what you use. The root import is the client and nothing else, and every other capability
 has its own entry point with a size budget CI enforces; [the packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md)
 publishes what each one costs. The package has no required dependencies: a graph-only application
-loads 78 KB, and installs nothing but this package.
+loads 80 KB, and installs nothing but this package.
 
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
@@ -133,7 +133,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Guardrails](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/security.md) | Injection, PII, secrets, schema validation, output redaction |
 | [Graphs](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/graphs.md) | Parallel branches, interrupts, checkpoints, time travel, subgraphs, caching, diagrams |
 | [Agents and tools](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/agents.md) | Graph-based agents with approvals, capabilities and permission policies, a sandbox contract, the middleware catalog, and the simple tool loop |
-| [Deep agents](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deep-agents.md) | Long, multi-step agents: a plan, a sandboxed workspace, helpers, skills, and a context that stays small |
+| [The deep-agent preset](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deep-agents.md) | Long, multi-step agents: a plan, a sandboxed workspace, helpers, skills, and a context that stays small |
 | [Long-term memory](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/memory.md) | Namespaced memory with semantic search, in memory or Redis |
 | [MCP](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/mcp.md) | Borrowing tools from MCP servers, a registry of many, and serving your own |
 | [Traces](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tracing.md) | Run trees, queries, feedback, comparison, and alerts |
@@ -252,12 +252,16 @@ Shipped so far:
   backend, one event stream, and dashboard rollups;
 - 2.2 production scale and safe upgrades: versioned database migrations, queue claims and routing
   that cost the same at any size, a circuit breaker that counts across workers, one tenant model
-  across every store, and `nexus doctor` to check a deployment before it serves traffic.
+  across every store, and `nexus doctor` to check a deployment before it serves traffic;
+- 2.3 agents that act safely, on production retrieval: capabilities and permission policies, a
+  sandbox contract, a middleware catalog, server authentication with one principal on every run,
+  keyword search in Postgres and Elasticsearch with rerankers, durable ingestion, and a deep-agent
+  preset.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.3 gives agents a real security boundary — capabilities, permissions, and a sandbox contract —
-with a complete middleware catalog, and retrieval that works at production scale. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
+Next, 2.4 takes the experimental surfaces out of experimental with evidence, adds an adapter kit, and
+speaks the agent protocols beyond MCP from a portable kernel. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
 releases after it.
 
 ## Before Production

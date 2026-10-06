@@ -4,15 +4,16 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.2.0**. 143 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.3.0**. 152 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, and 98 completion
-registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 873
-unit tests pass; coverage sits at **94.6% lines / 80.7% branches / 89.9% functions** against gates of
+registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 906
+unit tests pass; coverage sits at **94.8% lines / 80.9% branches / 90.3% functions** against gates of
 82/67/73. CI verifies lint, format, build, tests, coverage, registry drift, `llms.txt` drift,
 per-subpath size, documentation and guide coverage, the root import, a graph benchmark with a
 durability budget, runtime and memory-retention budgets, crash injection on five checkpointers, an
 upgrade from the published 2.0.0 and 2.1.0 packages, ten-worker races and tenant isolation on every
-shared store, mock conformance, packed-package smoke, API contract, consumer type resolution, and
+shared store, sandbox conformance, a permission policy in a real tool loop, retrieval and tool-selection
+experiments, a crash halfway through a 100,000-document ingestion, mock conformance, packed-package smoke, API contract, consumer type resolution, and
 clean install on Node 22 and 24.
 
 ---
@@ -33,7 +34,7 @@ behaves under a crash, a slow database, a rolling deploy, a thousand workers, or
 **What every release protects:**
 
 - No required dependency, and a size budget on every entry point. Today the root import is 336 KB, and
-  an entry point costs a fraction of it: `/agent` 28%, `/graph` 23%, `/operations` 17%, `/evaluate`
+  an entry point costs a fraction of it: `/agent` 31%, `/graph` 24%, `/operations` 17%, `/evaluate`
   11%, `/tracing` 9%, `/mcp` 4%, `/store` 2%. `npm run size:check` fails the build when an entry point
   grows past its budget or picks up a dependency.
 - A runtime and memory budget. `npm run bench:runtime` fails the release gate when a measured path
@@ -58,71 +59,12 @@ Each gap is written down in a guide's limitations today, and each is closed by o
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| Three agent middleware ship: summarize, redact, and limit tool calls | agents guide | 2.3 |
-| Tool safety is by tool name; there are no capabilities, permissions, or sandbox contract | security guide | 2.3 |
-| The server's `auth` hook has no standard implementations | server guide | 2.3 |
-| Keyword search is an in-memory index; reranking means an LLM call | retrieval guide | 2.3 |
-| Ingestion has no versions, hashes, incremental refresh, or resume | loaders guide | 2.3 |
-| The linter cannot see a side effect before an interrupt, or a sensitive tool without approval | graph guide | 2.3 |
 | Ten surfaces are experimental in production readiness, with no measurable way out | API stability | 2.4 |
 | Images have never passed live conformance | images guide | 2.4 |
 | A canary is rolled back on raw rates, without sample sizes or confidence | deployments guide | 2.4 |
 | A community adapter has no kit to build and verify itself against | — | 2.4 |
 | No agent protocol beyond MCP, and the client pipeline is Node-only | README | 2.4 |
 | Grounding, ingestion, and the PII and injection classifiers are the least-tested code | coverage report | 2.4 |
-
----
-
-## 2.3.0: agents that act safely, on production retrieval
-
-Agents get a complete middleware kit and a real security boundary, and the retrieval they read from
-works at production scale.
-
-**A middleware catalog**, each its own import on `nexus-ai-pro/agent/middleware`:
-`modelRetry()`, `toolRetry()`, `modelFallback()`, `dynamicModel()`, `toolSelector()`,
-`contextEditor()`, `piiMiddleware()`, `humanApproval()`, `modelCallLimit()`, and
-`filesystemContext()`. `toolSelector()` sends a model only the tools relevant to the turn, by rule or
-by embedding similarity, so an agent with 150 MCP tools sends a dozen schemas instead of 150.
-
-**Capabilities and permissions.** A tool declares the capabilities it needs, such as
-`network:api.github.com` or `filesystem:write`. A permission policy grants filesystem paths, network
-hosts, and shell commands, and decides each call: allow, deny, or interrupt for approval. Danger is a
-property of what a tool does, not of its name. The linter reads capabilities, and reports a sensitive
-tool with no approval and a side effect before an interrupt.
-
-**A sandbox contract.** Code and shell tools run through a `Sandbox` interface the application fills:
-a container, a VM, a remote interpreter. The package ships the contract, a conformance suite, and a
-process-level reference for development only.
-
-**A deep-agent preset.** `nexus-ai-pro/deep-agent` composes `createAgent()` with planning, a
-filesystem, subagents, skills, context offloading, the tool selector, and permissions. It is a preset
-over the existing agent and graph runtime, not a third engine.
-
-**Server authentication.** `jwtAuth()`, `apiKeyAuth()`, and `trustedProxyAuth()` fill the server's
-`auth` hook. All three return one `Principal` (subject, tenant, roles, scopes), which reaches runs,
-traces, budgets, tools, the store, audit, and deployments.
-
-**Sparse retrieval and reranking as contracts.** `SparseRetriever` lets external keyword search take
-part in hybrid retrieval, with references for Postgres full-text search and one search engine through
-the same structural-client approach as the vector stores. `Reranker` takes a query and documents and
-returns them ranked, with adapters for hosted rerank APIs and a local cross-encoder and no SDK
-dependency. `KeywordIndex` and `modelReranker()` stay for small corpora and LLM judgement.
-
-**Durable ingestion.** An ingestion pipeline on durable operations tracks each source's version and
-content hash, each chunk's version, and the embedding model. It refreshes only what changed,
-propagates deletions, writes idempotently, and resumes after a crash at the document it stopped on.
-
-**Proof.**
-- An agent over 150 tools completes a benchmark task set with `toolSelector()` at equal quality and a
-  measured cut in tokens and latency, reported by an experiment.
-- The permission policy refuses a write outside the workspace and a request to an unlisted host, and
-  interrupts on a granted-with-approval command, in a test that drives a real tool loop.
-- A deep agent completes a multi-step task on a fixture repository inside the reference sandbox.
-- A JWT from a test identity provider reaches a tool call as a `Principal`, scoped to its tenant.
-- Hybrid retrieval over Postgres full-text and pgvector beats vector-only on the stored dataset, with a
-  hosted reranker and a local one compared in one experiment.
-- An ingestion of 100,000 documents killed halfway resumes without re-embedding finished chunks, and a
-  second run after editing ten documents re-embeds only those.
 
 ---
 
