@@ -75,7 +75,10 @@ Everything 2.3 adds is stable from the start and additive: no default changes me
   current API versions;
 - `nexus-ai-pro/rag/pipeline`: `createIngestionPipeline()`, `ingestionExecutor()`, and their types.
   The manifest's layout under `['nexus', 'ingestion', <name>]` is stable: a later release reads a
-  manifest an earlier one wrote.
+  manifest an earlier one wrote;
+- `nexus-ai-pro/deep-agent`: `createDeepAgent()`, `DeepAgentOptions`, `DeepSubagent`, and
+  `DeepSkill`, and the names and arguments of the tools it gives the model (`write_todos`,
+  `delegate`, `load_skill`, `edit_file`). The wording of its system prompt may change in any release.
 
 ## 2.2 stage (2.2.0)
 

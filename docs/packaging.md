@@ -97,6 +97,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/config` | 328 KB | 98% | none |
 | `nexus-ai-pro/core` | 324 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 47% | none |
+| `nexus-ai-pro/deep-agent` | 137 KB | 41% | none |
 | `nexus-ai-pro/server` | 116 KB | 35% | none |
 | `nexus-ai-pro/batch` | 113 KB | 34% | none |
 | `nexus-ai-pro/agent` | 104 KB | 31% | none |
@@ -173,13 +174,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 12 KB | 4% | none |
+| `nexus-ai-pro/agent/sandbox` | 12 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
-| `nexus-ai-pro/agent/sandbox` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/store` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/testing/record` | 11 KB | 3% | none |

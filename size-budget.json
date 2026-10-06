@@ -21,6 +21,7 @@
     "./context": 16,
     "./context-hub": 36,
     "./core": 358,
+    "./deep-agent": 152,
     "./doctor": 14,
     "./embeddings": 40,
     "./embeddings/adapters": 18,

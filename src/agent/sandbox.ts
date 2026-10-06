@@ -6,9 +6,6 @@
  * reference for development, which runs commands as ordinary processes; it says so in its
  * `isolation`, and is never a security boundary.
  */
-import { spawn } from 'node:child_process';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import type { ToolDefinition } from '../types/messages.js';
 
 /** Options for one command. */
@@ -103,21 +100,33 @@ export interface ProcessSandboxOptions {
  * can, and reach any host: `isolation` says so. Use a container or a VM in production.
  */
 export function processSandbox(options: ProcessSandboxOptions): Sandbox {
-  const root = path.resolve(options.root);
-  const inside = (file: string): string => {
-    const resolved = path.resolve(root, file);
-    const relative = path.relative(root, resolved);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new SandboxPathError(file);
-    return resolved;
-  };
-  const ready = mkdir(root, { recursive: true });
+  // Node's modules load on first use, so importing this module needs no Node: a deep agent over a
+  // container sandbox runs on any runtime, and only a process sandbox needs Node.
+  const ready = (async () => {
+    const [{ spawn }, fs, { dirname, isAbsolute, relative, resolve }] = await Promise.all([
+      import('node:child_process'),
+      import('node:fs/promises'),
+      import('node:path'),
+    ]);
+    const root = resolve(options.root);
+    await fs.mkdir(root, { recursive: true });
+    const inside = (file: string): string => {
+      const resolved = resolve(root, file);
+      const fromRoot = relative(root, resolved);
+      if (fromRoot.startsWith('..') || isAbsolute(fromRoot)) throw new SandboxPathError(file);
+      return resolved;
+    };
+    return { spawn, fs, dirname, root, inside };
+  })();
+  // A root that cannot be created fails every call; it is never an unhandled rejection on its own.
+  ready.catch(() => undefined);
   const maxOutput = options.maxOutputBytes ?? 1_048_576;
 
   return {
     name: 'process (development only)',
     isolation: { filesystem: false, network: false, processes: false },
     async exec(command, execOptions = {}) {
-      await ready;
+      const { spawn, root, inside } = await ready;
       const started = Date.now();
       const cwd = inside(execOptions.cwd ?? '.');
       const env: Record<string, string> = {
@@ -147,7 +156,7 @@ export function processSandbox(options: ProcessSandboxOptions): Sandbox {
         child.stderr?.on('data', (chunk: Buffer) => {
           stderr = keep(stderr, chunk);
         });
-        const stop = () => killTree(child.pid);
+        const stop = () => killTree(spawn, child.pid);
         const limit = execOptions.timeoutMs ?? options.timeoutMs ?? 30_000;
         const timer = setTimeout(() => {
           timedOut = true;
@@ -172,30 +181,30 @@ export function processSandbox(options: ProcessSandboxOptions): Sandbox {
       });
     },
     async readFile(file) {
-      await ready;
-      return readFile(inside(file), 'utf8');
+      const { fs, inside } = await ready;
+      return fs.readFile(inside(file), 'utf8');
     },
     async writeFile(file, content) {
-      await ready;
+      const { fs, dirname, inside } = await ready;
       const target = inside(file);
-      await mkdir(path.dirname(target), { recursive: true });
-      await writeFile(target, content, 'utf8');
+      await fs.mkdir(dirname(target), { recursive: true });
+      await fs.writeFile(target, content, 'utf8');
     },
     async listFiles(directory = '.') {
-      await ready;
-      return (await readdir(inside(directory))).sort();
+      const { fs, inside } = await ready;
+      return (await fs.readdir(inside(directory))).sort();
     },
     async removeFile(file) {
-      await ready;
+      const { fs, root, inside } = await ready;
       const target = inside(file);
       if (target === root) throw new SandboxPathError(file);
-      await rm(target, { recursive: true, force: true });
+      await fs.rm(target, { recursive: true, force: true });
     },
   };
 }
 
 /** Stops a process and everything it started: the shell a command runs in starts the command itself. */
-function killTree(pid: number | undefined): void {
+function killTree(spawn: typeof import('node:child_process').spawn, pid: number | undefined): void {
   if (pid === undefined) return;
   try {
     if (process.platform === 'win32') {

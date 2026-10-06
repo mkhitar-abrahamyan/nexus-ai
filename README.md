@@ -132,7 +132,8 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Providers and routing](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/providers.md) | The twelve completion providers, routing and failover, the model registry |
 | [Guardrails](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/security.md) | Injection, PII, secrets, schema validation, output redaction |
 | [Graphs](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/graphs.md) | Parallel branches, interrupts, checkpoints, time travel, subgraphs, caching, diagrams |
-| [Agents and tools](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/agents.md) | Graph-based agents with approvals and middleware, and the simple tool loop |
+| [Agents and tools](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/agents.md) | Graph-based agents with approvals, capabilities and permission policies, a sandbox contract, the middleware catalog, and the simple tool loop |
+| [Deep agents](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deep-agents.md) | Long, multi-step agents: a plan, a sandboxed workspace, helpers, skills, and a context that stays small |
 | [Long-term memory](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/memory.md) | Namespaced memory with semantic search, in memory or Redis |
 | [MCP](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/mcp.md) | Borrowing tools from MCP servers, a registry of many, and serving your own |
 | [Traces](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tracing.md) | Run trees, queries, feedback, comparison, and alerts |

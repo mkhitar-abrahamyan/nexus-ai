@@ -71,14 +71,19 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // dispatch index, the shared circuit window, the Postgres rollup store, the routing plan, the
 // tenancy and doctor entry points, cache outcomes, and workflow step recovery — about 500KB unpacked
 // across both builds and their declarations, nearly all in opt-in subpaths.
-const MAX_PACKED_BYTES = 1_080_000;
-const MAX_UNPACKED_BYTES = 6_500_000;
+// Raised again in 2.3.0 for agents that act safely, on production retrieval: capabilities and
+// permission policies, the sandbox contract, ten middleware, server authentication, the principal on
+// every run, Postgres and Elasticsearch keyword search, rerankers, durable ingestion, and the
+// deep-agent preset. That is thirteen opt-in entry points in both builds and their declarations,
+// none of them loaded by the root.
+const MAX_PACKED_BYTES = 1_120_000;
+const MAX_UNPACKED_BYTES = 6_800_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
-// came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0, for
-// the same reasons, and still nothing but the package itself.
-const MAX_INSTALLED_BYTES = 6_600_000;
+// came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0 and
+// 2.3.0, for the same reasons, and still nothing but the package itself.
+const MAX_INSTALLED_BYTES = 6_900_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

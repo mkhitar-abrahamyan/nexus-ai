@@ -80,6 +80,18 @@ Agents that act safely, on production retrieval.
 
   `ingestionExecutor()` runs it as a durable operation, and a retry starts at the document the
   failed attempt stopped on.
+- **A deep-agent preset**, on the new `nexus-ai-pro/deep-agent`. `createDeepAgent()` is
+  `createAgent()` composed with:
+  - a plan, kept in the transcript;
+  - a sandboxed workspace, with `edit_file` for precise changes and commands granted by name;
+  - helpers behind one `delegate` tool, which never get a tool that needs approval;
+  - skills loaded on demand;
+  - instruction files and context offloading;
+  - context editing, optional tool selection, and a default permission policy.
+
+  It returns the same compiled graph as any agent; it is not a new engine.
+- `processSandbox()` loads Node's modules when first used, so `nexus-ai-pro/agent/sandbox`, and a
+  deep agent over a container sandbox, import on any runtime.
 
 ### Fixed
 
@@ -123,6 +135,11 @@ Agents that act safely, on production retrieval.
 - An ingestion of 100,000 documents dies halfway inside a durable operation. Its retry starts at the
   document the first attempt stopped on, and embeds no chunk that had finished. A second run after
   ten documents are edited embeds exactly ten chunks and deletes their old versions.
+- A deep agent completes a multi-step task on a fixture repository inside the reference sandbox. It
+  plans, runs the failing test, reads and edits the bug, verifies the fix, has a helper review it,
+  loads a skill, and records the change; the test then passes outside the agent. Along the way, a
+  30,000-character log is offloaded to a file. The default policy refuses an unlisted command, a
+  chained command, a write outside the workspace, and an ungranted tool.
 
 ## [2.2.0] - 2026-10-05
 

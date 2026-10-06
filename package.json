@@ -570,6 +570,16 @@
         "default": "./dist-cjs/agent/middleware/index.js"
       }
     },
+    "./deep-agent": {
+      "import": {
+        "types": "./dist/deep-agent/index.d.ts",
+        "default": "./dist/deep-agent/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/deep-agent/index.d.ts",
+        "default": "./dist-cjs/deep-agent/index.js"
+      }
+    },
     "./store": {
       "import": {
         "types": "./dist/store/index.d.ts",
@@ -1900,6 +1910,9 @@
       ],
       "agent/middleware": [
         "dist-cjs/agent/middleware/index.d.ts"
+      ],
+      "deep-agent": [
+        "dist-cjs/deep-agent/index.d.ts"
       ],
       "store": [
         "dist-cjs/store/index.d.ts"

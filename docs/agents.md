@@ -442,6 +442,19 @@ At a limit, the run ends with an answer and `stopReason: 'stopped'`. With `onLim
 fails with a `ModelCallLimitError` instead. `maxIterations` still stops a single run that keeps
 calling tools.
 
+## Deep agents
+
+For long, multi-step work, `createDeepAgent()` on `nexus-ai-pro/deep-agent` is `createAgent()`
+with a kit already assembled:
+- a plan it keeps current;
+- a sandboxed workspace;
+- helpers to delegate to;
+- skills loaded on demand;
+- context offloading and editing;
+- a permission policy.
+
+The [deep agents guide](./deep-agents.md) covers it.
+
 ## An agent as a tool
 
 `agentAsTool()` turns an agent into a `ToolDefinition`, so one agent can call another. A supervisor

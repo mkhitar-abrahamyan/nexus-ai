@@ -117,6 +117,7 @@ const imports = [
       'dynamicModel',
     ],
   },
+  { specifier: 'nexus-ai-pro/deep-agent', exports: ['createDeepAgent'] },
   { specifier: 'nexus-ai-pro/store', exports: ['MemoryStore', 'cosine'] },
   { specifier: 'nexus-ai-pro/store/redis', exports: ['RedisStore'] },
   { specifier: 'nexus-ai-pro/mcp', exports: ['McpClient', 'McpServer', 'createStdioTransport', 'McpError'] },
