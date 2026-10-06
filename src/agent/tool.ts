@@ -1,4 +1,4 @@
-import type { ContentPart, Message, ToolDefinition, ToolOutput } from '../types/messages.js';
+import type { ContentPart, Message, ToolContext, ToolDefinition, ToolOutput } from '../types/messages.js';
 import type { ToolExecutionResult } from '../types/agent.js';
 
 /** Defines a tool the model can call, typing its arguments. */
@@ -6,7 +6,8 @@ export function tool<TArgs extends Record<string, unknown> = Record<string, unkn
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute: (args: TArgs) => Promise<unknown> | unknown;
+  /** Runs the tool. In an agent, `context` says who the run is for and carries its signal and store. */
+  execute: (args: TArgs, context: ToolContext) => Promise<unknown> | unknown;
   /** What the tool does to the world, for a permission policy; see `ToolDefinition.capabilities`. */
   capabilities?: readonly string[] | ((args: TArgs) => readonly string[]);
 }): ToolDefinition {
@@ -15,7 +16,7 @@ export function tool<TArgs extends Record<string, unknown> = Record<string, unkn
     name: definition.name,
     description: definition.description,
     parameters: definition.parameters,
-    execute: async (args) => definition.execute(args as TArgs),
+    execute: async (args, context) => definition.execute(args as TArgs, context ?? {}),
     ...(capabilities === undefined
       ? {}
       : {
@@ -90,7 +91,7 @@ export class ToolExecutor {
   }
 
   /** Runs a tool. An unknown name or a thrown error comes back as a failed result. */
-  async execute(name: string, args: Record<string, unknown>): Promise<ToolExecutionResult> {
+  async execute(name: string, args: Record<string, unknown>, context?: ToolContext): Promise<ToolExecutionResult> {
     const toolDefinition = this.tools.get(name);
 
     if (!toolDefinition) {
@@ -102,7 +103,7 @@ export class ToolExecutor {
     }
 
     try {
-      const result = await toolDefinition.execute(args);
+      const result = await toolDefinition.execute(args, context);
       return { ok: true, result };
     } catch (err) {
       return {

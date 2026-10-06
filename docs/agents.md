@@ -124,6 +124,31 @@ const calls = run.tools();
 authorized, counted, and audited as an `agent` operation, alongside the model calls it makes.
 `ai.agent()` runs as one already. The [lifecycle guide](./lifecycle.md) explains what that shares.
 
+## Who a tool acts for
+
+An agent passes every tool a `ToolContext` as the second argument of `execute`, with these fields:
+- `toolCallId`, the call's id;
+- `threadId` and `tenantId`;
+- `signal`, the run's signal;
+- `store`, which in a tenant's run is the tenant's view of it;
+- `principal`, who the run is for: the caller the server authenticated, with their roles and
+  scopes.
+
+A tool can therefore act as that user and no one else, stop when the run is cancelled, and remember
+things per tenant. Middleware reads the principal as `context.principal`, and a permission policy
+as `request.principal`. A tool run outside an agent receives an empty context.
+
+```ts
+const myTickets = tool({
+  name: 'my_tickets',
+  description: "Lists the caller's open tickets",
+  parameters: { type: 'object' },
+  capabilities: ['network:helpdesk.internal'],
+  execute: async (_args, { principal, signal }) =>
+    helpdesk.tickets({ assignee: principal?.userId, tenant: principal?.tenantId, signal }),
+});
+```
+
 ## What a tool may do
 
 Approval by tool name does not scale: a tool that runs commands is harmless running `git status`
@@ -492,6 +517,7 @@ specific entry point that provides it.
 | `CreateAgentOptions` | interface | Options for `createAgent()`. |
 | `isToolOutput` | function | True for a result built with `toolOutput()`. |
 | `tool` | function | Defines a tool the model can call, typing its arguments. |
+| `ToolContext` | interface | What a tool receives besides its arguments when an agent runs it. |
 | `ToolExecutionResult` | interface | What running one tool produced. |
 | `ToolExecutor` | class | Runs tool calls by name, reporting failures as results rather than throwing. |
 | `toolMessageContent` | function | What the model reads for a tool's result: the parts of a `toolOutput()`, or anything else as JSON. |

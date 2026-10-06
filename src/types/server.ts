@@ -7,15 +7,9 @@
  * anything that can stream events for an input, which a compiled graph already does.
  */
 
-/** Who is making a request, as the server's authentication hook reports them. */
-export interface Principal {
-  /** Isolates threads, runs, and cron jobs. Requests only ever see their own tenant's resources. */
-  tenantId?: string;
-  /** Who the caller is, recorded on what they create. */
-  userId?: string;
-  /** What the caller may do. A route that names a scope refuses a principal without it. */
-  scopes?: readonly string[];
-}
+import type { Principal } from './principal.js';
+
+export type { Principal };
 
 /** Where a run stands, as the server reports it. */
 export type RunStatus = 'queued' | 'running' | 'awaiting_input' | 'succeeded' | 'failed' | 'cancelled' | 'expired';

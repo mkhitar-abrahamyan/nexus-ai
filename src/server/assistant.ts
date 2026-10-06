@@ -1,5 +1,5 @@
 import type { GraphStreamProjection } from '../types/graph.js';
-import type { AssistantRunContext, ServerAssistant } from '../types/server.js';
+import type { AssistantRunContext, Principal, ServerAssistant } from '../types/server.js';
 
 /**
  * The part of a compiled graph the adapter uses.
@@ -16,6 +16,7 @@ export interface GraphLike {
       signal?: AbortSignal;
       metadata?: Record<string, unknown>;
       tenantId?: string;
+      principal?: Principal;
       control?: DrainSwitch;
     },
   ): AsyncIterable<unknown>;
@@ -23,7 +24,13 @@ export interface GraphLike {
   resume(
     threadId: string,
     value: unknown,
-    options: { signal?: AbortSignal; metadata?: Record<string, unknown>; tenantId?: string; control?: DrainSwitch },
+    options: {
+      signal?: AbortSignal;
+      metadata?: Record<string, unknown>;
+      tenantId?: string;
+      principal?: Principal;
+      control?: DrainSwitch;
+    },
   ): AsyncIterable<unknown>;
   /** The thread's checkpoint, at its latest step or at one given. */
   state(
@@ -33,7 +40,13 @@ export interface GraphLike {
   /** Runs a thread on from its latest checkpoint, which is how a recovered run resumes at its last step. */
   continue?(
     threadId: string,
-    options: { signal?: AbortSignal; metadata?: Record<string, unknown>; tenantId?: string; control?: DrainSwitch },
+    options: {
+      signal?: AbortSignal;
+      metadata?: Record<string, unknown>;
+      tenantId?: string;
+      principal?: Principal;
+      control?: DrainSwitch;
+    },
   ): AsyncIterable<unknown>;
   /** Writes values into a thread's state, which is how a rollback is applied. */
   updateState?(threadId: string, values: Record<string, unknown>, options?: { asNode?: string }): Promise<unknown>;
@@ -49,6 +62,7 @@ export interface GraphLike {
 type GraphEventOptionsLike = {
   threadId?: string;
   tenantId?: string;
+  principal?: Principal;
   signal?: AbortSignal;
   metadata?: Record<string, unknown>;
   control?: DrainSwitch;
@@ -181,9 +195,11 @@ export function functionAssistant(
 }
 
 /** The run's tenant, as the graph takes it, so a graph's checkpoints and store are the tenant's own. */
-function tenantOf(context: AssistantRunContext): { tenantId?: string } {
-  const tenantId = context.principal?.tenantId;
-  return tenantId ? { tenantId } : {};
+/** The run's tenant and the caller behind it, so nodes, tools, and middleware see who the run is for. */
+function tenantOf(context: AssistantRunContext): { tenantId?: string; principal?: Principal } {
+  const principal = context.principal;
+  if (!principal) return {};
+  return { ...(principal.tenantId ? { tenantId: principal.tenantId } : {}), principal };
 }
 
 /**

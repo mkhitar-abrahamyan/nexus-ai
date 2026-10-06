@@ -5,6 +5,7 @@ import type { GraphCheckpointer, InterruptRequest, NodeContext } from '../types/
 import { Command, END, Send } from '../types/graph.js';
 import type { CompletionRequest, Message, ToolDefinition } from '../types/messages.js';
 import type { NexusResponse, ResponseMeta, StreamChunk, ToolCall } from '../types/response.js';
+import type { Principal } from '../types/principal.js';
 import type { Store } from '../types/store.js';
 import { capabilitiesOf } from './capabilities.js';
 import type { PermissionPolicyLike } from './permissions.js';
@@ -64,6 +65,8 @@ export interface AgentMiddlewareContext {
   threadId: string;
   /** The tenant the run is for, when it has one. */
   tenantId?: string;
+  /** Who the run is for, when it has a principal: the caller the server authenticated. */
+  principal?: Readonly<Principal>;
   /** Aborted when the run is cancelled or the step times out. A hook that waits should stop with it. */
   signal: AbortSignal;
   /**
@@ -343,7 +346,12 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
         // The policy decides before anything runs; a denial never reaches the tool.
         let permission: string | undefined;
         if (options.permissions) {
-          const verdict = await options.permissions.decide({ tool: description.name, args, capabilities });
+          const verdict = await options.permissions.decide({
+            tool: description.name,
+            args,
+            capabilities,
+            ...(context.principal ? { principal: context.principal } : {}),
+          });
           if (verdict.decision === 'deny') return refuse(`Permission denied: ${verdict.reason}`);
           if (verdict.decision === 'ask') permission = verdict.reason;
         }
@@ -384,7 +392,14 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
             });
             if (recheck.decision === 'deny') return { ok: false, error: `Permission denied: ${recheck.reason}` };
           }
-          return executor.execute(description.name, current.args);
+          return executor.execute(description.name, current.args, {
+            toolCallId: call.id,
+            threadId: context.threadId,
+            ...(context.tenantId !== undefined ? { tenantId: context.tenantId } : {}),
+            ...(context.principal ? { principal: context.principal } : {}),
+            signal: context.signal,
+            ...(context.store ? { store: context.store } : {}),
+          });
         };
         context.tool({ phase: 'start', id: call.id, name: description.name, args });
         const hooks = hookContext(context, context.state as AgentState, options.store);
@@ -512,6 +527,7 @@ function hookContext(
     ...((context.store ?? store) ? { store: context.store ?? store } : {}),
     threadId: context.threadId,
     ...(context.tenantId ? { tenantId: context.tenantId } : {}),
+    ...(context.principal ? { principal: context.principal } : {}),
     signal: context.signal,
     interrupt: <T>(request: InterruptRequest) => context.interrupt<T>(request),
   };

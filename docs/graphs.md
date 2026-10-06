@@ -354,7 +354,15 @@ view of the graph's store. Another tenant cannot use the thread: `resume()`, `co
 absent, and a new run on its id is refused. A run that names no tenant carries on the thread's, so the
 owner resumes as before.
 
+A `principal` run option says who the run is for, as the server's authentication reports them.
+Nodes read it as `context.principal`, and an agent passes it on to its tools and middleware. Its
+`tenantId` becomes the run's tenant when `tenantId` is not given, and a run whose two tenants differ
+is refused. Its `userId` is recorded on every checkpoint as `metadata.userId`. Nothing else in it is
+stored: a resumed run carries the principal of whoever resumed it. A subgraph runs for the same
+tenant and principal as its parent.
+
 ```ts
+await graph.invoke(input, { threadId, principal });   // its tenant, and who asked
 await graph.invoke(input, { threadId, tenantId: principal.tenantId });
 await graph.resumeWith(threadId, answer, { tenantId: principal.tenantId });
 const checkpoint = await graph.state(threadId, undefined, { tenantId: principal.tenantId });
@@ -774,7 +782,8 @@ Workflow steps have what graph nodes have:
   recorded, no new one starts, and the run ends with `GraphDrainedError`. `continue()` runs only what
   was left, on this worker or another, and the agent server drains a workflow it serves this way.
 - **Tenants.** `tenantId` is recorded on every checkpoint and read as `context.tenantId`; the
-  workflow's store becomes the tenant's view of it, and another tenant's thread is not found.
+  workflow's store becomes the tenant's view of it, and another tenant's thread is not found. A
+  `principal` is read as `context.principal`, and supplies the tenant when `tenantId` is not given.
 
 ```ts
 const charge = await step('charge', () => payments.charge(order), {

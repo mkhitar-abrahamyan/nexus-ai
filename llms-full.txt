@@ -1983,7 +1983,15 @@ view of the graph's store. Another tenant cannot use the thread: `resume()`, `co
 absent, and a new run on its id is refused. A run that names no tenant carries on the thread's, so the
 owner resumes as before.
 
+A `principal` run option says who the run is for, as the server's authentication reports them.
+Nodes read it as `context.principal`, and an agent passes it on to its tools and middleware. Its
+`tenantId` becomes the run's tenant when `tenantId` is not given, and a run whose two tenants differ
+is refused. Its `userId` is recorded on every checkpoint as `metadata.userId`. Nothing else in it is
+stored: a resumed run carries the principal of whoever resumed it. A subgraph runs for the same
+tenant and principal as its parent.
+
 ```ts
+await graph.invoke(input, { threadId, principal });   // its tenant, and who asked
 await graph.invoke(input, { threadId, tenantId: principal.tenantId });
 await graph.resumeWith(threadId, answer, { tenantId: principal.tenantId });
 const checkpoint = await graph.state(threadId, undefined, { tenantId: principal.tenantId });
@@ -2403,7 +2411,8 @@ Workflow steps have what graph nodes have:
   recorded, no new one starts, and the run ends with `GraphDrainedError`. `continue()` runs only what
   was left, on this worker or another, and the agent server drains a workflow it serves this way.
 - **Tenants.** `tenantId` is recorded on every checkpoint and read as `context.tenantId`; the
-  workflow's store becomes the tenant's view of it, and another tenant's thread is not found.
+  workflow's store becomes the tenant's view of it, and another tenant's thread is not found. A
+  `principal` is read as `context.principal`, and supplies the tenant when `tenantId` is not given.
 
 ```ts
 const charge = await step('charge', () => payments.charge(order), {
@@ -2568,6 +2577,31 @@ const calls = run.tools();
 **An agent is an operation of its client.** Pass `lifecycle: ai.lifecycle`, and every run is
 authorized, counted, and audited as an `agent` operation, alongside the model calls it makes.
 `ai.agent()` runs as one already. The [lifecycle guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/lifecycle.md) explains what that shares.
+
+## Who a tool acts for
+
+An agent passes every tool a `ToolContext` as the second argument of `execute`, with these fields:
+- `toolCallId`, the call's id;
+- `threadId` and `tenantId`;
+- `signal`, the run's signal;
+- `store`, which in a tenant's run is the tenant's view of it;
+- `principal`, who the run is for: the caller the server authenticated, with their roles and
+  scopes.
+
+A tool can therefore act as that user and no one else, stop when the run is cancelled, and remember
+things per tenant. Middleware reads the principal as `context.principal`, and a permission policy
+as `request.principal`. A tool run outside an agent receives an empty context.
+
+```ts
+const myTickets = tool({
+  name: 'my_tickets',
+  description: "Lists the caller's open tickets",
+  parameters: { type: 'object' },
+  capabilities: ['network:helpdesk.internal'],
+  execute: async (_args, { principal, signal }) =>
+    helpdesk.tickets({ assignee: principal?.userId, tenant: principal?.tenantId, signal }),
+});
+```
 
 ## What a tool may do
 
@@ -8656,10 +8690,11 @@ busy. `nexus-ai-pro/server/remote` is the client, so calling a deployed agent ne
 ```ts
 import { createServer } from 'node:http';
 import { createAgentServer, graphAssistant, toNodeListener } from 'nexus-ai-pro/server';
+import { jwtAuth } from 'nexus-ai-pro/server/auth';
 
 const server = createAgentServer({
   assistants: { support: graphAssistant(supportGraph, { description: 'Answers support questions' }) },
-  authenticate: (request) => verifyToken(request.headers.get('authorization')),
+  authenticate: jwtAuth({ jwks: 'https://login.example.com/.well-known/jwks.json', audience: 'agents-api' }),
   onBusy: 'enqueue',
 });
 
@@ -8894,10 +8929,91 @@ it.
 
 ## Authentication and tenancy
 
-`authenticate` turns a request into a `Principal`: a tenant, a user, and scopes. Returning nothing
-refuses the request as unauthenticated; returning a `Response` answers it directly, which is how a
-challenge or a redirect is returned. `allowAnonymous: false` refuses everything when no hook is
-configured. `GET /health` is always answered, because a probe carries no credentials.
+`authenticate` turns a request into a `Principal`, which has these fields:
+- `tenantId`, the tenant;
+- `userId`, the subject;
+- `roles` and `scopes`;
+- `method`, how the caller was authenticated;
+- `claims`, the verified claims.
+
+Returning nothing refuses the request as unauthenticated; returning a `Response` answers it directly,
+which is how a challenge or a redirect is returned. `allowAnonymous: false` refuses everything when
+no hook is configured. `GET /health` is always answered, because a probe carries no credentials.
+
+The principal goes everywhere the run goes:
+- Its tenant scopes threads, runs, cron jobs, budgets, and the store.
+- Its subject is recorded on what it creates and on every checkpoint, as `metadata.userId`, and in
+  the run's trace.
+- Graph nodes and workflow steps read it as `context.principal`.
+- An agent passes it to every tool, middleware, and permission policy. A tool can therefore act as
+  that user and no one else.
+
+**Built-in hooks.** `nexus-ai-pro/server/auth` has three hooks, each an `AuthHook` that returns the
+same `Principal`. They are built on Web Crypto, so they need no dependency.
+
+`jwtAuth()` verifies a JSON Web Token, read from `Authorization: Bearer` unless `token` reads it from
+elsewhere, such as a cookie. The key comes from one of three places:
+- an identity provider's key set (`jwks`), which is cached; a token that names a new key fetches
+  the set again, so a key rotation needs no restart;
+- a public key, as PEM, a JWK, or a `CryptoKey`;
+- a shared secret.
+
+`JwtAuthOptions` extends `JwtVerifyOptions`:
+- the `JwtAlgorithm`s accepted;
+- the `issuer` and `audience`;
+- clock tolerance;
+- `maxAgeSec`;
+- required claims;
+- `JwtClaimNames`, which says where the tenant, roles, and scopes are. A dot reaches a nested
+  claim, as in `realm_access.roles`.
+
+A token must carry an expiry. `alg: none` is never accepted. A secret is never accepted for an
+asymmetric algorithm, nor a public key for HMAC, so one cannot be passed off as the other. With a
+key set, `audience` is required, because a provider signs tokens for every application it serves.
+`audience: false` accepts any audience on purpose.
+
+Responses:
+- A request with no token is passed over.
+- A refused token answers `401`, with a `WWW-Authenticate` challenge naming why.
+- A valid token whose claims make no principal answers `403`.
+
+```ts
+import { anyAuth, apiKeyAuth, hashApiKey, jwtAuth } from 'nexus-ai-pro/server/auth';
+
+const server = createAgentServer({
+  assistants,
+  authenticate: anyAuth(
+    jwtAuth({
+      jwks: 'https://login.example.com/.well-known/jwks.json',
+      issuer: 'https://login.example.com/',
+      audience: 'agents-api',
+      claims: { tenant: 'org_id', roles: 'realm_access.roles' },
+    }),
+    apiKeyAuth({ keys: { [await hashApiKey(process.env.CI_KEY ?? '')]: { userId: 'ci', tenantId: 'acme', scopes: ['write'] } } }),
+  ),
+});
+```
+
+`createJwtVerifier()` is the verifier on its own, for a WebSocket handshake or a queue consumer. Its
+`JwtVerifier.verify()` returns a `VerifiedJwt`: the `JwtHeader` and the `JwtPayload`, every claim
+checked. Otherwise it throws a `JwtError`, whose `JwtErrorCode` says why: malformed, wrong algorithm,
+no key, bad signature, expired, not yet valid, too old, another issuer, another audience, or a
+missing claim.
+
+`apiKeyAuth()` authenticates services and scripts by key. Keys are compared by their SHA-256 hash,
+from `hashApiKey()`, so neither configuration nor a database holds a key itself.
+`ApiKeyAuthOptions` takes the hashes with the principal each stands for, a `lookup` by hash, the
+header, and a `prefix`. The prefix keeps a token in the same header for another hook. Without one,
+anything shaped like a JWT is left alone. An unknown key answers `401`.
+
+`trustedProxyAuth()` takes the caller from headers that an identity-aware proxy, a gateway, or a mesh
+sets. Headers are only as trustworthy as the path the request took. So `TrustedProxyAuthOptions`
+must give proof that the proxy sent the request: a shared `secret` header, compared in constant
+time, a `trust` check of your own, or both. Without that proof the hook refuses to be built.
+`TrustedProxyHeaders` names the user, tenant, roles, and scopes headers.
+
+`anyAuth()` tries hooks in order and takes the first principal. When none accepts, the answer is the
+first refusal any of them gave, so a caller learns why their credential failed.
 
 `scopes` names the scope each group of routes requires:
 
@@ -9844,7 +9960,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime` | 158 KB | 47% | none |
 | `nexus-ai-pro/server` | 116 KB | 35% | none |
 | `nexus-ai-pro/batch` | 113 KB | 34% | none |
-| `nexus-ai-pro/agent` | 102 KB | 30% | none |
+| `nexus-ai-pro/agent` | 104 KB | 31% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 29% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/groq` | 82 KB | 24% | none |
@@ -9854,8 +9970,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/lmstudio` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/openai` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/openrouter` | 81 KB | 24% | none |
+| `nexus-ai-pro/graph` | 80 KB | 24% | none |
 | `nexus-ai-pro/router` | 80 KB | 24% | none |
-| `nexus-ai-pro/graph` | 79 KB | 24% | none |
 | `nexus-ai-pro/postgres` | 78 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 74 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 68 KB | 20% | none |
@@ -9875,7 +9991,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
-| `nexus-ai-pro/graph/functional` | 32 KB | 10% | none |
+| `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
 | `nexus-ai-pro/agent/middleware` | 32 KB | 10% | none |
 | `nexus-ai-pro/context-hub` | 32 KB | 10% | none |
 | `nexus-ai-pro/voice` | 31 KB | 9% | none |
@@ -9896,6 +10012,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/evals` | 18 KB | 5% | none |
 | `nexus-ai-pro/mcp/registry` | 18 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 18 KB | 5% | none |
+| `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
 | `nexus-ai-pro/lifecycle` | 18 KB | 5% | none |
 | `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
@@ -9915,12 +10032,12 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
+| `nexus-ai-pro/voice/session` | 12 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
-| `nexus-ai-pro/voice/session` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
 | `nexus-ai-pro/agent/sandbox` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/store` | 11 KB | 3% | none |

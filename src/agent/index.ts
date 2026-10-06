@@ -26,3 +26,4 @@ export {
   type CreateAgentOptions,
 } from './create-agent.js';
 export type { AgentConfig, AgentResult, AgentStep, ToolExecutionResult } from '../types/agent.js';
+export type { ToolContext } from '../types/messages.js';

@@ -870,6 +870,16 @@
         "default": "./dist-cjs/server/tenancy.js"
       }
     },
+    "./server/auth": {
+      "import": {
+        "types": "./dist/server/auth.d.ts",
+        "default": "./dist/server/auth.js"
+      },
+      "require": {
+        "types": "./dist-cjs/server/auth.d.ts",
+        "default": "./dist-cjs/server/auth.js"
+      }
+    },
     "./tenancy": {
       "import": {
         "types": "./dist/tenancy/index.d.ts",
@@ -1934,6 +1944,9 @@
       ],
       "server/tenancy": [
         "dist-cjs/server/tenancy.d.ts"
+      ],
+      "server/auth": [
+        "dist-cjs/server/auth.d.ts"
       ],
       "tenancy": [
         "dist-cjs/tenancy/index.d.ts"

@@ -1,6 +1,6 @@
 # The agent server (experimental)
 
-<!-- covers: ./server ./server/remote -->
+<!-- covers: ./server ./server/auth ./server/remote -->
 
 A self-hosted HTTP server for your assistants, from `nexus-ai-pro/server`: threads, background runs,
 event streams you can resume, and cron jobs.
@@ -14,10 +14,11 @@ busy. `nexus-ai-pro/server/remote` is the client, so calling a deployed agent ne
 ```ts
 import { createServer } from 'node:http';
 import { createAgentServer, graphAssistant, toNodeListener } from 'nexus-ai-pro/server';
+import { jwtAuth } from 'nexus-ai-pro/server/auth';
 
 const server = createAgentServer({
   assistants: { support: graphAssistant(supportGraph, { description: 'Answers support questions' }) },
-  authenticate: (request) => verifyToken(request.headers.get('authorization')),
+  authenticate: jwtAuth({ jwks: 'https://login.example.com/.well-known/jwks.json', audience: 'agents-api' }),
   onBusy: 'enqueue',
 });
 
@@ -252,10 +253,91 @@ it.
 
 ## Authentication and tenancy
 
-`authenticate` turns a request into a `Principal`: a tenant, a user, and scopes. Returning nothing
-refuses the request as unauthenticated; returning a `Response` answers it directly, which is how a
-challenge or a redirect is returned. `allowAnonymous: false` refuses everything when no hook is
-configured. `GET /health` is always answered, because a probe carries no credentials.
+`authenticate` turns a request into a `Principal`, which has these fields:
+- `tenantId`, the tenant;
+- `userId`, the subject;
+- `roles` and `scopes`;
+- `method`, how the caller was authenticated;
+- `claims`, the verified claims.
+
+Returning nothing refuses the request as unauthenticated; returning a `Response` answers it directly,
+which is how a challenge or a redirect is returned. `allowAnonymous: false` refuses everything when
+no hook is configured. `GET /health` is always answered, because a probe carries no credentials.
+
+The principal goes everywhere the run goes:
+- Its tenant scopes threads, runs, cron jobs, budgets, and the store.
+- Its subject is recorded on what it creates and on every checkpoint, as `metadata.userId`, and in
+  the run's trace.
+- Graph nodes and workflow steps read it as `context.principal`.
+- An agent passes it to every tool, middleware, and permission policy. A tool can therefore act as
+  that user and no one else.
+
+**Built-in hooks.** `nexus-ai-pro/server/auth` has three hooks, each an `AuthHook` that returns the
+same `Principal`. They are built on Web Crypto, so they need no dependency.
+
+`jwtAuth()` verifies a JSON Web Token, read from `Authorization: Bearer` unless `token` reads it from
+elsewhere, such as a cookie. The key comes from one of three places:
+- an identity provider's key set (`jwks`), which is cached; a token that names a new key fetches
+  the set again, so a key rotation needs no restart;
+- a public key, as PEM, a JWK, or a `CryptoKey`;
+- a shared secret.
+
+`JwtAuthOptions` extends `JwtVerifyOptions`:
+- the `JwtAlgorithm`s accepted;
+- the `issuer` and `audience`;
+- clock tolerance;
+- `maxAgeSec`;
+- required claims;
+- `JwtClaimNames`, which says where the tenant, roles, and scopes are. A dot reaches a nested
+  claim, as in `realm_access.roles`.
+
+A token must carry an expiry. `alg: none` is never accepted. A secret is never accepted for an
+asymmetric algorithm, nor a public key for HMAC, so one cannot be passed off as the other. With a
+key set, `audience` is required, because a provider signs tokens for every application it serves.
+`audience: false` accepts any audience on purpose.
+
+Responses:
+- A request with no token is passed over.
+- A refused token answers `401`, with a `WWW-Authenticate` challenge naming why.
+- A valid token whose claims make no principal answers `403`.
+
+```ts
+import { anyAuth, apiKeyAuth, hashApiKey, jwtAuth } from 'nexus-ai-pro/server/auth';
+
+const server = createAgentServer({
+  assistants,
+  authenticate: anyAuth(
+    jwtAuth({
+      jwks: 'https://login.example.com/.well-known/jwks.json',
+      issuer: 'https://login.example.com/',
+      audience: 'agents-api',
+      claims: { tenant: 'org_id', roles: 'realm_access.roles' },
+    }),
+    apiKeyAuth({ keys: { [await hashApiKey(process.env.CI_KEY ?? '')]: { userId: 'ci', tenantId: 'acme', scopes: ['write'] } } }),
+  ),
+});
+```
+
+`createJwtVerifier()` is the verifier on its own, for a WebSocket handshake or a queue consumer. Its
+`JwtVerifier.verify()` returns a `VerifiedJwt`: the `JwtHeader` and the `JwtPayload`, every claim
+checked. Otherwise it throws a `JwtError`, whose `JwtErrorCode` says why: malformed, wrong algorithm,
+no key, bad signature, expired, not yet valid, too old, another issuer, another audience, or a
+missing claim.
+
+`apiKeyAuth()` authenticates services and scripts by key. Keys are compared by their SHA-256 hash,
+from `hashApiKey()`, so neither configuration nor a database holds a key itself.
+`ApiKeyAuthOptions` takes the hashes with the principal each stands for, a `lookup` by hash, the
+header, and a `prefix`. The prefix keeps a token in the same header for another hook. Without one,
+anything shaped like a JWT is left alone. An unknown key answers `401`.
+
+`trustedProxyAuth()` takes the caller from headers that an identity-aware proxy, a gateway, or a mesh
+sets. Headers are only as trustworthy as the path the request took. So `TrustedProxyAuthOptions`
+must give proof that the proxy sent the request: a shared `secret` header, compared in constant
+time, a `trust` check of your own, or both. Without that proof the hook refuses to be built.
+`TrustedProxyHeaders` names the user, tenant, roles, and scopes headers.
+
+`anyAuth()` tries hooks in order and takes the first principal. When none accepts, the answer is the
+first refusal any of them gave, so a caller learns why their credential failed.
 
 `scopes` names the scope each group of routes requires:
 
@@ -392,7 +474,7 @@ specific entry point that provides it.
 | `NodeResponseLike` | interface | The part of Node's `ServerResponse` the adapter writes. |
 | `NotFoundError` | class | Raised when a request names something that does not exist, or belongs to another tenant. |
 | `parseCron` | function | Parses the five-field cron syntax: `*`, numbers, `a-b` ranges, `a,b` lists, and `*​/n` steps. |
-| `Principal` | interface | Who is making a request, as the server's authentication hook reports them. |
+| `Principal` | interface | Who a request, a run, or a tool call is for. |
 | `RedisEventLogLikeClient` | interface | The Redis commands the event log needs, in `ioredis` argument order. |
 | `RedisRunEventLog` | class | Run events in Redis, so a client can reconnect to any replica and resume. |
 | `RedisRunEventLogOptions` | interface | Options for the Redis run event log. |
@@ -416,6 +498,31 @@ specific entry point that provides it.
 | `ThreadRecord` | interface | A conversation, and the state an assistant keeps for it. |
 | `toNodeListener` | function | Adapts the server to Node's `http`, and to anything that speaks its request and response objects. |
 | `UnauthorizedError` | class | Raised when a request carries no usable credentials. |
+
+### `nexus-ai-pro/server/auth`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `anyAuth` | function | Tries hooks in order and takes the first principal: tokens for people and keys for services on one server. |
+| `apiKeyAuth` | function | Authenticates requests by an API key, for services and scripts rather than people. |
+| `ApiKeyAuthOptions` | interface | Options for `apiKeyAuth()`. |
+| `AuthHook` | type | The `authenticate` hook of `createAgentServer()`. |
+| `createJwtVerifier` | function | Builds a verifier for tokens from one issuer. |
+| `hashApiKey` | function | The SHA-256 of an API key, as hex: what `apiKeyAuth({ keys })` is configured with. |
+| `JwtAlgorithm` | type | The signature algorithms a token may use. |
+| `jwtAuth` | function | Authenticates requests by a JSON Web Token: an identity provider's, through its key set, or your own, signed with a shared secret. |
+| `JwtAuthOptions` | interface | Options for `jwtAuth()`. |
+| `JwtClaimNames` | interface | Which claims a principal is read from. |
+| `JwtError` | class | Thrown when a token is refused: malformed, signed wrongly, expired, or for someone else. |
+| `JwtErrorCode` | type | Why a token was refused. |
+| `JwtHeader` | interface | A token's header. |
+| `JwtPayload` | interface | A token's claims, the registered ones typed. |
+| `JwtVerifier` | interface | A reusable verifier: it keeps imported keys and the fetched key set between tokens. |
+| `JwtVerifyOptions` | interface | Options for `createJwtVerifier()`. |
+| `trustedProxyAuth` | function | Takes the caller from headers an authenticating proxy sets: an identity-aware proxy, an API gateway, a service mesh. |
+| `TrustedProxyAuthOptions` | interface | Options for `trustedProxyAuth()`. |
+| `TrustedProxyHeaders` | interface | The headers a proxy names the caller in. |
+| `VerifiedJwt` | interface | A verified token. |
 
 ### `nexus-ai-pro/server/remote`
 

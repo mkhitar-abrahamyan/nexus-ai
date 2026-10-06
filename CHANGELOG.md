@@ -40,11 +40,27 @@ Agents that act safely, on production retrieval.
   store, the thread and tenant, the run's signal, and `interrupt()`. `context.stop()` ends a run
   with an answer and the new `stopReason: 'stopped'`. A `wrapToolCall` can pass `next()` changed
   arguments, which the permission policy decides again.
-
-### Fixed
+- **Server authentication**, on the new `nexus-ai-pro/server/auth`. It is built on Web Crypto, with no
+  dependency:
+  - `jwtAuth()` takes an identity provider's key set (cached, and refetched when a token names a new
+    key), a public key, or a shared secret, and checks issuer, audience, expiry, and age. It refuses
+    `alg: none` and key confusion, and requires an audience with a key set.
+  - `apiKeyAuth()` compares keys by their SHA-256 hash, from `hashApiKey()`.
+  - `trustedProxyAuth()` refuses to exist without proof that the proxy sent the request.
+  - `anyAuth()` combines hooks.
+  - `createJwtVerifier()` verifies tokens outside the server.
+- **One Principal, everywhere a run goes.** It gains `roles`, `method`, and `claims`.
+  - Graph and workflow runs take a `principal`, which nodes read as `context.principal`. Its tenant
+    becomes the run's, and its subject is recorded on every checkpoint and in the run's trace.
+  - `graphAssistant()` passes the authenticated caller on.
+  - Tools receive a `ToolContext` as the second argument of `execute`: the principal, the thread
+    and tenant, the run's signal, and the tenant's store.
+  - Middleware and permission policies see the principal too.
 
 - `limitToolCalls()` counted calls in memory shared by every run of an agent, so one thread's calls
   used up another's limit, and the count never reset. It now counts per run from the transcript.
+- A subgraph run through `asNode()` now runs for its parent's tenant, so its store is the tenant's
+  view, as the parent's is.
 - `sandboxTools()` file tools accept a path that names the mount, such as `/workspace/notes.txt`,
   as well as one relative to it, and say in their descriptions which to use.
 
@@ -63,6 +79,13 @@ Agents that act safely, on production retrieval.
   - an approver who raises a refund past what the policy allows has the edit refused;
   - two agents sharing a store share one thread budget;
   - a 45,000-character tool result reaches the transcript as a preview and a file.
+- A JWT from a test identity provider is verified against its key set and reaches an agent's tool
+  call as a `Principal` with its subject, tenant, roles, and scopes.
+  - The tool's writes land in that tenant's view of the store.
+  - The checkpoint records who ran the step.
+  - Another tenant's token gets 404 for the thread.
+  - Expired, wrong-audience, wrong-issuer, unsigned, and forged tokens are refused.
+  - The provider rotates its key with one refetch.
 
 ## [2.2.0] - 2026-10-05
 

@@ -17,6 +17,8 @@ import { withLifecycle } from '../lifecycle/run.js';
 import type { OperationLifecycleLike } from '../types/lifecycle.js';
 import { type CheckpointDraft, migrateCheckpoint, toCheckpoint } from './checkpoint-migration.js';
 import { tenantStore } from '../store/tenant.js';
+import type { Principal } from '../types/principal.js';
+import { withPrincipal } from '../utils/tenant.js';
 import { GraphDrainedError, GraphError, GraphNotInterruptedError, GraphThreadNotFoundError } from './errors.js';
 import type {
   GraphCheckpoint,
@@ -115,6 +117,8 @@ export interface WorkflowContext {
   readonly threadId: string;
   /** The tenant the run is for, when it has one. */
   readonly tenantId?: string;
+  /** Who the run is for, when it was started with a principal: the caller the server authenticated. */
+  readonly principal?: Readonly<Principal>;
   /** Aborted when the run is cancelled. */
   readonly signal: AbortSignal;
   /** Long-term memory, when the workflow was created with a store. In a tenant's run, the tenant's view of it. */
@@ -194,6 +198,12 @@ export interface WorkflowRunOptions {
    * without one carries on the thread's.
    */
   tenantId?: string;
+  /**
+   * Who the run is for, read as `context.principal`. Its `tenantId` is the run's tenant when
+   * `tenantId` is not given, and a run whose two tenants differ is refused; its `userId` is recorded
+   * on every checkpoint as `metadata.userId`.
+   */
+  principal?: Principal;
 }
 
 /** One event of a streamed workflow run. */
@@ -327,9 +337,10 @@ export class Workflow<I = unknown, O = unknown> {
     // A new run on an existing thread starts from a fresh state, numbered after the thread's history.
     return this.execute(threadId, runOptions, async () => {
       const latest = await this.latest(threadId);
-      if (latest && runOptions.tenantId !== undefined) {
+      const tenantId = runOptions.tenantId ?? runOptions.principal?.tenantId;
+      if (latest && tenantId !== undefined) {
         const owner = latest.metadata?.tenantId;
-        if (typeof owner === 'string' && owner !== runOptions.tenantId) {
+        if (typeof owner === 'string' && owner !== tenantId) {
           throw new GraphError(
             `Thread "${threadId}" cannot be used by this tenant; choose another id`,
             'GRAPH_VALIDATION_ERROR',
@@ -455,11 +466,25 @@ export class Workflow<I = unknown, O = unknown> {
     start: () => Promise<CheckpointDraft>,
   ): AsyncIterable<WorkflowEvent<O>> {
     const queue = new EventQueue<WorkflowEvent<O>>();
+    // The principal's tenant becomes the run's, and its subject is recorded with every checkpoint.
+    let options: WorkflowRunOptions;
+    try {
+      options = withPrincipal(runOptions);
+    } catch (error) {
+      queue.fail(error);
+      return queue;
+    }
+    const metadata = {
+      threadId,
+      graph: this.name,
+      ...(options.tenantId !== undefined ? { tenantId: options.tenantId } : {}),
+      ...(options.principal?.userId !== undefined ? { userId: options.principal.userId } : {}),
+    };
     void withLifecycle(
       this.options.lifecycle,
-      { family: 'graph', operation: `workflow.${this.name}`, metadata: { threadId, graph: this.name } },
-      runOptions.signal ? { signal: runOptions.signal } : {},
-      () => this.run(threadId, runOptions, start, queue),
+      { family: 'graph', operation: `workflow.${this.name}`, metadata },
+      options.signal ? { signal: options.signal } : {},
+      () => this.run(threadId, options, start, queue),
     ).then(
       () => queue.close(),
       (error: unknown) => queue.fail(error),
@@ -528,6 +553,7 @@ export class Workflow<I = unknown, O = unknown> {
     const context: WorkflowContext = {
       threadId,
       ...(tenantId === undefined ? {} : { tenantId }),
+      ...(runOptions.principal ? { principal: runOptions.principal } : {}),
       signal: controller.signal,
       ...(this.options.store
         ? { store: tenantId === undefined ? this.options.store : tenantStore(this.options.store, tenantId) }

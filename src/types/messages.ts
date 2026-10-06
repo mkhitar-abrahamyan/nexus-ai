@@ -1,5 +1,7 @@
 import type { CacheTtl, ReasoningEffort } from './providers.js';
 import type { AssetInput } from './images.js';
+import type { Principal } from './principal.js';
+import type { Store } from './store.js';
 
 declare global {
   namespace NodeJS {
@@ -123,8 +125,11 @@ export interface ToolDefinition {
   description: string;
   /** JSON Schema for the arguments. */
   parameters: Record<string, unknown>;
-  /** Runs the tool, for the agent loop and executors that call tools automatically. */
-  execute?: (args: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * Runs the tool, for the agent loop and executors that call tools automatically. An agent passes
+   * a `ToolContext` too: who the run is for, its thread and tenant, its signal, and its store.
+   */
+  execute?: (args: Record<string, unknown>, context?: ToolContext) => Promise<unknown>;
   /**
    * What the tool does to the world, as capabilities a permission policy decides on:
    * `filesystem:read` or `filesystem:write` with an optional path, `network` with an optional host,
@@ -147,6 +152,28 @@ export interface ToolDefinition {
  * and `{ name }` forces one specific tool.
  */
 export type ToolChoice = 'auto' | 'none' | 'required' | { name: string };
+
+/**
+ * What a tool receives besides its arguments when an agent runs it. Every field is optional: a tool
+ * run outside an agent, or by an executor given nothing, sees none of them.
+ */
+export interface ToolContext {
+  /** The model's id for this call. */
+  toolCallId?: string;
+  /** The thread the run belongs to. */
+  threadId?: string;
+  /** The tenant the run is for. */
+  tenantId?: string;
+  /**
+   * Who the run is for: the caller the server authenticated, with their roles and scopes, so a
+   * tool can act as that user and nobody else.
+   */
+  principal?: Readonly<Principal>;
+  /** Aborted when the run is cancelled or the step times out. A tool that waits should stop with it. */
+  signal?: AbortSignal;
+  /** Long-term memory. In a tenant's run, the tenant's view of it. */
+  store?: Store;
+}
 
 /** What a tool returned, correlated with the call that asked for it. */
 export interface ToolCallResult {

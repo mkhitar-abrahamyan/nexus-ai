@@ -59,7 +59,15 @@ Everything 2.3 adds is stable from the start and additive: no default changes me
   `AgentMiddleware.wrapModelCall`, `AgentMiddlewareContext`, `AgentModelCallContext`, the third
   argument of `wrapToolCall`, `next(call)`, and `AgentStopReason` `'stopped'`. The PII patterns
   may be tightened in a minor release to cut false positives, and new `PiiKind` members may be
-  added.
+  added;
+- `nexus-ai-pro/server/auth`: `jwtAuth()`, `apiKeyAuth()`, `trustedProxyAuth()`, `anyAuth()`,
+  `createJwtVerifier()`, `hashApiKey()`, `JwtError` and its codes, and every option type. New
+  `JwtAlgorithm` and `JwtErrorCode` members may be added;
+- `Principal.roles`, `method`, and `claims`; `GraphRunOptions.principal`, `NodeContext.principal`,
+  `WorkflowRunOptions.principal`, and `WorkflowContext.principal`; `ToolContext` and the second
+  argument of `ToolDefinition.execute`; `AgentMiddlewareContext.principal` and
+  `PermissionRequest.principal`. A checkpoint's `metadata.userId` is recorded when a run has a
+  principal with a subject.
 
 ## 2.2 stage (2.2.0)
 

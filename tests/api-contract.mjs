@@ -134,6 +134,7 @@ const expectedSubpaths = [
   './optimizer/cost',
   './server/deployments',
   './server/tenancy',
+  './server/auth',
   './tenancy',
   './doctor',
   './prompts',

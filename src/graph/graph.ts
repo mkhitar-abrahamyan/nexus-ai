@@ -31,6 +31,7 @@ import type {
 } from '../types/graph.js';
 import { Command, END, Send, START } from '../types/graph.js';
 import { tenantStore } from '../store/tenant.js';
+import { withPrincipal } from '../utils/tenant.js';
 import { linkSignals } from '../utils/signals.js';
 import { MemoryGraphCheckpointer } from './checkpointer.js';
 import { type CheckpointDraft, migrateCheckpoint, toCheckpoint } from './checkpoint-migration.js';
@@ -272,9 +273,10 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     const threadId = resolveThreadId(runOptions.threadId);
     return this.run(threadId, runOptions, async () => {
       this.assertInput(input);
-      if (runOptions.tenantId !== undefined) {
+      const tenantId = runOptions.tenantId ?? runOptions.principal?.tenantId;
+      if (tenantId !== undefined) {
         const existing = await this.checkpointer()?.get(threadId);
-        if (existing && !ownedBy(existing, runOptions.tenantId)) {
+        if (existing && !ownedBy(existing, tenantId)) {
           throw new GraphValidationError(`Thread "${threadId}" cannot be used by this tenant; choose another id`);
         }
       }
@@ -471,6 +473,9 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       const runOptions: GraphRunOptions = {
         threadId: `${context.threadId}:${context.taskId}`,
         signal: context.signal,
+        // A subgraph runs for the same tenant and principal as its parent, so its store is scoped too.
+        ...(context.tenantId !== undefined ? { tenantId: context.tenantId } : {}),
+        ...(context.principal ? { principal: context.principal } : {}),
         ...(forward ? { onEvent: forward, subgraphEvents: true } : {}),
       };
       const paused = await this.state(runOptions.threadId as string);
@@ -684,6 +689,8 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     runOptions: GraphRunOptions,
     seed: () => Promise<CheckpointDraft<S>>,
   ): AsyncGenerator<GraphStepEvent<S>, void, void> {
+    // The principal's tenant becomes the run's, and its subject is recorded with every checkpoint.
+    runOptions = withPrincipal(runOptions);
     const lifecycle = this.options.lifecycle;
     if (!lifecycle) {
       yield* this.runSteps(threadId, runOptions, seed);
@@ -693,7 +700,12 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       {
         family: this.options.lifecycleFamily ?? 'graph',
         operation: this.options.name ? `${this.options.lifecycleFamily ?? 'graph'}.${this.options.name}` : 'graph.run',
-        metadata: { threadId, ...(this.options.name ? { graph: this.options.name } : {}) },
+        metadata: {
+          threadId,
+          ...(this.options.name ? { graph: this.options.name } : {}),
+          ...(runOptions.tenantId !== undefined ? { tenantId: runOptions.tenantId } : {}),
+          ...(runOptions.principal?.userId !== undefined ? { userId: runOptions.principal.userId } : {}),
+        },
       },
       runOptions.signal ? { signal: runOptions.signal } : {},
     );
@@ -1220,6 +1232,7 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       step,
       threadId,
       ...(runOptions.tenantId !== undefined ? { tenantId: runOptions.tenantId } : {}),
+      ...(runOptions.principal ? { principal: runOptions.principal } : {}),
       taskId: task.id,
       input: task.input,
       attempt,

@@ -7,6 +7,7 @@
  * denied when any of its capabilities is, asked about when any needs approval, and allowed only when
  * every one is granted.
  */
+import type { Principal } from '../types/principal.js';
 import { parseCapability } from './capabilities.js';
 
 export { capabilitiesOf, isSensitiveCapability, type ParsedCapability, parseCapability } from './capabilities.js';
@@ -22,6 +23,8 @@ export interface PermissionRequest {
   args: Record<string, unknown>;
   /** What the call declares it does, or `undefined` when the tool declares nothing. */
   capabilities: readonly string[] | undefined;
+  /** Who the run is for, when it has a principal, so a policy of your own can decide by role or scope. */
+  principal?: Readonly<Principal>;
 }
 
 /** A policy's decision, with the reason a person or a model reads. */

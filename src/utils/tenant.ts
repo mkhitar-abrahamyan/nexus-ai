@@ -1,3 +1,5 @@
+import type { Principal } from '../types/principal.js';
+
 /**
  * The tenant id rule every scope shares. An id is letters, digits, `_`, and `-`, so it can never hold
  * the `/` a scoped name or key is built with: no tenant's prefix is a prefix of another's.
@@ -25,4 +27,25 @@ export function assertTenantId(tenantId: string): string {
 /** @internal The prefix a tenant's names and keys carry in a shared store. */
 export function tenantPrefix(tenantId: string): string {
   return `tenant/${assertTenantId(tenantId)}/`;
+}
+
+/**
+ * Run options with the principal's tenant applied: the principal's `tenantId` becomes the run's when
+ * it has none, a run whose two tenants differ is refused, and the principal's `userId` is recorded
+ * in the run's metadata.
+ */
+export function withPrincipal<
+  O extends { tenantId?: string; principal?: Principal; metadata?: Record<string, unknown> },
+>(runOptions: O): O {
+  const principal = runOptions.principal;
+  if (!principal) return runOptions;
+  const tenantId = principal.tenantId;
+  if (tenantId !== undefined && runOptions.tenantId !== undefined && tenantId !== runOptions.tenantId) {
+    throw new TypeError("The run's tenantId and its principal's tenant differ");
+  }
+  return {
+    ...runOptions,
+    ...(tenantId !== undefined && runOptions.tenantId === undefined ? { tenantId } : {}),
+    ...(principal.userId !== undefined ? { metadata: { ...runOptions.metadata, userId: principal.userId } } : {}),
+  };
 }

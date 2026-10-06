@@ -9,6 +9,7 @@ import type { OperationLifecycleLike } from './lifecycle.js';
  */
 
 import type { CacheAdapter } from '../cache/adapters.js';
+import type { Principal } from './principal.js';
 import type { Store } from './store.js';
 
 /** Entry sentinel. An edge from `START` names the first node. */
@@ -393,6 +394,8 @@ export interface NodeContext<S extends ChannelSchema> {
   readonly threadId: string;
   /** The tenant the run is for, when it has one. */
   readonly tenantId?: string;
+  /** Who the run is for, when it was started with a principal: the caller the server authenticated. */
+  readonly principal?: Readonly<Principal>;
   /** Identifies this task. Equal to `node` unless the task came from a `Send`. */
   readonly taskId: string;
   /** Input carried by a `Send`. Undefined for a node reached through an ordinary edge. */
@@ -601,6 +604,14 @@ export interface GraphRunOptions {
    * `tenantId` is refused before anything runs. A run without one carries on the thread's tenant.
    */
   tenantId?: string;
+  /**
+   * Who the run is for, such as the caller the server authenticated. Nodes read it as
+   * `context.principal`, and an agent hands it to every tool and middleware. Its `tenantId` is the
+   * run's tenant when `tenantId` is not given, and a run whose two tenants differ is refused. Its
+   * `userId` is recorded on every checkpoint as `metadata.userId`; the rest is never stored, so a
+   * resumed run carries the principal of whoever resumed it.
+   */
+  principal?: Principal;
   /** Overrides the compiled `maxConcurrency` for this run. */
   maxConcurrency?: number;
   /** Breakpoints for this run only, replacing the compiled ones. */

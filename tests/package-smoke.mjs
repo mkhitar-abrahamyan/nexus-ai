@@ -189,6 +189,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/server/deployments', exports: ['Deployments', 'watchCanaries', 'bucket'] },
   { specifier: 'nexus-ai-pro/server/tenancy', exports: ['tenantLimits', 'MemoryTenantUsage', 'RedisTenantUsage'] },
   {
+    specifier: 'nexus-ai-pro/server/auth',
+    exports: ['jwtAuth', 'apiKeyAuth', 'trustedProxyAuth', 'anyAuth', 'createJwtVerifier', 'hashApiKey', 'JwtError'],
+  },
+  {
     specifier: 'nexus-ai-pro/tenancy',
     exports: ['tenantScope', 'tenantStore', 'tenantTraceStore', 'tenantVectorStore', 'assertTenantId'],
   },
