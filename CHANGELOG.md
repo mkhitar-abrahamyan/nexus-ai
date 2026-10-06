@@ -56,6 +56,21 @@ Agents that act safely, on production retrieval.
   - Tools receive a `ToolContext` as the second argument of `execute`: the principal, the thread
     and tenant, the run's signal, and the tenant's store.
   - Middleware and permission policies see the principal too.
+- **Sparse retrieval as a contract.** A `SparseRetriever` is keyword search that takes writes, so it
+  fuses with vector search and stays in step with a vector store. `KeywordIndex` is one. Two more
+  ship:
+  - `PostgresKeywordIndex` (`nexus-ai-pro/postgres/fulltext`) uses Postgres full-text search, with a
+    GIN index and ranking in the database. With `shared`, it searches a pgvector table through a
+    generated column, so hybrid search keeps one copy of the data.
+  - `ElasticsearchKeywordIndex` (`nexus-ai-pro/rag/elasticsearch`) works with Elasticsearch or
+    OpenSearch over the REST API, with no client library.
+- **Rerankers**, on the new `nexus-ai-pro/rag/rerankers`, with no SDK:
+  - `cohereReranker()`, `voyageReranker()`, and `jinaReranker()` for hosted APIs;
+  - `teiReranker()` for a self-hosted cross-encoder;
+  - `httpReranker()` for any other API;
+  - `crossEncoderReranker()` for a model run in process.
+
+### Fixed
 
 - `limitToolCalls()` counted calls in memory shared by every run of an agent, so one thread's calls
   used up another's limit, and the count never reset. It now counts per run from the transcript.
@@ -86,6 +101,10 @@ Agents that act safely, on production retrieval.
   - Another tenant's token gets 404 for the thread.
   - Expired, wrong-audience, wrong-issuer, unsigned, and forged tokens are refused.
   - The provider rotates its key with one refetch.
+- On the stored support dataset, on real Postgres with full-text search and pgvector, hybrid retrieval
+  beats vector-only: recall@5 0.71 → 0.97 and mean reciprocal rank 0.51 → 0.71, both with a 95%
+  interval above zero. A hosted reranker and a local cross-encoder, compared in the same experiment,
+  each lift mean reciprocal rank to 0.97. One contract test runs against all four keyword indexes.
 
 ## [2.2.0] - 2026-10-05
 

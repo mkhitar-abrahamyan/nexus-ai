@@ -67,7 +67,12 @@ Everything 2.3 adds is stable from the start and additive: no default changes me
   `WorkflowRunOptions.principal`, and `WorkflowContext.principal`; `ToolContext` and the second
   argument of `ToolDefinition.execute`; `AgentMiddlewareContext.principal` and
   `PermissionRequest.principal`. A checkpoint's `metadata.userId` is recorded when a run has a
-  principal with a subject.
+  principal with a subject;
+- `SparseRetriever`; `PostgresKeywordIndex` and `keywordIndexMigrations()`
+  (`nexus-ai-pro/postgres/fulltext`); `ElasticsearchKeywordIndex` and `ElasticsearchError`
+  (`nexus-ai-pro/rag/elasticsearch`); and every reranker and option type on
+  `nexus-ai-pro/rag/rerankers`. The default endpoints of hosted rerankers follow their providers'
+  current API versions.
 
 ## 2.2 stage (2.2.0)
 
