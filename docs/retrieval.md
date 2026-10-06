@@ -1,6 +1,6 @@
 # Retrieval
 
-<!-- covers: ./rag/retrievers ./rag/redis ./rag/pinecone ./rag/weaviate ./rag/chroma -->
+<!-- covers: ./rag/retrievers ./rag/rerankers ./rag/elasticsearch ./rag/redis ./rag/pinecone ./rag/weaviate ./rag/chroma -->
 
 Retrieval quality and where the vectors live. Composable retrievers — hybrid search, reranking,
 diversity, parent documents, and several phrasings of a query — work over any store, and five more
@@ -65,6 +65,33 @@ normalizing.
 | `topK` | `FusionOptions` | every chunk, for the function; 5, for the retriever |
 | `candidates` | `FusedRetrieverOptions` | four times `topK`, asked of each retriever |
 
+### Keyword search at scale
+
+`KeywordIndex` is one `SparseRetriever`. That is the contract for keyword search that holds its own
+chunks: it is a `Retriever`, so it fuses with vector search, and it takes `add()` and `delete()`, so
+ingestion keeps it in step with a vector store. Two more ship, each checked by the same contract
+test:
+
+- `PostgresKeywordIndex`, on `nexus-ai-pro/postgres/fulltext`, uses Postgres full-text search. The
+  [Postgres guide](./postgres.md#keyword-search) covers it.
+- `ElasticsearchKeywordIndex`, on `nexus-ai-pro/rag/elasticsearch`, searches Elasticsearch or
+  OpenSearch through the REST API, with no client library, as the vector stores do.
+  `ElasticsearchKeywordIndexOptions` sets the cluster, the index, an API key or a user and password,
+  the analyzer, and when writes become searchable (`refresh`, `wait_for` by default).
+  - `migrate()` creates the index: `content` as analyzed text, and every metadata string as a keyword,
+    so a filter matches it exactly.
+  - Writes go in one NDJSON bulk request.
+  - Scores are the engine's own BM25.
+  - A failure raises an `ElasticsearchError` with the status and the body.
+
+```ts
+import { ElasticsearchKeywordIndex } from 'nexus-ai-pro/rag/elasticsearch';
+
+const keywords = new ElasticsearchKeywordIndex({ url: 'https://search.internal:9200', index: 'kb', apiKey });
+await keywords.migrate();
+const hybrid = hybridRetriever([vectorRetriever(store), keywords]);
+```
+
 ### Reranking
 
 `rerankRetriever()` asks its base for more candidates than it returns, scores them all, and keeps the
@@ -80,6 +107,45 @@ reply it cannot read scores them all 0 instead of failing the search. `ModelRera
 ```ts
 const reranked = rerankRetriever(hybrid, modelReranker(ai, { model: 'gpt-5.4-mini' }), { topK: 5 });
 ```
+
+`nexus-ai-pro/rag/rerankers` has rerankers that are faster and cheaper than a chat model. None
+needs an SDK.
+
+Hosted rerank APIs, each taking `HostedRerankerOptions` (the API key, the model, and an optional
+endpoint):
+- `cohereReranker()`;
+- `voyageReranker()`;
+- `jinaReranker()`.
+
+Self-hosted and in-process:
+- `teiReranker()` calls a cross-encoder that Hugging Face's text-embeddings-inference serves on your
+  own machine or cluster (`TeiRerankerOptions`).
+- `httpReranker()` covers any other rerank API. `HttpRerankerOptions` describes its request `body`
+  and how to read its `scores`.
+- `crossEncoderReranker()` runs a `CrossEncoder` in process. That is anything that scores
+  (query, passage) pairs, so an ONNX or transformers model fits in a few lines, the passages never
+  leave the machine, and there is no per-query price. `CrossEncoderRerankerOptions` sets the batch
+  size, the characters scored per chunk, and a sigmoid for a model that returns logits.
+
+Every HTTP reranker takes `RerankerHttpOptions`: `fetch`, headers, a timeout, and the characters sent
+per chunk. They all do the same three things:
+- put the scores back in the order of the chunks;
+- give 0 to a passage the API left out;
+- raise a `RerankerError` with the status when the API refuses.
+
+```ts
+import { cohereReranker, crossEncoderReranker } from 'nexus-ai-pro/rag/rerankers';
+
+const hosted = rerankRetriever(hybrid, cohereReranker({ apiKey, model: 'rerank-v3.5' }), { candidates: 20 });
+const local = rerankRetriever(hybrid, crossEncoderReranker({ score: (pairs) => model.score(pairs) }));
+```
+
+In the test suite, an experiment on the stored support dataset runs on real Postgres with
+full-text search and pgvector. Its findings:
+- Hybrid retrieval beats vector-only: recall@5 0.71 → 0.97, and mean reciprocal rank 0.51 → 0.71,
+  both with a 95% interval above zero.
+- A hosted reranker and a local cross-encoder, compared in the same experiment, each lift mean
+  reciprocal rank to 0.97.
 
 ### Diversity
 
@@ -197,8 +263,9 @@ the vectors live.
 
 ## Limitations
 
-- `KeywordIndex` holds its chunks in memory. For a corpus that does not fit, use the database's own
-  full-text search behind a `Retriever` of your own and fuse it the same way.
+- `KeywordIndex` holds its chunks in memory. For a corpus that does not fit, use
+  `PostgresKeywordIndex` or `ElasticsearchKeywordIndex`, or another engine behind a `SparseRetriever`
+  of your own.
 - `modelReranker()` and `modelQueryVariants()` cost a model call per retrieval; a cross-encoder or a
   hosted rerank API is faster and cheaper where you have one.
 - The Pinecone store does not create the index, which is a control-plane operation; create it in the
@@ -218,6 +285,14 @@ specific entry point that provides it.
 | `ChromaVectorStore` | class | Retrieval chunks in a Chroma collection, through its v2 REST API. |
 | `ChromaVectorStoreOptions` | interface | Options for the Chroma store. |
 
+### `nexus-ai-pro/rag/elasticsearch`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `ElasticsearchError` | class | Raised when the cluster answers with an error. |
+| `ElasticsearchKeywordIndex` | class | Keyword search in Elasticsearch or OpenSearch, through their REST API. |
+| `ElasticsearchKeywordIndexOptions` | interface | Options for the Elasticsearch keyword index. |
+
 ### `nexus-ai-pro/rag/pinecone`
 
 | Export | Kind | Summary |
@@ -233,6 +308,24 @@ specific entry point that provides it.
 | `RedisVectorLikeClient` | type | A Redis client that sends raw commands — what RediSearch's `FT.*` commands need. |
 | `RedisVectorStore` | class | Retrieval chunks in Redis, searched by RediSearch's vector index (Redis Stack, Redis 8, or Redis Cloud). |
 | `RedisVectorStoreOptions` | interface | Options for the Redis store. |
+
+### `nexus-ai-pro/rag/rerankers`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `cohereReranker` | function | Cohere's rerank API (`/v2/rerank`), such as `rerank-v3.5`. |
+| `CrossEncoder` | interface | A cross-encoder run in process: one score per (query, passage) pair, higher meaning more relevant. |
+| `crossEncoderReranker` | function | A reranker over a cross-encoder you run in process: no network call, no per-query price, and the passages never leave the machine. |
+| `CrossEncoderRerankerOptions` | interface | Options for `crossEncoderReranker()`. |
+| `HostedRerankerOptions` | interface | Options for a hosted rerank API. |
+| `httpReranker` | function | A reranker over any HTTP rerank API: you describe the request body and how to read the scores, and it handles the rest — truncation, the timeout, cancellation, errors, and scores put back in the order of the chunks. |
+| `HttpRerankerOptions` | interface | Options for `httpReranker()`: any rerank API, described by its request and its response. |
+| `jinaReranker` | function | Jina AI's rerank API (`/v1/rerank`), such as `jina-reranker-v2-base-multilingual`. |
+| `RerankerError` | class | Raised when a rerank API answers with an error. |
+| `RerankerHttpOptions` | interface | What every HTTP reranker takes. |
+| `teiReranker` | function | A cross-encoder served by Hugging Face's text-embeddings-inference, on your own machine or cluster: `docker run ... |
+| `TeiRerankerOptions` | interface | Options for `teiReranker()`. |
+| `voyageReranker` | function | Voyage AI's rerank API (`/v1/rerank`), such as `rerank-2`. |
 
 ### `nexus-ai-pro/rag/retrievers`
 
@@ -265,6 +358,7 @@ specific entry point that provides it.
 | `RetrievalModelClient` | interface | A client that runs one completion — a `NexusAI` instance, or anything with the same `complete()`. |
 | `RetrieveOptions` | interface | What one retrieval asks for. |
 | `Retriever` | interface | Anything that answers a query with ranked chunks. |
+| `SparseRetriever` | interface | Keyword search that holds its own chunks: an in-memory BM25 `KeywordIndex`, Postgres full-text search, a search engine. |
 | `splitParentChild` | function | Splits documents twice: into parents, kept for `parentDocumentRetriever()` to return, and each parent into small children, added to the store it searches. |
 | `tokenize` | function | Lower-cased runs of letters and digits, in any script. |
 | `vectorRetriever` | function | A vector store as a retriever, with defaults for every search. |

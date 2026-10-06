@@ -205,9 +205,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
 | `nexus-ai-pro/ops/rate-limit-adapters` | 7 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
+| `nexus-ai-pro/rag/elasticsearch` | 7 KB | 2% | none |
 | `nexus-ai-pro/evals/judge` | 7 KB | 2% | none |
 | `nexus-ai-pro/store` | 6 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 6 KB | 2% | none |
+| `nexus-ai-pro/postgres/fulltext` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/evaluate` | 6 KB | 2% | none |
 | `nexus-ai-pro/server/remote` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/prompts` | 6 KB | 2% | none |
@@ -220,6 +222,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/rag` | 5 KB | 1% | none |
 | `nexus-ai-pro/loaders/html` | 5 KB | 1% | none |
+| `nexus-ai-pro/rag/rerankers` | 5 KB | 1% | none |
 | `nexus-ai-pro/pipeline` | 4 KB | 1% | none |
 | `nexus-ai-pro/prompts/file` | 4 KB | 1% | none |
 | `nexus-ai-pro/prompts/redis` | 4 KB | 1% | none |

@@ -700,6 +700,16 @@
         "default": "./dist-cjs/postgres/vectors.js"
       }
     },
+    "./postgres/fulltext": {
+      "import": {
+        "types": "./dist/postgres/fulltext.d.ts",
+        "default": "./dist/postgres/fulltext.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/fulltext.d.ts",
+        "default": "./dist-cjs/postgres/fulltext.js"
+      }
+    },
     "./postgres/traces": {
       "import": {
         "types": "./dist/postgres/traces.d.ts",
@@ -1390,6 +1400,16 @@
         "default": "./dist-cjs/rag/chroma.js"
       }
     },
+    "./rag/elasticsearch": {
+      "import": {
+        "types": "./dist/rag/elasticsearch.d.ts",
+        "default": "./dist/rag/elasticsearch.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/elasticsearch.d.ts",
+        "default": "./dist-cjs/rag/elasticsearch.js"
+      }
+    },
     "./rag/retrievers": {
       "import": {
         "types": "./dist/rag/retrievers.d.ts",
@@ -1398,6 +1418,16 @@
       "require": {
         "types": "./dist-cjs/rag/retrievers.d.ts",
         "default": "./dist-cjs/rag/retrievers.js"
+      }
+    },
+    "./rag/rerankers": {
+      "import": {
+        "types": "./dist/rag/rerankers.d.ts",
+        "default": "./dist/rag/rerankers.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/rerankers.d.ts",
+        "default": "./dist-cjs/rag/rerankers.js"
       }
     },
     "./evals": {
@@ -1894,6 +1924,9 @@
       "postgres/vectors": [
         "dist-cjs/postgres/vectors.d.ts"
       ],
+      "postgres/fulltext": [
+        "dist-cjs/postgres/fulltext.d.ts"
+      ],
       "postgres/traces": [
         "dist-cjs/postgres/traces.d.ts"
       ],
@@ -2122,8 +2155,14 @@
       "rag/chroma": [
         "dist-cjs/rag/chroma.d.ts"
       ],
+      "rag/elasticsearch": [
+        "dist-cjs/rag/elasticsearch.d.ts"
+      ],
       "rag/retrievers": [
         "dist-cjs/rag/retrievers.d.ts"
+      ],
+      "rag/rerankers": [
+        "dist-cjs/rag/rerankers.d.ts"
       ],
       "sqlite/vectors": [
         "dist-cjs/sqlite/vectors.d.ts"

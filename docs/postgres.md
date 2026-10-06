@@ -1,6 +1,6 @@
 # Postgres
 
-<!-- covers: ./postgres ./postgres/operations ./postgres/store ./postgres/traces ./postgres/evaluate ./postgres/circuits ./postgres/prompts ./postgres/vectors ./postgres/migrations ./postgres/rollups -->
+<!-- covers: ./postgres ./postgres/operations ./postgres/store ./postgres/traces ./postgres/evaluate ./postgres/circuits ./postgres/prompts ./postgres/vectors ./postgres/fulltext ./postgres/migrations ./postgres/rollups -->
 
 Postgres storage for everything that has to outlive a process or be shared between workers: durable
 operations and graph checkpoints, long-term memory, traces and their hourly rollups, datasets and
@@ -240,6 +240,37 @@ await chunks.add(ingestDocuments(docs).chunks);
 const context = await chunks.search(question, { topK: 5, filter: { tenant: 'acme' } });
 ```
 
+## Keyword search
+
+`PostgresKeywordIndex`, on `nexus-ai-pro/postgres/fulltext`, is keyword search with Postgres's own
+full-text search: stemmed terms, a GIN index, and `ts_rank_cd` ranking from 0 to 1. Only the best
+matches leave the database. It is a `SparseRetriever`, so `hybridRetriever()` fuses it with
+`PostgresVectorStore`.
+
+`PostgresKeywordIndexOptions`:
+- `table`;
+- `language`, the text search configuration, `english` by default;
+- `match`: `any` finds chunks with any of the query's terms and ranks partial matches; `all` needs
+  every term and reads the query as a web search, with quoted phrases and `-` exclusions;
+- `shared`.
+
+With `shared`, the index searches a `PostgresVectorStore`'s own table:
+- `migrate()` adds a generated `tsvector` column and its index to that table;
+- the store's writes keep the column current;
+- `add()` and `delete()` leave writing to the store.
+
+So the hybrid search runs over one copy of every chunk, and keyword and vector search never disagree
+about what exists. `keywordIndexMigrations()` is the versioned schema, and `migrate()` applies it.
+
+```ts
+import { PostgresKeywordIndex } from 'nexus-ai-pro/postgres/fulltext';
+import { hybridRetriever, vectorRetriever } from 'nexus-ai-pro/rag/retrievers';
+
+const keywords = new PostgresKeywordIndex(pool, { table: 'nexus_vectors', shared: true });
+await keywords.migrate();                          // after chunks.migrate()
+const retriever = hybridRetriever([vectorRetriever(chunks), keywords]);
+```
+
 ## Limitations
 
 - Migrations only add. A column or index is never dropped in a minor release, so the schema of an
@@ -290,6 +321,14 @@ specific entry point that provides it.
 | `PostgresDatasetStore` | class | Dataset versions in Postgres, keyed by name and content version. |
 | `PostgresEvaluationStoreOptions` | interface | Options for the Postgres evaluation stores. |
 | `PostgresExperimentStore` | class | Experiments in Postgres, newest first by start time. |
+
+### `nexus-ai-pro/postgres/fulltext`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `keywordIndexMigrations` | function | The versioned schema, which `migrate()` applies. |
+| `PostgresKeywordIndex` | class | Keyword search in Postgres, with its full-text search: stemmed terms, a GIN index, and `ts_rank_cd` ranking, so only the best matches leave the database however large the table. |
+| `PostgresKeywordIndexOptions` | interface | Options for `PostgresKeywordIndex`. |
 
 ### `nexus-ai-pro/postgres/migrations`
 

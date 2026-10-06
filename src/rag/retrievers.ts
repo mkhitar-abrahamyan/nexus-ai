@@ -30,6 +30,18 @@ export interface Retriever {
   retrieve(query: string, options?: RetrieveOptions): Promise<VectorSearchResult[]>;
 }
 
+/**
+ * Keyword search that holds its own chunks: an in-memory BM25 `KeywordIndex`, Postgres full-text
+ * search, a search engine. It is a `Retriever`, so `hybridRetriever()` fuses it with vector search,
+ * and it takes writes, so ingestion keeps it in step with a vector store.
+ */
+export interface SparseRetriever extends Retriever {
+  /** Adds chunks, or replaces those whose id exists. */
+  add(chunks: readonly RagChunk[]): Promise<void> | void;
+  /** Removes chunks by id. An id that is not held is ignored. */
+  delete(ids: readonly string[]): Promise<void> | void;
+}
+
 /** A client that runs one completion — a `NexusAI` instance, or anything with the same `complete()`. */
 export interface RetrievalModelClient {
   /** Runs one completion and returns its text. */
@@ -71,7 +83,7 @@ export function tokenize(text: string): string[] {
  * codes, error numbers, names — that keyword search finds; `hybridRetriever()` fuses the two.
  * Adding a chunk whose id exists replaces it, as in a vector store.
  */
-export class KeywordIndex implements Retriever {
+export class KeywordIndex implements SparseRetriever {
   private readonly chunks = new Map<string, { chunk: RagChunk; terms: Map<string, number>; length: number }>();
   private readonly postings = new Map<string, Set<string>>();
   private totalLength = 0;
