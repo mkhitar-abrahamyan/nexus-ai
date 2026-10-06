@@ -34,6 +34,10 @@ interface StoredItem extends StoreItem {
 export class MemoryStore implements Store {
   private readonly items = new Map<string, StoredItem>();
   private readonly maxItems: number;
+  /** Whether any item was ever given a time to live; until one is, there is nothing to sweep. */
+  private expiring = false;
+  /** When expired items were last swept, in milliseconds. */
+  private sweptAt = Number.NEGATIVE_INFINITY;
   private readonly now: () => Date;
 
   constructor(private readonly options: MemoryStoreOptions = {}) {
@@ -49,6 +53,7 @@ export class MemoryStore implements Store {
     const timestamp = this.now().toISOString();
     const existing = this.items.get(id);
     const vector = await this.embed(value, options.index);
+    if (options.ttlMs !== undefined) this.expiring = true;
 
     this.items.delete(id);
     this.items.set(id, {
@@ -145,7 +150,17 @@ export class MemoryStore implements Store {
     return item.expiresAt !== undefined && Date.parse(item.expiresAt) <= this.now().getTime();
   }
 
+  /**
+   * Drops expired items. Reads already skip them, so this only reclaims memory: it runs once any item
+   * has a time to live, and at most once a second, so a write stays constant-time however many items
+   * there are. A store that is full sweeps before it evicts, so a live item never makes way for an
+   * expired one.
+   */
   private sweep(): void {
+    if (!this.expiring) return;
+    const now = this.now().getTime();
+    if (now - this.sweptAt < 1_000 && this.items.size <= this.maxItems) return;
+    this.sweptAt = now;
     for (const [id, item] of this.items) if (this.expired(item)) this.items.delete(id);
   }
 }

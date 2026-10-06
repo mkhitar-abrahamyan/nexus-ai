@@ -371,7 +371,7 @@ offered, and each tool's similarity score.
 In the benchmark in the test suite, `toolSelector()` sends 12 tools instead of 150 over 40 tasks:
 - every task still succeeds;
 - input tokens per task fall from about 64,000 to about 5,200;
-- latency per task falls by more than half.
+- latency per task falls by about 40%, with model time that grows with input size as prefill does.
 
 `compareExperiments()` reports the comparison.
 

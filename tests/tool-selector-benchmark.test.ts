@@ -198,6 +198,12 @@ test('toolSelector over 150 tools: equal quality, a fraction of the tokens, and 
   });
 
   const selections: ToolSelection[] = [];
+  // Created once, as an application would: each tool is embedded once, not once per task.
+  const selector = toolSelector({
+    embed: lexicalEmbed,
+    maxTools: 12,
+    onSelect: (selection) => selections.push(selection),
+  });
   const target =
     (withSelector: boolean) =>
     async (inputs: { text: string }): Promise<RunOutput> => {
@@ -205,9 +211,7 @@ test('toolSelector over 150 tools: equal quality, a fraction of the tokens, and 
       const agent = createAgent({
         client: oracle(plans, usage),
         tools,
-        middleware: withSelector
-          ? [toolSelector({ embed: lexicalEmbed, maxTools: 12, onSelect: (selection) => selections.push(selection) })]
-          : [],
+        middleware: withSelector ? [selector] : [],
       });
       const result = await agent.invoke(agentInput(inputs.text));
       const called = result.state.messages.flatMap(

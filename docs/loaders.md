@@ -1,6 +1,6 @@
 # Loaders
 
-<!-- covers: ./loaders ./loaders/text ./loaders/markdown ./loaders/html ./loaders/csv ./loaders/json ./loaders/pdf ./loaders/web ./loaders/git -->
+<!-- covers: ./loaders ./rag/pipeline ./loaders/text ./loaders/markdown ./loaders/html ./loaders/csv ./loaders/json ./loaders/pdf ./loaders/web ./loaders/git -->
 
 Getting documents into retrieval: files, pages, rows, records, PDFs, web pages, and Git
 repositories, each read into the `DocumentSource` values that ingestion splits into chunks. Every
@@ -44,6 +44,80 @@ the id. Loading the same corpus again replaces its chunks instead of duplicating
 
 `collectDocuments()` reads loaders into an array instead, for inspection or for code that wants
 the documents themselves.
+
+## Keeping an index current
+
+`loadIntoStore()` embeds everything it reads, every time. For a corpus that changes, use the durable
+pipeline on `nexus-ai-pro/rag/pipeline`.
+
+`createIngestionPipeline()` keeps a manifest in any `Store`. For each document, an
+`IngestedDocument` records:
+- the version of its content;
+- its chunking;
+- the embedding model;
+- each chunk's id with the version of its text.
+
+A run of the `IngestionPipeline` does six things:
+- It reads the corpus, from any `IngestionSource`: a loader, an array, or an iterable.
+- It skips every document whose content, chunking, and model are as recorded.
+- It embeds only the chunks that are new or changed. A chunk is named by its text, so one whose text
+  did not change keeps its embedding wherever it moved.
+- It deletes the chunks a document no longer has.
+- It deletes the documents the corpus no longer has, unless `deleteMissing: false` says the run
+  loads only part of it.
+- It writes every change to the stores before the manifest records it, so a crash repeats a write
+  but never loses one.
+
+A different embedding model, or different chunking, re-embeds everything. Chunks are cut by length,
+within each Markdown section when `splitOnMarkdownHeadings` is on. An edit therefore re-embeds the
+chunks of its own section, and adding a section leaves the others alone.
+
+`IngestionPipelineOptions`:
+- the pipeline's `name`, which keeps two manifests apart;
+- the `manifest` store;
+- the vector store;
+- any keyword indexes kept in step;
+- the `embed` function and the `embeddingModel`;
+- the chunking and the batch size.
+
+A `MemoryStore` keeps 10,000 items unless given a larger `maxItems`. A manifest has one item per
+document, so size it to the corpus or keep it in a database.
+
+`IngestionRunOptions`: a `signal`, `deleteMissing`, `onProgress`, and the durable `operation` the
+run belongs to. `run()` returns an `IngestionReport`, which counts:
+- documents read, unchanged, added, updated, and deleted;
+- chunks embedded, kept, and deleted;
+- documents a resumed run skipped.
+
+`document()` reads one document's manifest record, and `remove()` removes documents from every
+store.
+
+`ingestionExecutor()` makes the pipeline the executor of a durable operation. Submit it to an
+`OperationRunner`. After each batch, the run records how far it got, and a retry, on this worker or
+another, starts at the document the failed attempt stopped on.
+
+```ts
+import { OperationRunner } from 'nexus-ai-pro/operations';
+import { loadDirectory } from 'nexus-ai-pro/loaders/text';
+import { createIngestionPipeline, ingestionExecutor } from 'nexus-ai-pro/rag/pipeline';
+
+const pipeline = createIngestionPipeline({
+  name: 'help-center',
+  manifest: store,
+  vectors,
+  keywords: [elasticsearch],
+  embed,
+  embeddingModel: 'text-embedding-3-small',
+  chunking: { splitOnMarkdownHeadings: true },
+});
+const runner = new OperationRunner({ store: operations, retry: { maxAttempts: 5 } });
+const handle = await runner.submit(ingestionExecutor(pipeline, () => loadDirectory('./docs')), {
+  idempotencyKey: 'help-center',
+});
+```
+
+In the test suite, an ingestion of 100,000 documents dies halfway, and its retry embeds no chunk that
+had finished. A second run after ten documents are edited embeds exactly ten chunks.
 
 ## Files
 
@@ -242,4 +316,17 @@ specific entry point that provides it.
 | `sitemapUrls` | function | The page URLs a sitemap lists. |
 | `WebLoaderError` | class | Raised when a page cannot be loaded: a status that is not 2xx, or a type that is not text. |
 | `WebLoaderOptions` | interface | Options for the web loaders. |
+
+### `nexus-ai-pro/rag/pipeline`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `createIngestionPipeline` | function | Builds a pipeline that keeps the stores in step with a corpus, re-embedding only what changed. |
+| `IngestedDocument` | interface | What the manifest records for one document. |
+| `ingestionExecutor` | function | The pipeline as the executor of a durable operation: submit it to an `OperationRunner`, and an attempt that dies halfway is recovered by another worker, which starts at the document the first one stopped on. |
+| `IngestionPipeline` | interface | A pipeline: run it as often as the corpus changes. |
+| `IngestionPipelineOptions` | interface | Options for `createIngestionPipeline()`. |
+| `IngestionReport` | interface | What a run did. |
+| `IngestionRunOptions` | interface | Options for one run. |
+| `IngestionSource` | type | A source of documents: a loader, an array, or any iterable, read once per run. |
 <!-- reference:end -->

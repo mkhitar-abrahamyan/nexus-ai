@@ -72,7 +72,10 @@ Everything 2.3 adds is stable from the start and additive: no default changes me
   (`nexus-ai-pro/postgres/fulltext`); `ElasticsearchKeywordIndex` and `ElasticsearchError`
   (`nexus-ai-pro/rag/elasticsearch`); and every reranker and option type on
   `nexus-ai-pro/rag/rerankers`. The default endpoints of hosted rerankers follow their providers'
-  current API versions.
+  current API versions;
+- `nexus-ai-pro/rag/pipeline`: `createIngestionPipeline()`, `ingestionExecutor()`, and their types.
+  The manifest's layout under `['nexus', 'ingestion', <name>]` is stable: a later release reads a
+  manifest an earlier one wrote.
 
 ## 2.2 stage (2.2.0)
 

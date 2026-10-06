@@ -69,8 +69,23 @@ Agents that act safely, on production retrieval.
   - `teiReranker()` for a self-hosted cross-encoder;
   - `httpReranker()` for any other API;
   - `crossEncoderReranker()` for a model run in process.
+- **Durable ingestion**, on the new `nexus-ai-pro/rag/pipeline`. `createIngestionPipeline()` keeps a
+  manifest in any `Store`: each document's content version, its chunking, the embedding model, and
+  each chunk's version. A run:
+  - embeds only new and changed chunks; chunks are named by their text, so one that only moved keeps
+    its embedding;
+  - deletes the chunks and documents that are gone;
+  - keeps keyword indexes in step;
+  - writes to the stores before the manifest.
+
+  `ingestionExecutor()` runs it as a durable operation, and a retry starts at the document the
+  failed attempt stopped on.
 
 ### Fixed
+
+- `MemoryStore` swept every item for expiry on every write, so writing n items took time
+  proportional to n². It now sweeps only once an item has a time to live, and at most once a second.
+  Expired items were already hidden from reads.
 
 - `limitToolCalls()` counted calls in memory shared by every run of an agent, so one thread's calls
   used up another's limit, and the count never reset. It now counts per run from the transcript.
@@ -87,7 +102,7 @@ Agents that act safely, on production retrieval.
   and writes outside its root fails exactly those two checks.
 - An agent over 150 tools completes 40 tasks, a third of them needing two tools, with
   `toolSelector()` at equal quality: every task succeeds either way. Input tokens per task fall from
-  about 64,000 to about 5,200 and latency by more than half. Two experiments, reported by
+  about 64,000 to about 5,200 and latency by about 40%. Two experiments, reported by
   `compareExperiments()`, show it.
 - Each middleware is proved in a real agent loop. For example:
   - a charge that timed out is never retried;
@@ -105,6 +120,9 @@ Agents that act safely, on production retrieval.
   beats vector-only: recall@5 0.71 → 0.97 and mean reciprocal rank 0.51 → 0.71, both with a 95%
   interval above zero. A hosted reranker and a local cross-encoder, compared in the same experiment,
   each lift mean reciprocal rank to 0.97. One contract test runs against all four keyword indexes.
+- An ingestion of 100,000 documents dies halfway inside a durable operation. Its retry starts at the
+  document the first attempt stopped on, and embeds no chunk that had finished. A second run after
+  ten documents are edited embeds exactly ten chunks and deletes their old versions.
 
 ## [2.2.0] - 2026-10-05
 

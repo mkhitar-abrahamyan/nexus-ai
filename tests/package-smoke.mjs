@@ -301,6 +301,7 @@ const imports = [
       'RerankerError',
     ],
   },
+  { specifier: 'nexus-ai-pro/rag/pipeline', exports: ['createIngestionPipeline', 'ingestionExecutor'] },
   { specifier: 'nexus-ai-pro/loaders', exports: ['loadIntoStore', 'collectDocuments'] },
   { specifier: 'nexus-ai-pro/loaders/text', exports: ['loadText', 'loadDirectory'] },
   { specifier: 'nexus-ai-pro/loaders/markdown', exports: ['loadMarkdown', 'parseMarkdown'] },

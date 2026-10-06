@@ -1430,6 +1430,16 @@
         "default": "./dist-cjs/rag/rerankers.js"
       }
     },
+    "./rag/pipeline": {
+      "import": {
+        "types": "./dist/rag/pipeline.d.ts",
+        "default": "./dist/rag/pipeline.js"
+      },
+      "require": {
+        "types": "./dist-cjs/rag/pipeline.d.ts",
+        "default": "./dist-cjs/rag/pipeline.js"
+      }
+    },
     "./evals": {
       "import": {
         "types": "./dist/evals/index.d.ts",
@@ -2163,6 +2173,9 @@
       ],
       "rag/rerankers": [
         "dist-cjs/rag/rerankers.d.ts"
+      ],
+      "rag/pipeline": [
+        "dist-cjs/rag/pipeline.d.ts"
       ],
       "sqlite/vectors": [
         "dist-cjs/sqlite/vectors.d.ts"

@@ -177,6 +177,7 @@ const expectedSubpaths = [
   './rag/elasticsearch',
   './rag/retrievers',
   './rag/rerankers',
+  './rag/pipeline',
   './loaders',
   './loaders/text',
   './loaders/markdown',

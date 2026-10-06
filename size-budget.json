@@ -111,6 +111,7 @@
     "./rag/elasticsearch": 8,
     "./rag/files": 12,
     "./rag/pinecone": 12,
+    "./rag/pipeline": 16,
     "./rag/qdrant": 14,
     "./rag/redis": 14,
     "./rag/rerankers": 6,
