@@ -65,6 +65,12 @@ New and stable:
   protocol version it names. A minor release may send an event or answer a method it did not
   before, as a protocol adds them. An event or field already sent keeps its meaning. A new major
   version of a protocol arrives beside the old one, not in its place.
+- `nexus-ai-pro/runtime`, `runtimeInfo()`, `RuntimeInfo`, and `RuntimeName`, which may gain
+  names in a minor release; the `fetch` option on the OpenAI, Anthropic, Google, and Cohere
+  provider configurations.
+- Portability, for the client, the kernel, the provider adapters, graphs, agents, and the agent
+  protocols: none of them starts needing Node.js in a minor release, and the build fails if one
+  does.
 
 Without `confidence`, a canary is judged as before.
 

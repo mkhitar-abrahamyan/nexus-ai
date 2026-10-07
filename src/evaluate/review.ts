@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomHex } from '../utils/ids.js';
 import type { DatasetExample, EvaluationContext, EvaluationScore, Evaluator } from '../types/evaluate.js';
 import type { Run, RunQuery, TraceStore } from '../types/tracing.js';
 
@@ -80,7 +80,7 @@ export class AnnotationQueue {
   /** Queues something for review and returns the new item. */
   enqueue(subject: ReviewItem['subject'], metadata?: Record<string, unknown>): ReviewItem {
     const item: ReviewItem = {
-      id: `review-${randomBytes(6).toString('hex')}`,
+      id: `review-${randomHex(6)}`,
       subject,
       rubric: this.options.rubric,
       status: 'pending',

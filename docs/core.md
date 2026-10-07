@@ -698,21 +698,15 @@ specific entry point that provides it.
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `AnthropicProviderConfig` | interface | Configuration for Anthropic, or an Anthropic-compatible endpoint through `baseUrl`. |
-| `AssetContent` | interface | An asset passed by reference: an image or file a tool made or stored, named in the conversation by where it lives rather than carried as base64 text. |
-| `AudioContent` | interface | An audio part of a message, for audio-capable models, or a transcript standing in for the audio. |
 | `AuditLogConfig` | interface | What gets written to the audit log. |
 | `AuditLogEvent` | interface | One audit record. |
 | `AzureOpenAIProviderConfig` | interface | Configuration for Azure OpenAI deployment-scoped chat completions. |
-| `BinaryBuffer` | type | Node's `Buffer` when Node's type definitions are loaded, and `Uint8Array` otherwise, so the message types compile in a browser project as well as on a server. |
 | `BudgetConfig` | interface | A limit on how many input tokens a request may use. |
 | `BudgetExceededAction` | type | What happens when a request exceeds its token budget: fail, truncate, densify, or send it anyway. |
 | `buildMeta` | function | Builds a complete `ResponseMeta` from provider token counts. |
 | `BuildMetaOptions` | interface | Options for `buildMeta()`: the provider's token counts plus the call's context. |
 | `buildUsage` | function | Normalizes provider token counts into the portable `TokenUsage` shape. |
-| `CacheHint` | type | Marks a message or tool definition as the end of a cacheable prefix. |
 | `CohereProviderConfig` | interface | Configuration for Cohere. |
-| `CompletionRequest` | interface | A completion request: the model, the conversation, and every control over how it is answered. |
-| `ContentPart` | type | One part of a multimodal message. |
 | `costAmount` | function | Numeric cost for metrics and budgets: the priced amount, or 0 when nothing priced the call. |
 | `CostBudgetConfig` | interface | Refuses or flags a request whose estimated cost exceeds a limit, before it is sent. |
 | `CostEstimate` | interface | What a request is estimated to cost, before it is sent. |
@@ -726,47 +720,29 @@ specific entry point that provides it.
 | `FallbackConfig` | interface | Models tried when the route the router chose fails, applied to every request, including one that names its model. |
 | `GoogleProviderConfig` | interface | Configuration for Google's Gemini API. |
 | `GroqProviderConfig` | interface | Configuration for Groq. |
-| `ImageContent` | interface | An image part of a message, for vision-capable models. |
 | `LlamaCppProviderConfig` | interface | Configuration for a local llama.cpp OpenAI-compatible server. |
 | `LMStudioProviderConfig` | interface | Configuration for a local LM Studio OpenAI-compatible server. |
 | `LogEvent` | interface | One structured log event. |
 | `LoggerConfig` | interface | Structured logger hook config. |
 | `LogLevel` | type | Severity of a log event. |
-| `Message` | interface | One message in a conversation. |
-| `MessageRole` | type | Who a message is from: instructions, the user, the model, or a tool result. |
 | `MistralProviderConfig` | interface | Configuration for Mistral. |
 | `NexusAIConfig` | interface | Everything a `NexusAI` client needs. |
 | `NexusPlan` | interface | What `ai.plan()` says a request would do, without sending it: the route, the tokens, the cost, and whether guardrails would block it. |
-| `NexusResponse` | interface | A completion. |
-| `NexusStream` | interface | A streamed completion: iterate it for chunks, or abort it. |
 | `normalizeCreateNexusConfig` | function | Converts the beginner shorthand accepted by `createNexus()` into a normal `NexusAIConfig`. |
 | `OllamaProviderConfig` | interface | Configuration for a local Ollama server. |
 | `OpenAIProviderConfig` | interface | Configuration for OpenAI, and for any OpenAI-compatible server — vLLM, a gateway, a proxy — through `baseUrl`. |
 | `OptimizationResult` | interface | An optimized value with what optimization did to it. |
 | `priceUsage` | function | Prices a normalized usage record, keeping each token class on its own line. |
 | `PriceUsageOptions` | interface | Options for `priceUsage()`. |
-| `PromptCacheConfig` | interface | Provider-side prompt caching. |
 | `ProvidersConfig` | interface | Provider configs that Nexus can register from the constructor. |
 | `RateLimitConfig` | interface | Limits how many requests are allowed per window. |
-| `ReasoningConfig` | interface | Requested reasoning behavior. |
-| `ResponseCost` | interface | Numeric cost of one operation. |
 | `ResponseFormatConfig` | interface | A response format applied to every request that does not set its own. |
 | `ResponseFormatError` | class | Raised when a response does not match the requested format and cannot be repaired. |
-| `ResponseMeta` | interface | How a completion was produced: provider, model, timing, tokens, cost, and every policy that touched it. |
 | `RetryConfig` | interface | How a failed provider call is retried before failover moves on. |
 | `RoutingConfig` | interface | How requests with `model: 'auto'` are routed. |
 | `RoutingRule` | interface | A routing rule: when a request matches, route it to a model. |
 | `RoutingStrategy` | type | What the auto-router optimizes for: price, latency, quality, or keeping data on local models. |
-| `StreamChunk` | interface | One streamed event. |
-| `TextContent` | interface | A text part of a message. |
 | `TokenOptimizerConfig` | interface | Token optimization applied before a request is sent. |
-| `TokenUsage` | interface | Token accounting for one operation. |
 | `TokenUsageSnapshot` | interface | Token counts before and after optimization. |
-| `ToolCall` | interface | A tool call the model made. |
-| `ToolCallResult` | interface | What a tool returned, correlated with the call that asked for it. |
-| `ToolChoice` | type | How the model may use tools. |
-| `ToolDefinition` | interface | A tool the model may call. |
-| `ToolOutput` | interface | What a tool returns when its result is content rather than a value to serialize: text, images, and asset references, in order. |
 | `UsageInput` | interface | Token counts as a provider reported them, for `buildUsage()`. |
-| `VideoContent` | interface | A video part of a message. |
 <!-- reference:end -->

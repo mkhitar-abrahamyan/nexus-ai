@@ -40,6 +40,16 @@
         "default": "./dist-cjs/core/streaming.js"
       }
     },
+    "./runtime": {
+      "import": {
+        "types": "./dist/runtime/index.d.ts",
+        "default": "./dist/runtime/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/runtime/index.d.ts",
+        "default": "./dist-cjs/runtime/index.js"
+      }
+    },
     "./config": {
       "import": {
         "types": "./dist/core/config-builder.d.ts",
@@ -1595,7 +1605,7 @@
     "test:studio-install": "node studio/scripts/install-smoke.mjs",
     "docs:guides": "node scripts/check-guide-coverage.mjs && node scripts/check-doc-imports.mjs && node scripts/root-migration.mjs --check",
     "docs:update": "node scripts/check-guide-coverage.mjs --update && node scripts/generate-llms-txt.mjs",
-    "size:update": "node scripts/check-subpath-sizes.mjs --update",
+    "size:update": "node scripts/check-subpath-sizes.mjs --update && node scripts/check-portability.mjs --update",
     "registry:generate": "node scripts/generate-model-registry.mjs",
     "registry:check": "node scripts/generate-model-registry.mjs --check",
     "llms:generate": "node scripts/generate-llms-txt.mjs",
@@ -1607,7 +1617,7 @@
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
     "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit && tsc -p tsconfig.deploy.json",
     "typecheck:examples:browser": "tsc -p tsconfig.examples.browser.json --noEmit",
-    "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:conformance:images && npm run size:check && npm run docs:check && npm run docs:guides && npm run test:studio && npm run test:smoke && npm run test:api && npm run test:types",
+    "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:conformance:images && npm run size:check && npm run test:portable && npm run docs:check && npm run docs:guides && npm run test:studio && npm run test:smoke && npm run test:api && npm run test:types",
     "test:unit": "node --import tsx --test tests/unit.ts tests/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-lines=82 --test-coverage-branches=67 --test-coverage-functions=73 tests/unit.ts tests/*.test.ts",
     "test:smoke": "node tests/package-smoke.mjs",
@@ -1627,7 +1637,8 @@
     "build:esm": "tsc --removeComments --declaration false && tsc --emitDeclarationOnly",
     "build:cjs": "tsc -p tsconfig.cjs.json --removeComments --declaration false && tsc -p tsconfig.cjs.json --emitDeclarationOnly && node scripts/finalize-cjs.mjs",
     "test:conformance:images": "tsx tests/conformance.images.ts",
-    "conformance:images:record": "tsx tests/conformance.images.ts --record"
+    "conformance:images:record": "tsx tests/conformance.images.ts --record",
+    "test:portable": "node scripts/check-portability.mjs && node tests/portable/run.mjs node && node tests/portable/edge.mjs"
   },
   "keywords": [
     "ai",
@@ -1737,6 +1748,7 @@
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
     "@biomejs/biome": "^2.3.0",
+    "@edge-runtime/vm": "^5.0.0",
     "@electric-sql/pglite": "^0.5.8",
     "@electric-sql/pglite-pgvector": "^0.0.9",
     "@opentelemetry/api": "^1.9.1",
@@ -1748,6 +1760,7 @@
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "bullmq": "^5.63.0",
+    "esbuild": "^0.28.2",
     "express": "^5.1.0",
     "nexus-ai-pro-2-0": "npm:nexus-ai-pro@^2.0.0",
     "nexus-ai-pro-2-1": "npm:nexus-ai-pro@^2.1.0",
@@ -1787,7 +1800,7 @@
     "provenance": true
   },
   "overrides": {
-    "esbuild": "^0.28.1"
+    "esbuild": "$esbuild"
   },
   "module": "dist/index.js",
   "typesVersions": {
@@ -1797,6 +1810,9 @@
       ],
       "streaming": [
         "dist-cjs/core/streaming.d.ts"
+      ],
+      "runtime": [
+        "dist-cjs/runtime/index.d.ts"
       ],
       "config": [
         "dist-cjs/core/config-builder.d.ts"

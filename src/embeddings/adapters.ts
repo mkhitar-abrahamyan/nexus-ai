@@ -1,3 +1,4 @@
+import { decodeBase64 } from '../utils/base64.js';
 import type {
   EmbeddingInputType,
   EmbeddingProviderCallContext,
@@ -79,7 +80,7 @@ abstract class HttpEmbeddingProvider implements EmbeddingsProvider {
 
 /** Decodes the base64 float32 form OpenAI-compatible servers return for `encoding_format: base64`. */
 function decodeBase64Vector(value: string): number[] {
-  const bytes = Buffer.from(value, 'base64');
+  const bytes = decodeBase64(value);
   const floats = new Float32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 4));
   return Array.from(floats);
 }

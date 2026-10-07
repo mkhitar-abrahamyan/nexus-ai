@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from '../utils/sha256.js';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -354,7 +354,7 @@ function defaultKey(input: MatchInput, ignoreBodyFields: readonly string[] = [])
   } catch {
     // Not JSON: matched byte for byte.
   }
-  return createHash('sha256').update(`${input.method}\n${input.url}\n${body}`).digest('hex').slice(0, 16);
+  return sha256Hex(`${input.method}\n${input.url}\n${body}`).slice(0, 16);
 }
 
 function canonical(value: unknown): string {

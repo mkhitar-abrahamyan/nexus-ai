@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { Sha256 } from '../utils/sha256.js';
 import type { DatasetExample } from '../types/evaluate.js';
 
 /**
@@ -8,9 +8,9 @@ import type { DatasetExample } from '../types/evaluate.js';
  * `MediaEvalRunner` — does not pull file-system code into the imports that reach it.
  */
 export function contentVersion(examples: readonly DatasetExample[]): string {
-  const hash = createHash('sha256');
+  const hash = new Sha256();
   for (const example of examples) {
     hash.update(JSON.stringify({ id: example.id, inputs: example.inputs, expected: example.expected }));
   }
-  return `v${hash.digest('hex').slice(0, 12)}`;
+  return `v${hash.digest().slice(0, 12)}`;
 }

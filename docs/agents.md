@@ -530,13 +530,7 @@ specific entry point that provides it.
 | `AgentStopReason` | type | `completed` when the model answered, `max_iterations` when it ran out of model calls, `stopped` when a middleware ended the run through `context.stop()`. |
 | `createAgent` | function | Builds an agent and returns it as a compiled graph. |
 | `CreateAgentOptions` | interface | Options for `createAgent()`. |
-| `isToolOutput` | function | True for a result built with `toolOutput()`. |
-| `tool` | function | Defines a tool the model can call, typing its arguments. |
-| `ToolContext` | interface | What a tool receives besides its arguments when an agent runs it. |
 | `ToolExecutionResult` | interface | What running one tool produced. |
-| `ToolExecutor` | class | Runs tool calls by name, reporting failures as results rather than throwing. |
-| `toolMessageContent` | function | What the model reads for a tool's result: the parts of a `toolOutput()`, or anything else as JSON. |
-| `toolOutput` | function | Builds a tool's result as content: text, images, and asset references, in order. |
 
 ### `nexus-ai-pro/agent/middleware`
 

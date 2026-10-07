@@ -367,7 +367,8 @@ export class AnthropicProvider extends BaseProvider {
       this.client = new Anthropic({
         apiKey: this.config.apiKey,
         baseURL: this.config.baseUrl,
-      }) as AnthropicClient;
+        ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
+      } as ConstructorParameters<typeof Anthropic>[0]) as AnthropicClient;
     }
     return this.client;
   }

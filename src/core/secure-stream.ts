@@ -1,3 +1,4 @@
+import { utf8Length } from '../utils/ids.js';
 import type { SecurityPipeline } from '../security/index.js';
 import { redactSensitiveText } from '../security/output-guard.js';
 import type { NexusResponse, NexusStream, ResponseMeta, StreamChunk, ToolCall } from '../types/response.js';
@@ -37,11 +38,11 @@ export function protectStreamOutput(
 
         if (chunk.type === 'text' && chunk.content) {
           bufferedText += chunk.content;
-          bufferedBytes += Buffer.byteLength(chunk.content);
+          bufferedBytes += utf8Length(chunk.content);
         } else if (chunk.type === 'error' && chunk.error) {
-          bufferedBytes += Buffer.byteLength(chunk.error);
+          bufferedBytes += utf8Length(chunk.error);
         } else if (chunk.type === 'tool_call' && chunk.toolCall) {
-          bufferedBytes += Buffer.byteLength(chunk.toolCall.function.arguments);
+          bufferedBytes += utf8Length(chunk.toolCall.function.arguments);
           bufferedToolCalls.push(chunk.toolCall);
         }
 

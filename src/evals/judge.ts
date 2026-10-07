@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from '../utils/sha256.js';
 import { withProvenance } from '../evaluate/provenance.js';
 import type { EvaluationContext, Evaluator } from '../types/evaluate.js';
 import type { CompletionRequest, Message } from '../types/messages.js';
@@ -154,10 +154,7 @@ export class LLMJudge<Response = NexusResponse> {
       name: options.key ?? 'judge',
       judge: {
         model: this.options.model,
-        promptVersion: createHash('sha256')
-          .update(this.options.systemPrompt ?? 'default')
-          .digest('hex')
-          .slice(0, 12),
+        promptVersion: sha256Hex(this.options.systemPrompt ?? 'default').slice(0, 12),
         temperature: this.options.temperature ?? 0,
       },
       ...(this.options.rubric ? { rubric: this.options.rubric } : {}),

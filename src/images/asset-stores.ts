@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -77,7 +76,7 @@ export class FilesystemAssetStore implements AssetStore {
     this.directory = nonEmptyString(options?.directory, 'directory');
     this.maxAssetBytes = optionalPositiveNumber(options.maxAssetBytes, 'maxAssetBytes');
     this.defaultTtlSeconds = optionalPositiveNumber(options.defaultTtlSeconds, 'defaultTtlSeconds');
-    this.createAssetId = options.createAssetId ?? randomUUID;
+    this.createAssetId = options.createAssetId ?? (() => globalThis.crypto.randomUUID());
     this.clock = options.now ?? (() => new Date());
     this.signer = options.signer;
   }
@@ -316,7 +315,7 @@ export class S3AssetStore implements AssetStore {
     this.prefix = (options.prefix ?? 'nexus-assets/').replace(/^\/+/, '');
     this.maxAssetBytes = optionalPositiveNumber(options.maxAssetBytes, 'maxAssetBytes');
     this.defaultTtlSeconds = optionalPositiveNumber(options.defaultTtlSeconds, 'defaultTtlSeconds');
-    this.createAssetId = options.createAssetId ?? randomUUID;
+    this.createAssetId = options.createAssetId ?? (() => globalThis.crypto.randomUUID());
     this.clock = options.now ?? (() => new Date());
     this.signer = options.signer;
   }

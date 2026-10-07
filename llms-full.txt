@@ -21,6 +21,9 @@ Import only what you use. The root import is the client and nothing else, and ev
 has its own entry point with a size budget CI enforces; [the packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md)
 publishes what each one costs. The package has no required dependencies: a graph-only application
 loads 80 KB, and installs nothing but this package.
+The client, the provider adapters, graphs, agents, and the agent protocols run on Node.js, Deno,
+Bun, edge runtimes, and browsers; [the runtimes guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/runtimes.md)
+lists the entry points that need Node.js, and why.
 
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
@@ -177,6 +180,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Workflows](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md) | Ready-made chains and domain workflows |
 | [Command line](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) | The `nexus` command |
 | [Packaging and install weight](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md) | Every entry point and what it costs |
+| [Runtimes](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/runtimes.md) | The portable kernel, and running the client, providers, graphs, and agents on Deno, Bun, edge runtimes, and browsers |
 
 ## Examples
 
@@ -10742,75 +10746,78 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 340 KB | 100% | none |
-| `nexus-ai-pro/config` | 333 KB | 98% | none |
-| `nexus-ai-pro/core` | 329 KB | 97% | none |
+| `nexus-ai-pro` | 341 KB | 100% | none |
+| `nexus-ai-pro/config` | 334 KB | 98% | none |
+| `nexus-ai-pro/core` | 329 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
-| `nexus-ai-pro/deep-agent` | 137 KB | 40% | none |
+| `nexus-ai-pro/deep-agent` | 138 KB | 40% | none |
 | `nexus-ai-pro/server` | 117 KB | 34% | none |
-| `nexus-ai-pro/batch` | 113 KB | 33% | none |
-| `nexus-ai-pro/agent` | 104 KB | 31% | none |
+| `nexus-ai-pro/batch` | 114 KB | 33% | none |
+| `nexus-ai-pro/agent` | 105 KB | 31% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
+| `nexus-ai-pro/providers/groq` | 83 KB | 24% | none |
+| `nexus-ai-pro/providers/mistral` | 83 KB | 24% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
-| `nexus-ai-pro/providers/groq` | 82 KB | 24% | none |
-| `nexus-ai-pro/providers/mistral` | 82 KB | 24% | none |
-| `nexus-ai-pro/providers/deepseek` | 81 KB | 24% | none |
-| `nexus-ai-pro/providers/llamacpp` | 81 KB | 24% | none |
-| `nexus-ai-pro/providers/lmstudio` | 81 KB | 24% | none |
-| `nexus-ai-pro/providers/openai` | 81 KB | 24% | none |
-| `nexus-ai-pro/providers/openrouter` | 81 KB | 24% | none |
-| `nexus-ai-pro/graph` | 80 KB | 24% | none |
-| `nexus-ai-pro/router` | 80 KB | 24% | none |
+| `nexus-ai-pro/providers/deepseek` | 82 KB | 24% | none |
+| `nexus-ai-pro/providers/llamacpp` | 82 KB | 24% | none |
+| `nexus-ai-pro/providers/lmstudio` | 82 KB | 24% | none |
+| `nexus-ai-pro/providers/openai` | 82 KB | 24% | none |
+| `nexus-ai-pro/providers/openrouter` | 82 KB | 24% | none |
+| `nexus-ai-pro/graph` | 81 KB | 24% | none |
+| `nexus-ai-pro/router` | 81 KB | 24% | none |
 | `nexus-ai-pro/postgres` | 78 KB | 23% | none |
-| `nexus-ai-pro/providers/anthropic` | 74 KB | 22% | none |
-| `nexus-ai-pro/providers/google` | 68 KB | 20% | none |
+| `nexus-ai-pro/providers/anthropic` | 75 KB | 22% | none |
+| `nexus-ai-pro/providers/google` | 69 KB | 20% | none |
+| `nexus-ai-pro/images` | 60 KB | 18% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
-| `nexus-ai-pro/providers/ollama` | 57 KB | 17% | none |
+| `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 57 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 16% | none |
-| `nexus-ai-pro/images` | 55 KB | 16% | none |
-| `nexus-ai-pro/batch/openai` | 50 KB | 15% | none |
-| `nexus-ai-pro/batch/anthropic` | 50 KB | 15% | none |
-| `nexus-ai-pro/batch/mock` | 46 KB | 14% | none |
-| `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 14% | none |
+| `nexus-ai-pro/batch/openai` | 51 KB | 15% | none |
+| `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
+| `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
+| `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
+| `nexus-ai-pro/evaluate` | 44 KB | 13% | none |
 | `nexus-ai-pro/sqlite` | 41 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
-| `nexus-ai-pro/evaluate` | 38 KB | 11% | none |
 | `nexus-ai-pro/server/deployments` | 38 KB | 11% | none |
-| `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
+| `nexus-ai-pro/embeddings` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
-| `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
+| `nexus-ai-pro/prompts/registry` | 36 KB | 11% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 10% | none |
-| `nexus-ai-pro/context-hub` | 32 KB | 9% | none |
-| `nexus-ai-pro/voice` | 31 KB | 9% | none |
+| `nexus-ai-pro/voice` | 32 KB | 9% | none |
+| `nexus-ai-pro/evals` | 32 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
-| `nexus-ai-pro/telephony` | 30 KB | 9% | none |
-| `nexus-ai-pro/tracing` | 29 KB | 9% | none |
+| `nexus-ai-pro/context-hub` | 31 KB | 9% | none |
+| `nexus-ai-pro/telephony` | 31 KB | 9% | none |
+| `nexus-ai-pro/tracing` | 30 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
-| `nexus-ai-pro/evals` | 27 KB | 8% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
+| `nexus-ai-pro/images/stores` | 25 KB | 7% | none |
+| `nexus-ai-pro/runtime` | 24 KB | 7% | none |
+| `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 23 KB | 7% | none |
-| `nexus-ai-pro/images/stores` | 21 KB | 6% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
+| `nexus-ai-pro/images/assets` | 19 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
 | `nexus-ai-pro/protocols/a2a` | 19 KB | 6% | none |
-| `nexus-ai-pro/images/evals` | 18 KB | 5% | none |
+| `nexus-ai-pro/lifecycle` | 19 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 18 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 18 KB | 5% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
-| `nexus-ai-pro/lifecycle` | 18 KB | 5% | none |
+| `nexus-ai-pro/embeddings/adapters` | 17 KB | 5% | none |
 | `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
-| `nexus-ai-pro/embeddings/adapters` | 16 KB | 5% | none |
+| `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 5% | none |
 | `nexus-ai-pro/mcp` | 15 KB | 4% | none |
 | `nexus-ai-pro/protocols/acp` | 15 KB | 4% | none |
@@ -10818,7 +10825,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |
 | `nexus-ai-pro/prompts/client` | 15 KB | 4% | none |
 | `nexus-ai-pro/context` | 14 KB | 4% | none |
-| `nexus-ai-pro/images/assets` | 14 KB | 4% | none |
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
 | `nexus-ai-pro/sqlite/operations` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
@@ -10832,15 +10838,15 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/tenancy` | 12 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
+| `nexus-ai-pro/evals/judge` | 12 KB | 4% | none |
+| `nexus-ai-pro/providers` | 11 KB | 3% | none |
+| `nexus-ai-pro/providers/base` | 11 KB | 3% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/store` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
-| `nexus-ai-pro/testing/record` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/redis` | 11 KB | 3% | none |
-| `nexus-ai-pro/providers` | 10 KB | 3% | none |
-| `nexus-ai-pro/providers/base` | 10 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/migrations` | 10 KB | 3% | none |
@@ -10861,7 +10867,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/ops/rate-limit-adapters` | 7 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
 | `nexus-ai-pro/rag/elasticsearch` | 7 KB | 2% | none |
-| `nexus-ai-pro/evals/judge` | 7 KB | 2% | none |
 | `nexus-ai-pro/store` | 6 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/fulltext` | 6 KB | 2% | none |
@@ -10917,3 +10922,202 @@ after another with a long-lived signal, must each leave the heap within 8 MB of 
 after a collection. That check found 2.1 keeping about 5 KB per run whenever runs shared a signal.
 The release gate runs it; `npm run bench:runtime -- --update` records new budgets after a change
 that is meant to cost more.
+
+---
+
+Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/runtimes.md
+
+# Runtimes
+
+
+Most of this package runs on any JavaScript runtime: Node.js, Deno, Bun, edge runtimes such as
+Cloudflare Workers and Vercel's, and browsers. That includes:
+- the client;
+- every provider adapter;
+- graphs and agents;
+- the agent protocols.
+
+What needs Node.js is what needs a file system, a socket, a child process, or Node's crypto: file
+stores, the server, operations, telephony, and the sandbox. The table at the end lists each of
+those entry points and exactly what it needs.
+
+## The kernel
+
+`nexus-ai-pro/runtime` gathers the contracts every model call and tool call is built on into one
+small import. Nothing it reaches uses `fs`, `net`, `child_process`, Node's `crypto`, or Node's
+globals. The check that guards this fails the build if that ever changes. `runtimeInfo()` reports
+which runtime the code is on, as a `RuntimeInfo` with a `RuntimeName` and a version.
+
+```ts
+import { runtimeInfo, tool, collectStream } from 'nexus-ai-pro/runtime';
+import { GoogleProvider } from 'nexus-ai-pro/providers/google';
+
+export default {
+  async fetch(request: Request, env: { GEMINI_KEY: string }): Promise<Response> {
+    const provider = new GoogleProvider({ apiKey: env.GEMINI_KEY });
+    const stream = provider.stream({ model: 'gemini-3.8-flash', messages: [{ role: 'user', content: await request.text() }] });
+    return new Response(`${await collectStream(stream)} (${runtimeInfo().name})`);
+  },
+};
+```
+
+The kernel holds these.
+
+**Messages.** A `Message` has a `MessageRole` and content made of `ContentPart` values:
+- `TextContent`;
+- `ImageContent`, `AudioContent`, and `VideoContent`, whose bytes are a `BinaryBuffer`;
+- `AssetContent`, for media held in an asset store.
+
+A `CacheHint` marks where a cacheable prefix ends, and `PromptCacheConfig` sets how a request
+caches. A `CompletionRequest` carries the messages, the tools, a `ToolChoice`, and a
+`ReasoningConfig`.
+
+**Responses.** A `NexusResponse` has content, any `ToolCall` values, and its `ResponseMeta`:
+- `TokenUsage`;
+- `ResponseCost`;
+- the `CacheOutcome`.
+
+A stream is a `NexusStream` of `StreamChunk` values. `collectStream()` reads one to its text, and
+`mapStream()` transforms each chunk. `createTextStream()` makes a stream from text, for tests and
+cached answers.
+
+**The provider contract.** An adapter extends `BaseProvider`: it states its `ProviderInfo`, then
+completes and streams. Each call receives a `ProviderCallContext` with the operation's id, deadline,
+trace headers, and idempotency key.
+
+Failures are a `NexusProviderError` with a `NexusProviderErrorCategory`, built from
+`NexusProviderErrorOptions`:
+- `createProviderHttpError()` turns a failed HTTP response into one;
+- `toNexusProviderError()` turns anything thrown into one;
+- `categorizeProviderError()` reads the category;
+- `isRetryableProviderError()` says whether trying again can help;
+- `isAbortError()` recognizes a cancelled request.
+
+**The tool contract.** A `ToolDefinition` names a tool, describes it for the model, and declares
+its JSON Schema. `tool()` defines one with typed arguments. When an agent runs it, the tool
+receives a `ToolContext`. A tool returns any value, or a `ToolOutput` from `toolOutput()` that
+carries images back to the model. `isToolOutput()` recognizes one, and `toolMessageContent()` turns
+a result into the message the model reads. `ToolExecutor` runs tools by name outside an agent, and
+a `ToolCallResult` pairs a result with the call it answers.
+
+**Capabilities.** A tool declares what it does to the world as capabilities, read by
+`parseCapability()` into a `ParsedCapability`. `capabilitiesOf()` resolves the capabilities of a
+call. `isSensitiveCapability()` says which need a person's approval by default: anything but a read.
+
+Models have capabilities too. `negotiateCompletionRequest()` fits a request to what the routed
+model supports, by `NegotiateOptions`. It returns a `NegotiationResult` with each change it made,
+or raises a `NexusCapabilityError` under a strict policy.
+
+## Provider adapters on any runtime
+
+Each provider adapter keeps its own entry point, so an application loads only the providers it
+uses. The OpenAI, Anthropic, Google, and Cohere adapters take a `fetch` option. Every request then
+goes through it, for:
+- a platform's bound fetch;
+- a proxy that adds credentials;
+- a stub in a test.
+
+The OpenAI and Anthropic adapters call their official SDKs, which run on every runtime. Each SDK
+is an optional peer, loaded only when a request is sent.
+
+```ts
+import { OpenAIProvider } from 'nexus-ai-pro/providers/openai';
+
+const provider = new OpenAIProvider({
+  apiKey: env.OPENAI_KEY,
+  fetch: (input, init) => env.EGRESS.fetch(input, init),
+});
+```
+
+The client, graphs, agents, and the agent protocols need nothing more. A graph's node cache keys
+its entries with SHA-256 in plain JavaScript. It uses the runtime's native digest where one is
+available synchronously, and the digest is the same either way. Ids come from Web Crypto.
+
+## Proof
+
+The kernel's tests are written against web-standard APIs only, with no test framework and nothing
+of Node's. One file, `tests/portable/kernel.mjs`, runs on four runtimes against the built package:
+- **Node.js and an edge runtime** run on every build. The edge runtime is Vercel's, which exposes
+  no `process`, `Buffer`, or `require`, and the tests are bundled first, as a platform's build would
+  bundle them.
+- **Deno and Bun** run in CI beside it.
+
+On each runtime, the tests check the following:
+- tools and capabilities;
+- streams;
+- a provider over `fetch`, completing and streaming against a stub that splits the stream mid-frame;
+- the client routing a request to a provider;
+- a graph with a cached node;
+- an agent calling a tool;
+- an agent answering over A2A and rendering over AG-UI.
+
+`scripts/check-portability.mjs` walks every entry point's imports, static and dynamic, and fails
+the build in two cases:
+- the client, the kernel, a provider adapter, graphs, agents, or a protocol reaches anything
+  Node-only;
+- the table below falls out of date.
+
+## Limitations
+
+- **Browsers are covered by the checks, not by a browser run.** The import check holds for them,
+  and the edge runtime has only the web platform's globals, but CI does not open a browser.
+- **A provider key in a browser is visible to every user.** Call providers from a server or an edge
+  function, or through a proxy that holds the key. Some providers also refuse cross-origin requests.
+- **SHA-256 in plain JavaScript is slower on large inputs.** It takes about 7 µs for a typical
+  cache key, and about ten times native time for megabytes of image bytes. It is used only where
+  the runtime has no synchronous native digest.
+
+## What needs Node.js
+
+The table is generated from the built package's import graph, so it is exact. A runtime with Node
+compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
+
+
+Of 157 entry points, 125 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+
+| Entry point | Needs |
+| --- | --- |
+| `nexus-ai-pro/voice/openai` | the `Buffer` global |
+| `nexus-ai-pro/images` | `node:fs/promises`, `node:path` |
+| `nexus-ai-pro/images/openai` | the `Buffer` global |
+| `nexus-ai-pro/images/google` | the `Buffer` global |
+| `nexus-ai-pro/images/comfyui` | the `Buffer` global |
+| `nexus-ai-pro/images/transform` | `node:zlib`; the `Buffer` global |
+| `nexus-ai-pro/images/inputs` | `node:dns/promises`, `node:http`, `node:https`, `node:net`; the `Buffer` global |
+| `nexus-ai-pro/images/moderation` | the `Buffer` global |
+| `nexus-ai-pro/operations` | `node:crypto`; the `Buffer` global |
+| `nexus-ai-pro/operations/webhooks` | `node:crypto`; the `Buffer` global |
+| `nexus-ai-pro/agent/sandbox` | the `process` global |
+| `nexus-ai-pro/deep-agent` | the `process` global |
+| `nexus-ai-pro/mcp` | the `process` global |
+| `nexus-ai-pro/mcp/registry` | the `process` global |
+| `nexus-ai-pro/tracing` | `node:fs/promises`, `node:path`, `node:async_hooks` |
+| `nexus-ai-pro/tracing/otlp` | `node:async_hooks` |
+| `nexus-ai-pro/evaluate` | `node:fs/promises`, `node:path`; the `process` global |
+| `nexus-ai-pro/insights` | the `process` global |
+| `nexus-ai-pro/connectors` | `node:dns/promises`, `node:http`, `node:https`, `node:net`; the `Buffer` global |
+| `nexus-ai-pro/server` | `node:crypto`; the `Buffer` global |
+| `nexus-ai-pro/doctor` | `node:module`, `node:path`; the `process` global |
+| `nexus-ai-pro/prompts/registry` | `node:crypto`; the `Buffer` global |
+| `nexus-ai-pro/prompts/file` | `node:fs/promises`, `node:path`; the `process` global |
+| `nexus-ai-pro/testing/record` | `node:fs/promises`, `node:path`; the `Buffer` global, the `process` global |
+| `nexus-ai-pro/batch` | `node:crypto`; the `Buffer` global |
+| `nexus-ai-pro/images/stores` | `node:fs/promises`, `node:path` |
+| `nexus-ai-pro/telephony` | the `Buffer` global |
+| `nexus-ai-pro/telephony/realtime-bridge` | the `Buffer` global |
+| `nexus-ai-pro/telephony/twilio` | `node:crypto`; the `Buffer` global |
+| `nexus-ai-pro/loaders/web` | `node:dns/promises`, `node:http`, `node:https`, `node:net`; the `Buffer` global |
+| `nexus-ai-pro/loaders/git` | the `process` global |
+| `nexus-ai-pro/rag/redis` | the `Buffer` global |
+
+These run anywhere, and load a Node module only when a feature that needs it is used:
+
+| Entry point | Loads, when used |
+| --- | --- |
+| `nexus-ai-pro/images/evals` | `node:zlib`; the `Buffer` global |
+| `nexus-ai-pro/loaders/text` | `node:fs/promises`, `node:path` |
+| `nexus-ai-pro/loaders/markdown` | `node:fs/promises` |
+| `nexus-ai-pro/loaders/html` | `node:fs/promises` |
+| `nexus-ai-pro/loaders/csv` | `node:fs/promises` |
+| `nexus-ai-pro/loaders/json` | `node:fs/promises` |
+| `nexus-ai-pro/loaders/pdf` | `node:fs/promises` |

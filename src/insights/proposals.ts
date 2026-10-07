@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { ContextBundle, ContextBundleDefinition, ContextHub } from '../context-hub/hub.js';
 import type { CompareOptions, MetricComparison } from '../evaluate/compare.js';
 import type { PromptRegistry } from '../prompts/registry.js';
@@ -238,7 +237,7 @@ export async function proposeFix(options: ProposeFixOptions): Promise<FixProposa
       ? 'improved'
       : 'unchanged';
   const proposal: FixProposal = {
-    id: `fix-${randomUUID()}`,
+    id: `fix-${globalThis.crypto.randomUUID()}`,
     issueId: options.issue.id,
     issue: options.issue.summary,
     kind: subject.kind,

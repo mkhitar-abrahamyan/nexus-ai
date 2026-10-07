@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from '../utils/sha256.js';
 import type { CacheAdapter } from '../cache/adapters.js';
 import type { NodeCacheEntry, NodeCachePolicy } from '../types/graph.js';
 
@@ -26,7 +26,7 @@ export class NodeCache {
   key(policy: NodeCachePolicy, node: string, state: unknown, input: unknown): string | undefined {
     if (policy.key) return policy.key({ node, state, ...(input === undefined ? {} : { input }) });
     const material = keyMaterial({ graph: this.graphName, node, state, input });
-    return material === undefined ? undefined : `nexus-graph:${createHash('sha256').update(material).digest('hex')}`;
+    return material === undefined ? undefined : `nexus-graph:${sha256Hex(material)}`;
   }
 
   // A cache that cannot be read or written is a miss, never a failed node: the node's own result is
@@ -97,7 +97,7 @@ function keyMaterial(value: unknown): string | undefined {
     if (typeof current === 'number') return Number.isFinite(current) ? current : { $number: String(current) };
     if (typeof current !== 'object') throw new TypeError('unkeyable');
     if (current instanceof Date) return { $date: current.toISOString() };
-    if (current instanceof Uint8Array) return { $bytes: createHash('sha256').update(current).digest('hex') };
+    if (current instanceof Uint8Array) return { $bytes: sha256Hex(current) };
     if (ancestors.has(current)) throw new TypeError('circular');
     const prototype = Object.getPrototypeOf(current);
     if (!Array.isArray(current) && prototype !== Object.prototype && prototype !== null) {

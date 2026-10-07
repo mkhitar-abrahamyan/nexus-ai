@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-
+import { sha256Hex } from '../utils/sha256.js';
 import type {
   AssetBytesLocation,
   AssetChecksum,
@@ -287,7 +286,7 @@ export function cloneChecksum(checksum: AssetChecksum): AssetChecksum {
 }
 
 export function sha256Checksum(bytes: Uint8Array, supplied?: AssetChecksum): AssetChecksum {
-  const value = createHash('sha256').update(bytes).digest('hex');
+  const value = sha256Hex(bytes);
   if (supplied && supplied.algorithm.toLowerCase().replaceAll('-', '') === 'sha256') {
     if (supplied.value.toLowerCase() !== value) {
       throw new AssetStoreValidationError('Supplied SHA-256 checksum does not match the asset bytes');

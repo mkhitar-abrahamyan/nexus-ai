@@ -44,7 +44,7 @@ export class CohereProvider extends BaseProvider {
     try {
       this.throwIfAborted(request);
       const startTime = Date.now();
-      const response = await fetch(`${this.baseUrl()}/v2/chat`, {
+      const response = await (this.config.fetch ?? fetch)(`${this.baseUrl()}/v2/chat`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.config.apiKey}`,
@@ -113,7 +113,7 @@ export class CohereProvider extends BaseProvider {
 
   /** Whether the models endpoint answers with the configured key. */
   async healthCheck(): Promise<boolean> {
-    const response = await fetch(`${this.baseUrl()}/v2/models`, {
+    const response = await (this.config.fetch ?? fetch)(`${this.baseUrl()}/v2/models`, {
       headers: { Authorization: `Bearer ${this.config.apiKey}` },
     });
     return response.ok;

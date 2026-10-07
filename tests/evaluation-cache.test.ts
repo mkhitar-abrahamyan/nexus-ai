@@ -3,12 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import {
-  evaluationCacheKey,
-  FileEvaluationCache,
-  fingerprintOf,
-  MemoryEvaluationCache,
-} from '../src/evaluate/cache.js';
+import { evaluationCacheKey, fingerprintOf, MemoryEvaluationCache } from '../src/evaluate/cache.js';
+import { FileEvaluationCache } from '../src/evaluate/file-cache.js';
 import { compareExperiments } from '../src/evaluate/compare.js';
 import { createDataset } from '../src/evaluate/datasets.js';
 import { exactMatch } from '../src/evaluate/evaluators.js';

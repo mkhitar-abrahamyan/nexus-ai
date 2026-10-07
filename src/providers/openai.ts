@@ -168,6 +168,7 @@ export class OpenAIProvider extends BaseProvider {
         organization: this.config.organization,
         defaultHeaders: this.config.defaultHeaders,
         defaultQuery: this.config.defaultQuery,
+        ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
       } as ConstructorParameters<typeof OpenAI>[0]) as OpenAIClient;
     }
     return this.client;

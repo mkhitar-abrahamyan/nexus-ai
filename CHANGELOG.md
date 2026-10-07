@@ -45,6 +45,20 @@ Graduation and interoperability.
     Client Protocol. The editor sees streamed text and thought, each tool call with its kind, file,
     and diff, and the plan from `write_todos`. It asks the person to approve calls, and keeps an
     always-allow or always-reject choice for the session.
+- **A portable kernel**, on the new `nexus-ai-pro/runtime`: messages, responses, the provider and
+  tool contracts, streaming, and capabilities, in one small import that reaches nothing Node-only.
+  `runtimeInfo()` names the runtime the code is on.
+- **The client, the provider adapters, graphs, agents, and the agent protocols run on Deno, Bun,
+  edge runtimes, and browsers.**
+  - Ids come from Web Crypto.
+  - SHA-256 for node-cache keys and dataset versions is computed in plain JavaScript where the
+    runtime has no synchronous native digest. The digests are identical, so existing cache keys
+    still match.
+  - Base64 and UTF-8 byte counts no longer need `Buffer`.
+  - 125 of 157 entry points now run anywhere. The new runtimes guide lists the rest, each with
+    exactly what it needs.
+- The OpenAI, Anthropic, Google, and Cohere providers take a `fetch` option: a platform's bound
+  fetch, a proxy, or a test stub.
 
 ### Security
 
@@ -81,6 +95,9 @@ Testing the security code to depth found these gaps, and each is closed:
 
 ### Fixed
 
+- Bundling the client for an edge runtime failed: it reached the file-based evaluation cache, which
+  loads `node:fs`. `FileEvaluationCache` now lives in a module of its own, still exported from
+  `nexus-ai-pro/evaluate`.
 - `extractCitations()` and `validateCitations()` read a Markdown link `[text](url)` as a citation,
   and `[doc-1, doc-2]` as one id; links are ignored and lists are split.
 - The semantic injection classifier embeds a request in one call instead of one per message, and
@@ -111,6 +128,11 @@ Testing the security code to depth found these gaps, and each is closed:
   no Nexus client code, approval and resume included.
 - An editor's end of an ACP connection approves an edit, and sees the plan, the diff, and the
   answer.
+- The kernel's tests pass on Node.js, Deno, Bun, and Vercel's edge runtime, and CI runs all four.
+  The tests are written against web-standard APIs only, with no test framework and nothing of Node's,
+  and they cover a provider over `fetch`, the client, a cached graph, an agent, and A2A and AG-UI.
+  A check walks every entry point's imports, static and dynamic. It fails the build when the client,
+  the kernel, a provider adapter, graphs, agents, or a protocol reaches anything Node-only.
 
 ## [2.3.0] - 2026-10-06
 

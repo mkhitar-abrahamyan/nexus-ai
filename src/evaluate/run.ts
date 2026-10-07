@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomHex } from '../utils/ids.js';
 import { NEXUS_VERSION } from '../version.js';
 import { type EvaluationCache, evaluationCacheKey } from './cache.js';
 import { declaredProvenance } from './provenance.js';
@@ -124,7 +124,7 @@ export async function evaluate<I = unknown, O = unknown>(
   for (const evaluator of options.summary ?? []) summary.push(...(await evaluator(results)));
 
   const experiment: Experiment = {
-    id: `exp-${randomBytes(6).toString('hex')}`,
+    id: `exp-${randomHex(6)}`,
     name: options.name ?? `${dataset.name} ${startedAt}`,
     dataset: { name: dataset.name, version: dataset.version },
     startedAt,

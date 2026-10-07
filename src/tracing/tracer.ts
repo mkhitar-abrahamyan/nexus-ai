@@ -1,5 +1,5 @@
+import { randomHex } from '../utils/ids.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomBytes } from 'node:crypto';
 import type {
   Run,
   RunFeedback,
@@ -352,7 +352,7 @@ export class Tracer {
 }
 
 function id(prefix: string): string {
-  return `${prefix}-${randomBytes(8).toString('hex')}`;
+  return `${prefix}-${randomHex(8)}`;
 }
 
 /**

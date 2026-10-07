@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomHex } from '../utils/ids.js';
 import type {
   ChannelSchema,
   CompileOptions,
@@ -1549,7 +1549,7 @@ export function createGraph<S extends ChannelSchema>(config: {
 }
 
 function resolveThreadId(requested: string | undefined): string {
-  return requested?.trim() || `thread-${randomBytes(6).toString('hex')}`;
+  return requested?.trim() || `thread-${randomHex(6)}`;
 }
 
 function describe(error: unknown): string {

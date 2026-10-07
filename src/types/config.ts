@@ -35,6 +35,11 @@ export interface OpenAIProviderConfig {
   apiKey: string;
   /** API base URL. Point it at an OpenAI-compatible server to use that instead. */
   baseUrl?: string;
+  /**
+   * Replaces the global `fetch` for every request: a platform's bound fetch on an edge runtime, a
+   * proxy, or a stub in tests.
+   */
+  fetch?: typeof globalThis.fetch;
   /** OpenAI organization to bill. */
   organization?: string;
   /** Headers added to every request. */
@@ -70,6 +75,11 @@ export interface AnthropicProviderConfig {
   apiKey: string;
   /** API base URL. */
   baseUrl?: string;
+  /**
+   * Replaces the global `fetch` for every request: a platform's bound fetch on an edge runtime, a
+   * proxy, or a stub in tests.
+   */
+  fetch?: typeof globalThis.fetch;
   /** Name this provider registers under. */
   providerName?: string;
   /** Model-name prefixes this provider answers for. */
@@ -87,6 +97,11 @@ export interface GoogleProviderConfig {
   apiKey: string;
   /** API base URL. */
   baseUrl?: string;
+  /**
+   * Replaces the global `fetch` for every request: a platform's bound fetch on an edge runtime, a
+   * proxy, or a stub in tests.
+   */
+  fetch?: typeof globalThis.fetch;
 }
 
 /** Configuration for a local Ollama server. */
@@ -117,6 +132,11 @@ export interface CohereProviderConfig {
   apiKey: string;
   /** API base URL. */
   baseUrl?: string;
+  /**
+   * Replaces the global `fetch` for every request: a platform's bound fetch on an edge runtime, a
+   * proxy, or a stub in tests.
+   */
+  fetch?: typeof globalThis.fetch;
 }
 
 export interface OpenRouterProviderConfig {

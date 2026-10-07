@@ -1,3 +1,4 @@
+import { decodeBase64 } from '../utils/base64.js';
 import { BaseProvider, type ProviderInfo } from './base.js';
 import type { CompletionRequest, ContentPart, Message } from '../types/messages.js';
 import type { GoogleProviderConfig } from '../types/config.js';
@@ -199,7 +200,7 @@ export class GoogleProvider extends BaseProvider {
     const endpoint = stream ? 'streamGenerateContent' : 'generateContent';
     const url = `${this.baseUrl()}/models/${encodeURIComponent(model)}:${endpoint}?key=${encodeURIComponent(this.config.apiKey)}${stream ? '&alt=sse' : ''}`;
     const body = JSON.stringify(this.createBody(request));
-    const response = await fetch(url, {
+    const response = await (this.config.fetch ?? fetch)(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body,
@@ -416,14 +417,4 @@ export class GoogleProvider extends BaseProvider {
   private compact<T extends Record<string, unknown>>(value: T): T {
     return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
   }
-}
-
-/** Decodes base64 text to bytes, with Node's Buffer when it is there and the web API otherwise. */
-function decodeBase64(data: string): Uint8Array {
-  const buffer = (globalThis as { Buffer?: { from(data: string, encoding: string): Uint8Array } }).Buffer;
-  if (buffer) return new Uint8Array(buffer.from(data, 'base64'));
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
 }

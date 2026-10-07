@@ -1,3 +1,4 @@
+import { utf8Length } from '../utils/ids.js';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Run, RunFeedback, RunQuery, RunTree, TraceStore } from '../types/tracing.js';
@@ -214,7 +215,7 @@ export class JsonlTraceStore implements TraceStore {
     } catch {
       return;
     }
-    if (Buffer.byteLength(content, 'utf8') <= this.maxBytes) return;
+    if (utf8Length(content) <= this.maxBytes) return;
     const lines = content.split('\n').filter(Boolean);
     await writeFile(this.file, `${lines.slice(Math.floor(lines.length / 2)).join('\n')}\n`, 'utf8');
   }

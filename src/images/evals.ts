@@ -1,3 +1,4 @@
+import { Sha256, sha256Hex } from '../utils/sha256.js';
 import type {
   AssetDescriptor,
   AssetInput,
@@ -7,7 +8,6 @@ import type {
   ImageResult,
   MediaSafetyFinding,
 } from '../types/images.js';
-import { createHash } from 'node:crypto';
 import type { DatasetExample, EvaluationScore, Experiment, ExperimentStore } from '../types/evaluate.js';
 import type { RgbaImage } from './codec.js';
 import { linkSignals } from '../utils/signals.js';
@@ -599,18 +599,18 @@ function runScores(report: MediaEvalRunReport): EvaluationScore[] {
  * number in a string several times the image's size. Byte arrays are hashed by digest instead.
  */
 function mediaVersion(examples: ReadonlyArray<DatasetExample<MediaEvalCase>>): string {
-  const hash = createHash('sha256');
+  const hash = new Sha256();
   for (const example of examples) {
     hash.update(
       // A Buffer's toJSON() runs before a replacer sees the value, so the original is read from the
       // holder instead.
       JSON.stringify({ id: example.id, inputs: example.inputs }, function (this: Record<string, unknown>, key, value) {
         const original = this[key];
-        return original instanceof Uint8Array ? `bytes:${createHash('sha256').update(original).digest('hex')}` : value;
+        return original instanceof Uint8Array ? `bytes:${sha256Hex(original)}` : value;
       }),
     );
   }
-  return `v${hash.digest('hex').slice(0, 12)}`;
+  return `v${hash.digest().slice(0, 12)}`;
 }
 
 /** Case ids as example ids, with a suffix where two cases share an id. */

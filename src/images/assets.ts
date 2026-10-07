@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import type { AssetDescriptor } from '../types/images.js';
 import {
   AssetStoreCapacityError,
@@ -84,7 +82,7 @@ export class MemoryAssetStore implements AssetStore {
     this.maxTotalBytes = capacityOption(options.maxTotalBytes, DEFAULT_MAX_TOTAL_BYTES, 'maxTotalBytes');
     this.maxAssetBytes = capacityOption(options.maxAssetBytes, DEFAULT_MAX_ASSET_BYTES, 'maxAssetBytes');
     this.defaultTtlSeconds = optionalPositiveNumber(options.defaultTtlSeconds, 'defaultTtlSeconds');
-    this.createAssetId = options.createAssetId ?? randomUUID;
+    this.createAssetId = options.createAssetId ?? (() => globalThis.crypto.randomUUID());
     this.clock = options.now ?? (() => new Date());
     this.signer = options.signer;
   }

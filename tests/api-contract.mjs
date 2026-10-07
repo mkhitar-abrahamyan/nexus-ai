@@ -48,6 +48,7 @@ const expectedSubpaths = [
   '.',
   './core',
   './streaming',
+  './runtime',
   './config',
   './providers',
   './providers/anthropic',

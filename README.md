@@ -9,6 +9,9 @@ Import only what you use. The root import is the client and nothing else, and ev
 has its own entry point with a size budget CI enforces; [the packaging guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md)
 publishes what each one costs. The package has no required dependencies: a graph-only application
 loads 80 KB, and installs nothing but this package.
+The client, the provider adapters, graphs, agents, and the agent protocols run on Node.js, Deno,
+Bun, edge runtimes, and browsers; [the runtimes guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/runtimes.md)
+lists the entry points that need Node.js, and why.
 
 - NPM: https://www.npmjs.com/package/nexus-ai-pro
 - GitHub: https://github.com/mkhitar-abrahamyan/nexus-ai
@@ -165,6 +168,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Workflows](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md) | Ready-made chains and domain workflows |
 | [Command line](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) | The `nexus` command |
 | [Packaging and install weight](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md) | Every entry point and what it costs |
+| [Runtimes](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/runtimes.md) | The portable kernel, and running the client, providers, graphs, and agents on Deno, Bun, edge runtimes, and browsers |
 
 ## Examples
 

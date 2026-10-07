@@ -52,11 +52,12 @@ export {
   type CachedOutput,
   type EvaluationCache,
   evaluationCacheKey,
-  FileEvaluationCache,
   fingerprintOf,
   MemoryEvaluationCache,
   type MemoryEvaluationCacheOptions,
 } from './cache.js';
+// File-system code of its own, so what reaches the cache helpers runs on any runtime.
+export { FileEvaluationCache } from './file-cache.js';
 export type {
   Dataset,
   DatasetExample,

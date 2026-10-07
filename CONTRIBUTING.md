@@ -45,6 +45,7 @@ regenerate it in the change that edits the source.
 | `src/models/generated.ts` | `data/models/*.json` | `npm run registry:generate` |
 | The reference at the end of each guide | The doc comments | `npm run docs:update` |
 | `llms.txt` and `llms-full.txt` | The README and the guides | `npm run llms:generate`, which `docs:update` also runs |
+| The size table in `docs/packaging.md` and the runtimes table in `docs/runtimes.md` | The built package's import graph | `npm run size:update`, before `docs:update` |
 
 
 ## Running real-provider tests
@@ -93,6 +94,9 @@ The automated checks catch a missing export but not a half-wired one, so work th
 - add focused unit tests, including the smallest and largest realistic call;
 - run `npm run size:update` when the import graph changes, and check the diff: a jump in an unrelated
   entry point means a shared module reached somewhere it should not have;
+- keep the client, the kernel, the provider adapters, graphs, agents, and the agent protocols free of
+  Node built-ins and Node globals. `npm run test:portable` checks every entry point's imports and
+  runs the kernel's tests on Node.js and an edge runtime, and CI runs them on Deno and Bun as well;
 - document the feature once, in the most relevant README section, rather than in several places;
 - record the change under `Unreleased` in `CHANGELOG.md`;
 - follow `API_STABILITY.md`, and state any new guarantee there explicitly.
