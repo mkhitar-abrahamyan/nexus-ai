@@ -286,6 +286,61 @@ await assert.rejects(
   writeFileSync(smokePath, smokeScript);
   run(process.execPath, [smokePath], consumerDir);
 
+  // A community adapter, outside this repository: a vector store written against nothing but the kit
+  // from the installed package, which must pass the same contract this package's own stores pass.
+  const communityAdapter = `
+import { defineVectorStoreAdapter } from 'nexus-ai-pro/adapter-kit';
+
+const embed = (texts) =>
+  texts.map((text) => {
+    const vector = new Array(512).fill(0);
+    for (const word of text.toLowerCase().match(/[a-z]+/g) ?? []) {
+      let hash = 0x811c9dc5;
+      for (const char of word) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193) >>> 0;
+      vector[hash % 512] += 1;
+    }
+    const norm = Math.hypot(...vector) || 1;
+    return vector.map((value) => value / norm);
+  });
+
+class ArrayVectorStore {
+  constructor() { this.rows = new Map(); }
+  async add(documents) {
+    const vectors = embed(documents.map((doc) => doc.content));
+    documents.forEach((doc, index) => this.rows.set(doc.id, { ...doc, embedding: doc.embedding ?? vectors[index] }));
+  }
+  async search(query, options = {}) { return this.searchVector(embed([query])[0], options); }
+  async searchVector(vector, options = {}) {
+    const matches = (doc) => Object.entries(options.filter ?? {}).every(([key, value]) => doc.metadata?.[key] === value);
+    return [...this.rows.values()]
+      .filter(matches)
+      .map(({ embedding, ...doc }) => ({ ...doc, score: embedding.reduce((sum, value, index) => sum + value * vector[index], 0) }))
+      .filter((doc) => doc.score >= (options.minScore ?? 0))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, options.topK ?? 5);
+  }
+  async delete(ids) { for (const id of ids) this.rows.delete(id); }
+}
+
+const adapter = defineVectorStoreAdapter({
+  name: '@community/array-vectors',
+  version: '0.1.0',
+  nexus: '^2.3.0',
+  capabilities: { filters: 'typed' },
+  create: () => new ArrayVectorStore(),
+  budgets: { search: 250 },
+});
+const report = await adapter.verify(undefined, { embed });
+if (!report.passed) {
+  console.error(JSON.stringify(report.checks.filter((check) => !check.ok), null, 2));
+  process.exit(1);
+}
+console.log(\`community adapter passed \${report.checks.length} checks against nexus-ai-pro \${report.nexusVersion}\`);
+`;
+  const communityPath = path.join(consumerDir, 'community-adapter.mjs');
+  writeFileSync(communityPath, communityAdapter);
+  run(process.execPath, [communityPath], consumerDir);
+
   runNpm(['exec', '--offline', '--', 'nexus', 'help'], consumerDir);
   for (const optional of ['zod', 'ajv', 'ajv-formats', '@types/node']) {
     assert.equal(

@@ -830,6 +830,16 @@
         "default": "./dist-cjs/testing/index.js"
       }
     },
+    "./adapter-kit": {
+      "import": {
+        "types": "./dist/adapter-kit/index.d.ts",
+        "default": "./dist/adapter-kit/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/adapter-kit/index.d.ts",
+        "default": "./dist-cjs/adapter-kit/index.js"
+      }
+    },
     "./next": {
       "import": {
         "types": "./dist/next/route-handler.d.ts",
@@ -1985,6 +1995,9 @@
       ],
       "testing": [
         "dist-cjs/testing/index.d.ts"
+      ],
+      "adapter-kit": [
+        "dist-cjs/adapter-kit/index.d.ts"
       ],
       "next": [
         "dist-cjs/next/route-handler.d.ts"

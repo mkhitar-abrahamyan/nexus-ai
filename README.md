@@ -156,6 +156,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Realtime voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/realtime.md) | Browser and server realtime sessions with barge-in, tools, and exports |
 | [Telephony](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/telephony.md) | Calls, webhooks, phone numbers, and phone agents on realtime sessions |
 | [Testing](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/testing.md) | Recording and replaying provider traffic, and conformance suites |
+| [Adapter kit](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/adapter-kit.md) | Building a provider, store, or retriever outside this repository, and verifying it against the same contracts |
 | [Studio](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md) | A shared UI for traces, threads, approvals, experiments, prompts, deployments, costs, and health, as a separate package |
 | [Agent server](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md) | Self-hosted HTTP server for assistants: threads, durable runs, resumable streams, cron, a worker queue, and metrics |
 | [Deployments](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md) | Revisions and canaries with automatic rollback, autoscaling on Kubernetes and Helm, and per-tenant limits |

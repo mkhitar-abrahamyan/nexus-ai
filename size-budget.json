@@ -3,6 +3,7 @@
   "measuredAt": "2026-10-07",
   "maxKb": {
     ".": 376,
+    "./adapter-kit": 40,
     "./agent": 116,
     "./agent/middleware": 38,
     "./agent/permissions": 10,

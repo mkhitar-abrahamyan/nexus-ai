@@ -20,6 +20,17 @@ Graduation and interoperability.
     once per source.
   - Runs carry `feedback`. `POST /runs/:id/feedback` and `RunManager.addFeedback()` record a
     person's rating as well.
+- **An adapter kit**, on the new `nexus-ai-pro/adapter-kit`, for building adapters outside this
+  repository:
+  - `defineProviderAdapter()`, `defineEmbeddingsAdapter()`, `defineVectorStoreAdapter()`,
+    `defineRetrieverAdapter()`, and `defineStoreAdapter()`. Each takes a capability declaration
+    and the range of releases the adapter supports, read as npm reads ranges.
+  - Every instance normalizes its failures into an `AdapterError` with a code and `retryable`, and
+    reports each call to an `onCall` telemetry hook.
+  - `verify()` runs the adapter's contract suite, skipping only what it declares it cannot do, with
+    a benchmark held to the p95 budgets it declares.
+  - The vector-store, retriever, and store contracts ship as `runVectorStoreContract()`,
+    `runRetrieverContract()`, and `runStoreContract()`, with no test framework needed.
 
 ### Security
 
@@ -73,6 +84,10 @@ Testing the security code to depth found these gaps, and each is closed:
   runs, online evaluation recording the scores, and the guard reading them. A canary whose quality
   differs only within the noise keeps its share. A difference that 20,000 runs make significant, but
   that is under the minimum effect, is not a regression either.
+- A community-style adapter, built only from the kit, passes its contract suite. It is a vector store
+  in plain JavaScript inside the clean-install test's consumer project, importing nothing but
+  `nexus-ai-pro/adapter-kit` from the installed tarball. A deliberately broken store fails exactly the
+  checks it breaks.
 
 ## [2.3.0] - 2026-10-06
 

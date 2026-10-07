@@ -131,6 +131,7 @@ const expectedSubpaths = [
   './pipeline',
   './router',
   './testing',
+  './adapter-kit',
   './next',
   './rag/files',
   './optimizer/cost',

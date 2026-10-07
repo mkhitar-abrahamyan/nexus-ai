@@ -55,7 +55,11 @@ New and stable:
 - `confidence`, `minErrorRateIncrease`, `minFeedbackDrop`, and `resamples` on `watchCanaries()`;
   the same options and `seed` on `compareRuns()`; `Regression.interval`;
 - `Deployments.evaluate()` with `RunEvaluationOptions` and `RunEvaluationReport`;
-- `RunRecord.feedback`, `RunManager.addFeedback()`, and `POST /runs/:id/feedback`.
+- `RunRecord.feedback`, `RunManager.addFeedback()`, and `POST /runs/:id/feedback`;
+- `nexus-ai-pro/adapter-kit`: the `define*()` builders, `Adapter`, `AdapterDefinition`,
+  `AdapterReport`, `AdapterError` and its codes, the contract runners, and the capability types.
+  Contract checks may be added in a minor release when they test something the contract already
+  promised. A new check for a new promise arrives behind a capability an adapter must declare.
 
 Without `confidence`, a canary is judged as before.
 
