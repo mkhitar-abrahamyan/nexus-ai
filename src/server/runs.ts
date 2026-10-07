@@ -8,6 +8,7 @@ import type {
   OperationRunnerConfig,
   OperationStore,
 } from '../types/operations.js';
+import type { RunFeedback } from '../types/tracing.js';
 import type {
   AssistantRunContext,
   Principal,
@@ -375,6 +376,35 @@ export class RunManager {
       await this.releaseTenant(runId, options.principal?.tenantId);
       throw error;
     }
+  }
+
+  /**
+   * Leaves feedback on a run: a person's rating, or an online evaluator's score. A canary guard
+   * compares it between revisions as their quality. Another tenant's run is not found, and a run
+   * keeps its latest 100 pieces of feedback.
+   */
+  async addFeedback(
+    runId: string,
+    feedback: Omit<RunFeedback, 'createdAt'> & { createdAt?: string },
+    principal?: Principal,
+  ): Promise<RunRecord> {
+    const run = await this.run(runId, principal);
+    if (typeof feedback.key !== 'string' || !feedback.key.trim()) throw new BadRequestError('Feedback needs a key');
+    if (feedback.score !== undefined && !(typeof feedback.score === 'number' && Number.isFinite(feedback.score))) {
+      throw new BadRequestError('A feedback score is a finite number');
+    }
+    const at = this.now().toISOString();
+    const entry: RunFeedback = {
+      key: feedback.key,
+      ...(feedback.score === undefined ? {} : { score: feedback.score }),
+      ...(feedback.value === undefined ? {} : { value: feedback.value }),
+      ...(typeof feedback.comment === 'string' ? { comment: feedback.comment } : {}),
+      ...(typeof feedback.source === 'string' ? { source: feedback.source } : {}),
+      createdAt: feedback.createdAt ?? at,
+    };
+    const next: RunRecord = { ...run, feedback: [...(run.feedback ?? []), entry].slice(-100), updatedAt: at };
+    await this.state.put(RUNS, runId, next);
+    return next;
   }
 
   /** Cancels a run, including one another replica is executing. */

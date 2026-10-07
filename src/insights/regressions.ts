@@ -45,6 +45,22 @@ export interface CompareRunsOptions {
   minLatencyChangeMs?: number;
   /** A rise in mean cost, relative, that counts. Defaults to 0.25. */
   costIncrease?: number;
+  /**
+   * Judges every metric the way an evaluation comparison does, at this confidence, such as 0.95. Each
+   * metric is resampled by bootstrap, and it regresses only when two things hold: the change's
+   * interval does not reach zero, and the change is at least that metric's minimum effect. Noise and
+   * trivia both stay below the bar. Without it, the error rate uses a z-test at 95%, and latency and
+   * cost use their margins alone.
+   */
+  confidence?: number;
+  /** The smallest rise in the error rate, absolute, that counts under `confidence`. Defaults to 0.02. */
+  minErrorRateIncrease?: number;
+  /** The smallest fall in a feedback score's mean, absolute, that counts under `confidence`. Defaults to 0.05. */
+  minFeedbackDrop?: number;
+  /** Bootstrap resamples under `confidence`. Defaults to 1,000. */
+  resamples?: number;
+  /** Seeds the resampling, so the same runs always get the same verdict. Defaults to 1. */
+  seed?: number;
 }
 
 /** Options for `detectRegressions()`. */
@@ -96,6 +112,8 @@ export interface Regression {
   samples: { baseline: number; current: number };
   /** One readable line. */
   summary: string;
+  /** The change's interval, in the units of `change`, when the comparison was judged with `confidence`. */
+  interval?: [number, number];
 }
 
 /**
@@ -148,6 +166,7 @@ export function compareRuns(
   current: readonly RunSample[],
   options: CompareRunsOptions = {},
 ): Regression[] {
+  if (options.confidence !== undefined) return judgedRegressions(baseline, current, options, options.confidence);
   const name = options.group ?? 'runs';
   const minRuns = options.minRuns ?? 20;
   const metrics = new Set(options.metrics ?? ['error-rate', 'latency', 'cost']);
@@ -236,6 +255,203 @@ export function compareRuns(
     }
   }
   return regressions;
+}
+
+/**
+ * `compareRuns()` under `confidence`: each metric judged by a bootstrap interval and a minimum effect,
+ * as an evaluation comparison judges a score.
+ */
+function judgedRegressions(
+  baseline: readonly RunSample[],
+  current: readonly RunSample[],
+  options: CompareRunsOptions,
+  confidence: number,
+): Regression[] {
+  if (!(confidence > 0 && confidence < 1)) throw new RangeError('confidence is between 0 and 1, such as 0.95');
+  const name = options.group ?? 'runs';
+  const minRuns = options.minRuns ?? 20;
+  const metrics = new Set(options.metrics ?? ['error-rate', 'latency', 'cost']);
+  const judge = (
+    before: readonly number[],
+    after: readonly number[],
+    shape: Pick<MetricVerdictOptions, 'statistic' | 'relative' | 'worse' | 'minEffect'>,
+  ) =>
+    before.length >= minRuns && after.length >= minRuns
+      ? metricVerdict(before, after, {
+          ...shape,
+          confidence,
+          resamples: options.resamples ?? 1_000,
+          seed: options.seed ?? 1,
+        })
+      : undefined;
+  const regressions: Regression[] = [];
+  const add = (metric: string, verdict: MetricVerdict | undefined, counts: Regression['samples'], line: string) => {
+    if (!verdict?.regressed) return;
+    regressions.push({
+      group: name,
+      metric,
+      baseline: verdict.baseline,
+      current: verdict.current,
+      change: verdict.change,
+      samples: counts,
+      interval: verdict.interval,
+      summary: `${name}: ${line} (${Math.round(confidence * 100)}% interval ${formatInterval(verdict.interval, metric)})`,
+    });
+  };
+  const counts = { baseline: baseline.length, current: current.length };
+
+  if (metrics.has('error-rate')) {
+    const errors = (runs: readonly RunSample[]) => runs.map((run) => (run.status === 'error' ? 1 : 0));
+    const verdict = judge(errors(baseline), errors(current), {
+      statistic: meanOf,
+      relative: false,
+      worse: 'rise',
+      minEffect: options.minErrorRateIncrease ?? 0.02,
+    });
+    add(
+      'error-rate',
+      verdict,
+      counts,
+      `error rate rose from ${percent(verdict?.baseline ?? 0)} to ${percent(verdict?.current ?? 0)}`,
+    );
+  }
+  if (metrics.has('latency')) {
+    const latencies = (runs: readonly RunSample[]) => runs.map((run) => run.latencyMs).filter(isNumber);
+    const before = latencies(baseline);
+    const after = latencies(current);
+    const verdict = judge(before, after, {
+      statistic: (values) => percentile(values, 0.95) ?? 0,
+      relative: true,
+      worse: 'rise',
+      minEffect: options.latencyIncrease ?? 0.25,
+    });
+    // A relative rise of a few milliseconds is not a regression, however confident.
+    const large = verdict && verdict.current - verdict.baseline >= (options.minLatencyChangeMs ?? 0);
+    add(
+      'latency-p95',
+      large ? verdict : undefined,
+      { baseline: before.length, current: after.length },
+      `p95 latency rose from ${Math.round(verdict?.baseline ?? 0)}ms to ${Math.round(verdict?.current ?? 0)}ms`,
+    );
+  }
+  if (metrics.has('cost')) {
+    const costs = (runs: readonly RunSample[]) => runs.map((run) => run.cost).filter(isNumber);
+    const before = costs(baseline);
+    const after = costs(current);
+    const verdict = judge(before, after, {
+      statistic: meanOf,
+      relative: true,
+      worse: 'rise',
+      minEffect: options.costIncrease ?? 0.25,
+    });
+    add(
+      'cost',
+      verdict,
+      { baseline: before.length, current: after.length },
+      `mean cost rose from $${(verdict?.baseline ?? 0).toFixed(4)} to $${(verdict?.current ?? 0).toFixed(4)}`,
+    );
+  }
+  for (const feedbackKey of options.feedback ?? []) {
+    const scores = (runs: readonly RunSample[]) =>
+      runs
+        .flatMap((run) => (run.feedback ?? []).filter((item) => item.key === feedbackKey).map((item) => item.score))
+        .filter(isNumber);
+    const before = scores(baseline);
+    const after = scores(current);
+    const verdict = judge(before, after, {
+      statistic: meanOf,
+      relative: false,
+      worse: 'fall',
+      minEffect: options.minFeedbackDrop ?? 0.05,
+    });
+    add(
+      `feedback:${feedbackKey}`,
+      verdict,
+      { baseline: before.length, current: after.length },
+      `${feedbackKey} fell from ${(verdict?.baseline ?? 0).toFixed(2)} to ${(verdict?.current ?? 0).toFixed(2)}`,
+    );
+  }
+  return regressions;
+}
+
+/** How a metric is judged under `confidence`. */
+interface MetricVerdictOptions {
+  /** The statistic compared: a mean, or a percentile. */
+  statistic: (values: readonly number[]) => number;
+  /** Whether the change is a ratio, for latency and cost, or a difference, for rates and scores. */
+  relative: boolean;
+  /** Whether a rise is worse, for errors, latency, and cost, or a fall, for a quality score. */
+  worse: 'rise' | 'fall';
+  /** The smallest change in the bad direction that counts. */
+  minEffect: number;
+  confidence: number;
+  resamples: number;
+  seed: number;
+}
+
+interface MetricVerdict {
+  baseline: number;
+  current: number;
+  change: number;
+  interval: [number, number];
+  regressed: boolean;
+}
+
+/**
+ * One metric compared between two independent samples by bootstrap: both sides resampled with
+ * replacement, the change computed each time, the interval taken from the percentiles. It regresses
+ * when the observed change is at least `minEffect` in the bad direction and the interval does not
+ * reach zero.
+ */
+function metricVerdict(
+  baseline: readonly number[],
+  current: readonly number[],
+  options: MetricVerdictOptions,
+): MetricVerdict {
+  const change = (before: number, after: number) =>
+    options.relative ? (before === 0 ? 0 : after / before - 1) : after - before;
+  const before = options.statistic(baseline);
+  const after = options.statistic(current);
+  const random = seeded(options.seed);
+  const resample = (values: readonly number[]) =>
+    Array.from({ length: values.length }, () => values[Math.floor(random() * values.length)] as number);
+  const draws: number[] = [];
+  for (let index = 0; index < options.resamples; index += 1) {
+    draws.push(change(options.statistic(resample(baseline)), options.statistic(resample(current))));
+  }
+  draws.sort((a, b) => a - b);
+  const tail = (1 - options.confidence) / 2;
+  const at = (quantile: number) =>
+    draws[Math.min(draws.length - 1, Math.max(0, Math.floor(quantile * draws.length)))] as number;
+  const interval: [number, number] = [at(tail), at(1 - tail)];
+  const observed = change(before, after);
+  const regressed =
+    options.worse === 'rise'
+      ? observed >= options.minEffect && interval[0] > 0
+      : -observed >= options.minEffect && interval[1] < 0;
+  return { baseline: before, current: after, change: observed, interval, regressed };
+}
+
+/** Mulberry32: the same seed gives the same resamples, so a judgement can be reproduced. */
+function seeded(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function meanOf(values: readonly number[]): number {
+  return mean(values) ?? 0;
+}
+
+function formatInterval(interval: [number, number], metric: string): string {
+  const relative = metric === 'latency-p95' || metric === 'cost';
+  const show = (value: number) => (relative ? `${value >= 0 ? '+' : ''}${Math.round(value * 100)}%` : value.toFixed(3));
+  return `${show(interval[0])} to ${show(interval[1])}`;
 }
 
 function isNumber(value: unknown): value is number {

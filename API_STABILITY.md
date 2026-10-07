@@ -51,6 +51,14 @@ as the compatibility rules allow:
 - secret findings carry a preview instead of the value;
 - card and phone matches must pass their checks.
 
+New and stable:
+- `confidence`, `minErrorRateIncrease`, `minFeedbackDrop`, and `resamples` on `watchCanaries()`;
+  the same options and `seed` on `compareRuns()`; `Regression.interval`;
+- `Deployments.evaluate()` with `RunEvaluationOptions` and `RunEvaluationReport`;
+- `RunRecord.feedback`, `RunManager.addFeedback()`, and `POST /runs/:id/feedback`.
+
+Without `confidence`, a canary is judged as before.
+
 ## 2.3 stage (2.3.0)
 
 Everything 2.3 adds is stable from the start and additive: no default changes meaning.

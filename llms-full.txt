@@ -4325,6 +4325,16 @@ const regressions = compareRuns(liveRuns, canaryRuns, { group: 'support@v2', met
 Each run is a `RunSample`: a `status` (`error` counts as a failure), and optionally `latencyMs`,
 `cost`, and `feedback`. A traced `Run` already fits. `CompareRunsOptions` has the group name for the
 summaries, the metrics, the feedback keys, `minRuns`, and the latency and cost margins.
+
+With `confidence`, such as 0.95, each metric is judged instead by a seeded bootstrap. A metric then
+regresses only when its interval does not reach zero and the change is at least its minimum effect:
+- `minErrorRateIncrease` for the error rate;
+- the latency and cost margins;
+- `minFeedbackDrop` for a feedback score.
+
+So neither noise nor a trivially small change counts. `resamples` and `seed` control the bootstrap,
+and each `Regression` then carries its `interval`. The
+[canary guard](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md#judging-with-confidence-and-on-quality) judges canaries this way.
 `minLatencyChangeMs` sets the smallest latency rise that counts, in milliseconds, which keeps noise on
 fast runs from reading as a regression. `detectRegressions()` takes it too.
 
@@ -9029,6 +9039,7 @@ createServer(toNodeListener(server)).listen(8080);
 | `GET /threads/:id/runs` | That thread's runs |
 | `POST /runs`, `GET /runs`, `GET /runs/:id` | Stateless runs |
 | `POST /runs/:id/cancel` | Cancel, including a run another replica is executing |
+| `POST /runs/:id/feedback` | Leave feedback on a run: a `key`, and a `score`, a `value`, or a `comment` |
 | `GET /runs/:id/events` | The event stream, resumable with `Last-Event-ID` |
 | `POST /crons`, `GET /crons`, `DELETE /crons/:id` | Scheduled runs |
 | `GET /metrics`, `GET /scaling` | The queue and this replica, as Prometheus text and as JSON |
@@ -9093,6 +9104,10 @@ it, and `RunRecord` and `RunStatus` are what it reports.
   which is what makes a retried request safe.
 - **Cancellation.** `POST /runs/:id/cancel` aborts a local run at once and is observed by another
   replica through its heartbeat. A cancelled run stays cancelled even if its executor finishes later.
+- **Feedback.** `POST /runs/:id/feedback`, or `RunManager.addFeedback()`, adds feedback to the run
+  record. It may be a person's rating or an online evaluator's score, and a run keeps its latest 100.
+  The [canary guard](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md#judging-with-confidence-and-on-quality) compares it between
+  revisions as their quality.
 - **Timeouts.** `runTimeoutMs` expires a run that runs too long.
 
 A `RunRecord` also records how the run went:
@@ -9571,6 +9586,48 @@ A regressed canary is rolled back at once. The reason in the history names what 
 that holds up moves to its next step, and is promoted after the last one. Without `steps`, it stays
 where it is until a person promotes it.
 
+### Judging with confidence, and on quality
+
+Raw rates mislead in both directions. A few unlucky runs can roll back a good canary, and with enough
+traffic a trivially small change still clears a significance test. `confidence` judges every metric
+the way an evaluation comparison judges a score. Each metric is resampled by bootstrap, and it
+regresses only when both of these hold:
+- its interval at that confidence does not reach zero;
+- the change is at least the metric's minimum effect.
+
+| Metric | Minimum effect |
+| --- | --- |
+| error rate | `minErrorRateIncrease`, 0.02: two points |
+| p95 latency | `latencyIncrease`, a quarter, and at least `minLatencyChangeMs` |
+| mean cost | `costIncrease`, a quarter |
+| a feedback score | `minFeedbackDrop`, 0.05 |
+
+`resamples` sets the bootstrap's size, 1,000 by default. The resampling is seeded, so the same runs
+always get the same verdict, and the rollback reason quotes the interval.
+
+Quality comes from online evaluation. `Deployments.evaluate()` scores each finished run of an
+assistant with evaluators from `nexus-ai-pro/evaluate`, such as an LLM judge, and records the scores
+as the run's feedback. Name those keys in `feedback`, and a canary that answers worse is rolled back
+like one that fails more. A person can leave feedback on a run too, through
+`POST /runs/:runId/feedback`.
+
+```ts
+// Every few minutes: score new runs, then judge the canary on quality as well as errors and speed.
+await deployments.evaluate('support', { evaluators: [helpfulnessJudge], sampleRate: 0.2 });
+watchCanaries({ deployments, confidence: 0.95, minRuns: 50, feedback: ['helpfulness'] });
+```
+
+`RunEvaluationOptions` sets:
+- the `evaluators`;
+- `since`, the start of a canary for instance;
+- one `revision`;
+- a `sampleRate`, chosen by run id so every replica scores the same runs;
+- how many runs are read (`limit`);
+- the `source` the scores are recorded under. A run already scored by that source is skipped.
+
+`RunEvaluationReport` counts the runs scored and skipped, and lists every score. Evaluators judge a run
+by its output, since a run record does not keep its input.
+
 `CanaryGuardOptions`:
 
 | Option | Default | What it does |
@@ -9583,8 +9640,10 @@ where it is until a person promotes it.
 | `latencyIncrease`, `costIncrease` | 0.25 | The relative rise that counts. |
 | `minLatencyChangeMs` | 50 | The smallest latency rise that counts, so noise on fast runs never rolls a canary back. |
 | `steps` | none | Shares to move through while the canary holds up, before promotion. |
-| `samples` | run records | Where runs come from. Give it traced runs to judge on feedback scores too. |
-| `feedback` | none | Feedback keys to compare, when `samples` supplies them. |
+| `samples` | run records | Where runs come from, each with its feedback. Give it traced runs to judge on their feedback instead. |
+| `feedback` | none | Feedback keys to compare, such as the ones `Deployments.evaluate()` records. |
+| `confidence` | none | Judges each metric by a bootstrap interval and a minimum effect, as below. |
+| `minErrorRateIncrease`, `minFeedbackDrop`, `resamples` | 0.02, 0.05, 1,000 | The minimum effects and the bootstrap size under `confidence`. |
 | `by` | `guard` | Who the history says made the change. |
 | `onDecision`, `onError` | — | Hear each decision, and each failure. |
 
@@ -10253,7 +10312,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/core` | 329 KB | 97% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
 | `nexus-ai-pro/deep-agent` | 137 KB | 40% | none |
-| `nexus-ai-pro/server` | 116 KB | 34% | none |
+| `nexus-ai-pro/server` | 117 KB | 34% | none |
 | `nexus-ai-pro/batch` | 113 KB | 33% | none |
 | `nexus-ai-pro/agent` | 104 KB | 31% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
@@ -10283,6 +10342,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
 | `nexus-ai-pro/evaluate` | 38 KB | 11% | none |
+| `nexus-ai-pro/server/deployments` | 38 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
@@ -10290,13 +10350,12 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/middleware` | 33 KB | 10% | none |
 | `nexus-ai-pro/context-hub` | 32 KB | 9% | none |
 | `nexus-ai-pro/voice` | 31 KB | 9% | none |
+| `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 30 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 29 KB | 9% | none |
-| `nexus-ai-pro/server/deployments` | 29 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evals` | 27 KB | 8% | none |
-| `nexus-ai-pro/insights` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 23 KB | 7% | none |
 | `nexus-ai-pro/images/stores` | 21 KB | 6% | none |

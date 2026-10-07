@@ -8,6 +8,7 @@
  */
 
 import type { Principal } from './principal.js';
+import type { RunFeedback } from './tracing.js';
 
 export type { Principal };
 
@@ -77,6 +78,11 @@ export interface RunRecord {
   worker?: string;
   /** Its latest attempt, starting at 1. */
   attempt?: number;
+  /**
+   * Scores left on the run by people or by online evaluation, through `POST /runs/:runId/feedback`
+   * or `Deployments.evaluate()`. A canary guard compares them between revisions as its quality signal.
+   */
+  feedback?: RunFeedback[];
 }
 
 /** Why a run got the revision it did. */

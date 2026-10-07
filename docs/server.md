@@ -59,6 +59,7 @@ createServer(toNodeListener(server)).listen(8080);
 | `GET /threads/:id/runs` | That thread's runs |
 | `POST /runs`, `GET /runs`, `GET /runs/:id` | Stateless runs |
 | `POST /runs/:id/cancel` | Cancel, including a run another replica is executing |
+| `POST /runs/:id/feedback` | Leave feedback on a run: a `key`, and a `score`, a `value`, or a `comment` |
 | `GET /runs/:id/events` | The event stream, resumable with `Last-Event-ID` |
 | `POST /crons`, `GET /crons`, `DELETE /crons/:id` | Scheduled runs |
 | `GET /metrics`, `GET /scaling` | The queue and this replica, as Prometheus text and as JSON |
@@ -123,6 +124,10 @@ it, and `RunRecord` and `RunStatus` are what it reports.
   which is what makes a retried request safe.
 - **Cancellation.** `POST /runs/:id/cancel` aborts a local run at once and is observed by another
   replica through its heartbeat. A cancelled run stays cancelled even if its executor finishes later.
+- **Feedback.** `POST /runs/:id/feedback`, or `RunManager.addFeedback()`, adds feedback to the run
+  record. It may be a person's rating or an online evaluator's score, and a run keeps its latest 100.
+  The [canary guard](./deployments.md#judging-with-confidence-and-on-quality) compares it between
+  revisions as their quality.
 - **Timeouts.** `runTimeoutMs` expires a run that runs too long.
 
 A `RunRecord` also records how the run went:

@@ -256,6 +256,17 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
     const body = await readJson<{ reason?: string }>(request);
     return json(await runs.cancel(params.runId as string, principal, body.reason));
   });
+  write('POST', '/runs/:runId/feedback', async ({ request, params, principal }) => {
+    const body = await readJson<{ key: string; score?: number; value?: unknown; comment?: string; source?: string }>(
+      request,
+    );
+    const run = await runs.addFeedback(
+      params.runId as string,
+      { ...body, source: body.source ?? principal?.userId ?? 'api' },
+      principal,
+    );
+    return json({ runId: run.id, feedback: run.feedback?.at(-1) }, 201);
+  });
   read('GET', '/runs/:runId/events', async ({ request, params, principal, url }) => {
     await runs.run(params.runId as string, principal);
     const header = request.headers.get('last-event-id') ?? url.searchParams.get('lastEventId');

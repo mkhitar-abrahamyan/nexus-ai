@@ -6,6 +6,21 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 Graduation and interoperability.
 
+### Added
+
+- **Canaries judged with confidence, and on quality.**
+  - `watchCanaries({ confidence })` judges each metric the way an evaluation comparison judges a
+    score: a seeded bootstrap interval that must not reach zero, and a minimum effect —
+    `minErrorRateIncrease`, the latency and cost margins, and `minFeedbackDrop`. A real regression
+    rolls back; noise and a trivially small change do not. `compareRuns()` takes the same options,
+    and each `Regression` carries its `interval`.
+  - `Deployments.evaluate()` scores an assistant's finished runs with evaluators from
+    `nexus-ai-pro/evaluate`, and records the scores as run feedback. A canary that answers worse is
+    then rolled back like one that fails more. Sampling is stable by run id, and a run is scored
+    once per source.
+  - Runs carry `feedback`. `POST /runs/:id/feedback` and `RunManager.addFeedback()` record a
+    person's rating as well.
+
 ### Security
 
 Testing the security code to depth found these gaps, and each is closed:
@@ -54,6 +69,10 @@ Testing the security code to depth found these gaps, and each is closed:
   - file ingestion, which no test loaded before, at 97%.
 - Each security fix above is a test that names the attack it stops or the false positive it rules
   out.
+- A canary seeded with a quality regression is rolled back. The proof runs on a real server: 300
+  runs, online evaluation recording the scores, and the guard reading them. A canary whose quality
+  differs only within the noise keeps its share. A difference that 20,000 runs make significant, but
+  that is under the minimum effect, is not a regression either.
 
 ## [2.3.0] - 2026-10-06
 

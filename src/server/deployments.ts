@@ -1,4 +1,5 @@
 import { compareRuns, type Regression, type RegressionMetric, type RunSample } from '../insights/regressions.js';
+import type { EvaluationScore, Evaluator } from '../types/evaluate.js';
 import type {
   AssistantRunContext,
   DeploymentChange,
@@ -84,6 +85,32 @@ export interface RevisionStats {
   p95Ms?: number;
   /** Mean recorded cost of finished runs, in US dollars. */
   meanCost?: number;
+}
+
+/** Options for `Deployments.evaluate()`. */
+export interface RunEvaluationOptions {
+  /** What each run is scored by: evaluators from `nexus-ai-pro/evaluate`, such as an LLM judge. */
+  evaluators: ReadonlyArray<Evaluator>;
+  /** Only runs created from this time, such as the start of a canary. */
+  since?: string;
+  /** Only this revision's runs. Defaults to every revision's. */
+  revision?: string;
+  /** The share of runs scored, from 0 to 1, chosen by run id so every replica picks the same ones. Defaults to 1. */
+  sampleRate?: number;
+  /** How many recent runs are read. Defaults to 2,000. */
+  limit?: number;
+  /** Recorded as each score's source; a run already scored by this source is skipped. Defaults to `online-evaluation`. */
+  source?: string;
+}
+
+/** What `Deployments.evaluate()` did. */
+export interface RunEvaluationReport {
+  /** Runs scored. */
+  evaluated: number;
+  /** Runs passed over because this source had already scored them. */
+  skipped: number;
+  /** Every score given. */
+  scores: EvaluationScore[];
 }
 
 const DEPLOYMENTS = ['nexus', 'server', 'deployments'];
@@ -418,14 +445,73 @@ export class Deployments implements ServerDeployments {
     return (await this.runs(assistant, { since, limit }))
       .filter((run) => (run.revision?.id ?? '') === revision)
       .flatMap((run) => {
+        // Feedback travels with each run, so a guard can judge quality alongside errors and speed.
+        const feedback = run.feedback?.length ? { feedback: run.feedback } : {};
         if (run.status === 'failed' || run.status === 'expired') {
-          return [{ status: 'error', latencyMs: run.durationMs, cost: run.cost }];
+          return [{ status: 'error', latencyMs: run.durationMs, cost: run.cost, ...feedback }];
         }
         if (run.status === 'succeeded' || run.status === 'awaiting_input') {
-          return [{ status: 'success', latencyMs: run.durationMs, cost: run.cost }];
+          return [{ status: 'success', latencyMs: run.durationMs, cost: run.cost, ...feedback }];
         }
         return [];
       });
+  }
+
+  /**
+   * Online evaluation of the server's own runs: scores each finished run's output with evaluators
+   * from `nexus-ai-pro/evaluate`, and records the scores as the run's feedback. A canary guard given
+   * those keys in `feedback` then compares quality between revisions, beside errors, latency, and
+   * cost.
+   *
+   * A run is scored once per `source`, so calling this on a schedule never counts a run twice.
+   * Sampling is stable: the same run is always in or out of a sample, on every replica. Evaluators
+   * judge a run by its output, since a run record does not keep its input.
+   */
+  async evaluate(assistant: string, options: RunEvaluationOptions): Promise<RunEvaluationReport> {
+    const source = options.source ?? 'online-evaluation';
+    const rate = options.sampleRate ?? 1;
+    const report: RunEvaluationReport = { evaluated: 0, skipped: 0, scores: [] };
+    for (const run of await this.runs(assistant, options)) {
+      if (run.status !== 'succeeded') continue;
+      if (options.revision !== undefined && (run.revision?.id ?? '') !== options.revision) continue;
+      if (rate < 1 && bucket(`evaluate:${run.id}`) >= rate) continue;
+      if (run.feedback?.some((item) => item.source === source)) {
+        report.skipped += 1;
+        continue;
+      }
+      const scores: EvaluationScore[] = [];
+      for (const evaluator of options.evaluators) {
+        const value = await evaluator({
+          example: { id: run.id, inputs: undefined, ...(run.metadata ? { metadata: run.metadata } : {}) },
+          output: run.output,
+          latencyMs: run.durationMs ?? 0,
+          ...(run.cost === undefined ? {} : { cost: run.cost }),
+          run: 0,
+        });
+        if (typeof value === 'number') scores.push({ key: 'score', score: value });
+        else if (typeof value === 'boolean') scores.push({ key: 'score', score: value ? 1 : 0, passed: value });
+        else scores.push(...(Array.isArray(value) ? value : [value]));
+      }
+      const at = new Date().toISOString();
+      // Read again just before writing, so feedback a person left meanwhile is kept.
+      const latest = (await this.state.get<RunRecord>(RUNS_NAMESPACE, run.id)) ?? run;
+      await this.state.put(RUNS_NAMESPACE, run.id, {
+        ...latest,
+        feedback: [
+          ...(latest.feedback ?? []),
+          ...scores.map((score) => ({
+            key: score.key,
+            score: score.score,
+            ...(score.comment ? { comment: score.comment } : {}),
+            source,
+            createdAt: at,
+          })),
+        ].slice(-100),
+      });
+      report.evaluated += 1;
+      report.scores.push(...scores);
+    }
+    return report;
   }
 
   /** The deployment the router uses, reusing a recent read. */
@@ -497,8 +583,26 @@ export interface CanaryGuardOptions {
    * trace store to judge on feedback scores too, with `feedback` naming the keys.
    */
   samples?: (request: { assistant: string; revision: string; since: string }) => Promise<RunSample[]>;
-  /** Feedback keys whose mean score is compared, when `samples` supplies feedback. */
+  /**
+   * Feedback keys whose mean score is compared: the scores `Deployments.evaluate()` records from
+   * online evaluation, or any a person left through the feedback route. A canary that is worse on one
+   * is rolled back like one that fails more.
+   */
   feedback?: readonly string[];
+  /**
+   * Judges each metric as an evaluation comparison does, at this confidence, such as 0.95. A bootstrap
+   * interval must not reach zero, and the change must be at least the metric's minimum effect:
+   * `minErrorRateIncrease`, `latencyIncrease` with `minLatencyChangeMs`, `costIncrease`, and
+   * `minFeedbackDrop`. A real regression rolls back, and noise or a trivial change does not. Without
+   * it, the error rate uses a z-test at 95%, and latency and cost use their margins alone.
+   */
+  confidence?: number;
+  /** The smallest rise in the error rate, absolute, that counts under `confidence`. Defaults to 0.02. */
+  minErrorRateIncrease?: number;
+  /** The smallest fall in a feedback score's mean, absolute, that counts under `confidence`. Defaults to 0.05. */
+  minFeedbackDrop?: number;
+  /** Bootstrap resamples under `confidence`. Defaults to 1,000. */
+  resamples?: number;
   /** Recorded as who made a change. Defaults to `guard`. */
   by?: string;
   /** Hears every decision, including holds. */
@@ -583,6 +687,14 @@ export function watchCanaries(options: CanaryGuardOptions): CanaryGuard {
       latencyIncrease: options.latencyIncrease,
       minLatencyChangeMs: options.minLatencyChangeMs ?? 50,
       costIncrease: options.costIncrease,
+      ...(options.confidence === undefined
+        ? {}
+        : {
+            confidence: options.confidence,
+            minErrorRateIncrease: options.minErrorRateIncrease,
+            minFeedbackDrop: options.minFeedbackDrop,
+            resamples: options.resamples,
+          }),
     });
     if (regressions.length > 0) {
       await deployments.change(

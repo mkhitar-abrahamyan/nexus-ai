@@ -98,7 +98,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/core` | 329 KB | 97% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
 | `nexus-ai-pro/deep-agent` | 137 KB | 40% | none |
-| `nexus-ai-pro/server` | 116 KB | 34% | none |
+| `nexus-ai-pro/server` | 117 KB | 34% | none |
 | `nexus-ai-pro/batch` | 113 KB | 33% | none |
 | `nexus-ai-pro/agent` | 104 KB | 31% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
@@ -128,6 +128,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
 | `nexus-ai-pro/evaluate` | 38 KB | 11% | none |
+| `nexus-ai-pro/server/deployments` | 38 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 36 KB | 11% | none |
@@ -135,13 +136,12 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/middleware` | 33 KB | 10% | none |
 | `nexus-ai-pro/context-hub` | 32 KB | 9% | none |
 | `nexus-ai-pro/voice` | 31 KB | 9% | none |
+| `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 30 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 29 KB | 9% | none |
-| `nexus-ai-pro/server/deployments` | 29 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evals` | 27 KB | 8% | none |
-| `nexus-ai-pro/insights` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 23 KB | 7% | none |
 | `nexus-ai-pro/images/stores` | 21 KB | 6% | none |

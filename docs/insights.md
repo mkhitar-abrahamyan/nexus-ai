@@ -82,6 +82,16 @@ const regressions = compareRuns(liveRuns, canaryRuns, { group: 'support@v2', met
 Each run is a `RunSample`: a `status` (`error` counts as a failure), and optionally `latencyMs`,
 `cost`, and `feedback`. A traced `Run` already fits. `CompareRunsOptions` has the group name for the
 summaries, the metrics, the feedback keys, `minRuns`, and the latency and cost margins.
+
+With `confidence`, such as 0.95, each metric is judged instead by a seeded bootstrap. A metric then
+regresses only when its interval does not reach zero and the change is at least its minimum effect:
+- `minErrorRateIncrease` for the error rate;
+- the latency and cost margins;
+- `minFeedbackDrop` for a feedback score.
+
+So neither noise nor a trivially small change counts. `resamples` and `seed` control the bootstrap,
+and each `Regression` then carries its `interval`. The
+[canary guard](./deployments.md#judging-with-confidence-and-on-quality) judges canaries this way.
 `minLatencyChangeMs` sets the smallest latency rise that counts, in milliseconds, which keeps noise on
 fast runs from reading as a regression. `detectRegressions()` takes it too.
 

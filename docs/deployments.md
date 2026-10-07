@@ -157,6 +157,48 @@ A regressed canary is rolled back at once. The reason in the history names what 
 that holds up moves to its next step, and is promoted after the last one. Without `steps`, it stays
 where it is until a person promotes it.
 
+### Judging with confidence, and on quality
+
+Raw rates mislead in both directions. A few unlucky runs can roll back a good canary, and with enough
+traffic a trivially small change still clears a significance test. `confidence` judges every metric
+the way an evaluation comparison judges a score. Each metric is resampled by bootstrap, and it
+regresses only when both of these hold:
+- its interval at that confidence does not reach zero;
+- the change is at least the metric's minimum effect.
+
+| Metric | Minimum effect |
+| --- | --- |
+| error rate | `minErrorRateIncrease`, 0.02: two points |
+| p95 latency | `latencyIncrease`, a quarter, and at least `minLatencyChangeMs` |
+| mean cost | `costIncrease`, a quarter |
+| a feedback score | `minFeedbackDrop`, 0.05 |
+
+`resamples` sets the bootstrap's size, 1,000 by default. The resampling is seeded, so the same runs
+always get the same verdict, and the rollback reason quotes the interval.
+
+Quality comes from online evaluation. `Deployments.evaluate()` scores each finished run of an
+assistant with evaluators from `nexus-ai-pro/evaluate`, such as an LLM judge, and records the scores
+as the run's feedback. Name those keys in `feedback`, and a canary that answers worse is rolled back
+like one that fails more. A person can leave feedback on a run too, through
+`POST /runs/:runId/feedback`.
+
+```ts
+// Every few minutes: score new runs, then judge the canary on quality as well as errors and speed.
+await deployments.evaluate('support', { evaluators: [helpfulnessJudge], sampleRate: 0.2 });
+watchCanaries({ deployments, confidence: 0.95, minRuns: 50, feedback: ['helpfulness'] });
+```
+
+`RunEvaluationOptions` sets:
+- the `evaluators`;
+- `since`, the start of a canary for instance;
+- one `revision`;
+- a `sampleRate`, chosen by run id so every replica scores the same runs;
+- how many runs are read (`limit`);
+- the `source` the scores are recorded under. A run already scored by that source is skipped.
+
+`RunEvaluationReport` counts the runs scored and skipped, and lists every score. Evaluators judge a run
+by its output, since a run record does not keep its input.
+
 `CanaryGuardOptions`:
 
 | Option | Default | What it does |
@@ -169,8 +211,10 @@ where it is until a person promotes it.
 | `latencyIncrease`, `costIncrease` | 0.25 | The relative rise that counts. |
 | `minLatencyChangeMs` | 50 | The smallest latency rise that counts, so noise on fast runs never rolls a canary back. |
 | `steps` | none | Shares to move through while the canary holds up, before promotion. |
-| `samples` | run records | Where runs come from. Give it traced runs to judge on feedback scores too. |
-| `feedback` | none | Feedback keys to compare, when `samples` supplies them. |
+| `samples` | run records | Where runs come from, each with its feedback. Give it traced runs to judge on their feedback instead. |
+| `feedback` | none | Feedback keys to compare, such as the ones `Deployments.evaluate()` records. |
+| `confidence` | none | Judges each metric by a bootstrap interval and a minimum effect, as below. |
+| `minErrorRateIncrease`, `minFeedbackDrop`, `resamples` | 0.02, 0.05, 1,000 | The minimum effects and the bootstrap size under `confidence`. |
 | `by` | `guard` | Who the history says made the change. |
 | `onDecision`, `onError` | — | Hear each decision, and each failure. |
 
