@@ -150,6 +150,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
+| `nexus-ai-pro/protocols/a2a` | 19 KB | 6% | none |
 | `nexus-ai-pro/images/evals` | 18 KB | 5% | none |
 | `nexus-ai-pro/mcp/registry` | 18 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 18 KB | 5% | none |
@@ -163,6 +164,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/adapters` | 16 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 5% | none |
 | `nexus-ai-pro/mcp` | 15 KB | 4% | none |
+| `nexus-ai-pro/protocols/acp` | 15 KB | 4% | none |
 | `nexus-ai-pro/tracing/otlp` | 15 KB | 4% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |
 | `nexus-ai-pro/prompts/client` | 15 KB | 4% | none |
@@ -201,6 +203,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/migrations` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/lint` | 9 KB | 3% | none |
+| `nexus-ai-pro/protocols/ag-ui` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
 | `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |

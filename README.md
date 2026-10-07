@@ -136,6 +136,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [The deep-agent preset](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deep-agents.md) | Long, multi-step agents: a plan, a sandboxed workspace, helpers, skills, and a context that stays small |
 | [Long-term memory](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/memory.md) | Namespaced memory with semantic search, in memory or Redis |
 | [MCP](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/mcp.md) | Borrowing tools from MCP servers, a registry of many, and serving your own |
+| [Agent protocols](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/protocols.md) | Serving an agent to user interfaces over AG-UI, to other agents over A2A, and to code editors over ACP, and calling remote agents as tools |
 | [Traces](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tracing.md) | Run trees, queries, feedback, comparison, and alerts |
 | [Evaluation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md) | Datasets, evaluators, experiments, comparisons with a verdict, review queues, LLM judges |
 | [Context hub](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/context-hub.md) | Prompts, instructions, tools, and skills versioned together, promoted through gates, and moved between projects |

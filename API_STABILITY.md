@@ -60,6 +60,11 @@ New and stable:
   `AdapterReport`, `AdapterError` and its codes, the contract runners, and the capability types.
   Contract checks may be added in a minor release when they test something the contract already
   promised. A new check for a new promise arrives behind a capability an adapter must declare.
+- `nexus-ai-pro/protocols/ag-ui`, `nexus-ai-pro/protocols/a2a`, and `nexus-ai-pro/protocols/acp`:
+  the handlers, `a2aClient()`, `a2aTool()`, `serveAcp()`, and their types. Each speaks the
+  protocol version it names. A minor release may send an event or answer a method it did not
+  before, as a protocol adds them. An event or field already sent keeps its meaning. A new major
+  version of a protocol arrives beside the old one, not in its place.
 
 Without `confidence`, a canary is judged as before.
 

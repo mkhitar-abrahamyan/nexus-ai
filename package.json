@@ -620,6 +620,36 @@
         "default": "./dist-cjs/mcp/registry.js"
       }
     },
+    "./protocols/ag-ui": {
+      "import": {
+        "types": "./dist/protocols/ag-ui.d.ts",
+        "default": "./dist/protocols/ag-ui.js"
+      },
+      "require": {
+        "types": "./dist-cjs/protocols/ag-ui.d.ts",
+        "default": "./dist-cjs/protocols/ag-ui.js"
+      }
+    },
+    "./protocols/a2a": {
+      "import": {
+        "types": "./dist/protocols/a2a.d.ts",
+        "default": "./dist/protocols/a2a.js"
+      },
+      "require": {
+        "types": "./dist-cjs/protocols/a2a.d.ts",
+        "default": "./dist-cjs/protocols/a2a.js"
+      }
+    },
+    "./protocols/acp": {
+      "import": {
+        "types": "./dist/protocols/acp.d.ts",
+        "default": "./dist/protocols/acp.js"
+      },
+      "require": {
+        "types": "./dist-cjs/protocols/acp.d.ts",
+        "default": "./dist-cjs/protocols/acp.js"
+      }
+    },
     "./tracing": {
       "import": {
         "types": "./dist/tracing/index.d.ts",
@@ -2211,6 +2241,15 @@
       ],
       "mcp/registry": [
         "dist-cjs/mcp/registry.d.ts"
+      ],
+      "protocols/ag-ui": [
+        "dist-cjs/protocols/ag-ui.d.ts"
+      ],
+      "protocols/a2a": [
+        "dist-cjs/protocols/a2a.d.ts"
+      ],
+      "protocols/acp": [
+        "dist-cjs/protocols/acp.d.ts"
       ],
       "context-hub": [
         "dist-cjs/context-hub/index.d.ts"

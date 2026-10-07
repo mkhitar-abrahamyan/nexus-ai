@@ -31,6 +31,20 @@ Graduation and interoperability.
     a benchmark held to the p95 budgets it declares.
   - The vector-store, retriever, and store contracts ship as `runVectorStoreContract()`,
     `runRetrieverContract()`, and `runStoreContract()`, with no test framework needed.
+- **Agent protocols**, each on its own entry point and with no dependency:
+  - `nexus-ai-pro/protocols/ag-ui`: `agUiHandler()` serves a graph to any AG-UI frontend as
+    Server-Sent Events: each step, text as it streams, tool calls with their results, and the final
+    state. A run that needs approval finishes with an interrupt, and a resume entry on the same
+    thread continues it. `agUiEvents()` yields the same events for any other transport.
+  - `nexus-ai-pro/protocols/a2a`: `a2aHandler()` serves a graph as an A2A 1.0 agent: its card,
+    `SendMessage`, `SendStreamingMessage`, `GetTask`, and `CancelTask`. A context is a
+    conversation, and a task that needs approval asks for input and continues when a message answers
+    it. `a2aClient()` calls any A2A agent, and `a2aTool()` makes one a tool that declares the
+    host it reaches, so a permission policy decides it.
+  - `nexus-ai-pro/protocols/acp`: `serveAcp()` puts a graph in a code editor over the Agent
+    Client Protocol. The editor sees streamed text and thought, each tool call with its kind, file,
+    and diff, and the plan from `write_todos`. It asks the person to approve calls, and keeps an
+    always-allow or always-reject choice for the session.
 
 ### Security
 
@@ -88,6 +102,15 @@ Testing the security code to depth found these gaps, and each is closed:
   in plain JavaScript inside the clean-install test's consumer project, importing nothing but
   `nexus-ai-pro/adapter-kit` from the installed tarball. A deliberately broken store fails exactly the
   checks it breaks.
+- A Nexus agent and a remote agent complete tasks over A2A in both directions:
+  - A client that writes raw JSON-RPC, as the specification describes it, drives the served agent
+    through a conversation, an approval, streaming, cancellation, and each error code.
+  - The client and tool complete tasks against a stub agent written from the specification alone.
+  - One Nexus agent calls another through the tool.
+- A frontend renders a run through AG-UI with a plain `fetch` and Server-Sent Events parser, and
+  no Nexus client code, approval and resume included.
+- An editor's end of an ACP connection approves an edit, and sees the plan, the diff, and the
+  answer.
 
 ## [2.3.0] - 2026-10-06
 

@@ -122,6 +122,15 @@ const imports = [
   { specifier: 'nexus-ai-pro/store/redis', exports: ['RedisStore'] },
   { specifier: 'nexus-ai-pro/mcp', exports: ['McpClient', 'McpServer', 'createStdioTransport', 'McpError'] },
   {
+    specifier: 'nexus-ai-pro/protocols/ag-ui',
+    exports: ['agUiHandler', 'agUiEvents', 'agUiMessages', 'encodeAgUiEvent'],
+  },
+  {
+    specifier: 'nexus-ai-pro/protocols/a2a',
+    exports: ['a2aHandler', 'a2aClient', 'a2aTool', 'A2aError', 'A2A_PROTOCOL_VERSION'],
+  },
+  { specifier: 'nexus-ai-pro/protocols/acp', exports: ['serveAcp', 'ACP_PROTOCOL_VERSION'] },
+  {
     specifier: 'nexus-ai-pro/evaluate',
     exports: [
       'evaluate',
