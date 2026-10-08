@@ -124,6 +124,50 @@ export class SqliteStore implements Store {
     );
   }
 
+  /**
+   * Stores an item only when the stored one's `version` is `expected`, or, with `expected` `null`,
+   * only when none is stored. One statement, so two processes sharing the file cannot both win.
+   */
+  async putIfVersion<V extends { version: number }>(
+    namespace: StoreNamespace,
+    key: string,
+    value: V,
+    expected: number | null,
+  ): Promise<boolean> {
+    if (!key.trim()) throw new RangeError('A store key must not be empty');
+    const timestamp = this.now().toISOString();
+    const vector = await this.embed(value, undefined);
+    const embedding = vector ? JSON.stringify(vector) : null;
+    const rows =
+      expected === null
+        ? // An expired item counts as absent, as it does for get().
+          await this.client.all(
+            `INSERT INTO ${this.table} (ns_key, key, namespace, value, created_at, updated_at, expires_at, embedding)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+             ON CONFLICT (ns_key, key) DO UPDATE SET value = excluded.value, created_at = excluded.created_at,
+               updated_at = excluded.updated_at, expires_at = NULL, embedding = excluded.embedding
+             WHERE expires_at IS NOT NULL AND expires_at <= excluded.updated_at
+             RETURNING key`,
+            [
+              namespaceKey(namespace),
+              key,
+              JSON.stringify([...namespace]),
+              JSON.stringify(value),
+              timestamp,
+              timestamp,
+              embedding,
+            ],
+          )
+        : await this.client.all(
+            `UPDATE ${this.table} SET value = ?, updated_at = ?, expires_at = NULL, embedding = ?
+             WHERE ns_key = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)
+               AND json_type(value, '$.version') IN ('integer', 'real') AND json_extract(value, '$.version') = ?
+             RETURNING key`,
+            [JSON.stringify(value), timestamp, embedding, namespaceKey(namespace), key, timestamp, expected],
+          );
+    return rows.length > 0;
+  }
+
   /** Reads an item, or `undefined` when it does not exist or has expired. */
   async get<V>(namespace: StoreNamespace, key: string): Promise<StoreItem<V> | undefined> {
     const [row] = (await this.client.all(

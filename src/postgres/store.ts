@@ -139,6 +139,43 @@ export class PostgresStore implements Store {
     );
   }
 
+  /**
+   * Stores an item only when the stored one's `version` is `expected`, or, with `expected` `null`,
+   * only when none is stored. One statement, so two writers deciding on one version cannot both win.
+   */
+  async putIfVersion<V extends { version: number }>(
+    namespace: StoreNamespace,
+    key: string,
+    value: V,
+    expected: number | null,
+  ): Promise<boolean> {
+    if (!key.trim()) throw new RangeError('A store key must not be empty');
+    const timestamp = this.now().toISOString();
+    const vector = await this.embed(value, undefined);
+    const embedding = vector ? JSON.stringify(vector) : null;
+    const cast = this.options.vectorDimensions ? '::vector' : '::jsonb';
+    const { rows } =
+      expected === null
+        ? // An expired item counts as absent, as it does for get().
+          await this.client.query(
+            `INSERT INTO ${this.table} (ns_key, key, namespace, value, created_at, updated_at, expires_at, embedding)
+             VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $5, NULL, $6${cast})
+             ON CONFLICT (ns_key, key) DO UPDATE SET value = EXCLUDED.value, created_at = EXCLUDED.created_at,
+               updated_at = EXCLUDED.updated_at, expires_at = NULL, embedding = EXCLUDED.embedding
+             WHERE ${this.table}.expires_at IS NOT NULL AND ${this.table}.expires_at <= $5
+             RETURNING key`,
+            [namespaceKey(namespace), key, JSON.stringify([...namespace]), JSON.stringify(value), timestamp, embedding],
+          )
+        : await this.client.query(
+            `UPDATE ${this.table} SET value = $3::jsonb, updated_at = $4, expires_at = NULL, embedding = $5${cast}
+             WHERE ns_key = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $4)
+               AND jsonb_typeof(value -> 'version') = 'number' AND (value ->> 'version')::numeric = $6
+             RETURNING key`,
+            [namespaceKey(namespace), key, JSON.stringify(value), timestamp, embedding, expected],
+          );
+    return rows.length > 0;
+  }
+
   /** Reads an item, or `undefined` when it does not exist or has expired. */
   async get<V>(namespace: StoreNamespace, key: string): Promise<StoreItem<V> | undefined> {
     const { rows } = await this.client.query(

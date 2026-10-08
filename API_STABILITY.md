@@ -41,6 +41,19 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.5 stage (Unreleased)
+
+Everything 2.5 adds is stable from the start and additive.
+
+New and stable:
+- `putIfVersion()`, optional on `Store` and `ServerStateStore`, and its implementations;
+  `Deployments.atomicChanges`; `ScalingSnapshot.atomicChanges`;
+- `nexus-ai-pro/postgres/tenancy`: `PostgresTenantUsage`, `PostgresTenantUsageOptions`,
+  `tenantUsageMigration()`, and `tenantUsageMigrations()`; the `tenancy` member of
+  `PostgresAdapter`.
+
+A state store without `putIfVersion()` keeps its earlier behavior.
+
 ## 2.4 stage (2.4.0)
 
 Everything 2.4 adds is stable from the start and additive. These security fixes tighten behavior,

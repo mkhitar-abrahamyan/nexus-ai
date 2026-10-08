@@ -22,6 +22,19 @@ export class MemoryServerStore implements ServerStateStore {
     this.items.set(id, bucket);
   }
 
+  /** Writes a record only when the stored one's `version` is `expected`, or none is stored and `expected` is null. */
+  putIfVersion<V extends { version: number }>(
+    namespace: readonly string[],
+    key: string,
+    value: V,
+    expected: number | null,
+  ): boolean {
+    const current = this.get<{ version?: unknown }>(namespace, key);
+    if (expected === null ? current !== undefined : current?.version !== expected) return false;
+    this.put(namespace, key, value);
+    return true;
+  }
+
   /** Removes a record. */
   delete(namespace: readonly string[], key: string): void {
     this.items.get(namespace.join('\u0000'))?.delete(key);
@@ -46,6 +59,13 @@ export interface StoreLike {
     namespace: readonly string[],
     key: string,
   ): Promise<{ value: unknown } | undefined> | { value: unknown } | undefined;
+  /** Stores an item only when the stored one's `version` is `expected`. Optional. */
+  putIfVersion?(
+    namespace: readonly string[],
+    key: string,
+    value: { version: number },
+    expected: number | null,
+  ): Promise<boolean> | boolean;
   /** Deletes an item. */
   delete(namespace: readonly string[], key: string): Promise<void> | void;
   /** Items under a namespace prefix, newest first. */
@@ -58,11 +78,26 @@ export interface StoreLike {
 /**
  * Server state on top of a long-term store, so threads and runs live wherever memory already does.
  *
- * `MemoryStore`, `RedisStore`, and `PostgresStore` all satisfy `StoreLike`, which is what lets a
- * second replica see the first replica's threads without the server growing its own adapters.
+ * `MemoryStore`, `RedisStore`, `PostgresStore`, and `SqliteStore` all satisfy `StoreLike`, which is
+ * what lets a second replica see the first replica's threads without the server growing its own
+ * adapters. A store with `putIfVersion()` passes it on, so deployment changes are atomic across
+ * replicas.
  */
 export function fromStore(store: StoreLike): ServerStateStore {
+  const versioned = store.putIfVersion?.bind(store);
   return {
+    ...(versioned
+      ? {
+          async putIfVersion<V extends { version: number }>(
+            namespace: readonly string[],
+            key: string,
+            value: V,
+            expected: number | null,
+          ): Promise<boolean> {
+            return versioned(namespace, key, value, expected);
+          },
+        }
+      : {}),
     async get<V>(namespace: readonly string[], key: string): Promise<V | undefined> {
       return (await store.get(namespace, key))?.value as V | undefined;
     },

@@ -116,6 +116,8 @@ export interface RunEvaluationReport {
 const DEPLOYMENTS = ['nexus', 'server', 'deployments'];
 const REPLICAS = ['nexus', 'server', 'replicas'];
 const EPSILON = 1e-9;
+/** Times a change is decided again after other replicas changed the deployment first. */
+const MAX_CHANGE_ATTEMPTS = 10;
 
 interface Registration {
   revisions: Record<string, ServerAssistant>;
@@ -224,6 +226,15 @@ export class Deployments implements ServerDeployments {
     return choice(revision, registration.revisions[revision] as ServerAssistant, deployment, 'split');
   }
 
+  /**
+   * Whether changes are atomic across replicas: true when the state store has `putIfVersion()`.
+   * Otherwise, changes on this replica apply in order, but two replicas changing one deployment in
+   * the same instant can lose one change.
+   */
+  get atomicChanges(): boolean {
+    return typeof this.state.putIfVersion === 'function';
+  }
+
   /** Every deployment: those recorded, and the default of every assistant registered here that has none. */
   async list(): Promise<DeploymentRecord[]> {
     const stored = await this.state.list<DeploymentRecord>(DEPLOYMENTS, { limit: 500 });
@@ -283,7 +294,36 @@ export class Deployments implements ServerDeployments {
     change: DeploymentChange & { expectedVersion?: number },
     by?: string,
   ): Promise<DeploymentRecord> {
-    const current = await this.get(assistant);
+    const versioned = this.state.putIfVersion?.bind(this.state);
+    for (let attempt = 1; ; attempt += 1) {
+      const stored = await this.state.get<DeploymentRecord>(DEPLOYMENTS, assistant);
+      const next = await this.decide(assistant, change, by, stored);
+      if (!versioned) await this.state.put(DEPLOYMENTS, assistant, next);
+      else if (!(await versioned(DEPLOYMENTS, assistant, next, stored ? stored.version : null))) {
+        // Another replica changed it after it was read. Decide again on what that replica wrote: a
+        // change made on an expected version then finds the version gone, and throws.
+        if (attempt >= MAX_CHANGE_ATTEMPTS) {
+          throw new ServerError(
+            `Deployment "${assistant}" changed ${attempt} times while this change was being decided; try again`,
+            'DEPLOYMENT_CONFLICT',
+            409,
+          );
+        }
+        continue;
+      }
+      this.cache.set(assistant, { record: next, at: Date.now() });
+      return next;
+    }
+  }
+
+  /** The record a change makes of the stored one, or of the default when none is stored. */
+  private async decide(
+    assistant: string,
+    change: DeploymentChange & { expectedVersion?: number },
+    by: string | undefined,
+    stored: DeploymentRecord | undefined,
+  ): Promise<DeploymentRecord> {
+    const current = stored ?? this.initial(assistant);
     if (!current) {
       throw new BadRequestError(
         `Assistant "${assistant}" has no deployment yet: serve it through Deployments.assistant() first`,
@@ -367,8 +407,6 @@ export class Deployments implements ServerDeployments {
       const same = canaryRevisions(current).join() === canaries.join();
       next.canarySince = same && current.canarySince ? current.canarySince : at;
     }
-    await this.state.put(DEPLOYMENTS, assistant, next);
-    this.cache.set(assistant, { record: next, at: Date.now() });
     return next;
   }
 
@@ -411,7 +449,9 @@ export class Deployments implements ServerDeployments {
     for (const assistant of this.registrations.keys()) {
       const initial = this.initial(assistant);
       if (initial && !(await this.state.get<DeploymentRecord>(DEPLOYMENTS, assistant))) {
-        await this.state.put(DEPLOYMENTS, assistant, initial);
+        // Two replicas starting at once both seed it; with putIfVersion only the first one writes.
+        if (this.state.putIfVersion) await this.state.putIfVersion(DEPLOYMENTS, assistant, initial, null);
+        else await this.state.put(DEPLOYMENTS, assistant, initial);
       }
     }
     if (this.heartbeat) clearInterval(this.heartbeat.timer);

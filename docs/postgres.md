@@ -1,10 +1,10 @@
 # Postgres
 
-<!-- covers: ./postgres ./postgres/operations ./postgres/store ./postgres/traces ./postgres/evaluate ./postgres/circuits ./postgres/prompts ./postgres/vectors ./postgres/fulltext ./postgres/migrations ./postgres/rollups -->
+<!-- covers: ./postgres ./postgres/operations ./postgres/store ./postgres/traces ./postgres/evaluate ./postgres/circuits ./postgres/prompts ./postgres/vectors ./postgres/fulltext ./postgres/migrations ./postgres/rollups ./postgres/tenancy -->
 
 Postgres storage for everything that has to outlive a process or be shared between workers: durable
 operations and graph checkpoints, long-term memory, traces and their hourly rollups, datasets and
-experiments, shared circuit state, prompt versions, and retrieval vectors with pgvector. Every schema
+experiments, shared circuit state, tenant usage, prompt versions, and retrieval vectors with pgvector. Every schema
 is versioned, so an upgrade applies only what changed.
 
 Each adapter has its own entry point and works with the Postgres client you already use. None creates
@@ -218,6 +218,30 @@ const traces = rollupTraceStore(new PostgresTraceStore(pool), rollups);
 const month = sumRollups(await rollups.query({ since: '2026-10-01T00:00:00Z', tenant: 'acme' }));
 ```
 
+## Tenant usage
+
+`PostgresTenantUsage` is a `TenantUsageStore` for `tenantLimits()` (see the
+[deployments guide](./deployments.md)). Every replica enforces one limit through it, which until now
+needed Redis. Each key is one row, holding a tenant's active slots as a JSON map from run to lease
+expiry, or its spending in the current period. Every operation is one statement on that row.
+Postgres applies concurrent updates of one row one at a time, checking each against the newest
+version, so two replicas admitting runs for one tenant at once cannot both take its last slot.
+`PostgresTenantUsageOptions` has two fields: `table` (`nexus_tenant_usage`), and `now`, a clock for
+tests. `tenantUsageMigrations()` and `tenantUsageMigration()` give the schema, as every adapter's
+migrations do.
+
+```ts
+import { PostgresTenantUsage } from 'nexus-ai-pro/postgres/tenancy';
+import { tenantLimits } from 'nexus-ai-pro/server/tenancy';
+
+const usage = new PostgresTenantUsage(pool);
+await usage.migrate();
+const tenants = tenantLimits({ default: { maxActiveRuns: 10, budget: { usd: 50, period: 'day' } }, usage });
+```
+
+The long-term store's `putIfVersion()` is one statement too, so a server whose state lives in
+`PostgresStore` changes deployments atomically across replicas.
+
 ## Retrieval with pgvector
 
 `PostgresVectorStore` implements the retrieval contract every vector store shares: `add()`, `search()`,
@@ -380,6 +404,15 @@ specific entry point that provides it.
 | `PostgresStoreOptions` | interface | Options for the Postgres store. |
 | `storeMigration` | function | The schema, as statements. |
 | `storeMigrations` | function | The versioned schema, which `migrate()` and `nexus db migrate` apply. |
+
+### `nexus-ai-pro/postgres/tenancy`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `PostgresTenantUsage` | class | Tenant usage in Postgres, shared by every replica, for a deployment that already runs Postgres and not Redis. |
+| `PostgresTenantUsageOptions` | interface | Options for `PostgresTenantUsage`. |
+| `tenantUsageMigration` | function | The schema, as statements: every migration's, in order. |
+| `tenantUsageMigrations` | function | The versioned schema, which `migrate()` and `nexus db migrate` apply. |
 
 ### `nexus-ai-pro/postgres/traces`
 

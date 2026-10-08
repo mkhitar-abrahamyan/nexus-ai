@@ -3123,6 +3123,12 @@ promise, so a read from the in-memory store costs no microtask.
 | `search()` | Returns the items under a namespace prefix, newest first, or ranked by similarity to a query. |
 | `listNamespaces()` | Lists the namespaces under a prefix, for browsing what an agent remembered. |
 
+`putIfVersion()` is optional. It stores an item only when the stored one's `version` field is still
+the version given, or, given `null`, only when none is stored, and it resolves whether it wrote. The
+check and the write are one atomic step in every included store, so two processes deciding on one
+version cannot both write. The memory, Postgres, and SQLite stores have it, and so does the Redis
+store when its client has `eval`. Deployments use it to change atomically across replicas.
+
 A `StoreNamespace` is a tuple of strings. A `StoreItem` carries:
 
 - its namespace and key, and the value;
@@ -5015,7 +5021,7 @@ Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.m
 
 Postgres storage for everything that has to outlive a process or be shared between workers: durable
 operations and graph checkpoints, long-term memory, traces and their hourly rollups, datasets and
-experiments, shared circuit state, prompt versions, and retrieval vectors with pgvector. Every schema
+experiments, shared circuit state, tenant usage, prompt versions, and retrieval vectors with pgvector. Every schema
 is versioned, so an upgrade applies only what changed.
 
 Each adapter has its own entry point and works with the Postgres client you already use. None creates
@@ -5228,6 +5234,30 @@ await rollups.migrate();
 const traces = rollupTraceStore(new PostgresTraceStore(pool), rollups);
 const month = sumRollups(await rollups.query({ since: '2026-10-01T00:00:00Z', tenant: 'acme' }));
 ```
+
+## Tenant usage
+
+`PostgresTenantUsage` is a `TenantUsageStore` for `tenantLimits()` (see the
+[deployments guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md)). Every replica enforces one limit through it, which until now
+needed Redis. Each key is one row, holding a tenant's active slots as a JSON map from run to lease
+expiry, or its spending in the current period. Every operation is one statement on that row.
+Postgres applies concurrent updates of one row one at a time, checking each against the newest
+version, so two replicas admitting runs for one tenant at once cannot both take its last slot.
+`PostgresTenantUsageOptions` has two fields: `table` (`nexus_tenant_usage`), and `now`, a clock for
+tests. `tenantUsageMigrations()` and `tenantUsageMigration()` give the schema, as every adapter's
+migrations do.
+
+```ts
+import { PostgresTenantUsage } from 'nexus-ai-pro/postgres/tenancy';
+import { tenantLimits } from 'nexus-ai-pro/server/tenancy';
+
+const usage = new PostgresTenantUsage(pool);
+await usage.migrate();
+const tenants = tenantLimits({ default: { maxActiveRuns: 10, budget: { usd: 50, period: 'day' } }, usage });
+```
+
+The long-term store's `putIfVersion()` is one statement too, so a server whose state lives in
+`PostgresStore` changes deployments atomically across replicas.
 
 ## Retrieval with pgvector
 
@@ -9993,6 +10023,14 @@ Each shortcut takes `by` and `reason`, recorded in the history. `change()` also 
 `expectedVersion`. It refuses the change with `DEPLOYMENT_CONFLICT` when someone moved the deployment
 first, so two people cannot undo each other without noticing.
 
+Changes are atomic across replicas when the state store has `putIfVersion()`. The memory, Redis,
+Postgres, and SQLite stores have it, and `fromStore()` passes it on. A change is then written only if
+the version it was decided on is still the stored one. A replica that loses the race decides again
+on what the winner wrote, so a guard rolling a canary back and an operator promoting at the same
+moment both land, in order. A change made on an `expectedVersion` is refused instead.
+`Deployments.atomicChanges` and the `atomicChanges` field of `/scaling` say whether a deployment has
+this. Without it, changes on one replica still apply in order, but two replicas can lose one.
+
 ```ts
 await deployments.canary('support', '2026-09-30', 0.1, { by: 'ada', reason: 'new retrieval' });
 await deployments.change('support', { action: 'promote', revision: '2026-09-30', expectedVersion: 1 });
@@ -10253,6 +10291,9 @@ total. Two are included:
 - `RedisTenantUsage` shares the counts across replicas. Each operation is one atomic script, so two
   replicas can never both take a tenant's last slot. It needs only `eval`, the
   `RedisTenantUsageLikeClient`; `RedisTenantUsageOptions` sets the key prefix.
+- `PostgresTenantUsage`, from `nexus-ai-pro/postgres/tenancy`, shares them through Postgres, for a
+  deployment that runs Postgres and not Redis. The [Postgres guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.md#tenant-usage)
+  covers it.
 
 `GET /usage` returns the caller's `TenantUsage`: its limits, active runs, and spending this period.
 
@@ -10285,10 +10326,10 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
 
 ## Limitations
 
-- Revisions and canaries are experimental. Two replicas changing one deployment in the same instant
-  can lose one change, since the state store has no atomic compare-and-set. Changes on one replica
-  apply in order. Make changes from one place, or pass `expectedVersion` and retry a conflict. Tenant
-  limits and the worker queue are stable.
+- Revisions and canaries are experimental. With a state store that has no `putIfVersion()`, two
+  replicas changing one deployment in the same instant can lose one change: give the server one of
+  the included stores, or pass `expectedVersion` and retry a conflict. Tenant limits and the worker
+  queue are stable.
 - `bucket()` places random thread ids, which the server gives by default, evenly. Ids that differ
   only in their last characters, such as `user-1` to `user-500`, spread unevenly over a few hundred
   threads, so a canary's share of them drifts from its weight. Its output is part of the stability
@@ -10297,7 +10338,6 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   roll out an image before you give its new revision traffic.
 - `stats()` and the guard read recent run records, 2,000 by default, so a very busy assistant is judged
   on its latest runs.
-- Tenant usage is shared through Redis or your own `TenantUsageStore`; there is no Postgres one yet.
 - The Redis operation store reads every record to find queued work. Postgres and SQLite do it in one
   indexed query, so prefer them for large queues.
 
@@ -10785,12 +10825,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/core` | 329 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
 | `nexus-ai-pro/deep-agent` | 138 KB | 40% | none |
-| `nexus-ai-pro/server` | 117 KB | 34% | none |
+| `nexus-ai-pro/server` | 118 KB | 35% | none |
 | `nexus-ai-pro/batch` | 114 KB | 33% | none |
 | `nexus-ai-pro/agent` | 105 KB | 31% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
 | `nexus-ai-pro/providers/groq` | 83 KB | 24% | none |
 | `nexus-ai-pro/providers/mistral` | 83 KB | 24% | none |
+| `nexus-ai-pro/postgres` | 83 KB | 24% | none |
 | `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/deepseek` | 82 KB | 24% | none |
 | `nexus-ai-pro/providers/llamacpp` | 82 KB | 24% | none |
@@ -10799,7 +10840,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/openrouter` | 82 KB | 24% | none |
 | `nexus-ai-pro/graph` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 81 KB | 24% | none |
-| `nexus-ai-pro/postgres` | 78 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 75 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 69 KB | 20% | none |
 | `nexus-ai-pro/images` | 60 KB | 18% | none |
@@ -10812,10 +10852,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/evaluate` | 44 KB | 13% | none |
-| `nexus-ai-pro/sqlite` | 41 KB | 12% | none |
+| `nexus-ai-pro/sqlite` | 43 KB | 13% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
+| `nexus-ai-pro/server/deployments` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
-| `nexus-ai-pro/server/deployments` | 38 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 11% | none |
@@ -10864,6 +10904,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
 | `nexus-ai-pro/rag/pipeline` | 14 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
+| `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 12 KB | 4% | none |
 | `nexus-ai-pro/agent/sandbox` | 12 KB | 4% | none |
@@ -10877,11 +10918,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/base` | 11 KB | 3% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
-| `nexus-ai-pro/postgres/store` | 11 KB | 3% | none |
+| `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/redis` | 11 KB | 3% | none |
-| `nexus-ai-pro/sqlite/store` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/migrations` | 10 KB | 3% | none |
 | `nexus-ai-pro/prompts` | 10 KB | 3% | none |
@@ -10896,13 +10936,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
 | `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |
+| `nexus-ai-pro/store/redis` | 8 KB | 2% | none |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
+| `nexus-ai-pro/store` | 7 KB | 2% | none |
 | `nexus-ai-pro/ops/rate-limit-adapters` | 7 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
 | `nexus-ai-pro/rag/elasticsearch` | 7 KB | 2% | none |
-| `nexus-ai-pro/store` | 6 KB | 2% | none |
-| `nexus-ai-pro/store/redis` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/fulltext` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/evaluate` | 6 KB | 2% | none |
 | `nexus-ai-pro/server/remote` | 6 KB | 2% | none |
@@ -10920,6 +10960,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/rag/rerankers` | 5 KB | 1% | none |
 | `nexus-ai-pro/pipeline` | 4 KB | 1% | none |
 | `nexus-ai-pro/prompts/redis` | 4 KB | 1% | none |
+| `nexus-ai-pro/postgres/tenancy` | 4 KB | 1% | none |
 | `nexus-ai-pro/loaders/csv` | 4 KB | 1% | none |
 | `nexus-ai-pro/loaders/git` | 4 KB | 1% | none |
 | `nexus-ai-pro/operations/webhooks` | 3 KB | 0.9% | none |
@@ -11107,7 +11148,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 157 entry points, 125 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 158 entry points, 126 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

@@ -4,6 +4,34 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Graduation finished, and evaluation at production depth.
+
+### Added
+
+- **Deployment changes that are atomic across replicas.**
+  - The long-term `Store` contract and the server's `ServerStateStore` gain an optional
+    `putIfVersion()`. It writes a record only when the stored one's `version` is still the version
+    the change was decided on, in one atomic step. The memory, Postgres, and SQLite stores, the server's
+    memory store, and the Redis store (when its client has `eval`) have it, and `fromStore()` passes
+    it on.
+  - A deployment change uses it. A replica that loses the race decides again on the winner's record,
+    so two changes made at once both land, in order. A change made on an `expectedVersion` is
+    refused with `DEPLOYMENT_CONFLICT` instead. Two replicas starting at once seed one record.
+  - `Deployments.atomicChanges` and `/scaling`'s `atomicChanges` say whether the state store
+    offers this.
+- **Tenant usage in Postgres**, on the new `nexus-ai-pro/postgres/tenancy`: `PostgresTenantUsage`, so
+  every replica enforces one tenant limit without Redis. The `tenancy` adapter joins
+  `postgresMigrations()` and `nexus db migrate`.
+
+### Proof
+
+- Two replicas changing one deployment in the same instant both land, on the memory, Redis,
+  Postgres, and SQLite stores. The race test holds both writers until both arrive, and the same race
+  on a store without `putIfVersion()` loses a change. Of two changes made on one expected version,
+  exactly one is refused.
+- Ten workers spending one tenant budget lose nothing, and never over-grant a slot, on Postgres as
+  on memory and Redis.
+
 ## [2.4.0] - 2026-10-08
 
 Graduation and interoperability.

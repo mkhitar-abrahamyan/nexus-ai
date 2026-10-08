@@ -126,6 +126,7 @@ const expectedSubpaths = [
   './postgres/migrations',
   './postgres/rollups',
   './postgres/circuits',
+  './postgres/tenancy',
   './postgres/prompts',
   './server',
   './server/remote',

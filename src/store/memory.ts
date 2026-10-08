@@ -49,10 +49,37 @@ export class MemoryStore implements Store {
   /** Stores an item, keeping its original `createdAt` when it replaces one. */
   async put<V>(namespace: StoreNamespace, key: string, value: V, options: StorePutOptions = {}): Promise<void> {
     assertKey(key);
+    this.write(namespace, key, value, options, await this.embed(value, options.index));
+  }
+
+  /**
+   * Stores an item only when the stored one's `version` is `expected`, or, with `expected` `null`,
+   * only when none is stored. The check and the write run with nothing in between.
+   */
+  async putIfVersion<V extends { version: number }>(
+    namespace: StoreNamespace,
+    key: string,
+    value: V,
+    expected: number | null,
+  ): Promise<boolean> {
+    assertKey(key);
+    const vector = await this.embed(value, undefined);
+    const current = this.get<{ version?: unknown }>(namespace, key);
+    if (expected === null ? current !== undefined : current?.value?.version !== expected) return false;
+    this.write(namespace, key, value, {}, vector);
+    return true;
+  }
+
+  private write(
+    namespace: StoreNamespace,
+    key: string,
+    value: unknown,
+    options: StorePutOptions,
+    vector: number[] | undefined,
+  ): void {
     const id = idOf(namespace, key);
     const timestamp = this.now().toISOString();
     const existing = this.items.get(id);
-    const vector = await this.embed(value, options.index);
     if (options.ttlMs !== undefined) this.expiring = true;
 
     this.items.delete(id);

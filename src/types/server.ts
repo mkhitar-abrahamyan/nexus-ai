@@ -185,6 +185,11 @@ export interface ScalingSnapshot {
   lapsedLeases: number;
   /** The replica that answered. */
   replica: ReplicaReport;
+  /**
+   * Whether deployment changes are atomic across replicas, which they are when the state store has
+   * `putIfVersion()`. When false, two replicas changing one deployment at once can lose a change.
+   */
+  atomicChanges?: boolean;
 }
 
 /** How traffic for one assistant is split between its revisions. */
@@ -295,6 +300,17 @@ export interface ServerStateStore {
   get<V>(namespace: readonly string[], key: string): Promise<V | undefined> | V | undefined;
   /** Writes a record. */
   put<V>(namespace: readonly string[], key: string, value: V): Promise<void> | void;
+  /**
+   * Writes a record only when the stored one's `version` field is `expected`, or, with `expected`
+   * `null`, only when none is stored, and resolves whether it wrote. Optional: with it, two replicas
+   * changing one deployment at once never lose a change; without it, the later write wins.
+   */
+  putIfVersion?<V extends { version: number }>(
+    namespace: readonly string[],
+    key: string,
+    value: V,
+    expected: number | null,
+  ): Promise<boolean> | boolean;
   /** Removes a record. */
   delete(namespace: readonly string[], key: string): Promise<void> | void;
   /** Records under a namespace, newest first. */

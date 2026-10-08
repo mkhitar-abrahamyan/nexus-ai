@@ -1050,6 +1050,16 @@
         "default": "./dist-cjs/postgres/circuits.js"
       }
     },
+    "./postgres/tenancy": {
+      "import": {
+        "types": "./dist/postgres/tenancy.d.ts",
+        "default": "./dist/postgres/tenancy.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/tenancy.d.ts",
+        "default": "./dist-cjs/postgres/tenancy.js"
+      }
+    },
     "./ops/circuit-store": {
       "import": {
         "types": "./dist/ops/circuit-store.d.ts",
@@ -2091,6 +2101,9 @@
       ],
       "postgres/circuits": [
         "dist-cjs/postgres/circuits.d.ts"
+      ],
+      "postgres/tenancy": [
+        "dist-cjs/postgres/tenancy.d.ts"
       ],
       "ops/circuit-store": [
         "dist-cjs/ops/circuit-store.d.ts"

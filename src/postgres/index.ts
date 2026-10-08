@@ -7,6 +7,7 @@ import { operationStoreMigrations } from './operations.js';
 import { promptStoreMigrations } from './prompts.js';
 import { rollupStoreMigrations } from './rollups.js';
 import { storeMigrations } from './store.js';
+import { tenantUsageMigrations } from './tenancy.js';
 import { traceStoreMigrations } from './traces.js';
 import { vectorStoreMigrations } from './vectors.js';
 
@@ -63,6 +64,12 @@ export {
   traceStoreMigrations,
 } from './traces.js';
 export {
+  PostgresTenantUsage,
+  type PostgresTenantUsageOptions,
+  tenantUsageMigration,
+  tenantUsageMigrations,
+} from './tenancy.js';
+export {
   PostgresVectorStore,
   type PostgresVectorStoreOptions,
   vectorStoreMigration,
@@ -76,6 +83,7 @@ export type PostgresAdapter =
   | 'traces'
   | 'evaluation'
   | 'circuits'
+  | 'tenancy'
   | 'prompts'
   | 'rollups'
   | 'vectors';
@@ -107,6 +115,7 @@ export const POSTGRES_ADAPTERS: readonly PostgresAdapter[] = [
   'traces',
   'evaluation',
   'circuits',
+  'tenancy',
   'prompts',
   'rollups',
   'vectors',
@@ -126,6 +135,7 @@ export function postgresMigrations(options: PostgresMigrationOptions = {}): Sche
     traces: () => traceStoreMigrations(),
     evaluation: () => evaluationStoreMigrations(),
     circuits: () => circuitStoreMigrations(),
+    tenancy: () => tenantUsageMigrations(),
     prompts: () => promptStoreMigrations(),
     rollups: () => rollupStoreMigrations(),
     vectors: () => {

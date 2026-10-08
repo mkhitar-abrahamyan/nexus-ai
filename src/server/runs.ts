@@ -542,6 +542,7 @@ export class RunManager {
         : 0,
       lapsedLeases: stats.lapsedLeases,
       replica: this.replica(metadata),
+      atomicChanges: typeof this.state.putIfVersion === 'function',
     };
   }
 

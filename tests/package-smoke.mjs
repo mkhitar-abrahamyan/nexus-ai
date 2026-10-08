@@ -182,6 +182,7 @@ const imports = [
   },
   { specifier: 'nexus-ai-pro/postgres/rollups', exports: ['PostgresRollupStore', 'rollupStoreMigrations'] },
   { specifier: 'nexus-ai-pro/postgres/circuits', exports: ['PostgresCircuitStateStore', 'circuitStoreMigration'] },
+  { specifier: 'nexus-ai-pro/postgres/tenancy', exports: ['PostgresTenantUsage', 'tenantUsageMigrations'] },
   { specifier: 'nexus-ai-pro/postgres/prompts', exports: ['PostgresPromptStore', 'promptStoreMigration'] },
   {
     specifier: 'nexus-ai-pro/server',

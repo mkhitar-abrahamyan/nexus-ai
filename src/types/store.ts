@@ -75,6 +75,18 @@ export interface Store {
     namespace: StoreNamespace,
     key: string,
   ): Promise<StoreItem<V> | undefined> | StoreItem<V> | undefined;
+  /**
+   * Stores an item only when the stored one's `version` field is `expected`, or, with `expected`
+   * `null`, only when none is stored. Resolves whether it wrote. One atomic step in the store, so two
+   * processes deciding on the same version cannot both write: the loser reads again and decides
+   * again. Optional; the memory, Redis (with `eval`), Postgres, and SQLite stores have it.
+   */
+  putIfVersion?<V extends { version: number }>(
+    namespace: StoreNamespace,
+    key: string,
+    value: V,
+    expected: number | null,
+  ): Promise<boolean> | boolean;
   /** Deletes an item. */
   delete(namespace: StoreNamespace, key: string): Promise<void> | void;
   /** Items under a namespace prefix, newest first, or ranked by similarity when a query is given. */

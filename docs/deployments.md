@@ -97,6 +97,14 @@ Each shortcut takes `by` and `reason`, recorded in the history. `change()` also 
 `expectedVersion`. It refuses the change with `DEPLOYMENT_CONFLICT` when someone moved the deployment
 first, so two people cannot undo each other without noticing.
 
+Changes are atomic across replicas when the state store has `putIfVersion()`. The memory, Redis,
+Postgres, and SQLite stores have it, and `fromStore()` passes it on. A change is then written only if
+the version it was decided on is still the stored one. A replica that loses the race decides again
+on what the winner wrote, so a guard rolling a canary back and an operator promoting at the same
+moment both land, in order. A change made on an `expectedVersion` is refused instead.
+`Deployments.atomicChanges` and the `atomicChanges` field of `/scaling` say whether a deployment has
+this. Without it, changes on one replica still apply in order, but two replicas can lose one.
+
 ```ts
 await deployments.canary('support', '2026-09-30', 0.1, { by: 'ada', reason: 'new retrieval' });
 await deployments.change('support', { action: 'promote', revision: '2026-09-30', expectedVersion: 1 });
@@ -357,6 +365,9 @@ total. Two are included:
 - `RedisTenantUsage` shares the counts across replicas. Each operation is one atomic script, so two
   replicas can never both take a tenant's last slot. It needs only `eval`, the
   `RedisTenantUsageLikeClient`; `RedisTenantUsageOptions` sets the key prefix.
+- `PostgresTenantUsage`, from `nexus-ai-pro/postgres/tenancy`, shares them through Postgres, for a
+  deployment that runs Postgres and not Redis. The [Postgres guide](./postgres.md#tenant-usage)
+  covers it.
 
 `GET /usage` returns the caller's `TenantUsage`: its limits, active runs, and spending this period.
 
@@ -389,10 +400,10 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
 
 ## Limitations
 
-- Revisions and canaries are experimental. Two replicas changing one deployment in the same instant
-  can lose one change, since the state store has no atomic compare-and-set. Changes on one replica
-  apply in order. Make changes from one place, or pass `expectedVersion` and retry a conflict. Tenant
-  limits and the worker queue are stable.
+- Revisions and canaries are experimental. With a state store that has no `putIfVersion()`, two
+  replicas changing one deployment in the same instant can lose one change: give the server one of
+  the included stores, or pass `expectedVersion` and retry a conflict. Tenant limits and the worker
+  queue are stable.
 - `bucket()` places random thread ids, which the server gives by default, evenly. Ids that differ
   only in their last characters, such as `user-1` to `user-500`, spread unevenly over a few hundred
   threads, so a canary's share of them drifts from its weight. Its output is part of the stability
@@ -401,6 +412,5 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   roll out an image before you give its new revision traffic.
 - `stats()` and the guard read recent run records, 2,000 by default, so a very busy assistant is judged
   on its latest runs.
-- Tenant usage is shared through Redis or your own `TenantUsageStore`; there is no Postgres one yet.
 - The Redis operation store reads every record to find queued work. Postgres and SQLite do it in one
   indexed query, so prefer them for large queues.

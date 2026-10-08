@@ -41,6 +41,12 @@ promise, so a read from the in-memory store costs no microtask.
 | `search()` | Returns the items under a namespace prefix, newest first, or ranked by similarity to a query. |
 | `listNamespaces()` | Lists the namespaces under a prefix, for browsing what an agent remembered. |
 
+`putIfVersion()` is optional. It stores an item only when the stored one's `version` field is still
+the version given, or, given `null`, only when none is stored, and it resolves whether it wrote. The
+check and the write are one atomic step in every included store, so two processes deciding on one
+version cannot both write. The memory, Postgres, and SQLite stores have it, and so does the Redis
+store when its client has `eval`. Deployments use it to change atomically across replicas.
+
 A `StoreNamespace` is a tuple of strings. A `StoreItem` carries:
 
 - its namespace and key, and the value;

@@ -12,7 +12,12 @@ import { OperationRunner } from '../src/operations/runner.js';
 import { MemoryOperationStore } from '../src/operations/store.js';
 import { CircuitBreaker } from '../src/ops/circuit-breaker.js';
 import { MemoryCircuitStateStore, RedisCircuitStateStore } from '../src/ops/circuit-store.js';
-import { PostgresCircuitStateStore, type PostgresLikeClient, PostgresOperationStore } from '../src/postgres/index.js';
+import {
+  PostgresCircuitStateStore,
+  type PostgresLikeClient,
+  PostgresOperationStore,
+  PostgresTenantUsage,
+} from '../src/postgres/index.js';
 import { functionAssistant } from '../src/server/assistant.js';
 import { ThreadBusyError } from '../src/server/errors.js';
 import { MemoryRunEventLog } from '../src/server/events.js';
@@ -163,9 +168,13 @@ test('ten workers draining one queue run each operation exactly once', async () 
 });
 
 test('ten workers spending one tenant budget lose nothing, and its slots are never over-granted', async () => {
+  tables += 1;
+  const postgres = new PostgresTenantUsage(pgClient, { table: `race_tenants_${tables}` });
+  await postgres.migrate();
   for (const [name, usage] of [
     ['memory', new MemoryTenantUsage()],
     ['redis', new RedisTenantUsage(redis as never, { prefix: 'race-tenants:' })],
+    ['postgres', postgres],
   ] as const) {
     const limiter = tenantLimits({ tenants: { acme: { maxActiveRuns: 3, budget: { usd: 100 } } }, usage });
     const principal = { tenantId: 'acme' };

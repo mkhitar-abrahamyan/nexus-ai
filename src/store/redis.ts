@@ -31,6 +31,11 @@ export interface RedisStoreLikeClient {
   srem(key: string, member: string): Promise<unknown>;
   /** Reads a set. */
   smembers(key: string): Promise<string[]>;
+  /**
+   * Runs a Lua script, ioredis style: the script, the number of keys, then keys and arguments.
+   * Optional; with it, the store offers `putIfVersion()`, whose check and write run as one script.
+   */
+  eval?(script: string, numKeys: number, ...args: string[]): Promise<unknown>;
 }
 
 /** Options for the Redis store. */
@@ -47,6 +52,18 @@ interface StoredRecord extends StoreItem {
   vector?: number[];
 }
 
+const PUT_IF_VERSION = `-- nexus:put-if-version
+local current = redis.call('GET', KEYS[1])
+if current then
+  if ARGV[2] == '' then return 0 end
+  local ok, version = pcall(function() return cjson.decode(current).value.version end)
+  if not ok or type(version) ~= 'number' or version ~= tonumber(ARGV[2]) then return 0 end
+elseif ARGV[2] ~= '' then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[1])
+return 1`;
+
 /**
  * Long-term memory in Redis, so several processes share what an agent remembers.
  *
@@ -57,6 +74,16 @@ interface StoredRecord extends StoreItem {
 export class RedisStore implements Store {
   private readonly prefix: string;
   private readonly now: () => Date;
+  /**
+   * Stores an item only when the stored one's `version` is `expected`, or, with `expected` `null`,
+   * only when none is stored, as one script. Present only when the client has `eval`.
+   */
+  readonly putIfVersion?: <V extends { version: number }>(
+    namespace: StoreNamespace,
+    key: string,
+    value: V,
+    expected: number | null,
+  ) => Promise<boolean>;
 
   constructor(
     private readonly client: RedisStoreLikeClient,
@@ -64,6 +91,9 @@ export class RedisStore implements Store {
   ) {
     this.prefix = options.prefix ?? 'nexus:store';
     this.now = options.now ?? (() => new Date());
+    if (typeof client.eval === 'function') {
+      this.putIfVersion = (namespace, key, value, expected) => this.versionedPut(namespace, key, value, expected);
+    }
   }
 
   /** Stores an item, keeping its original `createdAt` when it replaces one. */
@@ -154,6 +184,42 @@ export class RedisStore implements Store {
     return all
       .map((entry) => entry.split('\u0000'))
       .filter((namespace) => prefix.every((part, index) => namespace[index] === part));
+  }
+
+  private async versionedPut(
+    namespace: StoreNamespace,
+    key: string,
+    value: unknown,
+    expected: number | null,
+  ): Promise<boolean> {
+    if (!key.trim()) throw new RangeError('A store key must not be empty');
+    const id = this.itemKey(namespace, key);
+    const existing = await this.read(id);
+    const timestamp = this.now().toISOString();
+    const vector = await this.embed(value, undefined);
+    const record: StoredRecord = {
+      namespace: [...namespace],
+      key,
+      value,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+      ...(vector ? { vector } : {}),
+    };
+    const eval_ = this.client.eval as NonNullable<RedisStoreLikeClient['eval']>;
+    const wrote = Number(
+      await eval_.call(
+        this.client,
+        PUT_IF_VERSION,
+        1,
+        id,
+        JSON.stringify(record),
+        expected === null ? '' : String(expected),
+      ),
+    );
+    if (wrote !== 1) return false;
+    await this.client.sadd(this.namespaceKey(namespace), key);
+    await this.client.sadd(this.indexKey(), namespace.join('\u0000'));
+    return true;
   }
 
   private async read(id: string): Promise<StoredRecord | undefined> {
