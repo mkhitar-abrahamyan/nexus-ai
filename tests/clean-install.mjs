@@ -370,7 +370,7 @@ console.log(\`community adapter passed \${report.checks.length} checks against n
   throw error;
 } finally {
   if (!keepTempDir) {
-    rmSync(tempRoot, { recursive: true, force: true });
+    rmSync(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

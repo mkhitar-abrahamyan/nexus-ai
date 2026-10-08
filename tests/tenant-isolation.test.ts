@@ -95,7 +95,7 @@ before(async () => {
 after(async () => {
   await pg.close();
   redis.close();
-  rmSync(scratch, { recursive: true, force: true });
+  rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 async function migrated<T extends { migrate(): Promise<unknown> }>(store: T): Promise<T> {

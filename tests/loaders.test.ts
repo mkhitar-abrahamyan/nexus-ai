@@ -72,7 +72,7 @@ before(async () => {
 
 after(() => {
   server.close();
-  rmSync(work, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 test('text files load from disk or memory, and a directory loads in sorted order through parsers', async () => {

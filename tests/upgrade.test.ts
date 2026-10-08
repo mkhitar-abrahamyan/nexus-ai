@@ -35,7 +35,7 @@ import {
 import type { Run } from '../src/types/tracing.js';
 
 const scratch = mkdtempSync(path.join(tmpdir(), 'nexus-upgrade-'));
-after(() => rmSync(scratch, { recursive: true, force: true }));
+after(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 interface Worker {
   name: string;

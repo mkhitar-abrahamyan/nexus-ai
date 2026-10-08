@@ -25,7 +25,7 @@ import {
 import { migrationChecksum } from '../src/utils/schema-migrations.js';
 
 const scratch = mkdtempSync(path.join(tmpdir(), 'nexus-migrations-'));
-after(() => rmSync(scratch, { recursive: true, force: true }));
+after(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 const sample = (component: string, statements: string[][]): SchemaMigration[] =>
   statements.map((list, index) => ({ component, version: index + 1, name: `step ${index + 1}`, statements: list }));

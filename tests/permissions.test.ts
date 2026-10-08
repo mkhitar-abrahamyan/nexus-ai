@@ -28,7 +28,7 @@ import type { CompletionRequest } from '../src/types/messages.js';
 import type { NexusResponse } from '../src/types/response.js';
 
 const scratch = mkdtempSync(path.join(tmpdir(), 'nexus-permissions-'));
-after(() => rmSync(scratch, { recursive: true, force: true }));
+after(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 function scriptedClient(responses: Array<Partial<NexusResponse>>) {
   const requests: CompletionRequest[] = [];

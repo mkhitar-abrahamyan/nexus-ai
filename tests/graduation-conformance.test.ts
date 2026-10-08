@@ -51,7 +51,7 @@ before(async () => {
 after(async () => {
   await pg.close();
   redis.close();
-  rmSync(work, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 const DIMENSIONS = 256;

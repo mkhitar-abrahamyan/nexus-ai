@@ -36,7 +36,7 @@ import type { CompletionRequest, Message, ToolDefinition } from '../src/types/me
 import type { NexusResponse } from '../src/types/response.js';
 
 const scratch = mkdtempSync(path.join(tmpdir(), 'nexus-middleware-'));
-after(() => rmSync(scratch, { recursive: true, force: true }));
+after(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 const reply = (partial: Partial<NexusResponse>): NexusResponse =>
   ({ content: '', role: 'assistant', finishReason: 'stop', meta: {} as never, ...partial }) as NexusResponse;

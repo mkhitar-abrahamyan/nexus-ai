@@ -23,7 +23,7 @@ import { FilePromptStore } from '../src/prompts/file.js';
 import { PromptRegistry } from '../src/prompts/registry.js';
 
 const work = mkdtempSync(path.join(tmpdir(), 'nexus-context-hub-'));
-after(() => rmSync(work, { recursive: true, force: true }));
+after(() => rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 async function setup() {
   const prompts = new PromptRegistry();

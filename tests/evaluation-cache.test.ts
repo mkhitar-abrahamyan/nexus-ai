@@ -12,7 +12,7 @@ import { evaluate } from '../src/evaluate/run.js';
 import { evaluatePrompt } from '../src/prompts/evaluate.js';
 
 const work = mkdtempSync(path.join(tmpdir(), 'nexus-eval-cache-'));
-after(() => rmSync(work, { recursive: true, force: true }));
+after(() => rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 const dataset = createDataset({
   name: 'capitals',

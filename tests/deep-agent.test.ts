@@ -25,7 +25,7 @@ import type { CompletionRequest, Message } from '../src/types/messages.js';
 import type { NexusResponse } from '../src/types/response.js';
 
 const scratch = mkdtempSync(path.join(tmpdir(), 'nexus-deep-agent-'));
-after(() => rmSync(scratch, { recursive: true, force: true }));
+after(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 async function fixtureRepository(name: string) {
   const root = path.join(scratch, name);

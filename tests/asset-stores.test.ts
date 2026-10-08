@@ -24,7 +24,7 @@ function putOptions(overrides: Partial<AssetPutOptions> = {}): AssetPutOptions {
 
 function tempDirectory(): string {
   const directory = mkdtempSync(path.join(tmpdir(), 'nexus-assets-'));
-  test.after(() => rmSync(directory, { recursive: true, force: true }));
+  test.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return directory;
 }
 

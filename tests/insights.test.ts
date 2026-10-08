@@ -26,7 +26,7 @@ import type { CompletionRequest } from '../src/types/messages.js';
 import type { Run, RunTree } from '../src/types/tracing.js';
 
 const work = mkdtempSync(path.join(tmpdir(), 'nexus-insights-'));
-after(() => rmSync(work, { recursive: true, force: true }));
+after(() => rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 let sequence = 0;
 function run(fields: Partial<Run> & { startedAt: string }): Run {

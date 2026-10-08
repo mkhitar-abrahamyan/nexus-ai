@@ -12,7 +12,7 @@ import { McpServer } from '../src/mcp/server.js';
 /** An environment placeholder as a configuration file writes it: `${NAME}`. */
 const ref = (name: string) => ['$', '{', name, '}'].join('');
 const work = mkdtempSync(path.join(tmpdir(), 'nexus-mcp-registry-'));
-after(() => rmSync(work, { recursive: true, force: true }));
+after(() => rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 function echoTool(name: string) {
   return tool({

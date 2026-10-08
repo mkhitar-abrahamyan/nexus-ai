@@ -50,7 +50,7 @@ import {
 } from '../src/sqlite/index.js';
 
 const scratch = mkdtempSync(path.join(tmpdir(), 'nexus-upgrade-2-3-'));
-after(() => rmSync(scratch, { recursive: true, force: true }));
+after(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 const DIMENSIONS = 16;
 const embed = (texts: string[]) => createHashEmbeddings(texts, DIMENSIONS);

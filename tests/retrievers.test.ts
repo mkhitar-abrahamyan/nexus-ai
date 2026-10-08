@@ -37,7 +37,7 @@ import { redisStub } from './vector-stubs.js';
 const DIMENSIONS = 64;
 const embed = (texts: string[]) => createHashEmbeddings(texts, DIMENSIONS);
 const datasets = mkdtempSync(path.join(tmpdir(), 'nexus-retrieval-'));
-after(() => rmSync(datasets, { recursive: true, force: true }));
+after(() => rmSync(datasets, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 const result = (id: string, score = 1, extra: Partial<VectorSearchResult> = {}): VectorSearchResult => ({
   id,

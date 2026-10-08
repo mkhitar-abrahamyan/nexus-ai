@@ -17,7 +17,7 @@ import { MemoryTenantUsage } from '../src/server/tenancy.js';
 import { applySqliteMigrations, sqliteMigrations } from '../src/sqlite/index.js';
 
 const scratch = mkdtempSync(path.join(tmpdir(), 'nexus-doctor-'));
-after(() => rmSync(scratch, { recursive: true, force: true }));
+after(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
 const statusOf = (report: DoctorReport) => Object.fromEntries(report.checks.map((check) => [check.id, check.status]));
 
