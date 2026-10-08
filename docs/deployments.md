@@ -82,6 +82,29 @@ thread never flips back and forth.
 Every run records its `RunRevision`: the revision, its share, the deployment version, and the reason.
 The thread records its revision too, which is how a rolled-back canary sends its threads home.
 
+### Revision worker pools
+
+A worker image does not have to carry every revision. Each worker claims only the queued runs routed
+to revisions it carries, so a new revision ships in a new image beside the old one.
+- **The run's kind names its revision.** A queued run's kind is `assistant:<id>@<revision>`. A worker
+  claims with the kinds of every revision it registered, and of each assistant's runs without one.
+  A run routed to a revision a worker lacks is left for a worker that has it, and never runs on
+  another revision instead.
+- **The API replicas route to any revision a worker carries.** A run that will wait in the queue is
+  routed over the revisions any fresh worker reports carrying, through `RevisionRequest.queued`. The
+  API replicas, with `queue: { claim: false }`, can then send traffic to a revision only the new
+  image has. `RevisionChoice.local` says whether the answering replica carries the chosen revision.
+  When it does not, the run is queued even when this replica has room.
+- **The queue is counted per revision.** `/scaling` reports queued runs per assistant and revision in
+  `queuedByRevision`, and `/metrics` as `nexus_server_runs_queued_by_revision`, so an autoscaler
+  starts the pool that carries the waiting revision. A run whose pool is scaled to zero waits for it.
+
+```ts
+// The API image routes; each worker image carries the revisions its code has.
+const api = createAgentServer({ assistants, state, operations, queue: { claim: false }, deployments });
+const worker = createAgentServer({ assistants, state, operations, queue: { concurrency: 8 }, deployments });
+```
+
 ### Changing the split
 
 Every change is a `DeploymentChange`, applied by `change()` or one of its shortcuts:
@@ -261,6 +284,8 @@ worker stopped, every 30 seconds by default.
 | `load` | `nexus_server_queue_load` | Queued plus running: what to size the pool by. |
 | `oldestQueuedSeconds` | `nexus_server_queue_oldest_seconds` | How long the oldest queued run has waited. |
 | `lapsedLeases` | `nexus_server_leases_lapsed` | Runs a stopped worker left, until another takes them over. |
+| `queuedByRevision` | `nexus_server_runs_queued_by_revision` | Queued runs per assistant and revision, for sizing each revision's pool. |
+| `atomicChanges` | — | Whether deployment changes are atomic across replicas. |
 | `replica` | `nexus_server_worker_*` | The answering replica: its runs, capacity, and whether it is draining. |
 
 Size the pool as `load` divided by each worker's `concurrency`. The deployment-wide numbers read the
@@ -408,8 +433,11 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   only in their last characters, such as `user-1` to `user-500`, spread unevenly over a few hundred
   threads, so a canary's share of them drifts from its weight. Its output is part of the stability
   promise, so threads keep their place through an upgrade.
-- A revision's code must be in every replica's image. A replica serves only the revisions it has, so
-  roll out an image before you give its new revision traffic.
+- A worker of 2.4 or earlier claims a run of any revision, and runs its live revision when it lacks
+  the one routed. Finish a rollout from 2.4 before images start carrying different revisions.
+- A replica that both serves the API and claims runs routes a run it has room for only among its own
+  revisions. Put the API on its own replicas, with `claim: false`, for a canary that only a new
+  image carries.
 - `stats()` and the guard read recent run records, 2,000 by default, so a very busy assistant is judged
   on its latest runs.
 - The Redis operation store reads every record to find queued work. Postgres and SQLite do it in one

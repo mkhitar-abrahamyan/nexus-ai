@@ -50,7 +50,13 @@ New and stable:
   `Deployments.atomicChanges`; `ScalingSnapshot.atomicChanges`;
 - `nexus-ai-pro/postgres/tenancy`: `PostgresTenantUsage`, `PostgresTenantUsageOptions`,
   `tenantUsageMigration()`, and `tenantUsageMigrations()`; the `tenancy` member of
-  `PostgresAdapter`.
+  `PostgresAdapter`;
+- `OperationStoreFilter.kinds`, `OperationStoreStats.queuedByKind`, `RevisionRequest.queued`,
+  `RevisionChoice.local`, `ScalingSnapshot.queuedByRevision`, and the
+  `nexus_server_runs_queued_by_revision` metric.
+
+A queued run's kind now names its revision, as `assistant:<id>@<revision>`. Code that reads the
+server's runs by the `assistant:` prefix, as the server itself does, is unaffected.
 
 A state store without `putIfVersion()` keeps its earlier behavior.
 

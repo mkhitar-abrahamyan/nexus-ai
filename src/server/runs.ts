@@ -33,7 +33,7 @@ import {
   ThreadBusyError,
 } from './errors.js';
 import { MemoryRunEventLog } from './events.js';
-import { gauge, ServerMetrics } from './metrics.js';
+import { gauge, gauges, ServerMetrics } from './metrics.js';
 import { MemoryServerStore, RUNS_NAMESPACE } from './state.js';
 
 /** What a run needs to start. */
@@ -142,6 +142,25 @@ interface Submission {
 const THREADS = ['nexus', 'server', 'threads'];
 const RUNS = RUNS_NAMESPACE as string[];
 const KIND_PREFIX = 'assistant:';
+
+/** The operation kind of a run: its assistant, and the revision it was routed to. */
+function runKind(assistant: string, revision: string | undefined): string {
+  return revision === undefined ? `${KIND_PREFIX}${assistant}` : `${KIND_PREFIX}${assistant}@${revision}`;
+}
+
+/** Queued runs per assistant and revision, from queued records per kind. */
+function byRevision(queuedByKind: Record<string, number>): Record<string, Record<string, number>> {
+  const counts: Record<string, Record<string, number>> = {};
+  for (const [kind, queued] of Object.entries(queuedByKind)) {
+    if (!kind.startsWith(KIND_PREFIX)) continue;
+    const rest = kind.slice(KIND_PREFIX.length);
+    const at = rest.lastIndexOf('@');
+    if (at <= 0) continue;
+    const assistant = rest.slice(0, at);
+    counts[assistant] = { ...counts[assistant], [rest.slice(at + 1)]: queued };
+  }
+  return counts;
+}
 /** The idempotency-key prefix of the record that says which run holds a thread. */
 const THREAD_CLAIM = 'nexus-thread:';
 /** A claim whose run never got recorded is abandoned after this long: its starter died mid-start. */
@@ -341,6 +360,7 @@ export class RunManager {
   ): Promise<RunRecord> {
     let assistant = base;
     let revision: RunRevision | undefined;
+    let elsewhere = false;
     if (base.route) {
       const choice = await base.route({
         runId,
@@ -348,11 +368,14 @@ export class RunManager {
         threadRevision: thread?.revision,
         requested: options.revision,
         principal: options.principal,
+        queued: !this.runsHere(),
       });
       if (choice) {
-        const { assistant: chosen, ...chosenRevision } = choice;
+        const { assistant: chosen, local, ...chosenRevision } = choice;
         assistant = chosen;
         revision = chosenRevision;
+        // A revision only another worker carries waits for that worker, however free this one is.
+        elsewhere = local === false;
       }
     } else if (options.revision !== undefined) {
       throw new BadRequestError(`Assistant "${options.assistant}" has no revisions`, 'UNKNOWN_REVISION');
@@ -371,7 +394,7 @@ export class RunManager {
     }
 
     try {
-      return await this.accept(runId, options, assistant, thread, revision);
+      return await this.accept(runId, options, assistant, thread, revision, elsewhere);
     } catch (error) {
       await this.releaseTenant(runId, options.principal?.tenantId);
       throw error;
@@ -446,12 +469,27 @@ export class RunManager {
     try {
       const handles = await this.runner.claimQueued((context) => this.executeStored(context), free, {
         kindPrefix: KIND_PREFIX,
+        kinds: this.claimableKinds(),
       });
       for (const handle of handles) this.track(handle);
       return handles.map((handle) => handle.id);
     } finally {
       this.claiming -= free;
     }
+  }
+
+  /**
+   * The kinds of run this replica can execute: each assistant's runs without a revision, and those
+   * of every revision it carries. A run routed to a revision this image lacks is left for a worker
+   * that has it.
+   */
+  private claimableKinds(): string[] {
+    const kinds: string[] = [];
+    for (const [id, assistant] of Object.entries(this.options.assistants)) {
+      kinds.push(runKind(id, undefined));
+      for (const revision of assistant.revisions ?? []) kinds.push(runKind(id, revision));
+    }
+    return kinds;
   }
 
   /**
@@ -543,6 +581,7 @@ export class RunManager {
       lapsedLeases: stats.lapsedLeases,
       replica: this.replica(metadata),
       atomicChanges: typeof this.state.putIfVersion === 'function',
+      queuedByRevision: byRevision(stats.queuedByKind ?? {}),
     };
   }
 
@@ -561,6 +600,16 @@ export class RunManager {
       snapshot.oldestQueuedSeconds,
     );
     gauge(lines, 'nexus_server_leases_lapsed', 'Running runs whose lease lapsed.', snapshot.lapsedLeases);
+    gauges(
+      lines,
+      'nexus_server_runs_queued_by_revision',
+      'Runs waiting for a worker that carries their revision, across the deployment.',
+      Object.entries(snapshot.queuedByRevision ?? {}).flatMap(([assistant, revisions]) =>
+        Object.entries(revisions).map(
+          ([revision, queued]) => [{ assistant, revision }, queued] as [Record<string, string>, number],
+        ),
+      ),
+    );
     gauge(lines, 'nexus_server_worker_in_flight', 'Runs this replica is executing.', snapshot.replica.inFlight);
     if (snapshot.replica.capacity !== undefined) {
       gauge(lines, 'nexus_server_worker_capacity', 'Runs this replica executes at once.', snapshot.replica.capacity);
@@ -580,6 +629,7 @@ export class RunManager {
     assistant: ServerAssistant,
     thread: ThreadRecord | undefined,
     revision: RunRevision | undefined,
+    elsewhere = false,
   ): Promise<RunRecord> {
     const at = this.now().toISOString();
     // Recorded before the run starts, so the rollback policy has a step to put the thread back to.
@@ -612,7 +662,8 @@ export class RunManager {
     };
     const submit = {
       id: runId,
-      kind: `${KIND_PREFIX}${options.assistant}`,
+      // The revision is part of the kind, so a worker claims only the runs it carries the code for.
+      kind: runKind(options.assistant, revision?.id),
       idempotencyKey: options.idempotencyKey,
       // The submission carries what any worker needs to run it.
       metadata: submission as unknown as Record<string, unknown>,
@@ -622,7 +673,7 @@ export class RunManager {
     };
 
     let acceptedId: string;
-    if (this.runsHere()) {
+    if (this.runsHere() && !elsewhere) {
       this.slots.add(runId);
       const plan: RunPlan = {
         assistantId: options.assistant,

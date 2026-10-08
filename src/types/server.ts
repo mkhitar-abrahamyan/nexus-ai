@@ -115,12 +115,26 @@ export interface RevisionRequest {
   requested?: string;
   /** Who asked. */
   principal?: Principal;
+  /**
+   * Whether the run will wait for a worker rather than start on this replica. The split then takes in
+   * the revisions any fresh worker carries, not only this replica's, so a new revision in a new worker
+   * image takes its share before the API replicas carry it.
+   */
+  queued?: boolean;
 }
 
 /** The revision `route()` chose: where it came from, and its code. */
 export interface RevisionChoice extends RunRevision {
-  /** The revision's assistant, which runs this request. */
+  /**
+   * The revision's assistant, which runs this request. When this replica does not carry the revision,
+   * its live revision stands in for the checks made before the run is queued.
+   */
   assistant: ServerAssistant;
+  /**
+   * Whether this replica carries the revision. When false, the run waits in the queue for a worker that
+   * does, and never runs here.
+   */
+  local?: boolean;
 }
 
 /**
@@ -190,6 +204,11 @@ export interface ScalingSnapshot {
    * `putIfVersion()`. When false, two replicas changing one deployment at once can lose a change.
    */
   atomicChanges?: boolean;
+  /**
+   * Queued runs per assistant and revision, such as `{ support: { v2: 12 } }`, so an autoscaler starts
+   * the worker pool that carries a revision. Runs without a revision are counted only in `queued`.
+   */
+  queuedByRevision?: Record<string, Record<string, number>>;
 }
 
 /** How traffic for one assistant is split between its revisions. */

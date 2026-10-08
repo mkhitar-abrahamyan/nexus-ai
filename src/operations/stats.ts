@@ -20,6 +20,7 @@ export function isUnheldQueued(record: OperationRecord<unknown>, now: string): b
 /** Whether a record passes a store filter. */
 export function matchesFilter(record: OperationRecord<unknown>, filter?: OperationStoreFilter): boolean {
   if (filter?.tenantId !== undefined && record.tenantId !== filter.tenantId) return false;
+  if (filter?.kinds && !filter.kinds.includes(record.kind ?? '')) return false;
   return !filter?.kindPrefix || (record.kind ?? '').startsWith(filter.kindPrefix);
 }
 
@@ -32,15 +33,18 @@ export function countRecords(
   const byStatus: Partial<Record<OperationStatus, number>> = {};
   let oldestQueuedAt: string | undefined;
   let lapsedLeases = 0;
+  const queuedByKind: Record<string, number> = {};
   for (const record of records) {
     if (isTerminalOperationStatus(record.status) || !matchesFilter(record, filter)) continue;
     byStatus[record.status] = (byStatus[record.status] ?? 0) + 1;
-    if (record.status === 'queued' && (!oldestQueuedAt || record.createdAt < oldestQueuedAt)) {
-      oldestQueuedAt = record.createdAt;
+    if (record.status === 'queued') {
+      if (!oldestQueuedAt || record.createdAt < oldestQueuedAt) oldestQueuedAt = record.createdAt;
+      const kind = record.kind ?? '';
+      queuedByKind[kind] = (queuedByKind[kind] ?? 0) + 1;
     }
     if (record.status === 'running' && (!record.lease || record.lease.expiresAt <= now)) lapsedLeases += 1;
   }
-  return { byStatus, ...(oldestQueuedAt ? { oldestQueuedAt } : {}), lapsedLeases };
+  return { byStatus, ...(oldestQueuedAt ? { oldestQueuedAt } : {}), lapsedLeases, queuedByKind };
 }
 
 /**
@@ -54,9 +58,10 @@ export async function operationStats(
 ): Promise<OperationStoreStats> {
   const now = (options.now ?? new Date()).toISOString();
   const filter =
-    options.kindPrefix || options.tenantId !== undefined
+    options.kindPrefix || options.kinds || options.tenantId !== undefined
       ? {
           ...(options.kindPrefix ? { kindPrefix: options.kindPrefix } : {}),
+          ...(options.kinds ? { kinds: options.kinds } : {}),
           ...(options.tenantId !== undefined ? { tenantId: options.tenantId } : {}),
         }
       : undefined;

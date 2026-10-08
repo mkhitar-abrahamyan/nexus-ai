@@ -84,6 +84,13 @@ export function gauge(lines: string[], name: string, help: string, value: number
   lines.push(`${name}${labelText(labels)} ${round(value)}`);
 }
 
+/** One gauge with several labelled samples, under one header. Writes nothing without samples. */
+export function gauges(lines: string[], name: string, help: string, samples: ReadonlyArray<[Labels, number]>): void {
+  if (samples.length === 0) return;
+  header(lines, name, 'gauge', help);
+  for (const [labels, value] of samples) lines.push(`${name}${labelText(labels)} ${round(value)}`);
+}
+
 function header(lines: string[], name: string, type: string, help?: string): void {
   if (help) lines.push(`# HELP ${name} ${help}`);
   lines.push(`# TYPE ${name} ${type}`);

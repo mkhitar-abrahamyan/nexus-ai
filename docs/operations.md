@@ -255,10 +255,11 @@ Two more optional methods serve queues and autoscalers:
 
 - `listQueued(limit, filter)` returns queued records no worker holds, oldest first.
 - `stats(now, filter)` returns an `OperationStoreStats`: unfinished records per status, the oldest
-  queued record's time, and running records whose lease has lapsed.
+  queued record's time, running records whose lease has lapsed, and queued records per kind.
 
 An `OperationStoreFilter` narrows both by `kindPrefix`, such as `assistant:` for the agent server's
-runs. `operationStats()` calls `stats()`, or counts `list()` for a store without it. Every store
+runs, and by `kinds`, a list of exact kinds. `claimQueued()` checks a candidate against the filter
+itself too, so a store of your own that ignores a filter field never hands a worker the wrong work. `operationStats()` calls `stats()`, or counts `list()` for a store without it. Every store
 here has both methods. Postgres and SQLite answer `listQueued()` from an index of queued work by age,
 so a claim reads the oldest few rows however long the queue is. Redis does too with `index: true`;
 without it, Redis reads every record.

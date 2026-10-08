@@ -22,9 +22,31 @@ Graduation finished, and evaluation at production depth.
 - **Tenant usage in Postgres**, on the new `nexus-ai-pro/postgres/tenancy`: `PostgresTenantUsage`, so
   every replica enforces one tenant limit without Redis. The `tenancy` adapter joins
   `postgresMigrations()` and `nexus db migrate`.
+- **Revision worker pools.** A worker image carries some revisions of an assistant, and claims only
+  the runs routed to them, so a new revision ships in a new image beside the old one.
+  - A queued run's kind names its revision, as `assistant:<id>@<revision>`, and a worker claims with
+    the kinds of the revisions it registered.
+  - A run that will wait in the queue is routed over the revisions any fresh worker reports
+    (`RevisionRequest.queued`), so the API replicas send traffic to a revision only a new image
+    carries. `RevisionChoice.local` says whether the answering replica has it.
+  - `/scaling` reports `queuedByRevision`, and `/metrics` `nexus_server_runs_queued_by_revision`, so an
+    autoscaler starts the pool a waiting revision needs.
+  - `OperationStoreFilter.kinds` filters by exact kinds on every operation store, and
+    `OperationStoreStats.queuedByKind` counts queued records per kind. `claimQueued()` checks each
+    candidate against the filter itself, for a store that ignores one.
+
+### Fixed
+
+- A worker that lacked the revision a run was routed to ran the assistant's live revision instead,
+  and the run still recorded the revision it was routed to. A worker now claims only runs of revisions
+  it carries.
 
 ### Proof
 
+- Two worker images drain one queue, one carrying v1 and the other v1 and v2, with an API replica
+  that carries only v1. Under a 50% canary, every run executes on the revision it was routed to, and
+  only the image with v2 runs v2. A run for a pool scaled to zero waits, is counted per revision on
+  `/scaling` and `/metrics`, and runs when that pool returns.
 - Two replicas changing one deployment in the same instant both land, on the memory, Redis,
   Postgres, and SQLite stores. The race test holds both writers until both arrive, and the same race
   on a store without `putIfVersion()` loses a change. Of two changes made on one expected version,

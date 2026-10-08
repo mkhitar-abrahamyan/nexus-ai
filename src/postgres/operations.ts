@@ -216,12 +216,12 @@ export class PostgresOperationStore<TResult = unknown> implements OperationStore
     const params: unknown[] = [now];
     const narrowed = filterSql(filter, params);
     const { rows } = await this.client.query(
-      `SELECT status, count(*)::int AS count,
+      `SELECT status, kind, count(*)::int AS count,
          min(created_at) FILTER (WHERE status = 'queued') AS oldest,
          count(*) FILTER (WHERE status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= $1))::int AS lapsed
        FROM ${this.table}
        WHERE status NOT IN (${TERMINAL})${narrowed}
-       GROUP BY status`,
+       GROUP BY status, kind`,
       params,
     );
     return statsFromRows(rows as StatsRow[]);
@@ -264,6 +264,10 @@ function filterSql(filter: OperationStoreFilter | undefined, params: unknown[]):
     params.push(filter.kindPrefix);
     sql += ` AND substr(kind, 1, char_length($${params.length})) = $${params.length}`;
   }
+  if (filter?.kinds) {
+    params.push([...filter.kinds]);
+    sql += ` AND kind = ANY($${params.length}::text[])`;
+  }
   if (filter?.tenantId !== undefined) {
     params.push(filter.tenantId);
     sql += ` AND doc ->> 'tenantId' = $${params.length}`;
@@ -274,6 +278,7 @@ function filterSql(filter: OperationStoreFilter | undefined, params: unknown[]):
 /** One row of the grouped stats query. */
 interface StatsRow {
   status: OperationStatus;
+  kind: string | null;
   count: number | string;
   oldest: string | null;
   lapsed: number | string;
@@ -284,10 +289,12 @@ function statsFromRows(rows: readonly StatsRow[]): OperationStoreStats {
   const byStatus: Partial<Record<OperationStatus, number>> = {};
   let oldestQueuedAt: string | undefined;
   let lapsedLeases = 0;
+  const queuedByKind: Record<string, number> = {};
   for (const row of rows) {
-    byStatus[row.status] = Number(row.count);
+    byStatus[row.status] = (byStatus[row.status] ?? 0) + Number(row.count);
+    if (row.status === 'queued') queuedByKind[row.kind ?? ''] = (queuedByKind[row.kind ?? ''] ?? 0) + Number(row.count);
     if (row.oldest && (!oldestQueuedAt || row.oldest < oldestQueuedAt)) oldestQueuedAt = row.oldest;
     lapsedLeases += Number(row.lapsed);
   }
-  return { byStatus, ...(oldestQueuedAt ? { oldestQueuedAt } : {}), lapsedLeases };
+  return { byStatus, ...(oldestQueuedAt ? { oldestQueuedAt } : {}), lapsedLeases, queuedByKind };
 }

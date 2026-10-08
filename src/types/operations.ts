@@ -230,6 +230,11 @@ export interface OperationStore<TResult = unknown> {
 export interface OperationStoreFilter {
   /** Only records whose `kind` starts with this, such as `assistant:` for the agent server's runs. */
   kindPrefix?: string;
+  /**
+   * Only records whose `kind` is one of these, exactly. A worker carrying some revisions of an
+   * assistant claims with it, so it never takes a run routed to a revision it does not have.
+   */
+  kinds?: readonly string[];
   /** Only records of this tenant. Postgres and SQLite read it through an index on queued work. */
   tenantId?: string;
 }
@@ -246,6 +251,8 @@ export interface OperationStoreStats {
   oldestQueuedAt?: string;
   /** Records still marked running whose lease has lapsed: work a stopped worker left behind. */
   lapsedLeases: number;
+  /** Queued records per `kind`, for an autoscaler that sizes a pool per kind of work. */
+  queuedByKind?: Record<string, number>;
 }
 
 /**

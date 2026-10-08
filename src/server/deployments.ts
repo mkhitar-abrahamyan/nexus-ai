@@ -140,6 +140,8 @@ interface Registration {
  */
 export class Deployments implements ServerDeployments {
   private readonly state: ServerStateStore;
+  /** What fresh workers carry, per assistant, read at most every `cacheMs`. */
+  private readonly fleet = new Map<string, { revisions: ReadonlySet<string>; at: number }>();
   /** The change in progress per deployment, which the next one waits for. */
   private readonly changing = new Map<string, Promise<DeploymentRecord>>();
   private readonly now: () => Date;
@@ -201,29 +203,34 @@ export class Deployments implements ServerDeployments {
     const deployment = await this.current(assistant);
 
     if (request.requested !== undefined) {
-      const chosen = registration.revisions[request.requested];
-      if (!chosen) {
+      // A queued run may name a revision only a worker carries.
+      const runnable =
+        registration.revisions[request.requested] !== undefined ||
+        (request.queued === true && (await this.workerRevisions(assistant)).has(request.requested));
+      if (!runnable) {
         throw new BadRequestError(
           `Assistant "${assistant}" has no revision "${request.requested}"`,
           'UNKNOWN_REVISION',
         );
       }
-      return choice(request.requested, chosen, deployment, 'requested');
+      return choice(request.requested, registration, deployment, 'requested');
     }
 
-    // Only revisions this replica can run take traffic here, so a revision named in the store but
-    // missing from this image never gets a run it cannot serve.
-    const traffic = servable(deployment.traffic, registration);
+    // Only revisions that can run take traffic: those this replica carries when the run starts here,
+    // and those any fresh worker carries when it waits in the queue. A revision named in the store but
+    // in no image never gets a run nobody can serve.
+    const fleet = request.queued ? await this.workerRevisions(assistant) : undefined;
+    const traffic = servable(deployment.traffic, registration, fleet);
     const threadRevision = request.threadRevision;
     if (threadRevision !== undefined && (traffic[threadRevision] ?? 0) > 0) {
-      return choice(threadRevision, registration.revisions[threadRevision] as ServerAssistant, deployment, 'thread');
+      return choice(threadRevision, registration, deployment, 'thread');
     }
     const revision = pickRevision(
       traffic,
       deployment.live,
       bucket(`${assistant}:${request.threadId ?? request.runId}`),
     );
-    return choice(revision, registration.revisions[revision] as ServerAssistant, deployment, 'split');
+    return choice(revision, registration, deployment, 'split');
   }
 
   /**
@@ -586,6 +593,19 @@ export class Deployments implements ServerDeployments {
     return record;
   }
 
+  /** The revisions fresh workers that claim queued runs report carrying, read at most every `cacheMs`. */
+  private async workerRevisions(assistant: string): Promise<ReadonlySet<string>> {
+    const cached = this.fleet.get(assistant);
+    if (cached && Date.now() - cached.at < (this.options.cacheMs ?? 2_000)) return cached.revisions;
+    const revisions = new Set<string>();
+    for (const replica of await this.replicas()) {
+      if (!replica.claims || replica.draining) continue;
+      for (const revision of replica.assistants[assistant] ?? []) revisions.add(revision);
+    }
+    this.fleet.set(assistant, { revisions, at: Date.now() });
+    return revisions;
+  }
+
   /** The deployment of a registered assistant before anything is recorded: its live revision, all traffic. */
   private initial(assistant: string): DeploymentRecord | undefined {
     const registration = this.registrations.get(assistant);
@@ -854,9 +874,18 @@ function pickRevision(traffic: Record<string, number>, live: string, position: n
   return (traffic[live] ?? 0) > 0 ? live : (Object.keys(traffic)[0] ?? live);
 }
 
-/** The split restricted to revisions this replica has, renormalized; all to live when none remain. */
-function servable(traffic: Record<string, number>, registration: Registration): Record<string, number> {
-  const kept = Object.entries(traffic).filter(([revision, weight]) => weight > 0 && registration.revisions[revision]);
+/**
+ * The split restricted to revisions that can run, renormalized: this replica's, and with `fleet`,
+ * those workers carry too. All to live when none remain.
+ */
+function servable(
+  traffic: Record<string, number>,
+  registration: Registration,
+  fleet?: ReadonlySet<string>,
+): Record<string, number> {
+  const kept = Object.entries(traffic).filter(
+    ([revision, weight]) => weight > 0 && (registration.revisions[revision] || fleet?.has(revision)),
+  );
   const total = kept.reduce((sum, [, weight]) => sum + weight, 0);
   if (total <= 0) return { [registration.live]: 1 };
   return Object.fromEntries(kept.map(([revision, weight]) => [revision, weight / total]));
@@ -891,11 +920,22 @@ function hasCanary(deployment: DeploymentRecord): boolean {
 
 function choice(
   id: string,
-  assistant: ServerAssistant,
+  registration: Registration,
   deployment: DeploymentRecord,
   reason: RevisionChoice['reason'],
 ): RevisionChoice {
-  return { id, assistant, weight: deployment.traffic[id] ?? 0, deployment: deployment.version, reason };
+  const here = registration.revisions[id];
+  const assistant = (here ??
+    registration.revisions[registration.live] ??
+    Object.values(registration.revisions)[0]) as ServerAssistant;
+  return {
+    id,
+    assistant,
+    local: here !== undefined,
+    weight: deployment.traffic[id] ?? 0,
+    deployment: deployment.version,
+    reason,
+  };
 }
 
 function summarize(revision: string, runs: readonly RunRecord[]): RevisionStats {

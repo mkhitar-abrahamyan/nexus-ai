@@ -119,6 +119,9 @@ export class OperationRunner<TResult = unknown> {
 
     for (const record of candidates) {
       if (claimed.length >= limit) break;
+      // Checked again here, so a store that ignores a filter it does not know never hands a worker
+      // work it was not asking for.
+      if (!matchesFilter(record, filter)) continue;
       if (record.expiresAt && record.expiresAt <= nowIso) {
         await this.settleExpired(record);
         continue;

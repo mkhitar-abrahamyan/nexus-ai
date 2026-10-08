@@ -23,7 +23,8 @@ function record(overrides: Partial<OperationRecord<string>>): OperationRecord<st
 
 /**
  * What every store's `listQueued()` and `stats()` must agree on: oldest first, held records skipped,
- * kinds filtered by prefix, finished records left uncounted, and lapsed leases reported.
+ * kinds filtered by prefix or exactly, finished records left uncounted, lapsed leases reported, and
+ * queued records counted per kind.
  */
 export async function queueContract(name: string, store: OperationStore<string>): Promise<void> {
   await store.create(record({ id: 'q-late', kind: 'assistant:a', createdAt: at(3) }));
@@ -48,16 +49,32 @@ export async function queueContract(name: string, store: OperationStore<string>)
     `${name}: kind prefix`,
   );
   assert.deepEqual(ids((await store.listQueued?.(1)) ?? []), ['q-early'], `${name}: limit`);
+  assert.deepEqual(
+    ids((await store.listQueued?.(10, { kinds: ['assistant:a', 'image.generate'] })) ?? []),
+    ['q-other', 'q-late'],
+    `${name}: exact kinds`,
+  );
+  assert.deepEqual(
+    ids((await store.listQueued?.(10, { kindPrefix: 'assistant:', kinds: ['assistant:b'] })) ?? []),
+    ['q-early'],
+    `${name}: a prefix and exact kinds together`,
+  );
+  assert.deepEqual(ids((await store.listQueued?.(10, { kinds: [] })) ?? []), [], `${name}: no kinds matches nothing`);
 
   const now = '2026-09-21T01:00:00.000Z';
   assert.deepEqual(
     await store.stats?.(now),
-    { byStatus: { queued: 4, running: 2 }, oldestQueuedAt: at(0), lapsedLeases: 1 },
+    {
+      byStatus: { queued: 4, running: 2 },
+      oldestQueuedAt: at(0),
+      lapsedLeases: 1,
+      queuedByKind: { 'assistant:a': 2, 'assistant:b': 1, 'image.generate': 1 },
+    },
     `${name}: stats`,
   );
   assert.deepEqual(
     await store.stats?.(now, { kindPrefix: 'image.' }),
-    { byStatus: { queued: 1 }, oldestQueuedAt: at(2), lapsedLeases: 0 },
+    { byStatus: { queued: 1 }, oldestQueuedAt: at(2), lapsedLeases: 0, queuedByKind: { 'image.generate': 1 } },
     `${name}: stats by kind`,
   );
 }

@@ -220,23 +220,26 @@ export class SqliteOperationStore<TResult = unknown> implements OperationStore<T
     const params: Array<string | number> = [now];
     const narrowed = filterSql(filter, params);
     const rows = (await this.client.all(
-      `SELECT status, count(*) AS count,
+      `SELECT status, kind, count(*) AS count,
          min(CASE WHEN status = 'queued' THEN created_at END) AS oldest,
          sum(CASE WHEN status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= ?) THEN 1 ELSE 0 END) AS lapsed
        FROM ${this.table}
        WHERE status NOT IN (${TERMINAL})${narrowed}
-       GROUP BY status`,
+       GROUP BY status, kind`,
       params,
-    )) as Array<{ status: OperationStatus; count: number; oldest: string | null; lapsed: number }>;
+    )) as Array<{ status: OperationStatus; kind: string | null; count: number; oldest: string | null; lapsed: number }>;
     const byStatus: Partial<Record<OperationStatus, number>> = {};
+    const queuedByKind: Record<string, number> = {};
     let oldestQueuedAt: string | undefined;
     let lapsedLeases = 0;
     for (const row of rows) {
-      byStatus[row.status] = Number(row.count);
+      byStatus[row.status] = (byStatus[row.status] ?? 0) + Number(row.count);
+      if (row.status === 'queued')
+        queuedByKind[row.kind ?? ''] = (queuedByKind[row.kind ?? ''] ?? 0) + Number(row.count);
       if (row.oldest && (!oldestQueuedAt || row.oldest < oldestQueuedAt)) oldestQueuedAt = row.oldest;
       lapsedLeases += Number(row.lapsed);
     }
-    return { byStatus, ...(oldestQueuedAt ? { oldestQueuedAt } : {}), lapsedLeases };
+    return { byStatus, ...(oldestQueuedAt ? { oldestQueuedAt } : {}), lapsedLeases, queuedByKind };
   }
 
   /** Deletes finished records last updated before a cutoff, returning how many went. */
@@ -266,6 +269,14 @@ function filterSql(filter: OperationStoreFilter | undefined, params: Array<strin
   if (filter?.kindPrefix) {
     params.push(filter.kindPrefix, filter.kindPrefix);
     sql += ' AND substr(kind, 1, length(?)) = ?';
+  }
+  if (filter?.kinds) {
+    // No kinds matches nothing, as an empty list matches nothing in the other stores.
+    if (filter.kinds.length === 0) sql += ' AND 0';
+    else {
+      params.push(...filter.kinds);
+      sql += ` AND kind IN (${filter.kinds.map(() => '?').join(', ')})`;
+    }
   }
   if (filter?.tenantId !== undefined) {
     params.push(filter.tenantId);
