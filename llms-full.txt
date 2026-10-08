@@ -282,8 +282,11 @@ Shipped so far:
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-What comes next is on the [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md):
-the gaps 2.4 left open, and the work applications ask for after them.
+Next, 2.5 finishes graduation, with deployments that change atomically across replicas, revision
+worker pools, and the studio. It also takes evaluation to production depth: whole conversations,
+synthetic and adversarial datasets, spend caps, online-evaluation workers, and signed context named on
+every trace. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
+releases after it.
 
 ## Before Production
 
@@ -4412,6 +4415,15 @@ It returns `EvalMetrics`, grouped by kind:
 The safety metrics are heuristics — short term lists and fixed patterns — suited to catching a
 regression in a test, not to judging content in production; use a model judge for that.
 
+## Limitations
+
+- An evaluator scores one answer. A conversation has no evaluator of its own, and nothing simulates
+  a user to hold one, so a multi-turn agent is evaluated turn by turn.
+- Datasets are written by hand, or exported from traces and review queues. Nothing generates examples
+  from documents, or attacks from the guardrails' patterns.
+- An experiment has no spend cap of its own: bound it with the client's budget. Online evaluation runs
+  when a replica calls `Deployments.evaluate()`, not on workers of its own.
+
 ---
 
 Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/context-hub.md
@@ -4558,6 +4570,9 @@ await otherHub.import(JSON.parse(await readFile('support-agent.json', 'utf8')), 
 
 - A bundle pins prompt versions; it does not follow prompt labels. Commit a new bundle version to
   take a new prompt version, which is what makes a bundle reproducible.
+- A bundle is versioned by its content, not signed. An import checks that the content is what was
+  exported, not who exported it.
+- A traced model call records the prompt version it was rendered from, but not the bundle's.
 
 ---
 

@@ -62,14 +62,88 @@ Each gap is written down in a guide's limitations today, and each is closed by o
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| Two replicas changing one deployment in the same instant can lose a change: the state store has no compare-and-set | deployments guide | not yet scheduled |
-| Images have not recorded live conformance on all three backends | API stability | not yet scheduled |
-| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | not yet scheduled |
-| The studio and its accounts have no threat review and no soak | API stability | not yet scheduled |
+| Two replicas changing one deployment in the same instant can lose a change: the state store has no compare-and-set | deployments guide | 2.5 |
+| Every replica's image must carry every revision | deployments guide | 2.5 |
+| Tenant usage is shared through Redis only; there is no Postgres store for it | deployments guide | 2.5 |
+| An evaluator scores one answer; a conversation has no evaluator, and no simulated user to hold one | evaluation guide | 2.5 |
+| Datasets are written by hand or exported from traces; nothing generates them from documents or attacks | evaluation guide | 2.5 |
+| An experiment has no spend cap, and online evaluation is a method a replica calls, not a worker | evaluation guide | 2.5 |
+| A context bundle is versioned, not signed, and a trace records the prompt version but not the context's | context hub guide | 2.5 |
+| The studio and its accounts have no threat review and no soak | API stability | 2.5 |
+| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.5 |
+| Images have not recorded live conformance on all three backends | API stability | 2.5 |
 
 ---
 
-## Beyond 2.4
+## 2.5.0: graduation finished, and evaluation at production depth
+
+The last experimental surfaces leave with evidence, and evaluation covers what production agents do:
+whole conversations, scored continuously, on datasets that grow on their own.
+
+**Deployments that change atomically.** The server's state store gains an optional compare-and-set,
+which the memory, Redis, Postgres, and SQLite stores implement. A deployment change is then decided on
+the version it read, on every replica rather than within one. A store without it keeps today's
+behavior, and says so in `/scaling`. Tenant usage gets a Postgres store beside the memory and Redis
+ones.
+
+**Revision worker pools.** A worker declares the revisions its image carries, and claims only runs
+routed to them. A rollout ships a new revision in a new image beside the old one, instead of every
+image carrying every revision. A run whose revision no worker serves waits in the queue, and
+`/scaling` reports it by revision, so an autoscaler starts the right pool.
+
+**Evaluation of whole conversations.** A thread evaluator scores a conversation, not one answer:
+- whether the user's goal was met;
+- a score for each turn;
+- the turn where it went wrong.
+
+A simulated user holds conversations with an agent for a dataset of goals. It is driven by a model, a
+persona, and a stopping rule. A multi-turn agent is then compared between versions as a single-turn
+one is today, with the same verdicts.
+
+**Datasets that grow.**
+- Synthetic examples are generated from documents. Each cites the passage it came from, and
+  near-duplicates are dropped.
+- Adversarial examples are generated from the guardrails' own attack patterns: injection,
+  exfiltration, and jailbreaks. A guarded agent is then evaluated against them in CI.
+- Production runs are promoted into datasets from insights, with the issue that found them.
+
+**Evaluation budgets and online-evaluation workers.** An experiment or an online evaluator runs within
+a spend cap, enforced through the lifecycle's budget. Online evaluation moves from a method a replica
+calls to workers on durable operations. They sample, apply back pressure, and score each run exactly
+once per source, across workers and after a crash.
+
+**Context you can verify.** A context bundle is signed with Ed25519 through Web Crypto, so on any
+runtime, and with a key id for rotation. An import or a serve refuses a bundle whose signature does
+not verify. Every traced model call records the context and prompt versions that produced it, and
+traces, insights, and experiments filter by them.
+
+**The rest of graduation.**
+- The studio gets a threat review of its sign-in, sessions, roles, CSRF protection, and audit log,
+  and a soak of its server.
+- The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores graduate when the live workflow passes
+  against each one.
+- Images graduate when recorded live conformance passes on all three backends.
+
+Each graduation is published with its checklist and evidence, as in 2.4.
+
+**Proof.**
+- Two replicas changing one deployment in the same instant never lose a change, on every state store
+  with compare-and-set. The race test holds both writers until both arrive.
+- Two worker images carrying different revisions drain one queue, and no run executes on an image
+  without its revision.
+- A simulated user holds 50 conversations with a support agent. A thread evaluator scores them, and
+  an experiment comparing two prompt versions gives a verdict over whole threads.
+- Ten online-evaluation workers score 10,000 runs, each exactly once per source. They resume after a
+  crash without scoring a run twice, and stop at their budget.
+- A synthetic dataset built from the guides cites a source for every example. An adversarial dataset
+  fails a deliberately unguarded agent and passes a guarded one.
+- A tampered signed bundle is refused at import and at serve, and every traced model call names its
+  context and prompt versions.
+- Every surface that graduates has its checklist published with evidence.
+
+---
+
+## Beyond 2.5
 
 Not yet scheduled, roughly in order of what applications ask for:
 
@@ -84,15 +158,10 @@ Not yet scheduled, roughly in order of what applications ask for:
    recording with a retention policy, and conference and transfer control.
 5. Video generation through the same asynchronous operation, job, and asset contracts.
 6. OCR, captioning, visual question answering, image embeddings, and media search and RAG.
-7. Revision-specific worker pools, so a deployment revision maps to an image digest instead of every
-   image carrying every revision; and multi-region deployment.
-8. Context hub hardening beyond graduation: signed bundles, and a content digest recorded on every
-   trace so a production run names the exact context that produced it.
-9. Evaluation follow-ons: multi-turn thread evaluation, adversarial and synthetic datasets, evaluation
-   budgets, and asynchronous online-evaluation workers.
-10. Policy-as-code presets versioned independently from the runtime, multi-tenant credential-vault
-    adapters, and routing by provider residency.
-11. Streaming reads and writes for the filesystem and S3 asset stores, and OTLP export over gRPC.
+7. Multi-region deployment.
+8. Policy-as-code presets versioned independently from the runtime, multi-tenant credential-vault
+   adapters, and routing by provider residency.
+9. Streaming reads and writes for the filesystem and S3 asset stores, and OTLP export over gRPC.
 
 **Deliberately not planned:** a hosted service, a large third-party integration catalogue (MCP and the
 adapter kit cover breadth), and a second language runtime.

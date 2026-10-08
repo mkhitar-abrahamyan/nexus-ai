@@ -141,6 +141,9 @@ await otherHub.import(JSON.parse(await readFile('support-agent.json', 'utf8')), 
 
 - A bundle pins prompt versions; it does not follow prompt labels. Commit a new bundle version to
   take a new prompt version, which is what makes a bundle reproducible.
+- A bundle is versioned by its content, not signed. An import checks that the content is what was
+  exported, not who exported it.
+- A traced model call records the prompt version it was rendered from, but not the bundle's.
 
 <!-- reference:start -->
 ## Reference

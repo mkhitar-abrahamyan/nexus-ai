@@ -270,8 +270,11 @@ Shipped so far:
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-What comes next is on the [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md):
-the gaps 2.4 left open, and the work applications ask for after them.
+Next, 2.5 finishes graduation, with deployments that change atomically across replicas, revision
+worker pools, and the studio. It also takes evaluation to production depth: whole conversations,
+synthetic and adversarial datasets, spend caps, online-evaluation workers, and signed context named on
+every trace. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
+releases after it.
 
 ## Before Production
 

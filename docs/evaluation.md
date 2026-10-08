@@ -388,6 +388,15 @@ It returns `EvalMetrics`, grouped by kind:
 The safety metrics are heuristics — short term lists and fixed patterns — suited to catching a
 regression in a test, not to judging content in production; use a model judge for that.
 
+## Limitations
+
+- An evaluator scores one answer. A conversation has no evaluator of its own, and nothing simulates
+  a user to hold one, so a multi-turn agent is evaluated turn by turn.
+- Datasets are written by hand, or exported from traces and review queues. Nothing generates examples
+  from documents, or attacks from the guardrails' patterns.
+- An experiment has no spend cap of its own: bound it with the client's budget. Online evaluation runs
+  when a replica calls `Deployments.evaluate()`, not on workers of its own.
+
 <!-- reference:start -->
 ## Reference
 
