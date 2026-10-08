@@ -145,7 +145,6 @@ gives the inbox its store, registry, and hub. The [studio](./studio.md) shows th
 
 ## Limitations
 
-- Insights are experimental.
 - Clustering by meaning embeds every run's text. On a busy store, bound the window and the `limit`.
 - A proposed fix is only as good as the dataset it is evaluated on. Nothing is promoted without a
   person, and promotion still runs the label's gates.

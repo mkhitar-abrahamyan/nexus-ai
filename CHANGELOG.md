@@ -59,6 +59,23 @@ Graduation and interoperability.
     exactly what it needs.
 - The OpenAI, Anthropic, Google, and Cohere providers take a `fetch` option: a platform's bound
   fetch, a proxy, or a test stub.
+- **Measured graduation.** These surfaces leave experimental status, each with evidence for every
+  requirement of the graduation checklist, published in `API_STABILITY.md`:
+  - the SQLite adapters;
+  - the Postgres and SQLite vector stores;
+  - the loaders and the retrievers;
+  - the MCP registry;
+  - the context hub and insights;
+  - tenant limits and the server's worker queue.
+
+  Deployments, images, the Qdrant, Redis, Pinecone, Weaviate, and Chroma vector stores, and the
+  studio stay experimental, each with the requirement that remains named.
+- `inheritEnv` on a local MCP server, in `StdioClientOptions` and in the registry's server
+  configuration: which of this process's environment variables the server inherits.
+- Load and soak budgets for every graduated surface, held in CI by `npm run bench:surfaces`. A soak
+  fails on heap growth, on a handle left open, or on a timer never cleared, unref'd ones included.
+- The scheduled live workflow records image conformance on every backend with a credential, and
+  runs the vector store contract against real Qdrant, Chroma, Weaviate, and Redis servers.
 
 ### Security
 
@@ -93,8 +110,30 @@ Testing the security code to depth found these gaps, and each is closed:
 - **Retrieved context reads as data.** `withRagContext()` now tells the model that the context is
   data, not instructions.
 
+The graduation reviews, published in `SECURITY.md`, found these, and each is closed:
+
+- **The Git loader followed symbolic links.** A repository with a tracked link to a file of the host,
+  such as `~/.ssh/id_rsa`, had that file loaded into a knowledge base. A link is now never followed,
+  nor a path that leaves the checkout.
+- **A gzipped sitemap could be a decompression bomb.** Inflation now stops at 50 MB, the sitemap
+  protocol's maximum, and the loader reports the sitemap.
+- **A local MCP server inherited this process's whole environment**, every API key and database URL
+  included. It now starts with its `env` and only what a process needs to run: the path, the home
+  and temporary directories, the locale, the Windows system variables, proxies, and certificates.
+  Name what else a server needs in `env`, or set `inheritEnv`.
+- **One caller's ratings could decide a canary.** Feedback was counted per rating, so a hundred low
+  ratings of one run met the minimum sample alone, and could roll back a canary or keep a bad one
+  alive. Each run now counts once per feedback key, as the mean of its ratings.
+- **The file prompt store could lose a label move.** Its compare-and-set was a read and then a write,
+  so two moves at once in one process could both succeed, the later erasing the earlier. Label
+  writes to one file are now serialized across the process.
+- **Two changes at once to one deployment, on one replica, could lose one**, such as a guard's
+  rollback and an operator's promotion. They now apply in order. Changes from two replicas in the
+  same instant still can, which keeps deployments experimental.
+
 ### Fixed
 
+- The agent server's guide called the server experimental, though it has been stable since 2.0.
 - Bundling the client for an edge runtime failed: it reached the file-based evaluation cache, which
   loads `node:fs`. `FileEvaluationCache` now lives in a module of its own, still exported from
   `nexus-ai-pro/evaluate`.
@@ -133,6 +172,17 @@ Testing the security code to depth found these gaps, and each is closed:
   and they cover a provider over `fetch`, the client, a cached graph, an agent, and A2A and AG-UI.
   A check walks every entry point's imports, static and dynamic. It fails the build when the client,
   the kernel, a provider adapter, graphs, agents, or a protocol reaches anything Node-only.
+- Every graduated surface passes its contract on every backend it supports. For the context hub,
+  that is memory, files, Redis, and Postgres, with two hubs racing for one label and never both
+  winning. For the retrievers, it is a vector retriever over memory, SQLite, and pgvector, besides
+  the keyword and hybrid retrievers.
+- What the published 2.3.0 package wrote, this release reads, and what it derived, this release
+  derives the same: a SQLite file shared by a 2.3 and a 2.4 worker, a pgvector table, loader ids,
+  retriever rankings, MCP configurations, context bundle versions and exports, insight proposals
+  and error signatures, and canary routing, thread by thread.
+- Each security fix has a test that names the attack, and fails on the code before it. The Git test
+  runs on Linux, where links are tracked as links, and the race test holds both writers until both
+  arrive, so it does not depend on timing.
 
 ## [2.3.0] - 2026-10-06
 

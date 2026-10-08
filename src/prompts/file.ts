@@ -64,20 +64,24 @@ export class FilePromptStore implements PromptStore {
   /** Writes a label when it still points at `expected`. */
   async setLabel(label: PromptLabel, expected?: string | null): Promise<boolean> {
     const file = this.labelFile(label.name, label.label);
-    if (expected !== undefined) {
-      const current = await readJson<PromptLabel>(file);
-      if (expected === null ? current !== undefined : current?.version !== expected) return false;
-    }
-    await writeJson(file, label);
-    return true;
+    return serialized(file, async () => {
+      if (expected !== undefined) {
+        const current = await readJson<PromptLabel>(file);
+        if (expected === null ? current !== undefined : current?.version !== expected) return false;
+      }
+      await writeJson(file, label);
+      return true;
+    });
   }
 
   /** Removes a label. Resolves true when it existed. */
   async deleteLabel(name: string, label: string): Promise<boolean> {
     const file = this.labelFile(name, label);
-    if ((await readJson(file)) === undefined) return false;
-    await rm(file, { force: true });
-    return true;
+    return serialized(file, async () => {
+      if ((await readJson(file)) === undefined) return false;
+      await rm(file, { force: true });
+      return true;
+    });
   }
 
   /** Appends a change to the prompt's history log. */
@@ -140,6 +144,24 @@ async function readJson<T>(file: string): Promise<T | undefined> {
     return JSON.parse(await readFile(file, 'utf8')) as T;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Label writes in progress, by file. A compare-and-set is a read then a write, so two in one process
+ * must not interleave; the map is shared by every store in the process, since two may share a
+ * directory.
+ */
+const labelWrites = new Map<string, Promise<unknown>>();
+
+async function serialized<T>(file: string, work: () => Promise<T>): Promise<T> {
+  const key = path.resolve(file);
+  const next = (labelWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(work);
+  labelWrites.set(key, next);
+  try {
+    return await next;
+  } finally {
+    if (labelWrites.get(key) === next) labelWrites.delete(key);
   }
 }
 

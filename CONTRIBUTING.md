@@ -97,6 +97,9 @@ The automated checks catch a missing export but not a half-wired one, so work th
 - keep the client, the kernel, the provider adapters, graphs, agents, and the agent protocols free of
   Node built-ins and Node globals. `npm run test:portable` checks every entry point's imports and
   runs the kernel's tests on Node.js and an edge runtime, and CI runs them on Deno and Bun as well;
+- keep a graduated surface within its load and soak budgets: `npm run bench:surfaces`, which
+  `check:release` runs. After a deliberate change to a hot path, record new budgets with
+  `npm run bench:surfaces -- --update`, and say why in the change;
 - document the feature once, in the most relevant README section, rather than in several places;
 - record the change under `Unreleased` in `CHANGELOG.md`;
 - follow `API_STABILITY.md`, and state any new guarantee there explicitly.

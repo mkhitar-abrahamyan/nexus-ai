@@ -74,6 +74,145 @@ New and stable:
 
 Without `confidence`, a canary is judged as before.
 
+These security fixes tighten more behavior, each closing a finding of a graduation review in
+[SECURITY.md](./SECURITY.md#threat-reviews):
+- the Git loader never follows a symbolic link, nor a path that leaves the checkout;
+- a gzipped sitemap may inflate to 50 MB at most, the sitemap protocol's maximum;
+- a local MCP server inherits only what a process needs to run, not this process's environment.
+  `inheritEnv` restores the old behavior, by name or entirely;
+- a canary is judged on runs, so each run counts once per feedback key, as the mean of its scores;
+- the file prompt store's label compare-and-set holds within one process;
+- changes to one deployment through one `Deployments` object apply in order.
+
+### Graduation
+
+A surface left experimental status in 2.4 only when every requirement in
+[How an item graduates](./ROADMAP.md#how-an-item-graduates) had evidence. That evidence is below.
+"n/a" names a requirement that does not apply, and says why. Every test named here runs in CI.
+Load and soak budgets are checked by `npm run bench:surfaces` and `npm run bench:runtime`, which are
+part of `check:release`. Upgrade tests run against the published 2.3.0 package, installed as a
+development alias.
+
+Every graduated surface is covered by the 2.x compatibility rules, with no breaking change planned.
+That is the "API stability" requirement, met by all of them.
+
+**The SQLite adapters** (`nexus-ai-pro/sqlite` and its subpaths):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | The operation store, store, and vector store contracts: `tests/sqlite.test.ts`, `tests/vector-stores.test.ts` |
+| Crash recovery | A crash at every durable boundary resumes to the uninterrupted state: `tests/crash-injection.test.ts` |
+| Concurrency | Ten workers race one thread, one idempotency key, one queue, and one budget: `tests/ten-workers.test.ts` |
+| Load | `checkpoint.sqlite` and `operations.claim-10k-queued` in `runtime-budget.json`; `sqlite.vectors-query-2k` and `sqlite.store-put-get-search` in `surface-budget.json` |
+| Tenant isolation | Every SQLite store: `tests/tenant-isolation.test.ts` |
+| Security | [Review](./SECURITY.md#sqlite-adapters): no findings |
+| Upgrade | A 2.3 file upgrades in place, and a 2.3 worker shares its queue: `tests/upgrade-previous-minor.test.ts`; likewise from 2.0: `tests/upgrade.test.ts` |
+| Soak | 20,000 queue lifecycles and 2,000 open, migrate, and close cycles, with flat memory and no handle left open |
+
+**The Postgres and SQLite vector stores** (`PostgresVectorStore`, `SqliteVectorStore`):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | The vector store contract on pgvector and on SQLite: `tests/vector-stores.test.ts`. The retriever contract over each: `tests/graduation-conformance.test.ts` |
+| Crash recovery | n/a: a store keeps no run state, and a reload upserts the same ids |
+| Concurrency | Ten writers upserting the same ids at once leave one whole row per id: `tests/graduation-conformance.test.ts` |
+| Load | `sqlite.vectors-query-2k` and `postgres.vectors-query-1k` in `surface-budget.json` |
+| Tenant isolation | Both stores: `tests/tenant-isolation.test.ts` |
+| Security | [Review](./SECURITY.md#the-postgres-and-sqlite-vector-stores): no findings |
+| Upgrade | A table 2.3 wrote is searched and filtered here: `tests/upgrade-previous-minor.test.ts` |
+| Soak | 1,000 write, search, and delete cycles on pgvector |
+
+**The loaders** (`nexus-ai-pro/loaders/*`):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | Every format, the web loader through the SSRF-safe fetch, and Git cloned and in place: `tests/loaders.test.ts` |
+| Crash recovery | n/a: a loader keeps no state, and reloading replaces the same chunks |
+| Concurrency | n/a: a loader shares no records |
+| Load | `loaders.markdown-csv-html` in `surface-budget.json` |
+| Tenant isolation | n/a: a loader stores nothing; the store it loads into is isolated |
+| Security | [Review](./SECURITY.md#loaders): two findings, both fixed |
+| Upgrade | The same files give the same ids and text as in 2.3: `tests/upgrade-previous-minor.test.ts` |
+| Soak | 2,000 load cycles |
+
+**The retrievers** (`nexus-ai-pro/rag/retrievers`):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | The retriever contract on `KeywordIndex`, on a vector retriever over memory, SQLite, and pgvector, and on `hybridRetriever()`: `tests/graduation-conformance.test.ts` |
+| Crash recovery | n/a: an index is held in memory, and rebuilt by loading |
+| Concurrency | n/a: an index belongs to one process |
+| Load | `retrievers.keyword-query-5k` and `retrievers.hybrid-query` in `surface-budget.json` |
+| Tenant isolation | Filters narrow every retriever, by the contract; the stores behind them are isolated |
+| Security | [Review](./SECURITY.md#retrievers): no findings |
+| Upgrade | The same corpus ranks the same, score for score, as in 2.3: `tests/upgrade-previous-minor.test.ts` |
+| Soak | 50,000 add and delete cycles |
+
+**The MCP registry** (`nexus-ai-pro/mcp/registry`):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | Servers over the protocol in process and as a real child process: `tests/mcp-registry.test.ts` |
+| Crash recovery | A server that fails to start is reported, and the rest serve: `tests/mcp-registry.test.ts` |
+| Concurrency | n/a: a registry shares no records |
+| Load | `mcp.registry-tools-10-servers` in `surface-budget.json` |
+| Tenant isolation | n/a: a registry stores nothing |
+| Security | [Review](./SECURITY.md#mcp-registry): one finding, fixed |
+| Upgrade | A configuration reads the same as in 2.3: `tests/upgrade-previous-minor.test.ts` |
+| Soak | 1,000 connect, call, and close cycles, with no handle left open |
+
+**The context hub** (`nexus-ai-pro/context-hub`):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | The same behavior on memory, files, Redis, and Postgres: `tests/graduation-conformance.test.ts` |
+| Crash recovery | A commit is content-addressed, so repeating an interrupted one writes the same version: `tests/context-hub.test.ts` |
+| Concurrency | Two hubs racing for one label never both win, on every backend: `tests/graduation-conformance.test.ts` |
+| Load | `context-hub.commit-resolve` in `surface-budget.json` |
+| Tenant isolation | Context bundles: `tests/tenant-isolation.test.ts` |
+| Security | [Review](./SECURITY.md#context-hub): one finding, fixed |
+| Upgrade | A bundle has the same version as in 2.3, and a 2.3 export imports: `tests/upgrade-previous-minor.test.ts` |
+| Soak | 2,000 commit, resolve, and render cycles |
+
+**Insights** (`nexus-ai-pro/insights`):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | The same issues from runs in memory and in Postgres: `tests/graduation-conformance.test.ts`; proposals in memory and in files: `tests/insights.test.ts` |
+| Crash recovery | n/a: analysis is read-only, and a proposal is one write |
+| Concurrency | n/a: a proposal is decided once, by a person |
+| Load | `insights.find-issues-5k-runs` in `surface-budget.json` |
+| Tenant isolation | Insights read through the trace store, which is isolated: `tests/tenant-isolation.test.ts` |
+| Security | [Review](./SECURITY.md#insights): no findings |
+| Upgrade | A 2.3 proposal reads here, and errors group under the same signatures: `tests/upgrade-previous-minor.test.ts` |
+| Soak | 300 clustering cycles |
+
+**Tenant limits and the server's worker queue** (`nexus-ai-pro/server/tenancy`, and the queue
+`createAgentServer()` runs on its operation store):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | Tenant usage in memory and in Redis; the queue on every operation store: `tests/deployments.test.ts`, `tests/operations.test.ts` |
+| Crash recovery | A crash at every durable boundary resumes to the same state, and a draining worker hands a run to another: `tests/crash-injection.test.ts`, `tests/deployments.test.ts` |
+| Concurrency | Ten workers drain one queue, and spend one tenant budget without over-granting a slot: `tests/ten-workers.test.ts` |
+| Load | `tenancy.admit-release` in `surface-budget.json`; `operations.claim-10k-queued` and `server.sse-fanout` in `runtime-budget.json` |
+| Tenant isolation | Operations: `tests/tenant-isolation.test.ts` |
+| Security | [Review](./SECURITY.md#tenant-limits-and-the-worker-queue): no findings |
+| Upgrade | A 2.3 worker and a 2.4 worker drain one queue: `tests/upgrade-previous-minor.test.ts` |
+| Soak | 50,000 admit and release cycles, and 500 replica lifecycles with no timer left running |
+
+**Still experimental**, each with what remains:
+- **Deployments** (`nexus-ai-pro/server/deployments`). Two replicas changing one deployment in the
+  same instant can lose one change, because the state store has no atomic compare-and-set. Every
+  other requirement has evidence above or in its review.
+- **Images.** Recorded live conformance must pass on all three backends. The scheduled live workflow
+  now records it, wherever a backend's credential is set.
+- **The Qdrant, Redis, Pinecone, Weaviate, and Chroma vector stores.** The contract must pass against
+  the real servers, not only stubs. The scheduled live workflow now runs it against each one as a
+  service container, and Pinecone runs when its secret is set.
+- **The studio and its accounts.** A threat review of its sign-in, sessions, and roles, and a soak
+  of its server, are still to do.
+
 ## 2.3 stage (2.3.0)
 
 Everything 2.3 adds is stable from the start and additive: no default changes meaning.
@@ -651,6 +790,9 @@ of the 1.x line.
 
 ## Deployment stage (1.24.0)
 
+Tenant limits and the worker queue graduated in 2.4; see the 2.4 stage for their evidence.
+Deployments remain experimental.
+
 Deployments (`nexus-ai-pro/server/deployments`), tenant limits (`nexus-ai-pro/server/tenancy`), and the
 server's worker queue are experimental in production readiness. Their contracts follow the 1.x rules.
 
@@ -665,6 +807,9 @@ server's worker queue are experimental in production readiness. Their contracts 
 
 ## Team platform stage (1.23.0)
 
+The context hub and insights graduated in 2.4; see the 2.4 stage for their evidence. The studio's
+accounts remain experimental.
+
 The context hub (`nexus-ai-pro/context-hub`), insights (`nexus-ai-pro/insights`), and the studio's
 accounts are experimental in production readiness. Their contracts follow the 1.x rules.
 
@@ -676,6 +821,9 @@ accounts are experimental in production readiness. Their contracts follow the 1.
 - The studio's roles keep their order and meaning; new actions are assigned to an existing role.
 
 ## Retrieval breadth stage (1.22.0)
+
+The loaders, the SQLite vector store, the retrievers, and the MCP registry graduated in 2.4; see the
+2.4 stage for their evidence. The Redis, Pinecone, Weaviate, and Chroma stores remain experimental.
 
 The loaders (`nexus-ai-pro/loaders/*`), the Redis, Pinecone, Weaviate, Chroma, and SQLite vector
 stores, the retrievers (`nexus-ai-pro/rag/retrievers`), and the MCP registry
@@ -693,6 +841,8 @@ stores, the retrievers (`nexus-ai-pro/rag/retrievers`), and the MCP registry
 
 ## Durable execution stage (1.21.0)
 
+The SQLite adapters graduated in 2.4; see the 2.4 stage for their evidence.
+
 Functional workflows (`nexus-ai-pro/graph/functional`) and the SQLite adapters (`nexus-ai-pro/sqlite`)
 are experimental in production readiness. Their contracts follow the 1.x rules.
 
@@ -704,6 +854,9 @@ are experimental in production readiness. Their contracts follow the 1.x rules.
   without `recover()` behaves as before.
 
 ## Retrieval stores stage (1.20.0)
+
+`PostgresVectorStore` graduated in 2.4; see the 2.4 stage for its evidence. `QdrantVectorStore`
+remains experimental.
 
 `PostgresVectorStore` (`nexus-ai-pro/postgres/vectors`) and `QdrantVectorStore` (`nexus-ai-pro/rag/qdrant`)
 are experimental in production readiness. The `VectorStore` contract they share with

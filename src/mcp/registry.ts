@@ -16,6 +16,12 @@ export interface McpServerConfig {
   env?: Record<string, string>;
   /** Working directory for the process. */
   cwd?: string;
+  /**
+   * Which of this process's own environment variables a local server inherits, besides `env`. By
+   * default, only what a process needs to start, never an API key; a list adds variables by name,
+   * `true` passes the whole environment, and `false` nothing but `env`.
+   */
+  inheritEnv?: boolean | string[];
   /** The endpoint of a remote server, reached over HTTP. */
   url?: string;
   /** Headers sent to a remote server, such as authorization. */
@@ -159,6 +165,7 @@ export class McpRegistry {
               ...(resolved.args ? { args: resolved.args } : {}),
               ...(resolved.env ? { env: resolved.env } : {}),
               ...(resolved.cwd ? { cwd: resolved.cwd } : {}),
+              ...(resolved.inheritEnv !== undefined ? { inheritEnv: resolved.inheritEnv } : {}),
             })
           : createHttpTransport({
               url: resolved.url as string,
@@ -282,6 +289,14 @@ export function validateMcpConfig(value: unknown): McpRegistryConfig {
       if (list !== undefined && !(Array.isArray(list) && list.every((item) => typeof item === 'string'))) {
         throw new McpRegistryError(`Server "${name}": "${field}" is a list of strings`, name);
       }
+    }
+    const inherit = server.inheritEnv;
+    if (
+      inherit !== undefined &&
+      typeof inherit !== 'boolean' &&
+      !(Array.isArray(inherit) && inherit.every((item) => typeof item === 'string'))
+    ) {
+      throw new McpRegistryError(`Server "${name}": "inheritEnv" is true, false, or a list of names`, name);
     }
     for (const field of ['env', 'headers'] as const) {
       const map = server[field];

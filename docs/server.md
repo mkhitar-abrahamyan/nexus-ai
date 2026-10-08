@@ -1,4 +1,4 @@
-# The agent server (experimental)
+# The agent server
 
 <!-- covers: ./server ./server/auth ./server/remote -->
 
@@ -434,7 +434,8 @@ const graph = createGraph({ channels })
 
 ## Limitations
 
-- The family is experimental: it is new, and the shape of the HTTP surface may still gain routes.
+- A minor release may add routes, and fields to what routes return. Existing ones keep their
+  shape.
 - Recovery repeats the step a run died in — for graphs and workflows — or the whole run, for any
   other assistant. The repeated part should be idempotent — the run id makes a good key — or the run
   should be left at one attempt.

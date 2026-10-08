@@ -59,3 +59,93 @@ jobs:
           else
             gh issue create --title "$title" --body "$body"
           fi
+
+  images:
+    # Image conformance on every backend with a credential, recorded so CI can replay it. The image
+    # family leaves experimental only when all three backends have recordings that pass; this job
+    # produces them, and a maintainer commits them from the artifact.
+    name: Image conformance recordings
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Record live image conformance
+        run: npx tsx tests/conformance.images.ts --record
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          COMFYUI_URL: ${{ secrets.COMFYUI_URL }}
+
+      - name: Replay what was recorded
+        run: npm run test:conformance:images
+
+      - name: Keep the recordings
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-conformance-recordings
+          path: tests/fixtures/images
+          if-no-files-found: ignore
+
+  vector-stores:
+    # The vector store contract against real servers: each self-hostable store as a service
+    # container, and Pinecone when its secret is set.
+    name: Vector store conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports: [6333:6333]
+      chroma:
+        image: chromadb/chroma:latest
+        ports: [8000:8000]
+      weaviate:
+        image: semitechnologies/weaviate:latest
+        ports: [8080:8080]
+        env:
+          AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: true
+          DEFAULT_VECTORIZER_MODULE: none
+          PERSISTENCE_DATA_PATH: /var/lib/weaviate
+          CLUSTER_HOSTNAME: node1
+      redis:
+        image: redis/redis-stack-server:latest
+        ports: [6379:6379]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies, and the Redis client the Redis store takes
+        run: npm ci && npm install --no-save ioredis
+
+      - name: Wait for the servers
+        run: |
+          for url in http://localhost:6333/readyz http://localhost:8000/api/v2/heartbeat http://localhost:8080/v1/.well-known/ready; do
+            for attempt in $(seq 1 30); do curl -fsS "$url" > /dev/null && break; sleep 2; done
+          done
+
+      - name: Run the vector store contract live
+        run: npm run test:vectors:live
+        env:
+          NEXUS_LIVE_QDRANT_URL: http://localhost:6333
+          NEXUS_LIVE_CHROMA_URL: http://localhost:8000
+          NEXUS_LIVE_WEAVIATE_URL: http://localhost:8080
+          NEXUS_LIVE_REDIS_URL: redis://localhost:6379
+          NEXUS_LIVE_PINECONE_HOST: ${{ secrets.NEXUS_LIVE_PINECONE_HOST }}
+          NEXUS_LIVE_PINECONE_API_KEY: ${{ secrets.NEXUS_LIVE_PINECONE_API_KEY }}

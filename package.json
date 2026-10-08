@@ -1631,14 +1631,15 @@
     "bench:runtime": "node --expose-gc scripts/bench-runtime.mjs",
     "pack:dry-run": "npm pack --dry-run --cache .tmp-nexus-ai-tests/npm-cache",
     "check": "npm run format:check && npm run registry:check && npm run llms:check && npm run lint && npm test && npm run typecheck:tests && npm run studio:typecheck && npm run typecheck:examples && npm run typecheck:examples:browser && npm run test:coverage",
-    "check:release": "npm run check && npm run bench:graph && npm run bench:runtime && npm run pack:dry-run && npm run test:clean-install && npm run test:studio-install",
+    "check:release": "npm run check && npm run bench:graph && npm run bench:runtime && npm run bench:surfaces && npm run pack:dry-run && npm run test:clean-install && npm run test:studio-install",
     "prepack": "npm run build",
     "prepublishOnly": "npm run check:release",
     "build:esm": "tsc --removeComments --declaration false && tsc --emitDeclarationOnly",
     "build:cjs": "tsc -p tsconfig.cjs.json --removeComments --declaration false && tsc -p tsconfig.cjs.json --emitDeclarationOnly && node scripts/finalize-cjs.mjs",
     "test:conformance:images": "tsx tests/conformance.images.ts",
     "conformance:images:record": "tsx tests/conformance.images.ts --record",
-    "test:portable": "node scripts/check-portability.mjs && node tests/portable/run.mjs node && node tests/portable/edge.mjs"
+    "test:portable": "node scripts/check-portability.mjs && node tests/portable/run.mjs node && node tests/portable/edge.mjs",
+    "bench:surfaces": "node --expose-gc --no-warnings scripts/bench-surfaces.mjs"
   },
   "keywords": [
     "ai",
@@ -1764,6 +1765,7 @@
     "express": "^5.1.0",
     "nexus-ai-pro-2-0": "npm:nexus-ai-pro@^2.0.0",
     "nexus-ai-pro-2-1": "npm:nexus-ai-pro@^2.1.0",
+    "nexus-ai-pro-2-3": "npm:nexus-ai-pro@^2.3.0",
     "ollama": "^0.5.6",
     "openai": "^4.52.0",
     "tsx": "^4.16.0",

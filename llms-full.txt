@@ -3252,9 +3252,20 @@ and a failure throws, so the agent sees a failed tool call.
 ## Transports
 
 `createStdioTransport()` starts a server as a child process and speaks to it over stdin and stdout.
-`StdioClientOptions` gives the `command`, `args`, `env` (added to this process's environment), and
-`cwd`. `node:child_process` is imported only when the transport starts, so a browser or edge build
-that uses HTTP never reaches for it.
+`StdioClientOptions` gives the `command`, `args`, `env`, `cwd`, and `inheritEnv`. `node:child_process`
+is imported only when the transport starts, so a browser or edge build that uses HTTP never reaches
+for it.
+
+A server is often third-party code, so it does not inherit this process's environment. It starts
+with `env` and only what a process needs to run:
+- the path, and the home and temporary directories;
+- the user, the locale, and the terminal;
+- the Windows system variables;
+- proxy and certificate settings.
+
+An API key or a database URL reaches a server only when `env` names it. `inheritEnv` widens this: a
+list adds variables by name, `true` passes the whole environment, as releases before 2.4 did, and
+`false` passes nothing but `env`.
 
 `createHttpTransport()` speaks to a remote server with one POST per message, carrying the
 `mcp-session-id` the server assigns and reading either a JSON body or an event-stream reply.
@@ -3317,7 +3328,7 @@ An `McpServerConfig` describes one server:
 
 | Field | What it sets |
 | --- | --- |
-| `command`, `args`, `env`, `cwd` | A local server, run over stdio. |
+| `command`, `args`, `env`, `cwd`, `inheritEnv` | A local server, run over stdio, with what it inherits from this process's environment. |
 | `url`, `headers` | A remote server, reached over HTTP. |
 | `allowTools`, `denyTools` | Which tools agents see. `*` matches any run of characters, and deny wins. |
 | `prefix` | The prefix of tool names agents see. Defaults to the server's name, so two servers' `search` stay apart; `false` keeps names as they are. |
@@ -4542,7 +4553,6 @@ await otherHub.import(JSON.parse(await readFile('support-agent.json', 'utf8')), 
 
 ## Limitations
 
-- The hub is experimental.
 - A bundle pins prompt versions; it does not follow prompt labels. Commit a new bundle version to
   take a new prompt version, which is what makes a bundle reproducible.
 
@@ -4696,7 +4706,6 @@ gives the inbox its store, registry, and hub. The [studio](https://github.com/mk
 
 ## Limitations
 
-- Insights are experimental.
 - Clustering by meaning embeds every run's text. On a busy store, bound the window and the `limit`.
 - A proposed fix is only as good as the dataset it is evaluated on. Nothing is promoted without a
   person, and promotion still runs the label's gates.
@@ -9418,7 +9427,7 @@ up — cycles — are marked, so they can be drawn around the side.
 
 Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md
 
-# The agent server (experimental)
+# The agent server
 
 
 A self-hosted HTTP server for your assistants, from `nexus-ai-pro/server`: threads, background runs,
@@ -9853,7 +9862,8 @@ const graph = createGraph({ channels })
 
 ## Limitations
 
-- The family is experimental: it is new, and the shape of the HTTP surface may still gain routes.
+- A minor release may add routes, and fields to what routes return. Existing ones keep their
+  shape.
 - Recovery repeats the step a run died in — for graphs and workflows — or the whole run, for any
   other assistant. The repeated part should be idempotent — the run id makes a good key — or the run
   should be left at one attempt.
@@ -9867,7 +9877,7 @@ const graph = createGraph({ channels })
 
 Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md
 
-# Deployments: revisions, canaries, scaling, and tenants (experimental)
+# Deployments: revisions, canaries, scaling, and tenants
 
 
 Run the agent server as a service you operate yourself. This guide covers four things:
@@ -10257,10 +10267,16 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
 
 ## Limitations
 
-- The family is experimental, and its routes may still grow.
+- Revisions and canaries are experimental. Two replicas changing one deployment in the same instant
+  can lose one change, since the state store has no atomic compare-and-set. Changes on one replica
+  apply in order. Make changes from one place, or pass `expectedVersion` and retry a conflict. Tenant
+  limits and the worker queue are stable.
+- `bucket()` places random thread ids, which the server gives by default, evenly. Ids that differ
+  only in their last characters, such as `user-1` to `user-500`, spread unevenly over a few hundred
+  threads, so a canary's share of them drifts from its weight. Its output is part of the stability
+  promise, so threads keep their place through an upgrade.
 - A revision's code must be in every replica's image. A replica serves only the revisions it has, so
   roll out an image before you give its new revision traffic.
-- Deployment changes are last-writer-wins unless you pass `expectedVersion`.
 - `stats()` and the guard read recent run records, 2,000 by default, so a very busy assistant is judged
   on its latest runs.
 - Tenant usage is shared through Redis or your own `TenantUsageStore`; there is no Postgres one yet.
@@ -10799,16 +10815,16 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/images/stores` | 25 KB | 7% | none |
 | `nexus-ai-pro/runtime` | 24 KB | 7% | none |
+| `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
-| `nexus-ai-pro/loaders/web` | 23 KB | 7% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
+| `nexus-ai-pro/mcp/registry` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/assets` | 19 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
 | `nexus-ai-pro/protocols/a2a` | 19 KB | 6% | none |
 | `nexus-ai-pro/lifecycle` | 19 KB | 6% | none |
-| `nexus-ai-pro/mcp/registry` | 18 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 18 KB | 5% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
@@ -10817,9 +10833,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
+| `nexus-ai-pro/mcp` | 16 KB | 5% | none |
 | `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 5% | none |
-| `nexus-ai-pro/mcp` | 15 KB | 4% | none |
 | `nexus-ai-pro/protocols/acp` | 15 KB | 4% | none |
 | `nexus-ai-pro/tracing/otlp` | 15 KB | 4% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |
@@ -10879,21 +10895,21 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/errors` | 5 KB | 1% | none |
 | `nexus-ai-pro/embeddings/mock` | 5 KB | 1% | none |
 | `nexus-ai-pro/tracing/rollups` | 5 KB | 1% | none |
+| `nexus-ai-pro/prompts/file` | 5 KB | 1% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/rag` | 5 KB | 1% | none |
 | `nexus-ai-pro/loaders/html` | 5 KB | 1% | none |
 | `nexus-ai-pro/rag/rerankers` | 5 KB | 1% | none |
 | `nexus-ai-pro/pipeline` | 4 KB | 1% | none |
-| `nexus-ai-pro/prompts/file` | 4 KB | 1% | none |
 | `nexus-ai-pro/prompts/redis` | 4 KB | 1% | none |
 | `nexus-ai-pro/loaders/csv` | 4 KB | 1% | none |
+| `nexus-ai-pro/loaders/git` | 4 KB | 1% | none |
 | `nexus-ai-pro/operations/webhooks` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/cache/memory-cache` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/loaders/text` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/loaders/markdown` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/loaders/json` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/loaders/pdf` | 3 KB | 0.9% | none |
-| `nexus-ai-pro/loaders/git` | 3 KB | 0.9% | none |
 | `nexus-ai-pro/cache` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/cache/adapters` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/jobs` | 2 KB | 0.6% | none |

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -45,6 +45,12 @@ before(async () => {
     if (url === '/pages.xml') {
       response.writeHead(200, { 'content-type': 'application/xml' });
       response.end(`<urlset><url><loc>${origin}/guide</loc></url><url><loc>${origin}/notes.txt</loc></url></urlset>`);
+      return;
+    }
+    if (url === '/bomb.xml.gz') {
+      // 60 MB of nothing, in about 60 KB of gzip.
+      response.writeHead(200, { 'content-type': 'application/gzip' });
+      response.end(gzipSync(Buffer.alloc(60 * 1024 * 1024)));
       return;
     }
     if (url === '/more.xml.gz') {
@@ -260,6 +266,13 @@ test('web pages load through the SSRF-safe fetch, in order, and fail or skip as 
   assert.equal(skipped.length, 2);
 });
 
+test('a gzipped sitemap that inflates past the protocol’s 50 MB is refused, not decompressed into memory', async () => {
+  await assert.rejects(
+    sitemapUrls(`${origin}/bomb.xml.gz`, { allowPrivateNetworks: true }),
+    (error: unknown) => error instanceof WebLoaderError && /at most 50 MB/.test(error.message),
+  );
+});
+
 test('a sitemap index is followed, gzip included, and its pages load', async () => {
   const urls = await sitemapUrls(`${origin}/sitemap.xml`, { allowPrivateNetworks: true });
   assert.deepEqual(urls, [`${origin}/guide`, `${origin}/notes.txt`, `${origin}/private?a=1&b=2`]);
@@ -316,6 +329,43 @@ test('a Git repository loads its tracked text files, locally or cloned at a ref'
   );
   await assert.rejects(collectDocuments(loadGitRepository(repository, { ref: 'no-such-branch' })), GitLoaderError);
   await assert.rejects(collectDocuments(loadGitRepository('--upload-pack=evil')), /must not start/);
+});
+
+test('a Git repository never reads through a tracked symbolic link, cloned or in place', async (t) => {
+  const secret = path.join(work, 'host-secret.md');
+  writeFileSync(secret, 'PRIVATE KEY that must never be loaded');
+  const repository = path.join(work, 'linked-repo');
+  mkdirSync(repository, { recursive: true });
+  try {
+    symlinkSync(secret, path.join(repository, 'notes.md'));
+  } catch {
+    t.skip('this machine cannot create symbolic links');
+    return;
+  }
+  const git = (...args: string[]) =>
+    execFileSync(
+      'git',
+      ['-c', 'user.email=test@example.test', '-c', 'user.name=Test', '-c', 'core.symlinks=true', ...args],
+      {
+        cwd: repository,
+        stdio: 'pipe',
+      },
+    );
+  git('init', '-q', '-b', 'main');
+  writeFileSync(path.join(repository, 'README.md'), '# Linked\nreadme');
+  git('add', 'README.md', 'notes.md');
+  git('commit', '-q', '-m', 'a link to a file outside the repository');
+  assert.match(git('ls-files', '-s', 'notes.md').toString(), /^120000 /, 'the link is tracked as a link');
+
+  const inPlace = await collectDocuments(loadGitRepository(repository));
+  const cloned = await collectDocuments(loadGitRepository(`file://${repository.split(path.sep).join('/')}`));
+  for (const documents of [inPlace, cloned]) {
+    assert.deepEqual(
+      documents.map((document) => document.id),
+      ['README.md'],
+    );
+    assert.ok(documents.every((document) => !document.text.includes('PRIVATE KEY')));
+  }
 });
 
 test('loadIntoStore streams documents into a store in batches, and reloading replaces chunks', async () => {

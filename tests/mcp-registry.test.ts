@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { tool } from '../src/agent/tool.js';
+import { createStdioTransport, serverEnvironment } from '../src/mcp/client.js';
 import type { JsonRpcMessage, McpTransport } from '../src/mcp/protocol.js';
 import { McpRegistry, McpRegistryError, type McpServerConfig, validateMcpConfig } from '../src/mcp/registry.js';
 import { McpServer } from '../src/mcp/server.js';
@@ -178,4 +179,56 @@ test('a configuration file loads, and a bad configuration is refused with the fi
     /"env" maps names to strings/,
   );
   assert.throws(() => validateMcpConfig({ servers: { x: { command: 'a' } }, bundles: { b: 'x' } }), /Bundle "b"/);
+});
+
+test('a local server inherits only what a process needs to run, never this process’s secrets', async () => {
+  const host = {
+    PATH: '/usr/bin',
+    HOME: '/home/ada',
+    LC_ALL: 'C.UTF-8',
+    http_proxy: 'http://proxy.internal:3128',
+    SystemRoot: 'C:/Windows',
+    OPENAI_API_KEY: 'sk-secret',
+    DATABASE_URL: 'postgres://user:pass@db/prod',
+    GITHUB_TOKEN: 'ghp-secret',
+  };
+  assert.deepEqual(Object.keys(serverEnvironment(host, { env: { TOKEN: 'given' } })).sort(), [
+    'HOME',
+    'LC_ALL',
+    'PATH',
+    'SystemRoot',
+    'TOKEN',
+    'http_proxy',
+  ]);
+  assert.equal(
+    serverEnvironment(host, { inheritEnv: ['github_token'] }).GITHUB_TOKEN,
+    'ghp-secret',
+    'names compare without case',
+  );
+  assert.equal(serverEnvironment(host, { inheritEnv: true }).OPENAI_API_KEY, 'sk-secret');
+  assert.deepEqual(serverEnvironment(host, { inheritEnv: false, env: { ONLY: '1' } }), { ONLY: '1' });
+  assert.throws(() => validateMcpConfig({ servers: { x: { command: 'x', inheritEnv: 'yes' } } }), /inheritEnv/);
+
+  // A real child process, started by the transport, reports what it sees.
+  process.env.NEXUS_TEST_HOST_SECRET = 'must-not-leak';
+  try {
+    const report = `process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'env', params: { secret: process.env.NEXUS_TEST_HOST_SECRET ?? null, given: process.env.GIVEN ?? null, path: Boolean(process.env.PATH || process.env.Path) } }) + '\\n')`;
+    const seen = async (options: { inheritEnv?: boolean }) => {
+      const transport = createStdioTransport({
+        command: process.execPath,
+        args: ['-e', report],
+        env: { GIVEN: 'yes' },
+        ...options,
+      });
+      const message = new Promise<JsonRpcMessage>((resolve) => transport.onMessage(resolve));
+      await transport.start?.();
+      const received = (await message) as { params: Record<string, unknown> };
+      await transport.close?.();
+      return received.params;
+    };
+    assert.deepEqual(await seen({}), { secret: null, given: 'yes', path: true });
+    assert.deepEqual(await seen({ inheritEnv: true }), { secret: 'must-not-leak', given: 'yes', path: true });
+  } finally {
+    delete process.env.NEXUS_TEST_HOST_SECRET;
+  }
 });

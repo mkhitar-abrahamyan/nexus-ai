@@ -29,6 +29,33 @@ const scored = (count: number, score: (index: number) => number): RunSample[] =>
     feedback: [{ key: 'quality', score: score(index) }],
   }));
 
+test('a run counts once per feedback key, so one caller rating one run many times moves nothing', () => {
+  const good = scored(40, () => 0.9);
+  // One run on the canary rated 0 a hundred times, beside runs as good as the baseline.
+  const flooded: RunSample[] = [
+    { status: 'success', feedback: Array.from({ length: 100 }, () => ({ key: 'quality', score: 0 })) },
+    ...scored(39, () => 0.9),
+  ];
+  for (const options of [{}, { confidence: 0.95 }]) {
+    assert.deepEqual(compareRuns(good, flooded, { feedback: ['quality'], ...options }), [], JSON.stringify(options));
+  }
+  // Nor can a hundred ratings of one run meet the minimum sample by themselves.
+  const alone: RunSample[] = [
+    { status: 'success', feedback: Array.from({ length: 100 }, () => ({ key: 'quality', score: 0 })) },
+  ];
+  assert.deepEqual(compareRuns(good, alone, { feedback: ['quality'] }), []);
+  // A run rated by several people counts as the mean of their scores.
+  const mixed: RunSample[] = Array.from({ length: 40 }, () => ({
+    status: 'success',
+    feedback: [
+      { key: 'quality', score: 0.2 },
+      { key: 'quality', score: 0.4 },
+    ],
+  }));
+  const [fell] = compareRuns(good, mixed, { feedback: ['quality'] });
+  assert.match(fell?.summary ?? '', /fell from 0.90 to 0.30/);
+});
+
 test('under a confidence level, a metric regresses only past both its interval and its minimum effect', () => {
   const judged = { confidence: 0.95, metrics: ['error-rate', 'latency', 'cost'] as const };
 

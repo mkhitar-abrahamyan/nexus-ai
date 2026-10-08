@@ -26,6 +26,21 @@ export interface RunSample {
   feedback?: ReadonlyArray<{ key: string; score?: number }>;
 }
 
+/**
+ * Each run's score for a feedback key: the mean of the scores it was given, so a run counts once
+ * however many times it was rated. One caller rating one run a hundred times can then neither meet a
+ * minimum sample alone nor outweigh every other run.
+ */
+function runScores(runs: readonly RunSample[], key: string): number[] {
+  return runs.flatMap((run) => {
+    const given = (run.feedback ?? [])
+      .filter((item) => item.key === key)
+      .map((item) => item.score)
+      .filter(isNumber);
+    return given.length ? [given.reduce((sum, score) => sum + score, 0) / given.length] : [];
+  });
+}
+
 /** Options for `compareRuns()`: what is compared, and how large a change must be to count. */
 export interface CompareRunsOptions {
   /** Names the group in each regression and its summary. Defaults to `runs`. */
@@ -34,7 +49,10 @@ export interface CompareRunsOptions {
   metrics?: readonly RegressionMetric[];
   /** Feedback keys whose mean score is compared, such as `helpfulness`. */
   feedback?: readonly string[];
-  /** Runs, or feedback scores, each side needs before it is judged. Defaults to 20. */
+  /**
+   * Runs each side needs before it is judged; for a feedback score, runs that have one. Defaults to
+   * 20. A run counts once per feedback key, however many times it was rated.
+   */
   minRuns?: number;
   /** A rise in p95 latency, relative, that counts. Defaults to 0.25, a quarter slower. */
   latencyIncrease?: number;
@@ -79,7 +97,10 @@ export interface DetectRegressionsOptions {
   metrics?: readonly RegressionMetric[];
   /** Feedback keys whose mean score is compared, such as `helpfulness`. */
   feedback?: readonly string[];
-  /** Runs, or feedback scores, each window needs before a group is judged. Defaults to 20. */
+  /**
+   * Runs each window needs before a group is judged; for a feedback score, runs that have one.
+   * Defaults to 20.
+   */
   minRuns?: number;
   /** A rise in p95 latency, relative, that counts. Defaults to 0.25, a quarter slower. */
   latencyIncrease?: number;
@@ -232,10 +253,7 @@ export function compareRuns(
     }
   }
   for (const feedbackKey of options.feedback ?? []) {
-    const scores = (runs: readonly RunSample[]) =>
-      runs
-        .flatMap((run) => (run.feedback ?? []).filter((item) => item.key === feedbackKey).map((item) => item.score))
-        .filter(isNumber);
+    const scores = (runs: readonly RunSample[]) => runScores(runs, feedbackKey);
     const before = scores(baseline);
     const after = scores(current);
     if (before.length < minRuns || after.length < minRuns) continue;
@@ -352,10 +370,7 @@ function judgedRegressions(
     );
   }
   for (const feedbackKey of options.feedback ?? []) {
-    const scores = (runs: readonly RunSample[]) =>
-      runs
-        .flatMap((run) => (run.feedback ?? []).filter((item) => item.key === feedbackKey).map((item) => item.score))
-        .filter(isNumber);
+    const scores = (runs: readonly RunSample[]) => runScores(runs, feedbackKey);
     const before = scores(baseline);
     const after = scores(current);
     const verdict = judge(before, after, {

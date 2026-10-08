@@ -139,7 +139,6 @@ await otherHub.import(JSON.parse(await readFile('support-agent.json', 'utf8')), 
 
 ## Limitations
 
-- The hub is experimental.
 - A bundle pins prompt versions; it does not follow prompt labels. Commit a new bundle version to
   take a new prompt version, which is what makes a bundle reproducible.
 

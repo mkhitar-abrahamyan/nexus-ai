@@ -1,0 +1,33 @@
+{
+  "measuredAt": "2026-10-07",
+  "note": "Load: ratios of each timing to a calibration loop on the same machine. Soak: heap growth allowed after each lifecycle run, with no handle left open. Regenerate with npm run bench:surfaces -- --update.",
+  "tolerance": 3,
+  "calibrationMs": 17.162,
+  "ratios": {
+    "sqlite.vectors-query-2k": 13.1794,
+    "sqlite.store-put-get-search": 0.9433,
+    "postgres.vectors-query-1k": 1.0154,
+    "retrievers.keyword-query-5k": 8.1438,
+    "retrievers.hybrid-query": 2.4411,
+    "loaders.markdown-csv-html": 2.8753,
+    "mcp.registry-tools-10-servers": 0.0135,
+    "context-hub.commit-resolve": 0.8569,
+    "insights.find-issues-5k-runs": 0.1345,
+    "deployments.route-canary": 0.2593,
+    "deployments.bucket": 0.0852,
+    "tenancy.admit-release": 0.2142
+  },
+  "soakMb": 8,
+  "soaks": {
+    "sqlite.queue-lifecycle": 20000,
+    "sqlite.open-migrate-close": 2000,
+    "postgres.vectors-write-search-delete": 1000,
+    "retrievers.keyword-churn": 50000,
+    "loaders.repeat": 2000,
+    "mcp.registry-connect-call-close": 1000,
+    "context-hub.commit-resolve-render": 2000,
+    "insights.cluster-repeat": 300,
+    "deployments.route-admit-release": 50000,
+    "deployments.attach-watch-detach": 500
+  }
+}

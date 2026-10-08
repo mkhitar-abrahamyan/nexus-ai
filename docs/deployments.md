@@ -1,4 +1,4 @@
-# Deployments: revisions, canaries, scaling, and tenants (experimental)
+# Deployments: revisions, canaries, scaling, and tenants
 
 <!-- covers: ./server/deployments ./server/tenancy -->
 
@@ -389,10 +389,16 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
 
 ## Limitations
 
-- The family is experimental, and its routes may still grow.
+- Revisions and canaries are experimental. Two replicas changing one deployment in the same instant
+  can lose one change, since the state store has no atomic compare-and-set. Changes on one replica
+  apply in order. Make changes from one place, or pass `expectedVersion` and retry a conflict. Tenant
+  limits and the worker queue are stable.
+- `bucket()` places random thread ids, which the server gives by default, evenly. Ids that differ
+  only in their last characters, such as `user-1` to `user-500`, spread unevenly over a few hundred
+  threads, so a canary's share of them drifts from its weight. Its output is part of the stability
+  promise, so threads keep their place through an upgrade.
 - A revision's code must be in every replica's image. A replica serves only the revisions it has, so
   roll out an image before you give its new revision traffic.
-- Deployment changes are last-writer-wins unless you pass `expectedVersion`.
 - `stats()` and the guard read recent run records, 2,000 by default, so a very busy assistant is judged
   on its latest runs.
 - Tenant usage is shared through Redis or your own `TenantUsageStore`; there is no Postgres one yet.

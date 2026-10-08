@@ -79,13 +79,20 @@ export async function* loadGitRepository(
     const extensions = options.extensions && new Set(options.extensions.map((extension) => extension.toLowerCase()));
     const maxFileBytes = options.maxFileBytes ?? 1_000_000;
 
+    const { lstat, realpath } = await import('node:fs/promises');
+    const checkout = await realpath(directory);
     for (const file of files) {
       const extension = path.extname(file).toLowerCase();
       if (extensions && !extensions.has(extension)) continue;
       if (options.ignore?.(file)) continue;
       let bytes: Uint8Array;
       try {
-        bytes = new Uint8Array(await readFile(path.join(directory, file)));
+        const full = path.join(directory, file);
+        // A tracked symbolic link can point anywhere on this machine, such as a key file, and a
+        // repository is untrusted input: a link is never followed, nor a path that leaves the checkout.
+        if ((await lstat(full)).isSymbolicLink()) continue;
+        if (!(await realpath(full)).startsWith(checkout + path.sep)) continue;
+        bytes = new Uint8Array(await readFile(full));
       } catch {
         continue; // Tracked but deleted from the working tree, or a submodule.
       }

@@ -138,6 +138,8 @@ interface Registration {
  */
 export class Deployments implements ServerDeployments {
   private readonly state: ServerStateStore;
+  /** The change in progress per deployment, which the next one waits for. */
+  private readonly changing = new Map<string, Promise<DeploymentRecord>>();
   private readonly now: () => Date;
   private readonly registrations = new Map<string, Registration>();
   private readonly cache = new Map<string, { record: DeploymentRecord; at: number }>();
@@ -255,8 +257,28 @@ export class Deployments implements ServerDeployments {
    * `expectedVersion` applies a change only to the version it was decided on, and throws
    * `DEPLOYMENT_CONFLICT` otherwise, so two people — or a person and a canary guard — cannot undo each
    * other without noticing.
+   *
+   * Changes to one deployment through this object apply one at a time, so two made at once on one
+   * replica both land, in order. The state store has no atomic compare-and-set, so two replicas
+   * changing one deployment in the same instant can still lose one change: make changes from one
+   * place, or pass `expectedVersion` and retry a conflict.
    */
   async change(
+    assistant: string,
+    change: DeploymentChange & { expectedVersion?: number },
+    by?: string,
+  ): Promise<DeploymentRecord> {
+    const previous = this.changing.get(assistant) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(() => this.applyChange(assistant, change, by));
+    this.changing.set(assistant, next);
+    try {
+      return await next;
+    } finally {
+      if (this.changing.get(assistant) === next) this.changing.delete(assistant);
+    }
+  }
+
+  private async applyChange(
     assistant: string,
     change: DeploymentChange & { expectedVersion?: number },
     by?: string,

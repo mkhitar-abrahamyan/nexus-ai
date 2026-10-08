@@ -33,6 +33,9 @@ export interface WebLoaderOptions extends SafeFetchPolicy {
   onSkip?: (url: string, reason: Error) => void;
 }
 
+/** The most a sitemap may hold uncompressed, by the sitemap protocol. */
+const MAX_SITEMAP_BYTES = 50 * 1024 * 1024;
+
 /** Raised when a page cannot be loaded: a status that is not 2xx, or a type that is not text. */
 export class WebLoaderError extends Error {
   constructor(
@@ -104,7 +107,16 @@ export async function sitemapUrls(url: string | URL, options: SitemapOptions = {
     let xml: string;
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
       const { gunzipSync } = await import('node:zlib');
-      xml = gunzipSync(bytes).toString('utf8');
+      try {
+        // A few megabytes of gzip can inflate to gigabytes; the sitemap protocol caps a sitemap at
+        // 50 MB uncompressed, so nothing larger is a sitemap.
+        xml = gunzipSync(bytes, { maxOutputLength: MAX_SITEMAP_BYTES }).toString('utf8');
+      } catch (error) {
+        throw new WebLoaderError(
+          `${sitemap} does not decompress to a sitemap of at most 50 MB: ${error instanceof Error ? error.message : String(error)}`,
+          sitemap,
+        );
+      }
     } else xml = new TextDecoder().decode(bytes);
     const locations = [...xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)].map((match) => decodeXml(match[1]));
     if (/<sitemapindex\b/i.test(xml)) {

@@ -259,6 +259,83 @@ export interface StdioClientOptions {
   env?: Record<string, string>;
   /** Working directory for the process. */
   cwd?: string;
+  /**
+   * Which of this process's environment variables the server inherits, besides `env`. By default,
+   * only what a process needs to start: the path, the home and temporary directories, the user, the
+   * locale and terminal, the Windows system variables, proxies, and certificate settings. A server is
+   * often third-party code, and must not see this process's API keys or database URLs. A list adds
+   * the variables it names, `true` passes the whole environment, as releases before 2.4 did, and
+   * `false` passes nothing but `env`.
+   */
+  inheritEnv?: boolean | readonly string[];
+}
+
+/** The variables a server inherits by default: enough to start a process, and nothing secret. */
+const INHERITED_ENV = new Set([
+  'PATH',
+  'PATHEXT',
+  'HOME',
+  'USER',
+  'USERNAME',
+  'LOGNAME',
+  'SHELL',
+  'TERM',
+  'LANG',
+  'LANGUAGE',
+  'TZ',
+  'TMPDIR',
+  'TEMP',
+  'TMP',
+  'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_DATA_HOME',
+  'XDG_RUNTIME_DIR',
+  'SYSTEMROOT',
+  'SYSTEMDRIVE',
+  'WINDIR',
+  'COMSPEC',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'PROGRAMDATA',
+  'PROGRAMFILES',
+  'PROGRAMFILES(X86)',
+  'COMMONPROGRAMFILES',
+  'PROCESSOR_ARCHITECTURE',
+  'NUMBER_OF_PROCESSORS',
+  'OS',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'ALL_PROXY',
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+]);
+
+/**
+ * The environment a server process starts with. Names compare without case, as Windows compares
+ * them, and `LC_` locale settings are kept with the rest of the locale.
+ */
+export function serverEnvironment(
+  source: Record<string, string | undefined>,
+  options: Pick<StdioClientOptions, 'env' | 'inheritEnv'> = {},
+): Record<string, string> {
+  if (options.inheritEnv === false) return { ...options.env };
+  const named = new Set(
+    (Array.isArray(options.inheritEnv) ? options.inheritEnv : []).map((name) => name.toUpperCase()),
+  );
+  const inherited: Record<string, string> = {};
+  for (const [name, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    const upper = name.toUpperCase();
+    if (options.inheritEnv === true || INHERITED_ENV.has(upper) || upper.startsWith('LC_') || named.has(upper)) {
+      inherited[name] = value;
+    }
+  }
+  return { ...inherited, ...options.env };
 }
 
 /**
@@ -278,7 +355,7 @@ export function createStdioTransport(options: StdioClientOptions): McpTransport 
       const { spawn } = await import('node:child_process');
       const spawned = spawn(options.command, options.args ?? [], {
         cwd: options.cwd,
-        env: { ...process.env, ...options.env },
+        env: serverEnvironment(process.env, options),
         stdio: ['pipe', 'pipe', 'inherit'],
       });
       spawned.stdout.setEncoding('utf8');

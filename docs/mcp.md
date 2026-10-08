@@ -56,9 +56,20 @@ and a failure throws, so the agent sees a failed tool call.
 ## Transports
 
 `createStdioTransport()` starts a server as a child process and speaks to it over stdin and stdout.
-`StdioClientOptions` gives the `command`, `args`, `env` (added to this process's environment), and
-`cwd`. `node:child_process` is imported only when the transport starts, so a browser or edge build
-that uses HTTP never reaches for it.
+`StdioClientOptions` gives the `command`, `args`, `env`, `cwd`, and `inheritEnv`. `node:child_process`
+is imported only when the transport starts, so a browser or edge build that uses HTTP never reaches
+for it.
+
+A server is often third-party code, so it does not inherit this process's environment. It starts
+with `env` and only what a process needs to run:
+- the path, and the home and temporary directories;
+- the user, the locale, and the terminal;
+- the Windows system variables;
+- proxy and certificate settings.
+
+An API key or a database URL reaches a server only when `env` names it. `inheritEnv` widens this: a
+list adds variables by name, `true` passes the whole environment, as releases before 2.4 did, and
+`false` passes nothing but `env`.
 
 `createHttpTransport()` speaks to a remote server with one POST per message, carrying the
 `mcp-session-id` the server assigns and reading either a JSON body or an event-stream reply.
@@ -121,7 +132,7 @@ An `McpServerConfig` describes one server:
 
 | Field | What it sets |
 | --- | --- |
-| `command`, `args`, `env`, `cwd` | A local server, run over stdio. |
+| `command`, `args`, `env`, `cwd`, `inheritEnv` | A local server, run over stdio, with what it inherits from this process's environment. |
 | `url`, `headers` | A remote server, reached over HTTP. |
 | `allowTools`, `denyTools` | Which tools agents see. `*` matches any run of characters, and deny wins. |
 | `prefix` | The prefix of tool names agents see. Defaults to the server's name, so two servers' `search` stay apart; `false` keeps names as they are. |

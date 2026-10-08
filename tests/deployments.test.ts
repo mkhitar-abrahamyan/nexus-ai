@@ -197,6 +197,37 @@ test('promote and rollback move the live revision, keep a history, and refuse a 
   });
 });
 
+test('changes made at once on one replica all land, in order, none lost', async () => {
+  // A store that yields between every read and write, so unserialized changes would interleave.
+  const inner = new MemoryServerStore();
+  const tick = () => new Promise((resolve) => setImmediate(resolve));
+  const slow = {
+    get: async <V>(namespace: readonly string[], key: string) => {
+      await tick();
+      return inner.get<V>(namespace, key);
+    },
+    put: async <V>(namespace: readonly string[], key: string, value: V) => {
+      await tick();
+      inner.put(namespace, key, value);
+    },
+    delete: (namespace: readonly string[], key: string) => inner.delete(namespace, key),
+    list: <V>(namespace: readonly string[], options?: { limit?: number }) => inner.list<V>(namespace, options),
+  };
+  const deployments = new Deployments({ state: slow, cacheMs: 0 });
+  deployments.assistant('support', { v1: answering('v1'), v2: answering('v2') }, { live: 'v1' });
+  const start = (await deployments.promote('support', 'v1')).version;
+  const weights = Array.from({ length: 20 }, (_, index) => (index + 1) / 100);
+  await Promise.all(weights.map((weight) => deployments.canary('support', 'v2', weight, { by: `guard-${weight}` })));
+  const after = await deployments.get('support');
+  assert.equal(after?.version, start + weights.length, 'every change raised the version');
+  assert.equal(
+    after?.history.filter((entry) => entry.action === 'canary').length,
+    weights.length,
+    'and is in the history',
+  );
+  assert.equal(after?.traffic.v2, 0.2, 'the last change made is the one in force');
+});
+
 test('a canary that regresses is rolled back by the guard, with the regression as the reason', async () => {
   const state = new MemoryServerStore();
   const deployments = new Deployments({ state });
