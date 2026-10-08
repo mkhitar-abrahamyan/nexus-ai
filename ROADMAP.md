@@ -4,16 +4,19 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.3.0**. 152 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.4.0**. 157 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, and 98 completion
-registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 906
-unit tests pass; coverage sits at **94.8% lines / 80.9% branches / 90.3% functions** against gates of
+registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 966
+unit tests pass; coverage sits at **95.4% lines / 81.7% branches / 91.2% functions** against gates of
 82/67/73. CI verifies lint, format, build, tests, coverage, registry drift, `llms.txt` drift,
 per-subpath size, documentation and guide coverage, the root import, a graph benchmark with a
-durability budget, runtime and memory-retention budgets, crash injection on five checkpointers, an
-upgrade from the published 2.0.0 and 2.1.0 packages, ten-worker races and tenant isolation on every
-shared store, sandbox conformance, a permission policy in a real tool loop, retrieval and tool-selection
-experiments, a crash halfway through a 100,000-document ingestion, mock conformance, packed-package smoke, API contract, consumer type resolution, and
+durability budget, runtime and memory-retention budgets, load and soak budgets for every graduated
+surface, crash injection on five checkpointers, an upgrade from the published 2.0.0, 2.1.0, and 2.3.0
+packages, ten-worker races and tenant isolation on every shared store, sandbox conformance, a
+permission policy in a real tool loop, retrieval and tool-selection experiments, a crash halfway
+through a 100,000-document ingestion, the agent protocols driven from the other side of the wire, the
+imports of every entry point for anything Node-only, the portable kernel on Node, Deno, Bun, and an
+edge runtime, mock conformance, packed-package smoke, API contract, consumer type resolution, and
 clean install on Node 22 and 24.
 
 ---
@@ -33,9 +36,9 @@ behaves under a crash, a slow database, a rolling deploy, a thousand workers, or
 
 **What every release protects:**
 
-- No required dependency, and a size budget on every entry point. Today the root import is 336 KB, and
-  an entry point costs a fraction of it: `/agent` 31%, `/graph` 24%, `/operations` 17%, `/evaluate`
-  11%, `/tracing` 9%, `/mcp` 4%, `/store` 2%. `npm run size:check` fails the build when an entry point
+- No required dependency, and a size budget on every entry point. Today the root import is 341 KB, and
+  an entry point costs a fraction of it: `/agent` 31%, `/graph` 24%, `/operations` 16%, `/evaluate`
+  13%, `/tracing` 9%, `/mcp` 5%, `/store` 2%. `npm run size:check` fails the build when an entry point
   grows past its budget or picks up a dependency.
 - A runtime and memory budget. `npm run bench:runtime` fails the release gate when a measured path
   slows past its budget, relative to the machine it runs on, or when a run leaves memory behind.
@@ -59,58 +62,10 @@ Each gap is written down in a guide's limitations today, and each is closed by o
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| Ten surfaces are experimental in production readiness, with no measurable way out | API stability | 2.4 |
-| Images have never passed live conformance | images guide | 2.4 |
-| A canary is rolled back on raw rates, without sample sizes or confidence | deployments guide | 2.4 |
-| A community adapter has no kit to build and verify itself against | — | 2.4 |
-| No agent protocol beyond MCP, and the client pipeline is Node-only | README | 2.4 |
-| Grounding, ingestion, and the PII and injection classifiers are the least-tested code | coverage report | 2.4 |
-
----
-
-## 2.4.0: graduation and interoperability
-
-The experimental surfaces leave experimental with evidence, and the package speaks the protocols the
-agent ecosystem uses.
-
-**Measured graduation.** Every experimental surface works through the checklist in
-[How an item graduates](#how-an-item-graduates): the studio, deployments with tenant limits and the
-worker queue, the context hub, insights, loaders, vector stores, retrievers, the MCP registry, SQLite,
-and images. Images record live conformance on all three backends first. A surface leaves experimental
-when every item has evidence, not on a date, and its evidence is published in `API_STABILITY.md`.
-
-**Deployment statistics.** Canary guards reuse the evaluation verdict: a minimum run count, a
-confidence level, a minimum effect size, and quality from online evaluation alongside errors, cost,
-and latency. A revision that regresses quality rolls back automatically.
-
-**An adapter kit.** `defineVectorStoreAdapter()`, `defineProviderAdapter()`, `defineRetrieverAdapter()`,
-and their siblings, each with contract tests, a capability declaration, version compatibility,
-benchmark fixtures, error normalization, and telemetry requirements. A community package can be built
-and verified without entering this repository.
-
-**Agent protocols**, each on its own subpath and out of the root:
-
-- `nexus-ai-pro/protocols/ag-ui`: a graph's event stream as a frontend-neutral protocol;
-- `nexus-ai-pro/protocols/a2a`: a Nexus agent calling, and serving, remote agents;
-- `nexus-ai-pro/protocols/acp`: for coding-agent interoperability.
-
-**A portable kernel.** `nexus-ai-pro/runtime` holds messages, the provider and tool contracts,
-streaming, capabilities, and fetch-based adapters, with no `fs`, `net`, `child_process`, or Node-only
-crypto. It runs on edge runtimes, Deno, Bun, and in browsers. Operations, Postgres, SQLite, the
-server, the studio, and telephony stay Node-only, and say so.
-
-**Test depth where it is thinnest.** Grounding and verification, file ingestion, and the PII and
-semantic-injection classifiers get tests to the package's own coverage, since security and grounding
-claims rest on them.
-
-**Proof.**
-- Each graduated surface's checklist is published with its evidence.
-- A canary with a seeded quality regression is rolled back, and one with noise under the minimum
-  effect size is not.
-- A community-style adapter built only from the kit passes its contract suite.
-- A Nexus agent and a remote agent complete a task over A2A in both directions, and a frontend renders
-  a run through AG-UI with no Nexus client code.
-- The kernel's tests pass on Node, Deno, Bun, and an edge runtime in CI.
+| Two replicas changing one deployment in the same instant can lose a change: the state store has no compare-and-set | deployments guide | not yet scheduled |
+| Images have not recorded live conformance on all three backends | API stability | not yet scheduled |
+| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | not yet scheduled |
+| The studio and its accounts have no threat review and no soak | API stability | not yet scheduled |
 
 ---
 
