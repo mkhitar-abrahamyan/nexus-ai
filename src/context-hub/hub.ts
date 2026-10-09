@@ -11,6 +11,15 @@ import type {
   RenderOptions,
 } from '../types/prompts.js';
 import { type ContextDiff, diffContexts } from './diff.js';
+import {
+  type ContextKeyring,
+  type ContextSignature,
+  type ContextSignedContent,
+  type ContextSigner,
+  contextDigest,
+  signDigest,
+  verifiedBy,
+} from './signing.js';
 
 /** A prompt a bundle uses, pinned to one content version of the prompt registry. */
 export interface ContextPromptPin {
@@ -75,6 +84,8 @@ export interface ContextBundle extends ContextBundleDefinition {
   author?: string;
   /** The version that was newest before it. */
   parent?: string;
+  /** Signatures over its content and its pinned prompts' content. Not part of the version. */
+  signatures?: ContextSignature[];
 }
 
 /** Which bundle version is being used, as experiments and traces record it. */
@@ -147,8 +158,33 @@ export interface ContextHubOptions {
   gates?: Record<string, readonly ContextPromotionGate[]>;
   /** Called after every recorded change. */
   onChange?: (entry: ContextHistoryEntry) => void | Promise<void>;
+  /**
+   * Signs every new version, over its content and its pinned prompts' content, so another hub can
+   * check where it came from. Signing a bundle that pins prompts needs `prompts`.
+   */
+  signer?: ContextSigner;
+  /**
+   * The keys whose signatures this hub trusts, for `verify()`, and for `requireSignature`. A signature
+   * by a key the keyring does not hold is kept, but never trusted.
+   */
+  keyring?: ContextKeyring;
+  /**
+   * Refuses any bundle without a valid signature by a key in `keyring`: on import, and whenever a
+   * version is served through `resolve()` or `renderPrompt()`.
+   */
+  requireSignature?: boolean;
   /** Replaces the system clock, for tests. */
   now?: () => Date;
+}
+
+/** What `ContextHub.verify()` found. */
+export interface ContextVerification {
+  /** Whether a key in the keyring signed exactly this content. */
+  trusted: boolean;
+  /** The digest the content has now. */
+  digest: string;
+  /** The signature that verified, when one did. */
+  signature?: ContextSignature;
 }
 
 /** Base class for context hub errors, each with a stable `code`. */
@@ -206,6 +242,20 @@ export class ContextPromotionError extends ContextHubError {
   }
 }
 
+/** Raised when a bundle has no signature the hub trusts, or its signatures do not match its content. */
+export class ContextSignatureError extends ContextHubError {
+  constructor(
+    /** The bundle. */
+    public readonly bundle: string,
+    /** The version. */
+    public readonly version: string,
+    reason: string,
+  ) {
+    super(`Context bundle "${bundle}" ${version}: ${reason}`, 'CONTEXT_SIGNATURE');
+    this.name = 'ContextSignatureError';
+  }
+}
+
 /** Raised when a bundle definition, a pin, or an import is invalid. */
 export class ContextDefinitionError extends ContextHubError {
   constructor(message: string) {
@@ -249,7 +299,13 @@ export class ContextHub {
   readonly store: PromptStore;
   private readonly now: () => Date;
 
+  /** Versions already verified as trusted, which never change. */
+  private readonly trusted = new Map<string, Promise<ContextVerification>>();
+
   constructor(private readonly options: ContextHubOptions = {}) {
+    if (options.requireSignature && !options.keyring) {
+      throw new TypeError('requireSignature needs a keyring of the keys the hub trusts');
+    }
     this.store = options.store ?? new MemoryPromptStore();
     this.now = options.now ?? (() => new Date());
   }
@@ -262,6 +318,14 @@ export class ContextHub {
   async commit(
     definition: ContextBundleDefinition,
     options: { message?: string; author?: string; label?: string | readonly string[] } = {},
+  ): Promise<ContextBundle> {
+    return this.commitSigned(definition, options, []);
+  }
+
+  private async commitSigned(
+    definition: ContextBundleDefinition,
+    options: { message?: string; author?: string; label?: string | readonly string[] },
+    inherited: readonly ContextSignature[],
   ): Promise<ContextBundle> {
     validate(definition);
     if (this.options.prompts) {
@@ -288,6 +352,12 @@ export class ContextHub {
         ...(options.author === undefined ? {} : { author: options.author }),
         ...(newest ? { parent: newest.version } : {}),
       };
+      const signatures = [...inherited];
+      if (this.options.signer) {
+        const digest = await contextDigest(await this.signedContent(definition));
+        signatures.push(await signDigest(this.options.signer, digest, this.now()));
+      }
+      if (signatures.length > 0) stored.signatures = signatures;
       await this.store.saveVersion(toStored(stored));
       await this.record({ name: definition.name, action: 'commit', version: id, by: options.author });
     }
@@ -313,9 +383,26 @@ export class ContextHub {
     return found;
   }
 
+  /**
+   * Whether a key in the hub's keyring signed exactly this bundle's content, and its pinned prompts'
+   * content as the prompt registry holds them. A version's answer never changes, so it is checked
+   * once.
+   */
+  async verify(bundle: ContextBundle): Promise<ContextVerification> {
+    const key = `${bundle.name}@${bundle.version}`;
+    let pending = this.trusted.get(key);
+    if (!pending) {
+      pending = this.check(bundle, await this.signedContent(bundle));
+      this.trusted.set(key, pending);
+      pending.catch(() => this.trusted.delete(key));
+    }
+    return pending;
+  }
+
   /** A version with the reference experiments and traces record for it. */
   async resolve(name: string, ref = 'latest'): Promise<{ bundle: ContextBundle; reference: ContextReference }> {
     const bundle = await this.get(name, ref);
+    await this.assertTrusted(bundle);
     return {
       bundle,
       reference: {
@@ -339,6 +426,7 @@ export class ContextHub {
     const registry = this.options.prompts;
     if (!registry)
       throw new ContextDefinitionError('Rendering a pinned prompt needs the hub to have a prompt registry');
+    await this.assertTrusted(bundle);
     const pin = bundle.prompts?.[role];
     if (!pin) throw new ContextNotFoundError(bundle.name, `prompt role "${role}"`);
     const version = await registry.get(pin.name, pin.version);
@@ -517,17 +605,80 @@ export class ContextHub {
         );
       }
     }
-    const { version, createdAt: _createdAt, parent: _parent, message, author, ...definition } = exported.bundle;
+    const {
+      version,
+      createdAt: _createdAt,
+      parent: _parent,
+      message,
+      author,
+      signatures = [],
+      ...definition
+    } = exported.bundle;
     if ((await contextVersion(definition)) !== version) {
       throw new ContextDefinitionError(
         `Bundle ${definition.name} was exported as ${version} but its content has changed`,
       );
     }
-    return this.commit(definition, {
-      message: message ?? 'imported',
-      ...((options.by ?? author) === undefined ? {} : { author: options.by ?? author }),
-      ...(options.label === undefined ? {} : { label: options.label }),
-    });
+    // The signatures that claim this exact content are kept; one claiming other content is dropped.
+    const digest = await contextDigest(signedContentOf(definition, exportedPrompts(exported)));
+    const claims = signatures.filter((signature) => signature?.digest === digest);
+    if (this.options.requireSignature && this.options.keyring) {
+      const signed = await verifiedBy(this.options.keyring, digest, claims);
+      if (!signed) {
+        throw new ContextSignatureError(
+          definition.name,
+          version,
+          signatures.length > 0
+            ? 'no signature verifies against its content with a trusted key'
+            : 'it is not signed, and this hub requires a signature',
+        );
+      }
+    }
+    return this.commitSigned(
+      definition,
+      {
+        message: message ?? 'imported',
+        ...((options.by ?? author) === undefined ? {} : { author: options.by ?? author }),
+        ...(options.label === undefined ? {} : { label: options.label }),
+      },
+      claims,
+    );
+  }
+
+  /** Refuses a bundle without a trusted signature, when the hub requires one. */
+  private async assertTrusted(bundle: ContextBundle): Promise<void> {
+    if (!this.options.requireSignature) return;
+    const verification = await this.verify(bundle);
+    if (!verification.trusted) {
+      throw new ContextSignatureError(
+        bundle.name,
+        bundle.version,
+        bundle.signatures?.length
+          ? 'no signature verifies against its content with a trusted key'
+          : 'it is not signed, and this hub requires a signature',
+      );
+    }
+  }
+
+  private async check(bundle: ContextBundle, content: ContextSignedContent): Promise<ContextVerification> {
+    const digest = await contextDigest(content);
+    const signature = this.options.keyring
+      ? await verifiedBy(this.options.keyring, digest, bundle.signatures)
+      : undefined;
+    return { trusted: signature !== undefined, digest, ...(signature ? { signature } : {}) };
+  }
+
+  /** What a signature over this bundle covers, with its pinned prompts read from the registry. */
+  private async signedContent(definition: ContextBundleDefinition): Promise<ContextSignedContent> {
+    const pins = Object.entries(definition.prompts ?? {});
+    if (pins.length > 0 && !this.options.prompts) {
+      throw new ContextDefinitionError(
+        `Bundle "${definition.name}" pins prompts; signing or verifying it needs the hub to have a prompt registry`,
+      );
+    }
+    const prompts: PromptVersion[] = [];
+    for (const [, pin] of pins) prompts.push(await (this.options.prompts as PromptRegistry).get(pin.name, pin.version));
+    return signedContentOf(definition, prompts);
   }
 
   private async read(name: string, version: string): Promise<ContextBundle | undefined> {
@@ -576,6 +727,43 @@ function validate(definition: ContextBundleDefinition): void {
 
 // A prompt store holds prompt versions; a bundle is kept in one as a version with no messages, which
 // every prompt adapter stores as the JSON document it is.
+/** The content a signature covers: the bundle's versioned fields, and each pinned prompt's. */
+function signedContentOf(definition: ContextBundleDefinition, prompts: readonly PromptVersion[]): ContextSignedContent {
+  const byPin = new Map(prompts.map((prompt) => [`${prompt.name}@${prompt.version}`, prompt]));
+  const pinned: ContextSignedContent['prompts'] = {};
+  for (const [role, pin] of Object.entries(definition.prompts ?? {})) {
+    const prompt = byPin.get(`${pin.name}@${pin.version}`);
+    if (!prompt)
+      throw new ContextDefinitionError(
+        `Bundle "${definition.name}" pins ${role} to ${pin.name}@${pin.version}, which is not at hand`,
+      );
+    pinned[role] = {
+      name: prompt.name,
+      messages: prompt.messages,
+      partials: prompt.partials,
+      config: prompt.config,
+      defaults: prompt.defaults,
+    };
+  }
+  return {
+    bundle: {
+      name: definition.name,
+      description: definition.description,
+      prompts: definition.prompts,
+      instructions: definition.instructions,
+      tools: definition.tools,
+      skills: definition.skills,
+      config: definition.config,
+    },
+    prompts: pinned,
+  };
+}
+
+/** The prompts an export carries, as prompt versions. */
+function exportedPrompts(exported: ContextBundleExport): PromptVersion[] {
+  return exported.prompts;
+}
+
 function toStored(bundle: ContextBundle): PromptVersion {
   return { ...bundle, messages: [], variables: [] } as unknown as PromptVersion;
 }

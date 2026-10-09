@@ -26,6 +26,8 @@ export {
   type ContextPromotionContext,
   ContextPromotionError,
   type ContextPromotionGate,
+  ContextSignatureError,
+  type ContextVerification,
   type ContextPromotionResult,
   type ContextPromptPin,
   type ContextReference,
@@ -34,6 +36,19 @@ export {
   contextVersion,
 } from './hub.js';
 export type { ExperimentGateOptions } from '../prompts/gates.js';
+export {
+  type ContextCryptoKey,
+  type ContextJsonWebKey,
+  type ContextKeyring,
+  type ContextSignature,
+  type ContextSignedContent,
+  type ContextSigner,
+  type ContextSigningKey,
+  contextDigest,
+  ed25519Keyring,
+  ed25519Signer,
+  generateContextKey,
+} from './signing.js';
 
 /**
  * A bundle's instructions joined into one system text, in the order the bundle lists them, or only

@@ -128,6 +128,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite` | 43 KB | 13% | none |
 | `nexus-ai-pro/server/deployments` | 41 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
+| `nexus-ai-pro/context-hub` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
@@ -138,7 +139,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/voice` | 32 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
-| `nexus-ai-pro/context-hub` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 31 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 30 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |

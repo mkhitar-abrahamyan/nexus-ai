@@ -34,6 +34,19 @@ Graduation finished, and evaluation at production depth.
   - `OperationStoreFilter.kinds` filters by exact kinds on every operation store, and
     `OperationStoreStats.queuedByKind` counts queued records per kind. `claimQueued()` checks each
     candidate against the filter itself, for a store that ignores one.
+- **Signed context bundles.**
+  - A hub with a `signer` signs every new version with Ed25519, through Web Crypto, so on any
+    runtime. The signature covers the bundle's content and its pinned prompts' content, under the
+    full SHA-256 that `contextDigest()` computes, not the 12-digit version.
+  - A hub with a `keyring` checks signatures with `verify()`. With `requireSignature`, it refuses a
+    bundle without a trusted signature, with a `ContextSignatureError`, on `import()` and whenever
+    `resolve()` or `renderPrompt()` serves one.
+  - An import keeps the signatures that claim its content, and adds the importing hub's. That is how
+    keys rotate.
+  - `generateContextKey()`, `ed25519Signer()`, and `ed25519Keyring()` make and load keys, as JSON Web
+    Keys or Web Crypto keys.
+- **Context on every trace.** A traced model call records `metadata.context` beside
+  `metadata.prompt`, so a trace query or an insight narrows by bundle version.
 
 ### Fixed
 
@@ -43,6 +56,11 @@ Graduation finished, and evaluation at production depth.
 
 ### Proof
 
+- A signed bundle imports into a hub that requires signatures. It is refused there when it is unsigned,
+  or edited after export even with its version recomputed. One edited where it is stored is refused
+  when it is served. A re-import through a hub with a new key keeps both signatures, so the bundle
+  stays trusted once the old key is retired. Every traced model call rendered from it names its
+  context and prompt versions.
 - Two worker images drain one queue, one carrying v1 and the other v1 and v2, with an API replica
   that carries only v1. Under a 50% canary, every run executes on the revision it was routed to, and
   only the image with v2 runs v2. A run for a pool scaled to zero waits, is counted per revision on

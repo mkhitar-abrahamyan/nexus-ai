@@ -137,13 +137,62 @@ await writeFile('support-agent.json', JSON.stringify(await hub.export('support-a
 await otherHub.import(JSON.parse(await readFile('support-agent.json', 'utf8')), { label: 'staging' });
 ```
 
+## Signed bundles
+
+A version check proves an export was not edited by accident. A signature proves who published it.
+A hub with a `signer` signs every new version, and a hub with a `keyring` checks those signatures.
+
+- **What a signature covers.** It covers the bundle's content and the content of every prompt it
+  pins, under the full SHA-256 that `contextDigest()` computes over a `ContextSignedContent`. A
+  version is only the first 12 hex digits, enough to name content but not to stand behind a signature.
+  Signing a bundle that pins prompts needs the hub's prompt registry, which is where that content
+  comes from.
+- **The keys.** Signatures are Ed25519, through Web Crypto, so on any runtime.
+  `generateContextKey()` creates a `ContextSigningKey`: a `ContextSigner`, and both halves as a
+  `ContextJsonWebKey` to keep in a secret store. `ed25519Signer()` loads a private key as a signer,
+  and `ed25519Keyring()` loads trusted public keys, by key id, as a `ContextKeyring`. Either takes a
+  JSON Web Key or a `ContextCryptoKey`, which any runtime's `CryptoKey` is.
+- **What is stored.** Each `ContextSignature` names its key id, the digest, the signature, and when it
+  was signed. It is stored with the version and travels in its export, but it is not part of the
+  version.
+- **Checking.** `verify()` returns a `ContextVerification`: whether a trusted key signed exactly this
+  content, the digest it has now, and the signature that verified. A version's answer is checked once
+  and remembered.
+- **Requiring it.** With `requireSignature`, the hub refuses, with a `ContextSignatureError`, a bundle
+  with no signature from a key in its keyring. That holds on `import()`, and whenever `resolve()` or
+  `renderPrompt()` serves a version. A version edited where it is stored is refused when it is served.
+- **Imports keep signatures.** An import keeps the signatures that claim its exact content, and a hub
+  with its own signer adds one. That is how a key rotates: re-import the bundles through a hub that
+  trusts the old key and signs with the new one.
+
+```ts
+import { ContextHub, ed25519Keyring, ed25519Signer } from 'nexus-ai-pro/context-hub';
+
+const publisher = new ContextHub({ prompts, signer: await ed25519Signer('release-2026', privateKey) });
+const production = new ContextHub({
+  prompts,
+  keyring: await ed25519Keyring({ 'release-2026': publicKey }),
+  requireSignature: true,
+});
+```
+
+## On every trace
+
+`renderPrompt()` records the bundle in the request's `metadata.context` and the prompt in
+`metadata.prompt`, and a traced model call keeps both. A trace query by
+`{ metadata: { 'context.version': version } }` finds every call one version made, and the `query`
+of an insight narrows the same way. An agent that is not rendered from the hub can still name its
+bundle: pass the `reference` that `resolve()` returns as `metadata: { context: reference }` to
+`createAgent()`.
+
 ## Limitations
 
 - A bundle pins prompt versions; it does not follow prompt labels. Commit a new bundle version to
   take a new prompt version, which is what makes a bundle reproducible.
-- A bundle is versioned by its content, not signed. An import checks that the content is what was
-  exported, not who exported it.
-- A traced model call records the prompt version it was rendered from, but not the bundle's.
+- Versions are immutable, so one committed before a signer was configured stays unsigned. Re-import
+  it through a hub that signs.
+- A signature covers what a bundle names. The tool implementations `bindTools()` binds are the
+  application's own code, which the bundle cannot change.
 
 <!-- reference:start -->
 ## Reference
@@ -161,14 +210,18 @@ specific entry point that provides it.
 | `ContextBundleExport` | interface | A bundle with the prompts it pins, as one document that moves between projects. |
 | `ContextChange` | interface | One entry that differs between two bundle versions. |
 | `ContextConflictError` | class | Raised when a label moved while it was being changed. |
+| `ContextCryptoKey` | interface | A Web Crypto key, as `crypto.subtle` returns one. |
 | `ContextDefinitionError` | class | Raised when a bundle definition, a pin, or an import is invalid. |
 | `ContextDiff` | interface | What changed between two versions of a bundle. |
+| `contextDigest` | function | The digest a signature covers, as `sha256:` and 64 hex digits. |
 | `contextExperimentGate` | function | Refuses a promotion until an experiment has passed for the exact bundle version being promoted, as `experimentGate()` does for prompts: an experiment counts when its `metadata.context` names the version, which `evaluateContext()` records. |
 | `ContextHistoryEntry` | type | One recorded change to a bundle. |
 | `ContextHub` | class | Versioned context bundles: prompts, instructions, tool sets, and skills versioned together, labelled, promoted through gates, diffed, rolled back, and exported to move between projects. |
 | `ContextHubError` | class | Base class for context hub errors, each with a stable `code`. |
 | `ContextHubOptions` | interface | Options for a `ContextHub`. |
 | `contextInstructions` | function | A bundle's instructions joined into one system text, in the order the bundle lists them, or only the ones named in `include`, in that order. |
+| `ContextJsonWebKey` | interface | A JSON Web Key, as Web Crypto exports one. |
+| `ContextKeyring` | interface | Verifies signatures by key id. |
 | `ContextLabel` | type | A label pointing at a bundle version. |
 | `ContextNotFoundError` | class | Raised for a bundle, version, or label that does not exist. |
 | `ContextPromotionContext` | interface | What a context promotion gate is asked to judge. |
@@ -177,12 +230,21 @@ specific entry point that provides it.
 | `ContextPromotionResult` | interface | The outcome of a promotion. |
 | `ContextPromptPin` | interface | A prompt a bundle uses, pinned to one content version of the prompt registry. |
 | `ContextReference` | interface | Which bundle version is being used, as experiments and traces record it. |
+| `ContextSignature` | interface | One signature on a bundle version. |
+| `ContextSignatureError` | class | Raised when a bundle has no signature the hub trusts, or its signatures do not match its content. |
+| `ContextSignedContent` | interface | What a bundle signature covers: the bundle's versioned content, and its pinned prompts' content. |
+| `ContextSigner` | interface | Signs bundle digests with a private key, under a key id. |
+| `ContextSigningKey` | interface | A new signing key, with both halves as JSON Web Keys to keep in a secret store. |
 | `ContextSkill` | interface | A skill: instructions for one kind of task, with the reference material it needs. |
 | `ContextTarget` | type | Runs one example with a bundle: build the request from it, call the model or agent, return the output. |
 | `ContextTool` | interface | A tool a bundle offers: its name, description, and argument schema. |
+| `ContextVerification` | interface | What `ContextHub.verify()` found. |
 | `contextVersion` | function | The content version of a bundle: `c` and the first 12 hex digits of a SHA-256 over its name, description, prompts, instructions, tools, skills, and configuration. |
 | `diffContexts` | function | Compares two versions of a bundle, entry by entry, with line diffs for text. |
+| `ed25519Keyring` | function | A keyring of trusted Ed25519 public keys, by key id. |
+| `ed25519Signer` | function | A signer from an Ed25519 private key, as a JSON Web Key or a Web Crypto key. |
 | `evaluateContext` | function | Runs a bundle version over a dataset and scores it. |
 | `formatContextDiff` | function | A diff as text, one line per change and `+`/`-` lines for text, for a terminal or a pull request. |
+| `generateContextKey` | function | Creates an Ed25519 signing key through Web Crypto, so on any runtime. |
 | `servedByContextGate` | function | Refuses a promotion unless the version is what another label serves now, such as `staging` before `production`. |
 <!-- reference:end -->

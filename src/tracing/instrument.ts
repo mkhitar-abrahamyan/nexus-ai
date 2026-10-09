@@ -208,6 +208,9 @@ export function traceModelClient<T extends ModelClientLike>(
             finishReason: response.finishReason,
             // A request rendered from a prompt carries its version, so a trace answers "which prompt ran".
             ...(request.metadata?.prompt === undefined ? {} : { prompt: request.metadata.prompt }),
+            // And a request rendered from a context bundle names the bundle version, so a trace answers
+            // "which context ran", and a query or an insight can narrow by it.
+            ...(request.metadata?.context === undefined ? {} : { context: request.metadata.context }),
             // What the response cache did, and why: a hit, a miss, a stale entry, a bypass, or an error.
             ...(response.meta?.cache ? { cache: response.meta.cache } : {}),
             ...(request.tenantId ? { tenantId: request.tenantId } : {}),

@@ -55,6 +55,13 @@ New and stable:
   `RevisionChoice.local`, `ScalingSnapshot.queuedByRevision`, and the
   `nexus_server_runs_queued_by_revision` metric.
 
+- signing on `nexus-ai-pro/context-hub`: `ContextHubOptions.signer`, `keyring`, and `requireSignature`;
+  `ContextHub.verify()` and `ContextVerification`; `ContextBundle.signatures`; `ContextSignatureError`;
+  `generateContextKey()`, `ed25519Signer()`, `ed25519Keyring()`, `contextDigest()`, and the signing
+  types. The signed digest's format is `nexus-context-signature`, format version 1, and a later release
+  verifies it;
+- `metadata.context` on a traced model call.
+
 A queued run's kind now names its revision, as `assistant:<id>@<revision>`. Code that reads the
 server's runs by the `assistant:` prefix, as the server itself does, is unaffected.
 

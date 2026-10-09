@@ -5,7 +5,8 @@
 Traces you can search, from `nexus-ai-pro/tracing`. Each request becomes a tree of runs — the graph,
 its nodes, its model and tool calls — stored in memory, a JSONL file, or Postgres. You can filter
 them, leave feedback on them, compare two of them, and alert on them. A model call rendered from a
-versioned prompt records which prompt ran, in `metadata.prompt`.
+versioned prompt records which prompt ran, in `metadata.prompt`, and one rendered from a context
+bundle records which bundle version, in `metadata.context`.
 
 ## Overview
 
@@ -190,8 +191,8 @@ inputs. It returns `GraphTracing`:
 
 `traceModelClient()` wraps anything with a `complete()` method — the `ModelClientLike` contract — so
 every call becomes a `model` run. The run records the request, the content and tool calls, token usage,
-cost, finish reason, the model and provider that answered, and the prompt version when the request came
-from a registry. Its `parent` option decides where the call hangs: `() => tracing.runFor('model')`
+cost, finish reason, the model and provider that answered, and the prompt and context versions when the
+request came from a registry or a context hub. Its `parent` option decides where the call hangs: `() => tracing.runFor('model')`
 nests it inside the node that made it.
 
 A tool call an agent reports — `createAgent()` reports every one — becomes a `tool` run inside the
