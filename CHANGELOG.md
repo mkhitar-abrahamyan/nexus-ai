@@ -4,7 +4,7 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-Graduation finished, and evaluation at production depth.
+Graduation finished, and conversations evaluated.
 
 ### Added
 

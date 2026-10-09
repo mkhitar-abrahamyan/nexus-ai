@@ -81,15 +81,19 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // none of them loaded by the root. Also the graduation evidence and threat reviews, published in
 // API_STABILITY.md and SECURITY.md, which ship in the package. Measured at 1,136,295 bytes packed
 // and 6,905,419 unpacked.
-const MAX_PACKED_BYTES = 1_170_000;
-const MAX_UNPACKED_BYTES = 7_100_000;
+// Raised again in 2.5.0 for the rest of graduation: two opt-in entry points (Postgres tenant usage
+// and conversation evaluation), signed context bundles, deployment rollups, and the graduation
+// evidence and threat reviews for deployments and the studio. Measured at 1,174,324 bytes packed and
+// 7,089,212 unpacked.
+const MAX_PACKED_BYTES = 1_210_000;
+const MAX_UNPACKED_BYTES = 7_300_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
 // came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0 and
-// 2.3.0 and 2.4.0, for the same reasons, and still nothing but the package itself: 6,908,187
-// bytes in 2.4.0.
-const MAX_INSTALLED_BYTES = 7_200_000;
+// 2.3.0 and 2.4.0 and 2.5.0, for the same reasons, and still nothing but the package itself:
+// 6,908,187 bytes in 2.4.0.
+const MAX_INSTALLED_BYTES = 7_400_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
