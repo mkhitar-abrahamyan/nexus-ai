@@ -155,6 +155,7 @@ const imports = [
       'FileExperimentStore',
     ],
   },
+  { specifier: 'nexus-ai-pro/evaluate/threads', exports: ['simulatedUser', 'scriptedUser', 'conversationTarget', 'graphThreadAgent', 'goalReached', 'goalCompletion', 'turnCount', 'turnScores', 'formatThread'] },
   {
     specifier: 'nexus-ai-pro/postgres',
     exports: [

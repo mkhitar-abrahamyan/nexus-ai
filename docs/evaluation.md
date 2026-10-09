@@ -1,6 +1,6 @@
 # Evaluation
 
-<!-- covers: ./evaluate ./evals ./evals/judge -->
+<!-- covers: ./evaluate ./evaluate/threads ./evals ./evals/judge -->
 
 Evaluation from `nexus-ai-pro/evaluate`: run any target — a completion, an agent, a graph, an image operation, or plain code — over a dataset versioned by its content, score it, and compare experiments with a verdict rather than a difference of means. `nexus-ai-pro/evals` keeps the eval-case runner and the LLM judge.
 
@@ -264,6 +264,92 @@ It returns an `ExperimentComparison`:
 
 `formatComparison()` renders it as text for a pull request or a CI log.
 
+## Conversations
+
+An agent that talks with a user over several turns is judged on the whole conversation: whether the
+user got what they came for, how many turns it took, and the turn where it went wrong.
+`nexus-ai-pro/evaluate/threads` holds those conversations with a simulated user and scores them, so
+two versions of a multi-turn agent are compared the way single answers are, with the same verdicts.
+
+```ts
+import { compareExperiments, createDataset, evaluate } from 'nexus-ai-pro/evaluate';
+import {
+  conversationTarget,
+  goalCompletion,
+  goalReached,
+  graphThreadAgent,
+  simulatedUser,
+  turnCount,
+} from 'nexus-ai-pro/evaluate/threads';
+
+const goals = createDataset({
+  name: 'support-goals',
+  examples: [{ inputs: { goal: 'Get a refund for order 1182', persona: 'An impatient customer' } }],
+});
+const user = simulatedUser({ client: ai, model: 'gpt-5.4-mini' });
+const run = (agent) =>
+  evaluate(conversationTarget(graphThreadAgent(agent), { user, maxTurns: 8 }), goals, [
+    goalReached(),
+    goalCompletion(judge),
+    turnCount(),
+  ]);
+
+const comparison = compareExperiments(await run(current), await run(candidate), { lowerIsBetter: ['turns'] });
+```
+
+### The simulated user
+
+A dataset of conversations holds `ThreadInputs`: the user's `goal`, and optionally a `persona` and the
+user's `opening` message. A `SimulatedUser` plays that user. Given a `SimulatedUserContext` (the
+goal, the persona, and the turns so far), it returns a `SimulatedUserReply`: its next message, or that
+it is done, because the goal was met or because it gave up.
+
+- `simulatedUser()` is driven by a model, through any `SimulatedUserClient` with a `complete()`
+  method. The model is told the goal and the persona, sees the conversation with the roles turned
+  around, and ends it by answering `DONE: GOAL` or `DONE: GAVE UP`. `SimulatedUserOptions` set the
+  model, a default persona, the temperature (0, so a conversation repeats), the token limit, and
+  instructions of your own.
+- `scriptedUser()` follows a script, for a deterministic test: its messages in order, then done. A
+  function in place of the script decides each move itself.
+
+### The conversation target
+
+`conversationTarget()` is an `evaluate()` target. For each example it lets the user speak and the agent
+answer, until the user is done or `ConversationTargetOptions.maxTurns` (10) user messages have been
+sent. The user may be one for every example, or a function that builds one per example, such as one
+with that example's persona.
+
+The target returns a `Thread`: every `ThreadTurn`, and a `ThreadEnding` that says how it ended:
+`goal`, `gave-up`, `max-turns`, or `error` with the agent's message. An assistant turn records how
+long the agent took and, when the agent reports them, every message it added on the way: its tool
+calls, their results, and the answer.
+
+A `ThreadAgent` is any function from the conversation so far to a `ThreadAgentReply`: the answer, or
+the answer and the messages the agent added. It is given its own earlier turns as it recorded them,
+and a `ThreadAgentContext`: the example's inputs, the turn, a `conversationId` that is new for every
+conversation, and the abort signal. `graphThreadAgent()` makes one from `createAgent()`, or from any
+`ThreadGraph` that takes `{ messages }` and ends with an `answer`. Each turn runs on the
+conversation's thread with the transcript so far, so the agent sees its own tool calls on later
+turns, as it does with a real user, with or without a checkpointer.
+
+### Thread evaluators
+
+| Evaluator | Key | Scores |
+| --- | --- | --- |
+| `goalReached()` | `goal_reached` | 1 when the user said the goal was met, otherwise 0, with how the conversation ended. |
+| `goalCompletion(judge)` | `goal_completion` | A judge's verdict on the whole conversation, given the goal as the question. It takes an `LLMJudge`. |
+| `turnCount()` | `turns` | How many times the agent spoke. Fewer is better: compare with `lowerIsBetter: ['turns']`. |
+| `turnScores(evaluator)` | `turn_score` | Every assistant turn by an evaluator of single answers, and the conversation by their mean. |
+
+`turnScores()` shows the evaluator each turn as an example of its own. The user's message is the
+input, the turn is the output, and the conversation before it is in `metadata.history`. The score's
+metadata lists every turn's score, and `wentWrongAt`, the first turn below the threshold, counted
+from 1. `TurnScoresOptions` set the key and the threshold (0.5). `formatThread()` writes a
+conversation as text, for a judge or a person.
+
+Each evaluator scores an output that is not a conversation as 0, so one failed target does not end
+an experiment.
+
 ## Online evaluation and review
 
 `evaluateOnline()` scores production traffic. It takes `OnlineEvaluationOptions`:
@@ -390,8 +476,10 @@ regression in a test, not to judging content in production; use a model judge fo
 
 ## Limitations
 
-- An evaluator scores one answer. A conversation has no evaluator of its own, and nothing simulates
-  a user to hold one, so a multi-turn agent is evaluated turn by turn.
+- A simulated user is as good as the model that plays it. Hold its model and temperature fixed
+  between the experiments you compare, and read some conversations before trusting a verdict.
+- A conversation runs its turns in order, so 50 conversations of 5 turns are 250 agent calls and 250
+  user-model calls. `concurrency` runs conversations side by side, not turns.
 - Datasets are written by hand, or exported from traces and review queues. Nothing generates examples
   from documents, or attacks from the guardrails' patterns.
 - An experiment has no spend cap of its own: bound it with the client's budget. Online evaluation runs
@@ -518,4 +606,33 @@ specific entry point that provides it.
 | `underCost` | function | Cost as a pass or fail, per example. |
 | `underLatency` | function | Latency as a pass or fail, so a quality gate can hold a budget as well as a score. |
 | `withProvenance` | function | Says where an evaluator's scores come from: its name and version, the judge model and prompt version behind it, and its rubric. |
+
+### `nexus-ai-pro/evaluate/threads`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `conversationTarget` | function | An `evaluate()` target that holds a conversation per example: the simulated user speaks, the agent answers, until the user says it is done or the turn limit is reached. |
+| `ConversationTargetOptions` | interface | Options for `conversationTarget()`. |
+| `formatThread` | function | The conversation as text, for a judge or a person. |
+| `goalCompletion` | function | Whether the goal was met, in a judge's opinion of the whole conversation, not the user's. |
+| `goalReached` | function | Whether the user said its goal was met: 1 when the conversation ended on `goal`, otherwise 0, with how it ended as the comment. |
+| `graphThreadAgent` | function | An agent from `createAgent()`, or any graph that takes `{ messages }` and ends with an `answer`, as a thread agent. |
+| `scriptedUser` | function | A user that follows a script, for deterministic tests: its messages in order, then `done`. |
+| `simulatedUser` | function | A simulated user driven by a model: it is told the goal and the persona, sees the conversation with the roles turned around, and writes the next message, or says it is done and why. |
+| `SimulatedUser` | interface | Plays the user in a conversation. |
+| `SimulatedUserClient` | interface | A model client, as the judges take one. |
+| `SimulatedUserContext` | interface | What a simulated user sees when it writes its next message. |
+| `SimulatedUserOptions` | interface | Options for `simulatedUser()`. |
+| `SimulatedUserReply` | type | A simulated user's move: its next message, or the end of the conversation and why. |
+| `Thread` | interface | A finished conversation: what a conversation target returns, and what thread evaluators read. |
+| `ThreadAgent` | type | The agent a conversation target talks to. |
+| `ThreadAgentContext` | interface | What a thread agent is told besides the conversation. |
+| `ThreadAgentReply` | type | What a thread agent answers: the reply, or the reply and every message the agent added on the way, such as its tool calls and their results. |
+| `ThreadEnding` | type | Why a conversation ended. |
+| `ThreadGraph` | interface | A graph a thread agent can drive: one that takes `{ messages }`, as `createAgent()` builds. |
+| `ThreadInputs` | interface | What a conversation is about: the user's goal, and optionally who they are and how they open. |
+| `ThreadTurn` | interface | One turn of a conversation. |
+| `turnCount` | function | How many times the assistant spoke: fewer is better. |
+| `turnScores` | function | Scores every assistant turn with an evaluator of single answers, and the conversation by their mean. |
+| `TurnScoresOptions` | interface | Options for `turnScores()`. |
 <!-- reference:end -->

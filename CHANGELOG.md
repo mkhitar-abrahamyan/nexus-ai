@@ -45,6 +45,16 @@ Graduation finished, and evaluation at production depth.
     keys rotate.
   - `generateContextKey()`, `ed25519Signer()`, and `ed25519Keyring()` make and load keys, as JSON Web
     Keys or Web Crypto keys.
+- **Whole conversations, evaluated** (`nexus-ai-pro/evaluate/threads`).
+  - `simulatedUser()` plays a user with a goal and a persona, driven by a model, and says when the goal
+    was met or when it gives up. `scriptedUser()` follows a script, for deterministic tests.
+  - `conversationTarget()` is an `evaluate()` target that holds a conversation per example and returns
+    the `Thread`: every turn, how long each answer took, the messages the agent added, and how it
+    ended. `graphThreadAgent()` drives an agent from `createAgent()`, which keeps its own tool calls
+    from turn to turn.
+  - Thread evaluators: `goalReached()`, `goalCompletion()` with a judge, `turnCount()`, and
+    `turnScores()`, which scores every turn with an evaluator of single answers and names the turn
+    where the conversation went wrong.
 - **Context on every trace.** A traced model call records `metadata.context` beside
   `metadata.prompt`, so a trace query or an insight narrows by bundle version.
 
@@ -56,6 +66,11 @@ Graduation finished, and evaluation at production depth.
 
 ### Proof
 
+- A simulated user holds 50 conversations with each of two versions of a support agent built with
+  `createAgent()`. The thread evaluators score every conversation, and `compareExperiments()` finds
+  the second version better on goals met, the judge's verdict, turns taken, and per-turn scores, with
+  no regression; the reverse comparison regresses. A conversation that failed names the turn where it
+  went wrong.
 - A signed bundle imports into a hub that requires signatures. It is refused there when it is unsigned,
   or edited after export even with its version recomputed. One edited where it is stored is refused
   when it is served. A re-import through a hub with a new key keeps both signatures, so the bundle

@@ -31,6 +31,7 @@
     "./evals": 36,
     "./evals/judge": 14,
     "./evaluate": 50,
+    "./evaluate/threads": 10,
     "./graph": 90,
     "./graph/functional": 38,
     "./graph/lint": 10,

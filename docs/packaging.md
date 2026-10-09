@@ -210,6 +210,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
 | `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 8 KB | 2% | none |
+| `nexus-ai-pro/evaluate/threads` | 8 KB | 2% | none |
 | `nexus-ai-pro/realtime/openai-server` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
 | `nexus-ai-pro/store` | 7 KB | 2% | none |

@@ -60,7 +60,11 @@ New and stable:
   `generateContextKey()`, `ed25519Signer()`, `ed25519Keyring()`, `contextDigest()`, and the signing
   types. The signed digest's format is `nexus-context-signature`, format version 1, and a later release
   verifies it;
-- `metadata.context` on a traced model call.
+- `metadata.context` on a traced model call;
+- `nexus-ai-pro/evaluate/threads`, experimental: `simulatedUser()`, `scriptedUser()`,
+  `conversationTarget()`, `graphThreadAgent()`, `formatThread()`, `goalReached()`,
+  `goalCompletion()`, `turnCount()`, `turnScores()`, and their types. The score keys `goal_reached`,
+  `goal_completion`, `turns`, and `turn_score` are stable once the entry point graduates.
 
 A queued run's kind now names its revision, as `assistant:<id>@<revision>`. Code that reads the
 server's runs by the `assistant:` prefix, as the server itself does, is unaffected.
