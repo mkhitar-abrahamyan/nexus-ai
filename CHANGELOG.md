@@ -56,6 +56,11 @@ Graduation finished, and evaluation at production depth.
     and `rollups()` sum them in one read, and `GET /deployments/:assistant` reports them.
   - `watchCanaries({ from: 'rollups' })` judges a canary on every run since the split last changed,
     instead of the latest 2,000 run records.
+- **A doctor that knows the opt-in settings.** `nexus doctor` and `diagnose()` warn, in a new
+  `settings` check, when a `RedisOperationStore` runs without `index: true`, and when a `Tracer`
+  writes to a persistent store without `incremental`. Each warning names the setting that fixes it.
+  Both stay opt-in through 2.x. `RedisOperationStore.indexed`, `Tracer.store`, and
+  `Tracer.incremental` report the settings.
 - **Whole conversations, evaluated** (`nexus-ai-pro/evaluate/threads`).
   - `simulatedUser()` plays a user with a goal and a persona, driven by a model, and says when the goal
     was met or when it gives up. `scriptedUser()` follows a script, for deterministic tests.
@@ -77,6 +82,9 @@ Graduation finished, and evaluation at production depth.
 
 ### Proof
 
+- The doctor's seeded deployment warns about a Redis operation store without its index and a tracer
+  writing to a persistent store at the end of each trace, and the same deployment with both settings
+  turned on passes.
 - Ten replicas make mixed changes to one deployment at once (canaries, splits, promotions,
   rollbacks, and a bucketing change), held until all ten arrive, on the memory server store and the
   memory, Redis, Postgres, and SQLite stores. Every change lands, each with a version of its own, and

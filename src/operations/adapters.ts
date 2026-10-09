@@ -153,7 +153,8 @@ export interface RedisOperationStoreOptions {
 export class RedisOperationStore<TResult = unknown> implements OperationStore<TResult> {
   private readonly prefix: string;
   private readonly useEval: boolean;
-  private readonly indexed: boolean;
+  /** Whether queued and leased work is kept in sorted sets, as `index: true` asks. */
+  readonly indexed: boolean;
 
   constructor(
     private readonly client: RedisOperationLikeClient,

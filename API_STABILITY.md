@@ -68,6 +68,8 @@ New and stable:
   `DeploymentsOptions.rollupMs`; `CanaryGuardOptions.from`. `ServerDeployments` gains an optional
   `recordRun()`, and `RunManagerOptions.deployments`. The positions `fnv1a-v1` and `hash-v2` give a key
   never change;
+- the doctor's `settings` check; `RedisOperationStore.indexed`; `Tracer.store` and
+  `Tracer.incremental`;
 - `nexus-ai-pro/evaluate/threads`, experimental: `simulatedUser()`, `scriptedUser()`,
   `conversationTarget()`, `graphThreadAgent()`, `formatThread()`, `goalReached()`,
   `goalCompletion()`, `turnCount()`, `turnScores()`, and their types. The score keys `goal_reached`,

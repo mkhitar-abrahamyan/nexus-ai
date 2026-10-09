@@ -103,10 +103,13 @@ which suits a deploy step. `migrate --dry-run` prints the statements it would ru
 | Operation queue | a running operation's lease lapsed, or the oldest queued one waited past `--max-queue-age-ms` (warns) |
 | Provider health | a provider is stale or unhealthy (warns) |
 | One-process settings | with more than one replica, a store keeps its state in process memory: a memory checkpointer, operation store, server state, or tenant usage fails; a memory rate-limit, circuit, trace, prompt, cache, or rollup store warns |
+| Opt-in settings | a store lacks a setting that stays opt-in through 2.x but that a deployment needs: a `RedisOperationStore` without `index: true`, or a `Tracer` writing to a persistent store without `incremental` (warns, with the setting that fixes it) |
 
 Without `--module` it checks what a shell can see. A module reaches the rest, exporting any of
 `database` (or `client`, so a `nexus db` module works unchanged), `redis`, `operations`, `ai`,
-`deployment` (`{ replicas, stores }`), and `close`. `--replicas` sets the replica count.
+`deployment` (`{ replicas, stores }`), and `close`. `--replicas` sets the replica count. Put the
+application's tracer among the `stores` for the tracing check: `Tracer.store` and
+`Tracer.incremental` are what it reads, and `RedisOperationStore.indexed` for the queue's.
 
 ```bash
 nexus doctor --module doctor.mjs --strict
@@ -193,10 +196,9 @@ starts no slower.
 
 ## Limitations
 
-- The doctor checks that a store is reachable, and its queue, but not how it is configured. It does
-  not warn when a Redis operation store runs without its dispatch index, or a persistent trace store
-  without incremental tracing. The [operations](./operations.md) and [tracing](./tracing.md) guides say
-  when each is worth turning on.
+- The doctor sees only what it is given. A store left out of `deployment.stores` is not checked, and
+  it knows a store's kind by its class name, so a store of your own is checked only for what it
+  reports.
 
 
 <!-- reference:start -->

@@ -58,8 +58,10 @@ export interface DoctorDeployment {
   replicas: number;
   /**
    * The stores and shared state it uses, by any name: a checkpointer, the operation store, the
-   * server's state, tenant usage, a rate-limit store, a circuit store, a cache. Each is reported when
-   * it keeps its state in process memory, where each replica would see only its own.
+   * server's state, tenant usage, a rate-limit store, a circuit store, a cache, a tracer. Each is
+   * reported when it keeps its state in process memory, where each replica would see only its own,
+   * and when it lacks an opt-in setting a deployment needs: a Redis operation store without its
+   * dispatch index, or a tracer writing to a persistent store without incremental tracing.
    */
   stores?: Record<string, unknown>;
 }
@@ -161,6 +163,7 @@ export async function diagnose(options: DoctorOptions = {}): Promise<DoctorRepor
   await run('queue', 'Operation queue and leases', () => queueCheck(options.operations, now(), options.maxQueueAgeMs));
   await run('health', 'Provider health', () => healthCheck(options.ai));
   await run('topology', 'Settings that only work in one process', () => topologyCheck(options.deployment));
+  await run('settings', 'Opt-in settings a deployment needs', () => settingsCheck(options.deployment));
 
   const failures = checks.filter((check) => check.status === 'fail').length;
   const warnings = checks.filter((check) => check.status === 'warn').length;
@@ -352,4 +355,44 @@ function topologyCheck(deployment: DoctorDeployment | undefined): Omit<DoctorChe
     detail: `${deployment.replicas} replicas: ${findings.map((finding) => finding.text).join('; ')}.`,
     hint: 'Use the Redis, Postgres, or SQLite adapter for each, or run one replica.',
   };
+}
+
+/**
+ * Settings that stay opt-in through 2.x, because turning them on changes what an upgrade does, but
+ * that a deployment needs: found on the stores it describes, each with the setting that fixes it.
+ */
+function settingsCheck(deployment: DoctorDeployment | undefined): Omit<DoctorCheck, 'id' | 'title'> {
+  const stores = Object.entries(deployment?.stores ?? {});
+  if (stores.length === 0) return { status: 'skip', detail: 'No stores described.' };
+  const findings: string[] = [];
+  const hints = new Set<string>();
+  for (const [name, value] of stores) {
+    const kind = kindOf(value);
+    if (kind === 'RedisOperationStore' && (value as { indexed?: unknown }).indexed === false) {
+      findings.push(
+        `${name} is a RedisOperationStore without index: true, so finding queued work reads every record and a long queue slows every claim`,
+      );
+      hints.add(
+        'Give the Redis operation store index: true once every worker sharing its prefix runs 2.2 or later, then call reindex() once.',
+      );
+    }
+    if (kind === 'Tracer') {
+      const tracer = value as { incremental?: unknown; store?: unknown };
+      const store = kindOf(tracer.store);
+      if (tracer.incremental === false && store && store !== 'MemoryTraceStore') {
+        findings.push(
+          `${name} writes to a ${store} without incremental, so a trace is written when its root finishes and a replica that dies mid-run loses it`,
+        );
+        hints.add(
+          'Create the Tracer with incremental: true, and close what a dead process left with closeAbandonedRuns().',
+        );
+      }
+    }
+  }
+  if (findings.length === 0) return { status: 'ok', detail: 'No store lacks a setting a deployment needs.' };
+  return { status: 'warn', detail: `${findings.join('; ')}.`, hint: [...hints].join(' ') };
+}
+
+function kindOf(value: unknown): string | undefined {
+  return (value as { constructor?: { name?: string } } | null)?.constructor?.name;
 }

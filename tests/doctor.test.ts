@@ -11,10 +11,26 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { diagnose, type DoctorReport } from '../src/doctor/index.js';
 import { MemoryGraphCheckpointer } from '../src/graph/checkpointer.js';
+import { RedisOperationStore } from '../src/operations/adapters.js';
 import { MemoryOperationStore } from '../src/operations/store.js';
 import { MemoryCircuitStateStore } from '../src/ops/circuit-store.js';
 import { MemoryTenantUsage } from '../src/server/tenancy.js';
 import { applySqliteMigrations, sqliteMigrations } from '../src/sqlite/index.js';
+import { MemoryTraceStore } from '../src/tracing/stores.js';
+import { Tracer } from '../src/tracing/tracer.js';
+
+/** A Redis client with the commands a store needs to be built, never called by the doctor. */
+const redisClient = () => ({
+  hget: async () => null,
+  hset: async () => 1,
+  hdel: async () => 1,
+  hvals: async () => [],
+  zadd: async () => 1,
+  zrem: async () => 1,
+  zrangebyscore: async () => [],
+});
+/** A trace store that is not in process memory, as the doctor sees one. */
+class PostgresTraceStore {}
 
 const scratch = mkdtempSync(path.join(tmpdir(), 'nexus-doctor-'));
 after(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -66,6 +82,8 @@ test('every seeded misconfiguration is reported, each by its own check', async (
         checkpointer: new MemoryGraphCheckpointer(),
         tenantUsage: new MemoryTenantUsage(),
         circuits: new MemoryCircuitStateStore(),
+        queue: new RedisOperationStore(redisClient() as never),
+        tracer: new Tracer({ store: new PostgresTraceStore() as never }),
       },
     },
   });
@@ -81,6 +99,7 @@ test('every seeded misconfiguration is reported, each by its own check', async (
     queue: 'warn',
     health: 'warn',
     topology: 'fail',
+    settings: 'warn',
   });
   const detail = (id: string) => report.checks.find((check) => check.id === id)?.detail ?? '';
   assert.match(detail('node'), /needs 22 or newer/);
@@ -97,7 +116,13 @@ test('every seeded misconfiguration is reported, each by its own check', async (
   assert.match(detail('topology'), /circuits is a MemoryCircuitStateStore/);
   assert.equal(report.ok, false);
   assert.equal(report.failures, 4);
-  assert.equal(report.warnings, 4);
+  assert.match(detail('settings'), /queue is a RedisOperationStore without index: true/);
+  assert.match(detail('settings'), /tracer writes to a PostgresTraceStore without incremental/);
+  assert.match(
+    report.checks.find((check) => check.id === 'settings')?.hint ?? '',
+    /index: true.*reindex().*incremental: true/,
+  );
+  assert.equal(report.warnings, 5);
   assert.ok(
     report.checks.every((check) => !JSON.stringify(check).includes('sk-')),
     'no secret is printed',
@@ -117,7 +142,16 @@ test('the same deployment, fixed, passes every check', async () => {
     redis: { ping: () => 'PONG' },
     operations: new MemoryOperationStore(),
     ai: { getProviderHealth: () => [{ providerName: 'openai', healthy: true }] },
-    deployment: { replicas: 3, stores: { checkpointer: new PostgresLikeCheckpointer() } },
+    deployment: {
+      replicas: 3,
+      stores: {
+        checkpointer: new PostgresLikeCheckpointer(),
+        queue: new RedisOperationStore(redisClient() as never, { index: true }),
+        tracer: new Tracer({ store: new PostgresTraceStore() as never, incremental: true }),
+        // A tracer in memory has nothing to lose to a crash that it would not lose anyway.
+        local: new Tracer({ store: new MemoryTraceStore() }),
+      },
+    },
   });
   assert.equal(report.ok, true, JSON.stringify(report.checks, null, 2));
   assert.equal(report.warnings, 0);
@@ -126,7 +160,7 @@ test('the same deployment, fixed, passes every check', async () => {
   const empty = await diagnose({ nodeVersion: '22.0.0', env: {}, resolvePackage: () => true });
   assert.deepEqual(
     empty.checks.filter((check) => check.status === 'skip').map((check) => check.id),
-    ['database', 'migrations', 'redis', 'queue', 'health', 'topology'],
+    ['database', 'migrations', 'redis', 'queue', 'health', 'topology', 'settings'],
   );
 });
 

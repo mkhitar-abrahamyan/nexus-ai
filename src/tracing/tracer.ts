@@ -134,6 +134,16 @@ export class Tracer {
     this.now = options.now ?? (() => new Date());
   }
 
+  /** Where runs are written. */
+  get store(): TraceStore {
+    return this.options.store;
+  }
+
+  /** Whether runs are written as they start and finish, as `incremental` asks. */
+  get incremental(): boolean {
+    return this.options.incremental === true;
+  }
+
   /** The run currently in scope, if any. */
   current(): { traceId: string; runId: string } | undefined {
     const active = this.context.getStore();
