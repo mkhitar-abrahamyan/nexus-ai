@@ -58,38 +58,62 @@ another orchestration abstraction.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release.
+Each gap is written down in a guide's limitations today, and each is closed by one release. A gap
+marked *built* is closed on `main` and leaves this table when its release ships.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| Two replicas changing one deployment in the same instant can lose a change: the state store has no compare-and-set | deployments guide | 2.5 |
-| Every replica's image must carry every revision | deployments guide | 2.5 |
-| Tenant usage is shared through Redis only; there is no Postgres store for it | deployments guide | 2.5 |
+| Two replicas changing one deployment in the same instant can lose a change: the state store has no compare-and-set | deployments guide | 2.5, built |
+| Every replica's image must carry every revision | deployments guide | 2.5, built |
+| Tenant usage is shared through Redis only; there is no Postgres store for it | deployments guide | 2.5, built |
+| A context bundle is versioned, not signed, and a trace records the prompt version but not the context's | context hub guide | 2.5, built |
 | An evaluator scores one answer; a conversation has no evaluator, and no simulated user to hold one | evaluation guide | 2.5 |
-| Datasets are written by hand or exported from traces; nothing generates them from documents or attacks | evaluation guide | 2.5 |
-| An experiment has no spend cap, and online evaluation is a method a replica calls, not a worker | evaluation guide | 2.5 |
-| A context bundle is versioned, not signed, and a trace records the prompt version but not the context's | context hub guide | 2.5 |
+| `bucket()` spreads ids that differ only in their last characters unevenly, so a canary's share drifts from its weight | deployments guide | 2.5 |
+| Canary statistics and the guard read the latest 2,000 runs, not the canary's whole window | deployments guide | 2.5 |
+| The doctor does not warn about a Redis operation store without its dispatch index, or a persistent trace store without incremental tracing | CLI guide | 2.5 |
 | The studio and its accounts have no threat review and no soak | API stability | 2.5 |
 | The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.5 |
 | Images have not recorded live conformance on all three backends | API stability | 2.5 |
+| A tool reports nothing until it returns | agents guide | 2.6 |
+| AG-UI reports state once, at the end, and does not run the tools a frontend offers | protocols guide | 2.6 |
+| A2A tasks live in memory, and A2A has no `ListTasks`, `SubscribeToTask`, or push notifications | protocols guide | 2.6 |
+| ACP sessions live in memory, with no `session/load`, no media prompts, and no use of the editor's file system, terminal, or MCP servers | protocols guide | 2.6 |
+| CI does not open a browser | runtimes guide | 2.6 |
+| Tool selection runs on the application's side; a provider's own tool search is not used | agents guide | 2.7 |
+| The workspace has no glob or grep, and helpers are fixed when the agent is built and run one at a time, in process | deep-agent guide | 2.7 |
+| The only sandbox shipped is for development | deep-agent guide | 2.7 |
+| Datasets are written by hand or exported from traces; nothing generates them from documents or attacks | evaluation guide | 2.7 |
+| An experiment has no spend cap, and online evaluation is a method a replica calls, not a worker | evaluation guide | 2.7 |
 
 ---
 
-## 2.5.0: graduation finished, and evaluation at production depth
+## 2.5.0: graduation finished, and conversations evaluated
 
-The last experimental surfaces leave with evidence, and evaluation covers what production agents do:
-whole conversations, scored continuously, on datasets that grow on their own.
+The last experimental surfaces leave with evidence, deployments keep their guarantees across many
+replicas, and evaluation covers whole conversations.
 
-**Deployments that change atomically.** The server's state store gains an optional compare-and-set,
-which the memory, Redis, Postgres, and SQLite stores implement. A deployment change is then decided on
-the version it read, on every replica rather than within one. A store without it keeps today's
-behavior, and says so in `/scaling`. Tenant usage gets a Postgres store beside the memory and Redis
-ones.
+Built so far on `main`: atomic deployment changes, Postgres tenant usage, revision worker pools, and
+signed context. Conversation evaluation is in progress.
 
-**Revision worker pools.** A worker declares the revisions its image carries, and claims only runs
-routed to them. A rollout ships a new revision in a new image beside the old one, instead of every
-image carrying every revision. A run whose revision no worker serves waits in the queue, and
+**Deployments that change atomically** *(built)*. The server's state store gains an optional
+compare-and-set, which the memory, Redis, Postgres, and SQLite stores implement. A deployment change
+is then decided on the version it read, on every replica rather than within one. A store without it
+keeps today's behavior, and says so in `/scaling`. Tenant usage gets a Postgres store beside the
+memory and Redis ones.
+
+**Revision worker pools** *(built)*. A worker declares the revisions its image carries, and claims
+only runs routed to them. A rollout ships a new revision in a new image beside the old one, instead of
+every image carrying every revision. A run whose revision no worker serves waits in the queue, and
 `/scaling` reports it by revision, so an autoscaler starts the right pool.
+
+**Canaries that stay fair.**
+- A deployment can choose `bucketStrategy: 'hash-v2'`, which places a thread by a well-mixed hash,
+  so sequential ids spread as evenly as random ones. The choice is recorded with the deployment, and
+  `fnv1a-v1` stays the default, so no thread moves through an upgrade.
+- Canary statistics come from rollups. Each replica keeps counts per revision as runs finish: runs,
+  errors, latency buckets, and cost. `stats()` and the guard sum them over the canary's whole
+  window, instead of reading the latest 2,000 runs. Each replica writes only its own counts, so
+  counting never contends.
 
 **Evaluation of whole conversations.** A thread evaluator scores a conversation, not one answer:
 - whether the user's goal was met;
@@ -99,6 +123,114 @@ image carrying every revision. A run whose revision no worker serves waits in th
 A simulated user holds conversations with an agent for a dataset of goals. It is driven by a model, a
 persona, and a stopping rule. A multi-turn agent is then compared between versions as a single-turn
 one is today, with the same verdicts.
+
+**Context you can verify** *(built)*. A context bundle is signed with Ed25519 through Web Crypto, so
+on any runtime, and with a key id for rotation. An import or a serve refuses a bundle whose signature
+does not verify. Every traced model call records the context and prompt versions that produced it,
+and traces and insights filter by them.
+
+**A doctor that knows the opt-in settings.** `nexus doctor` warns when a Redis operation store runs
+without its dispatch index, and when a persistent trace store runs without incremental tracing. Each
+warning names the setting that fixes it. Both settings stay opt-in through 2.x, so the doctor is how a
+deployment learns it needs them.
+
+**The rest of graduation.**
+- The studio gets a threat review of its sign-in, sessions, roles, CSRF protection, and audit log,
+  with its findings closed. Every route is fuzzed with every role, and with one tenant's account
+  against another tenant's records. Its server gets a soak.
+- The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores graduate when the live workflow passes
+  against each one.
+- Images graduate when recorded live conformance passes on all three backends.
+
+Each graduation is published with its checklist and evidence, as in 2.4.
+
+**Proof.**
+- Ten replicas apply mixed changes to one deployment at once (canary, split, promote, and rollback),
+  on every state store with compare-and-set. Every change lands, and the history is one linear
+  sequence of versions.
+- Two worker images carrying different revisions drain one queue, and no run executes on an image
+  without its revision.
+- Under `hash-v2`, 500 sequential thread ids split within a point of a canary's weight, and every
+  thread of a `fnv1a-v1` deployment keeps its bucket through the upgrade.
+- A guard over rollups judges a canary of 100,000 runs on all of them, in one read per replica.
+- A simulated user holds 50 conversations with a support agent. A thread evaluator scores them, and
+  an experiment comparing two agent versions gives a verdict over whole threads.
+- A tampered signed bundle is refused at import and at serve, and every traced model call names its
+  context and prompt versions.
+- Every surface that graduates has its checklist published with evidence.
+
+---
+
+## 2.6.0: protocols complete, and progress on every stream
+
+An agent behind any of the three protocols behaves as it does in process: it survives a restart,
+reports progress while a tool works, and is tested against the previous release on the other side
+of the wire.
+
+**Tool progress, end to end.** A tool can report progress while it runs. A `ToolDefinition` gains an
+optional `stream`: an async generator that yields progress and returns the result, beside
+`execute`. Its progress becomes the graph's tool events. From there it reaches:
+- the event stream and server-sent events;
+- AG-UI, A2A, and ACP;
+- traces;
+- the studio.
+
+A tool without `stream` behaves as today.
+
+**AG-UI, complete.** State is reported as it changes, with `STATE_DELTA` patches after a snapshot,
+and the transcript with `MESSAGES_SNAPSHOT`. Tools the frontend offers run in the frontend: the run
+pauses on the call, and resumes when the frontend sends the result.
+
+**A2A, durable and complete.** Tasks live in a task store, with memory, Redis, Postgres, and SQLite
+stores, so a restart or another replica picks a task up. The agent serves `ListTasks`,
+`SubscribeToTask`, push notifications to a webhook signed as the server's webhooks are, and an
+extended card for authenticated callers.
+
+**ACP, durable and complete.** Sessions live in a session store and the agent offers
+`session/load`. A prompt can carry images and audio. With the editor's consent, the agent works
+through the editor's file system and terminal, and connects the MCP servers the editor offers.
+
+**Interoperability, proven.**
+- A browser runs in CI: Chromium imports the portable entry points and runs a graph and an agent
+  against a mock.
+- The previous minor's client is driven against this release's server, and the other way round, on
+  every protocol and the server's HTTP API.
+- A nightly matrix runs each protocol against the reference client of its own project.
+
+**Proof.**
+- A long-running tool's progress arrives on every stream while it runs, in order, and the
+  result after it.
+- An A2A task and an ACP session survive a server restart halfway through, and resume on another
+  replica.
+- An AG-UI client sees each state change as a delta that rebuilds the final state, and runs a
+  frontend tool that the agent waits for.
+- A 2.5 client and a 2.6 server, and a 2.6 client and a 2.5 server, pass the protocol suites.
+
+---
+
+## 2.7.0: agents that do more, and evaluation that runs on its own
+
+Agents work on larger tool sets and workspaces, with helpers that run beside them. Evaluation grows
+its own datasets and runs continuously, within a budget.
+
+**Agent execution.**
+- **Provider tool search.** A tool marked `deferred` is sent to a provider that offers its own tool
+  search as searchable, not loaded. A provider without one falls back to `toolSelector()`, so an
+  agent with hundreds of tools runs on every provider.
+- **An interpreter contract.** A small interface runs a snippet of code with the agent's tools
+  callable from it, so a model can call tools from code instead of one round trip each. The reference
+  runs in a worker with time and memory limits. Like the reference sandbox, it is not a security
+  boundary.
+- **Workspace search.** The workspace tools gain glob and grep, bounded in matches and bytes.
+- **Helpers that run beside the agent.** Helpers can be created during a run, from a description the
+  agent writes, within limits the application sets. A helper can run in the background while the
+  agent continues, and the agent collects its result later. A helper's events stream inside the
+  agent's own stream, under the helper's namespace.
+- **A multimodal workspace.** Files in the workspace can be images, audio, or PDFs. A tool reads them
+  as content parts the model sees, not as text.
+- **A container sandbox.** A sandbox for production, on its own subpath, drives the `docker` or
+  `podman` binary as the git loader drives `git`, with no dependency. It is held to the sandbox
+  conformance suite.
 
 **Datasets that grow.**
 - Synthetic examples are generated from documents. Each cites the passage it came from, and
@@ -112,38 +244,21 @@ a spend cap, enforced through the lifecycle's budget. Online evaluation moves fr
 calls to workers on durable operations. They sample, apply back pressure, and score each run exactly
 once per source, across workers and after a crash.
 
-**Context you can verify.** A context bundle is signed with Ed25519 through Web Crypto, so on any
-runtime, and with a key id for rotation. An import or a serve refuses a bundle whose signature does
-not verify. Every traced model call records the context and prompt versions that produced it, and
-traces, insights, and experiments filter by them.
-
-**The rest of graduation.**
-- The studio gets a threat review of its sign-in, sessions, roles, CSRF protection, and audit log,
-  and a soak of its server.
-- The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores graduate when the live workflow passes
-  against each one.
-- Images graduate when recorded live conformance passes on all three backends.
-
-Each graduation is published with its checklist and evidence, as in 2.4.
-
 **Proof.**
-- Two replicas changing one deployment in the same instant never lose a change, on every state store
-  with compare-and-set. The race test holds both writers until both arrive.
-- Two worker images carrying different revisions drain one queue, and no run executes on an image
-  without its revision.
-- A simulated user holds 50 conversations with a support agent. A thread evaluator scores them, and
-  an experiment comparing two prompt versions gives a verdict over whole threads.
+- An agent with 500 tools finishes the tool-selection experiment on every provider, with deferred
+  tools on the providers that search and the selector on the rest.
+- A background helper's result reaches the agent after the agent has moved on, and a crash in
+  between repeats neither the helper nor the agent's own finished steps.
+- The container sandbox passes the sandbox conformance suite, and a command cannot reach the host's
+  files or network.
 - Ten online-evaluation workers score 10,000 runs, each exactly once per source. They resume after a
   crash without scoring a run twice, and stop at their budget.
 - A synthetic dataset built from the guides cites a source for every example. An adversarial dataset
   fails a deliberately unguarded agent and passes a guarded one.
-- A tampered signed bundle is refused at import and at serve, and every traced model call names its
-  context and prompt versions.
-- Every surface that graduates has its checklist published with evidence.
 
 ---
 
-## Beyond 2.5
+## Beyond 2.7
 
 Not yet scheduled, roughly in order of what applications ask for:
 
@@ -162,6 +277,12 @@ Not yet scheduled, roughly in order of what applications ask for:
 8. Policy-as-code presets versioned independently from the runtime, multi-tenant credential-vault
    adapters, and routing by provider residency.
 9. Streaming reads and writes for the filesystem and S3 asset stores, and OTLP export over gRPC.
+
+**Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
+does. In 3.0 they become defaults, each with a migration note:
+- incremental tracing on a persistent trace store;
+- the Redis operation store's dispatch index;
+- `hash-v2` bucketing for deployments created on 3.0. A deployment keeps the strategy it records.
 
 **Deliberately not planned:** a hosted service, a large third-party integration catalogue (MCP and the
 adapter kit cover breadth), and a second language runtime.

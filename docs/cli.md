@@ -191,6 +191,13 @@ Every command takes `--json`. A usage mistake exits 2, and a failed check or a r
 1, so a CI script can tell them apart. The newer commands load their code on demand, so `nexus scan`
 starts no slower.
 
+## Limitations
+
+- The doctor checks that a store is reachable, and its queue, but not how it is configured. It does
+  not warn when a Redis operation store runs without its dispatch index, or a persistent trace store
+  without incremental tracing. The [operations](./operations.md) and [tracing](./tracing.md) guides say
+  when each is worth turning on.
+
 
 <!-- reference:start -->
 ## Reference

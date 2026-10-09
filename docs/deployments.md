@@ -440,5 +440,6 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   image carries.
 - `stats()` and the guard read recent run records, 2,000 by default, so a very busy assistant is judged
   on its latest runs.
-- The Redis operation store reads every record to find queued work. Postgres and SQLite do it in one
-  indexed query, so prefer them for large queues.
+- The Redis operation store reads every record to find queued work unless it is given `index: true`.
+  Postgres and SQLite always use an index. The [operations guide](./operations.md) says when to turn it
+  on.

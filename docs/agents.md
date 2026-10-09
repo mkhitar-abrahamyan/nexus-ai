@@ -504,6 +504,13 @@ The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven 
 `AgentLoopModelClient`. It returns an `AgentResult`: the answer, the model calls made, and every
 `AgentStep` along the way. It has no checkpoints and no approvals, which is the point of it.
 
+## Limitations
+
+- A tool reports nothing while it runs: its result arrives when it returns. A graph node can report
+  progress with `context.tool()`, but a `ToolDefinition` cannot.
+- Tool selection runs on the application's side. `toolSelector()` narrows the tools before each
+  model call, and a provider's own tool search is not used.
+
 <!-- reference:start -->
 ## Reference
 

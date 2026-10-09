@@ -283,9 +283,8 @@ Shipped so far:
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
 Next, 2.5 finishes graduation, with deployments that change atomically across replicas, revision
-worker pools, and the studio. It also takes evaluation to production depth: whole conversations,
-synthetic and adversarial datasets, spend caps, online-evaluation workers, and signed context named on
-every trace. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
+worker pools, fair canaries, and the studio. It also evaluates whole conversations with simulated
+users, and signs context, which every trace then names. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
 releases after it.
 
 ## Before Production
@@ -2975,6 +2974,13 @@ The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven 
 `AgentLoopModelClient`. It returns an `AgentResult`: the answer, the model calls made, and every
 `AgentStep` along the way. It has no checkpoints and no approvals, which is the point of it.
 
+## Limitations
+
+- A tool reports nothing while it runs: its result arrives when it returns. A graph node can report
+  progress with `context.tool()`, but a `ToolDefinition` cannot.
+- Tool selection runs on the application's side. `toolSelector()` narrows the tools before each
+  model call, and a provider's own tool search is not used.
+
 ---
 
 Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deep-agents.md
@@ -3074,8 +3080,11 @@ Afterwards the test passes when run outside the agent. Along the way:
 
 - The reference sandbox, `processSandbox()`, is for development. It is never a security boundary.
   Use a container or a VM behind the `Sandbox` interface in production.
-- Helpers run in process, one delegation at a time per call. A helper that should run elsewhere is
-  an agent on another server, called through `createRemoteGraph()`.
+- Helpers are fixed when the agent is built, and run in process, one delegation at a time per call.
+  A helper that should run elsewhere is an agent on another server, called through
+  `createRemoteGraph()`.
+- The workspace tools read, write, edit, and list files, and run commands. There is no glob or grep
+  tool, so a search is a command the sandbox runs.
 
 ---
 
@@ -10417,8 +10426,9 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   image carries.
 - `stats()` and the guard read recent run records, 2,000 by default, so a very busy assistant is judged
   on its latest runs.
-- The Redis operation store reads every record to find queued work. Postgres and SQLite do it in one
-  indexed query, so prefer them for large queues.
+- The Redis operation store reads every record to find queued work unless it is given `index: true`.
+  Postgres and SQLite always use an index. The [operations guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/operations.md) says when to turn it
+  on.
 
 ---
 
@@ -10801,6 +10811,13 @@ such as `--ignore DYNAMIC_ROUTE`. The [graph guide](https://github.com/mkhitar-a
 Every command takes `--json`. A usage mistake exits 2, and a failed check or a refused request exits
 1, so a CI script can tell them apart. The newer commands load their code on demand, so `nexus scan`
 starts no slower.
+
+## Limitations
+
+- The doctor checks that a store is reachable, and its queue, but not how it is configured. It does
+  not warn when a Redis operation store runs without its dispatch index, or a persistent trace store
+  without incremental tracing. The [operations](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/operations.md) and [tracing](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tracing.md) guides say
+  when each is worth turning on.
 
 ---
 

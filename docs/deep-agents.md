@@ -94,5 +94,8 @@ Afterwards the test passes when run outside the agent. Along the way:
 
 - The reference sandbox, `processSandbox()`, is for development. It is never a security boundary.
   Use a container or a VM behind the `Sandbox` interface in production.
-- Helpers run in process, one delegation at a time per call. A helper that should run elsewhere is
-  an agent on another server, called through `createRemoteGraph()`.
+- Helpers are fixed when the agent is built, and run in process, one delegation at a time per call.
+  A helper that should run elsewhere is an agent on another server, called through
+  `createRemoteGraph()`.
+- The workspace tools read, write, edit, and list files, and run commands. There is no glob or grep
+  tool, so a search is a command the sandbox runs.
