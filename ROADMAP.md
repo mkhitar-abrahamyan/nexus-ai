@@ -4,20 +4,21 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.4.0**. 157 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.5.0**. 159 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, and 98 completion
-registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 966
-unit tests pass; coverage sits at **95.4% lines / 81.7% branches / 91.2% functions** against gates of
-82/67/73. CI verifies lint, format, build, tests, coverage, registry drift, `llms.txt` drift,
-per-subpath size, documentation and guide coverage, the root import, a graph benchmark with a
-durability budget, runtime and memory-retention budgets, load and soak budgets for every graduated
-surface, crash injection on five checkpointers, an upgrade from the published 2.0.0, 2.1.0, and 2.3.0
-packages, ten-worker races and tenant isolation on every shared store, sandbox conformance, a
-permission policy in a real tool loop, retrieval and tool-selection experiments, a crash halfway
-through a 100,000-document ingestion, the agent protocols driven from the other side of the wire, the
-imports of every entry point for anything Node-only, the portable kernel on Node, Deno, Bun, and an
-edge runtime, mock conformance, packed-package smoke, API contract, consumer type resolution, and
-clean install on Node 22 and 24.
+registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 991
+unit tests and 30 studio tests pass; coverage sits at **95.4% lines / 81.9% branches / 91.5%
+functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry
+drift, `llms.txt` drift, per-subpath size, documentation and guide coverage, the root import, a graph
+benchmark with a durability budget, runtime and memory-retention budgets, load and soak budgets for
+every graduated surface, crash injection on five checkpointers, an upgrade from the published 2.0.0,
+2.1.0, and 2.3.0 packages, ten-worker races and tenant isolation on every shared store, ten replicas
+changing one deployment at once on every state store, sandbox conformance, a permission policy in a
+real tool loop, retrieval and tool-selection experiments, a crash halfway through a 100,000-document
+ingestion, the agent protocols driven from the other side of the wire, every studio route called by
+every role and with hostile input, the imports of every entry point for anything Node-only, the
+portable kernel on Node, Deno, Bun, and an edge runtime, mock conformance, packed-package smoke, API
+contract, consumer type resolution, and clean install on Node 22 and 24.
 
 ---
 
@@ -58,20 +59,10 @@ another orchestration abstraction.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release. A gap
-marked *built* is closed on `main` and leaves this table when its release ships.
+Each gap is written down in a guide's limitations today, and each is closed by one release.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| Two replicas changing one deployment in the same instant can lose a change: the state store has no compare-and-set | deployments guide | 2.5, built |
-| Every replica's image must carry every revision | deployments guide | 2.5, built |
-| Tenant usage is shared through Redis only; there is no Postgres store for it | deployments guide | 2.5, built |
-| A context bundle is versioned, not signed, and a trace records the prompt version but not the context's | context hub guide | 2.5, built |
-| An evaluator scores one answer; a conversation has no evaluator, and no simulated user to hold one | evaluation guide | 2.5, built |
-| `bucket()` spreads ids that differ only in their last characters unevenly, so a canary's share drifts from its weight | deployments guide | 2.5, built |
-| Canary statistics and the guard read the latest 2,000 runs, not the canary's whole window | deployments guide | 2.5, built |
-| The doctor does not warn about a Redis operation store without its dispatch index, or a persistent trace store without incremental tracing | CLI guide | 2.5, built |
-| The studio and its accounts have no threat review and no soak | API stability | 2.5, built |
 | The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.6 |
 | Images have not recorded live conformance on all three backends | API stability | 2.6 |
 | A tool reports nothing until it returns | agents guide | 2.6 |
@@ -84,79 +75,6 @@ marked *built* is closed on `main` and leaves this table when its release ships.
 | The only sandbox shipped is for development | deep-agent guide | 2.7 |
 | Datasets are written by hand or exported from traces; nothing generates them from documents or attacks | evaluation guide | 2.7 |
 | An experiment has no spend cap, and online evaluation is a method a replica calls, not a worker | evaluation guide | 2.7 |
-
----
-
-## 2.5.0: graduation finished, and conversations evaluated
-
-The last experimental surfaces leave with evidence, deployments keep their guarantees across many
-replicas, and evaluation covers whole conversations.
-
-Built on `main`: everything below except live conformance for the remote vector stores and images,
-which needs the scheduled live workflow's credentials and moves to 2.6.
-
-**Deployments that change atomically** *(built)*. The server's state store gains an optional
-compare-and-set, which the memory, Redis, Postgres, and SQLite stores implement. A deployment change
-is then decided on the version it read, on every replica rather than within one. A store without it
-keeps today's behavior, and says so in `/scaling`. Tenant usage gets a Postgres store beside the
-memory and Redis ones.
-
-**Revision worker pools** *(built)*. A worker declares the revisions its image carries, and claims
-only runs routed to them. A rollout ships a new revision in a new image beside the old one, instead of
-every image carrying every revision. A run whose revision no worker serves waits in the queue, and
-`/scaling` reports it by revision, so an autoscaler starts the right pool.
-
-**Canaries that stay fair** *(built)*.
-- A deployment can choose `bucketStrategy: 'hash-v2'`, which places a thread by a well-mixed hash,
-  so sequential ids spread as evenly as random ones. The choice is recorded with the deployment, and
-  `fnv1a-v1` stays the default, so no thread moves through an upgrade.
-- Canary statistics come from rollups. Each replica keeps counts per revision as runs finish: runs,
-  errors, latency buckets, and cost. `stats()` and the guard sum them over the canary's whole
-  window, instead of reading the latest 2,000 runs. Each replica writes only its own counts, so
-  counting never contends.
-
-**Evaluation of whole conversations** *(built)*. A thread evaluator scores a conversation, not one answer:
-- whether the user's goal was met;
-- a score for each turn;
-- the turn where it went wrong.
-
-A simulated user holds conversations with an agent for a dataset of goals. It is driven by a model, a
-persona, and a stopping rule. A multi-turn agent is then compared between versions as a single-turn
-one is today, with the same verdicts.
-
-**Context you can verify** *(built)*. A context bundle is signed with Ed25519 through Web Crypto, so
-on any runtime, and with a key id for rotation. An import or a serve refuses a bundle whose signature
-does not verify. Every traced model call records the context and prompt versions that produced it,
-and traces and insights filter by them.
-
-**A doctor that knows the opt-in settings** *(built)*. `nexus doctor` warns when a Redis operation store runs
-without its dispatch index, and when a persistent trace store runs without incremental tracing. Each
-warning names the setting that fixes it. Both settings stay opt-in through 2.x, so the doctor is how a
-deployment learns it needs them.
-
-**The rest of graduation** *(built)*.
-- The studio gets a threat review of its sign-in, sessions, roles, CSRF protection, and audit log,
-  with its findings closed. Every route is fuzzed with every role and with hostile input, and a
-  studio over one tenant's scoped stores never shows another's. Its server gets a soak.
-- Deployments graduate, now that changes are atomic across replicas.
-
-Each graduation is published with its checklist and evidence, as in 2.4.
-
-**Proof.**
-- Ten replicas apply mixed changes to one deployment at once (canary, split, promote, and rollback),
-  on every state store with compare-and-set. Every change lands, and the history is one linear
-  sequence of versions.
-- Two worker images carrying different revisions drain one queue, and no run executes on an image
-  without its revision.
-- Under `hash-v2`, sets of 500 sequential thread ids split as evenly as random ones, within the
-  spread random placement shows, and every thread of a `fnv1a-v1` deployment keeps its bucket
-  through the upgrade.
-- A guard over rollups judges a canary of 100,000 runs on all of them, in one read per replica.
-- A simulated user holds 50 conversations with a support agent. A thread evaluator scores them, and
-  an experiment comparing two agent versions gives a verdict over whole threads.
-- A tampered signed bundle is refused at import and at serve, and every traced model call names its
-  context and prompt versions.
-- Every surface that graduates has its checklist published with evidence.
 
 ---
 

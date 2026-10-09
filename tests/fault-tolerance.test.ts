@@ -76,20 +76,34 @@ test('async durability writes every checkpoint, in order, and the run waits for 
 });
 
 test('async durability overlaps writes with the work, and keeps them one at a time', async () => {
-  const syncStore = new SlowCheckpointer(20);
-  const asyncStore = new SlowCheckpointer(20);
-  const started = performance.now();
-  await chain(8, { checkpointer: syncStore }, 20).invoke();
-  const syncMs = performance.now() - started;
-  const asyncStarted = performance.now();
-  const result = await chain(8, { checkpointer: asyncStore, durability: 'async', maxPendingWrites: 2 }, 20).invoke();
-  const asyncMs = performance.now() - asyncStarted;
+  // Whether a checkpoint write was still in flight as each node began its work: the overlap itself,
+  // observed rather than timed, so a loaded machine cannot blur it. The graph benchmark times it.
+  const run = async (durability: 'sync' | 'async') => {
+    const store = new SlowCheckpointer(20);
+    const overlapped: boolean[] = [];
+    const graph = createGraph({ channels: { log: appendList<string>() } });
+    for (let index = 0; index < 8; index += 1) {
+      graph.addNode(`n${index}`, async () => {
+        overlapped.push(store.inFlight > 0);
+        await sleep(20);
+        return { log: [`n${index}`] };
+      });
+    }
+    graph.setEntry('n0');
+    for (let index = 0; index < 7; index += 1) graph.addEdge(`n${index}`, `n${index + 1}`);
+    graph.addEdge('n7', END);
+    const result = await graph.compile({ checkpointer: store, durability, maxPendingWrites: 2 }).invoke();
+    return { store, overlapped: overlapped.filter(Boolean).length, result };
+  };
+  const sync = await run('sync');
+  const background = await run('async');
 
-  assert.equal(result.state.log.length, 8);
-  // Sync pays the work plus a write per step; async does the work while the writes catch up behind.
-  assert.ok(asyncMs < syncMs * 0.8, `async ${Math.round(asyncMs)}ms should beat sync ${Math.round(syncMs)}ms`);
-  assert.equal(asyncStore.peak, 1, 'writes land one at a time, in order');
-  assert.deepEqual(asyncStore.written, syncStore.written);
+  assert.equal(background.result.state.log.length, 8);
+  // Sync waits for each step's write before the next step works; async works while it writes.
+  assert.equal(sync.overlapped, 0, 'sync never works while a write is in flight');
+  assert.ok(background.overlapped >= 4, `async worked during a write on ${background.overlapped} of 8 steps`);
+  assert.equal(background.store.peak, 1, 'writes land one at a time, in order');
+  assert.deepEqual(background.store.written, sync.store.written);
 });
 
 test('a write that fails in the background fails the run', async () => {
