@@ -67,13 +67,13 @@ marked *built* is closed on `main` and leaves this table when its release ships.
 | Every replica's image must carry every revision | deployments guide | 2.5, built |
 | Tenant usage is shared through Redis only; there is no Postgres store for it | deployments guide | 2.5, built |
 | A context bundle is versioned, not signed, and a trace records the prompt version but not the context's | context hub guide | 2.5, built |
-| An evaluator scores one answer; a conversation has no evaluator, and no simulated user to hold one | evaluation guide | 2.5 |
-| `bucket()` spreads ids that differ only in their last characters unevenly, so a canary's share drifts from its weight | deployments guide | 2.5 |
-| Canary statistics and the guard read the latest 2,000 runs, not the canary's whole window | deployments guide | 2.5 |
-| The doctor does not warn about a Redis operation store without its dispatch index, or a persistent trace store without incremental tracing | CLI guide | 2.5 |
-| The studio and its accounts have no threat review and no soak | API stability | 2.5 |
-| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.5 |
-| Images have not recorded live conformance on all three backends | API stability | 2.5 |
+| An evaluator scores one answer; a conversation has no evaluator, and no simulated user to hold one | evaluation guide | 2.5, built |
+| `bucket()` spreads ids that differ only in their last characters unevenly, so a canary's share drifts from its weight | deployments guide | 2.5, built |
+| Canary statistics and the guard read the latest 2,000 runs, not the canary's whole window | deployments guide | 2.5, built |
+| The doctor does not warn about a Redis operation store without its dispatch index, or a persistent trace store without incremental tracing | CLI guide | 2.5, built |
+| The studio and its accounts have no threat review and no soak | API stability | 2.5, built |
+| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.6 |
+| Images have not recorded live conformance on all three backends | API stability | 2.6 |
 | A tool reports nothing until it returns | agents guide | 2.6 |
 | AG-UI reports state once, at the end, and does not run the tools a frontend offers | protocols guide | 2.6 |
 | A2A tasks live in memory, and A2A has no `ListTasks`, `SubscribeToTask`, or push notifications | protocols guide | 2.6 |
@@ -92,8 +92,8 @@ marked *built* is closed on `main` and leaves this table when its release ships.
 The last experimental surfaces leave with evidence, deployments keep their guarantees across many
 replicas, and evaluation covers whole conversations.
 
-Built so far on `main`: atomic deployment changes, Postgres tenant usage, revision worker pools, and
-signed context. Conversation evaluation is in progress.
+Built on `main`: everything below except live conformance for the remote vector stores and images,
+which needs the scheduled live workflow's credentials and moves to 2.6.
 
 **Deployments that change atomically** *(built)*. The server's state store gains an optional
 compare-and-set, which the memory, Redis, Postgres, and SQLite stores implement. A deployment change
@@ -106,7 +106,7 @@ only runs routed to them. A rollout ships a new revision in a new image beside t
 every image carrying every revision. A run whose revision no worker serves waits in the queue, and
 `/scaling` reports it by revision, so an autoscaler starts the right pool.
 
-**Canaries that stay fair.**
+**Canaries that stay fair** *(built)*.
 - A deployment can choose `bucketStrategy: 'hash-v2'`, which places a thread by a well-mixed hash,
   so sequential ids spread as evenly as random ones. The choice is recorded with the deployment, and
   `fnv1a-v1` stays the default, so no thread moves through an upgrade.
@@ -115,7 +115,7 @@ every image carrying every revision. A run whose revision no worker serves waits
   window, instead of reading the latest 2,000 runs. Each replica writes only its own counts, so
   counting never contends.
 
-**Evaluation of whole conversations.** A thread evaluator scores a conversation, not one answer:
+**Evaluation of whole conversations** *(built)*. A thread evaluator scores a conversation, not one answer:
 - whether the user's goal was met;
 - a score for each turn;
 - the turn where it went wrong.
@@ -129,18 +129,16 @@ on any runtime, and with a key id for rotation. An import or a serve refuses a b
 does not verify. Every traced model call records the context and prompt versions that produced it,
 and traces and insights filter by them.
 
-**A doctor that knows the opt-in settings.** `nexus doctor` warns when a Redis operation store runs
+**A doctor that knows the opt-in settings** *(built)*. `nexus doctor` warns when a Redis operation store runs
 without its dispatch index, and when a persistent trace store runs without incremental tracing. Each
 warning names the setting that fixes it. Both settings stay opt-in through 2.x, so the doctor is how a
 deployment learns it needs them.
 
-**The rest of graduation.**
+**The rest of graduation** *(built)*.
 - The studio gets a threat review of its sign-in, sessions, roles, CSRF protection, and audit log,
-  with its findings closed. Every route is fuzzed with every role, and with one tenant's account
-  against another tenant's records. Its server gets a soak.
-- The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores graduate when the live workflow passes
-  against each one.
-- Images graduate when recorded live conformance passes on all three backends.
+  with its findings closed. Every route is fuzzed with every role and with hostile input, and a
+  studio over one tenant's scoped stores never shows another's. Its server gets a soak.
+- Deployments graduate, now that changes are atomic across replicas.
 
 Each graduation is published with its checklist and evidence, as in 2.4.
 
@@ -150,8 +148,9 @@ Each graduation is published with its checklist and evidence, as in 2.4.
   sequence of versions.
 - Two worker images carrying different revisions drain one queue, and no run executes on an image
   without its revision.
-- Under `hash-v2`, 500 sequential thread ids split within a point of a canary's weight, and every
-  thread of a `fnv1a-v1` deployment keeps its bucket through the upgrade.
+- Under `hash-v2`, sets of 500 sequential thread ids split as evenly as random ones, within the
+  spread random placement shows, and every thread of a `fnv1a-v1` deployment keeps its bucket
+  through the upgrade.
 - A guard over rollups judges a canary of 100,000 runs on all of them, in one read per replica.
 - A simulated user holds 50 conversations with a support agent. A thread evaluator scores them, and
   an experiment comparing two agent versions gives a verdict over whole threads.
@@ -190,6 +189,9 @@ extended card for authenticated callers.
 `session/load`. A prompt can carry images and audio. With the editor's consent, the agent works
 through the editor's file system and terminal, and connects the MCP servers the editor offers.
 
+**Carried from 2.5: live graduation.** The remote vector stores and images graduate when the
+scheduled live workflow passes against each. It needs the repository's live credentials.
+
 **Interoperability, proven.**
 - A browser runs in CI: Chromium imports the portable entry points and runs a graph and an agent
   against a mock.
@@ -202,6 +204,9 @@ through the editor's file system and terminal, and connects the MCP servers the 
   result after it.
 - An A2A task and an ACP session survive a server restart halfway through, and resume on another
   replica.
+- The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores pass their contract against the real
+  servers, and images record live conformance on all three backends, each published with its
+  graduation checklist.
 - An AG-UI client sees each state change as a delta that rebuilds the final state, and runs a
   frontend tool that the agent waits for.
 - A 2.5 client and a 2.6 server, and a 2.6 client and a 2.5 server, pass the protocol suites.
