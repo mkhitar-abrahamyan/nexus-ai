@@ -768,3 +768,19 @@ test('a latency rise of a few milliseconds is noise to the guard, not a regressi
   assert.deepEqual(compareRuns(runs(1), runs(3), { metrics: ['latency'], minLatencyChangeMs: 50 }), []);
   assert.equal(compareRuns(runs(100), runs(400), { metrics: ['latency'], minLatencyChangeMs: 50 }).length, 1);
 });
+
+test('an assistant or revision named after a built-in property is refused, not run', async () => {
+  const deployments = new Deployments();
+  const app = createAgentServer({
+    assistants: { support: deployments.assistant('support', { v1: answering('v1') }) },
+  });
+  for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const assistant = await call(app, 'POST', '/runs', { assistant: name, input: { index: 0 } });
+    assert.equal(assistant.status, 400, `assistant "${name}"`);
+    assert.equal((await jsonOf<{ error: { code: string } }>(assistant)).error.code, 'UNKNOWN_ASSISTANT');
+    const revision = await call(app, 'POST', '/runs', { assistant: 'support', revision: name, input: { index: 0 } });
+    assert.equal(revision.status, 400, `revision "${name}"`);
+    assert.equal((await jsonOf<{ error: { code: string } }>(revision)).error.code, 'UNKNOWN_REVISION');
+  }
+  assert.throws(() => deployments.assistant('other', { v1: answering('v1') }, { live: 'constructor' }), /no revision/);
+});

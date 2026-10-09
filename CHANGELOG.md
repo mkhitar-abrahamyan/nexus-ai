@@ -61,6 +61,11 @@ Graduation finished, and evaluation at production depth.
   writes to a persistent store without `incremental`. Each warning names the setting that fixes it.
   Both stay opt-in through 2.x. `RedisOperationStore.indexed`, `Tracer.store`, and
   `Tracer.incremental` report the settings.
+- **Graduation.** Deployments and the studio leave experimental status, each with its checklist and
+  evidence in `API_STABILITY.md` and a threat review in `SECURITY.md`.
+- **The studio's routes, listed.** `Studio.routes` gives every route's method, path, role, and audit
+  action. `StudioOptions.maxBodyBytes` bounds a request body, and
+  `MemoryStudioJournalOptions.maxComments` bounds the comments kept in memory.
 - **Whole conversations, evaluated** (`nexus-ai-pro/evaluate/threads`).
   - `simulatedUser()` plays a user with a goal and a persona, driven by a model, and says when the goal
     was met or when it gives up. `scriptedUser()` follows a script, for deterministic tests.
@@ -74,6 +79,28 @@ Graduation finished, and evaluation at production depth.
 - **Context on every trace.** A traced model call records `metadata.context` beside
   `metadata.prompt`, so a trace query or an insight narrows by bundle version.
 
+### Security
+
+- **The studio**, from its threat review:
+  - A request body is refused with `413` past `maxBodyBytes`, 1 MiB by default, as it arrives and
+    before anyone is signed in. Before, a body was read whole into memory first.
+  - With accounts, only a bearer `Authorization` header stands in for the page token. Before, any
+    `Authorization` header did, and a browser adds Basic credentials to another site's request by
+    itself, so a sign-in proxy that uses Basic authentication let another site make changes.
+  - A change's body must be `application/json` (`415` otherwise) and a JSON object (`400`
+    otherwise).
+  - A change refused for want of the page token is recorded in the audit log.
+  - Graphs and review queues are looked up among the application's own entries, so a name such as
+    `constructor` no longer reaches the prototype.
+  - Malformed percent-encoding in a path is a `400`, not a server error.
+  - `limit`, `hours`, and `days` have ceilings: 1,000 items, 10,000 audit entries, 90 days of
+    issues, and 366 days of costs.
+  - The memory journal keeps at most 10,000 comments.
+  - The server no longer sends an internal error's message, and logs it instead.
+  - Only `http` and `https` pull-request links are rendered.
+- **The agent server** refuses an assistant or revision named after a built-in property, such as
+  `constructor`, with `400`. Before, such a run was accepted and failed when it ran.
+
 ### Fixed
 
 - A worker that lacked the revision a run was routed to ran the assistant's live revision instead,
@@ -82,6 +109,10 @@ Graduation finished, and evaluation at production depth.
 
 ### Proof
 
+- The studio's threat review is a test: every route is called by every role and refuses the roles
+  below its own, recording each refusal; over 2,000 requests with hostile paths, queries, and bodies
+  all answer below `500`, and no prototype is polluted. 2,000 sign-in, read, and change cycles leave
+  the heap flat, and 200 servers start and close with no handle left open.
 - The doctor's seeded deployment warns about a Redis operation store without its index and a tracer
   writing to a persistent store at the end of each trace, and the same deployment with both settings
   turned on passes.

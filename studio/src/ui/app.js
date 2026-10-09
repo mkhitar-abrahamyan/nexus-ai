@@ -22,6 +22,16 @@ function h(tag, attrs = {}, ...children) {
   return element;
 }
 
+/** An address to link to, only when it is a web page: a stored URL never becomes a script. */
+function webLink(value) {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function s(tag, attrs = {}, ...children) {
   const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
   for (const [key, value] of Object.entries(attrs ?? {})) {
@@ -761,7 +771,9 @@ function proposalCard(proposal) {
       'p',
       { class: 'muted' },
       `${proposal.baseline.version} → ${proposal.candidate.version}`,
-      proposal.pullRequest ? [' · ', h('a', { href: proposal.pullRequest.url }, 'pull request')] : '',
+      proposal.pullRequest && webLink(proposal.pullRequest.url)
+        ? [' · ', h('a', { href: webLink(proposal.pullRequest.url), rel: 'noreferrer' }, 'pull request')]
+        : '',
     ),
     can('editor')
       ? h(

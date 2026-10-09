@@ -129,12 +129,13 @@ test('roles decide what each person may do, every change is audited, and nobody 
     [
       'rui@example.com audit.read denied',
       'ana@example.com prompt.rollback failed',
+      'ana@example.com prompt.promote denied',
       'vic@example.com review.claim denied',
       'rui@example.com review.claim ok',
       'ana@example.com prompt.promote ok',
       'rui@example.com prompt.promote denied',
     ],
-    'every change and every refusal is recorded, newest first; allowed reads are not',
+    'every change and every refusal, a change without the page token included, is recorded, newest first; allowed reads are not',
   );
 });
 

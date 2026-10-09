@@ -67,6 +67,8 @@ export interface StudioCommentStore {
 export interface MemoryStudioJournalOptions {
   /** Audit entries kept, newest kept first. Defaults to 10,000. */
   maxEntries?: number;
+  /** Comments kept, the oldest dropped first. Defaults to 10,000. */
+  maxComments?: number;
 }
 
 /** The audit log and comments in process memory. The default, and lost on restart. */
@@ -74,9 +76,11 @@ export class MemoryStudioJournal implements StudioAuditLog, StudioCommentStore {
   private readonly entries: StudioAuditEntry[] = [];
   private readonly comments: StudioComment[] = [];
   private readonly maxEntries: number;
+  private readonly maxComments: number;
 
   constructor(options: MemoryStudioJournalOptions = {}) {
     this.maxEntries = options.maxEntries ?? 10_000;
+    this.maxComments = options.maxComments ?? 10_000;
   }
 
   /** Records an audit entry, dropping the oldest beyond `maxEntries`. */
@@ -90,9 +94,10 @@ export class MemoryStudioJournal implements StudioAuditLog, StudioCommentStore {
     return filterAudit([...this.entries].reverse(), query);
   }
 
-  /** Stores a comment. */
+  /** Stores a comment, dropping the oldest beyond `maxComments`. */
   addComment(comment: StudioComment): void {
     this.comments.push({ ...comment });
+    if (this.comments.length > this.maxComments) this.comments.splice(0, this.comments.length - this.maxComments);
   }
 
   /** The comments on a subject, oldest first. */

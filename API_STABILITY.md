@@ -75,6 +75,52 @@ New and stable:
   `goalCompletion()`, `turnCount()`, `turnScores()`, and their types. The score keys `goal_reached`,
   `goal_completion`, `turns`, and `turn_score` are stable once the entry point graduates.
 
+The studio now refuses, as the compatibility rules allow for security: a change whose body is not
+`application/json`, with `415`; a body that is not a JSON object, with `400`; a body past
+`maxBodyBytes`, with `413`; and a list `limit`, `hours`, or `days` past its ceiling, with `400`. With
+accounts, only a bearer `Authorization` header stands in for the page token. The agent server refuses
+an assistant or revision named after a built-in property, such as `constructor`. Also stable from
+2.5: `StudioOptions.maxBodyBytes`, `Studio.routes` and `StudioRoute`, and
+`MemoryStudioJournalOptions.maxComments`.
+
+### Graduation
+
+Two more surfaces leave experimental status in 2.5, by the same checklist as in 2.4. Every test named
+here runs in CI.
+
+**Deployments** (`nexus-ai-pro/server/deployments`):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | Atomic changes on the memory server store and the memory, Redis, Postgres, and SQLite stores: `tests/atomic-deployments.test.ts`; routing, canaries, and guards: `tests/deployments.test.ts`, `tests/fair-canaries.test.ts`; revision pools: `tests/revision-pools.test.ts` |
+| Crash recovery | A change is one compare-and-set write, so a crash leaves the old record or the new one; a drained replica hands its runs to another: `tests/deployments.test.ts`. A replica that dies loses at most its last `rollupMs` of counts, which the guide states |
+| Concurrency | Ten replicas making mixed changes at once land in one linear history on every store: `tests/atomic-deployments.test.ts` |
+| Load | `deployments.route-canary` and `deployments.bucket` in `surface-budget.json` |
+| Tenant isolation | n/a: a deployment is an assistant's configuration, not a tenant's data. The runs it routes are operations, which are isolated: `tests/tenant-isolation.test.ts` |
+| Security | [Review](./SECURITY.md#deployments): four findings fixed, two documented limitations |
+| Upgrade | A 2.3 replica's deployment routes the same here, and every thread keeps its bucket: `tests/upgrade-previous-minor.test.ts` |
+| Soak | 50,000 route, admit, and release cycles, 500 replica lifecycles, and 20,000 runs counted and judged from rollups, with no timer left running |
+
+**The studio and its accounts** (`nexus-ai-pro-studio`):
+
+| Requirement | Evidence |
+| --- | --- |
+| Conformance | Every view over its sources, with and without accounts: `studio/test/studio.test.ts`, `studio/test/team.test.ts`, `studio/test/deployments.test.ts` |
+| Crash recovery | n/a: the studio keeps no state but its journal, which appends one line per entry and skips a line a crash cut short: `studio/test/security.test.ts` |
+| Concurrency | n/a: every change goes through its source's own API, where races are settled: prompt and bundle labels by compare-and-set, deployments by `putIfVersion()` |
+| Load | 500 signed-in reads within a budget relative to the machine: `studio/test/security.test.ts` |
+| Tenant isolation | A studio over `tenantScope()` views lists one tenant's runs, and another tenant's trace is not found: `studio/test/security.test.ts` |
+| Security | [Review](./SECURITY.md#the-studio-and-its-accounts): ten findings, all fixed; every route fuzzed by every role and with hostile input: `studio/test/security.test.ts` |
+| Upgrade | The journal reads what 2.4 wrote, and accounts and configuration load unchanged: `studio/test/security.test.ts`, `studio/test/team.test.ts` |
+| Soak | 2,000 sign-in, read, and change cycles with flat memory, and 200 servers started and closed with no handle left open: `studio/test/security.test.ts` |
+
+**Still experimental**, each with what remains:
+- **Images.** Recorded live conformance must pass on all three backends. The scheduled live workflow
+  records it wherever a backend's credential is set, and none has run with all three yet.
+- **The Qdrant, Redis, Pinecone, Weaviate, and Chroma vector stores.** The contract must pass against
+  the real servers. The scheduled live workflow runs it against each one, Pinecone when its secret is
+  set, and its evidence is published when it has passed against all five.
+
 A queued run's kind now names its revision, as `assistant:<id>@<revision>`. Code that reads the
 server's runs by the `assistant:` prefix, as the server itself does, is unaffected.
 

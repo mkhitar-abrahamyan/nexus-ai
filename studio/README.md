@@ -43,8 +43,10 @@ given.
 | Audit | Every change and every refused attempt, for admins |
 
 The studio binds `127.0.0.1`, requires the token on every request and a header on every change,
-refuses non-loopback hosts, and inserts every value as text.
+refuses non-loopback hosts, bounds every request body, and inserts every value as text. Its threat
+review is in [SECURITY.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/SECURITY.md#the-studio-and-its-accounts).
 
 Full guide: [docs/studio.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md).
 
-Requires Node.js 22 and nexus-ai-pro 1.24 or newer. Experimental.
+Requires Node.js 22 and nexus-ai-pro 2.0 or newer. Stable from 2.5, with its graduation evidence in
+[API_STABILITY.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/API_STABILITY.md).

@@ -465,10 +465,10 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
 
 ## Limitations
 
-- Revisions and canaries are experimental. With a state store that has no `putIfVersion()`, two
-  replicas changing one deployment in the same instant can lose one change: give the server one of
-  the included stores, or pass `expectedVersion` and retry a conflict. Tenant limits and the worker
-  queue are stable.
+- With a state store of your own that has no `putIfVersion()`, two replicas changing one deployment
+  in the same instant can lose one change: give the server one of the included stores, or pass
+  `expectedVersion` and retry a conflict.
+- A replica that dies loses the runs it counted in its last `rollupMs`. The run records stay whole.
 - `fnv1a-v1` stays the default bucket strategy through 2.x, so a deployment keyed by sequential ids
   needs `bucketStrategy: 'hash-v2'` to split them evenly.
 - A worker of 2.4 or earlier claims a run of any revision, and runs its live revision when it lacks

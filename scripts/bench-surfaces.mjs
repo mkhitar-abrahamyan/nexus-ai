@@ -506,10 +506,36 @@ await soak('mcp.registry-connect-call-close', 1_000, async () => {
     replica.assistant('support', { v1: { run: async () => ({}) } });
     await replica.attach(report(`replica-${index}`));
     const guard = watchCanaries({ deployments: replica, everyMs: 5 });
+    replica.recordRun(finishedRun(index, 'v1', 0));
     await new Promise((resolve) => setTimeout(resolve, 1));
     guard.stop();
     await replica.detach();
   });
+  // Counting a canary's runs: each replica records the runs it finishes, writes them every second,
+  // and a guard over rollups judges on all of them.
+  const counting = new Deployments({ state: new MemoryServerStore(), cacheMs: 60_000, rollupMs: 5 });
+  counting.assistant('support', { v1: { run: async () => ({}) }, v2: { run: async () => ({}) } }, { live: 'v1' });
+  const version = (await counting.canary('support', 'v2', 0.5)).version;
+  const rollupGuard = watchCanaries({ deployments: counting, from: 'rollups', everyMs: 3_600_000 });
+  await soak('deployments.rollups-record-judge', 20_000, async (index) => {
+    counting.recordRun(finishedRun(index, index % 2 === 0 ? 'v1' : 'v2', version));
+    if (index % 1_000 === 999) await rollupGuard.check();
+  });
+  rollupGuard.stop();
+  await counting.detach();
+}
+
+/** A run the server finished, as it records one. */
+function finishedRun(index, revision, deployment) {
+  return {
+    id: `run-${index}`,
+    assistant: 'support',
+    status: 'succeeded',
+    createdAt: new Date().toISOString(),
+    durationMs: 50 + (index % 200),
+    cost: 0.001,
+    revision: { id: revision, weight: 0.5, deployment, reason: 'split' },
+  };
 }
 
 // ── Compare ───────────────────────────────────────────────────────

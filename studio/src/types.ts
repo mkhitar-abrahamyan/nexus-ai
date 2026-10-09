@@ -275,6 +275,11 @@ export interface StudioOptions {
    * several replicas the same one so a page stays valid across them.
    */
   secret?: string;
+  /**
+   * The largest request body the studio reads, in bytes. A larger one is refused with `413` before
+   * it is read, and before anyone is signed in. Defaults to 1 MiB.
+   */
+  maxBodyBytes?: number;
   /** How the issues view looks for problems in traces. */
   insights?: {
     /** Runs at least this slow, in milliseconds, are reported as slow issues. */

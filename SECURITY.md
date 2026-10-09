@@ -52,7 +52,7 @@ what it could do with that input. Each review is published here with its finding
 before the surface graduates. A finding is closed in one of two ways: by a fix with a test that
 names the attack, or by a documented limitation that the surface's guide states.
 
-These reviews were done for 2.4.
+These reviews were done for 2.4, and for 2.5 where a review says so.
 
 ### SQLite adapters
 
@@ -168,7 +168,18 @@ server trusts by itself.
 
 Findings: none.
 
-### Deployments (reviewed; still experimental)
+### Deployments
+
+Reviewed for 2.4, and again for 2.5, when it graduated.
+
+Trust boundary: a deployment is changed by an admin, a canary guard, or the studio's admins; a run
+names its assistant, and optionally a revision, in a request from any caller with the write scope.
+Replicas, guards, and the studio share the server's state store, which they trust.
+- Every change is decided on the version it read and written by compare-and-set, on every included
+  state store, so a stale change never overwrites a newer one.
+- A guard acts on the version it judged, so guards on every replica never undo each other.
+- A replica writes rollups only to its own record. Counts are as trustworthy as the state store, as
+  run records already are.
 
 Findings:
 - **Fixed in 2.4: one caller's ratings could decide a canary.** A canary was judged on feedback
@@ -177,10 +188,68 @@ Findings:
   key, as the mean of its ratings.
 - **Fixed in 2.4: two changes at once on one replica could lose one**, such as a guard's rollback
   and an operator's promotion. Changes to one deployment now apply in order.
-- **Open: two replicas changing one deployment in the same instant can lose one change.** The
-  server's state store has no atomic compare-and-set. Until it does, deployments stay experimental.
-  The guide says to make changes from one place, or to pass `expectedVersion` and retry a conflict.
-- **Documented limitation: `bucket()` spreads sequential ids unevenly.** Ids that differ only in their
-  last characters spread unevenly over a few hundred threads. Random ids, which the server gives by
-  default, spread evenly. The function's output is part of the stability promise, so it is not
-  changed in 2.x.
+- **Fixed in 2.5: two replicas changing one deployment in the same instant could lose one change.**
+  The state store gained `putIfVersion()`, and a replica that loses the race decides again on the
+  winner's record. Proof: ten replicas held until all arrive make mixed changes on every store, and
+  every change lands in one linear history.
+- **Fixed in 2.5: a name from a request could reach an object's prototype.** A run for the assistant
+  `constructor`, or naming the revision `constructor`, was accepted and failed when it ran. Only an
+  application's own assistants and revisions are looked up now, and both are refused with `400`.
+- **Documented limitation: `fnv1a-v1` spreads sequential ids unevenly.** It stays the default, since
+  its positions are part of the stability promise. `hash-v2` spreads them evenly, opt-in per
+  deployment.
+- **Documented limitation: a replica that dies loses the runs it counted in its last `rollupMs`.**
+  Rollups are statistics; the run records stay whole.
+
+### The studio and its accounts
+
+Reviewed for 2.5, when it graduated.
+
+Trust boundary: anyone who can reach the port, before signing in; a signed-in person, limited by
+their role; a page on another site acting through a signed-in person's browser; and the data the
+studio shows, which traces, models, and people wrote.
+- The `Host` header must be a loopback name or one in `allowedHosts`, which closes DNS rebinding.
+- Tokens are compared in constant time. A token in the URL is moved into an HTTP-only, `SameSite=Strict`
+  cookie, `Secure` over HTTPS, and taken out of the address bar. `headerAuth()` trusts identity
+  headers only with the proxy's secret or from its addresses.
+- Every change needs a page token in a header, an HMAC of the user and their role under the server's
+  secret, which another site can neither read nor send. Every refusal is audited.
+- Every response carries a content security policy without inline script, `nosniff`, `no-store`,
+  and no referrer. The page inserts every value as text.
+
+Findings, each fixed in 2.5 with a test in `studio/test/security.test.ts`:
+- **A request body was read whole before anyone signed in.** Anyone who could reach the port could
+  fill the server's memory. A body past `maxBodyBytes`, 1 MiB by default, is now refused with `413`
+  as it arrives.
+- **Behind a sign-in proxy that uses Basic authentication, another site could make a change.** Any
+  `Authorization` header counted as proof that a script, not a browser, sent the change. But a
+  browser attaches Basic credentials to another site's request by itself. Only a bearer token counts
+  now, and a change's body must be `application/json`, which a form on another site cannot send.
+- **A change refused for want of the page token was not audited.** It is now, under the person whose
+  browser sent it, so a forged change leaves a trace.
+- **A name from the URL could reach an object's prototype.** A graph or review queue named
+  `constructor` failed with a server error. Only an application's own entries are looked up.
+- **A body that was not a JSON object reached handlers that read its fields.** `null`, an array, or a
+  number failed with a server error. Such a body is now refused with `400`.
+- **A path with malformed percent-encoding failed with a server error.** It is now a `400`.
+- **A viewer could ask a store for everything it holds.** `limit`, `hours`, and `days` had no
+  ceiling. A list now returns at most 1,000 items, the audit log 10,000 entries, the issues view 90
+  days, and the costs view 366 days; past that, the request is refused with `400`.
+- **The memory journal kept every comment.** It now keeps the latest 10,000, as it keeps audit entries.
+- **The server answered an internal error with its message.** That reply could reach anyone who can
+  reach the port. It now says only that the request failed, and logs the error on the server.
+- **A proposal's pull-request link was rendered as stored.** The content security policy already
+  blocked a `javascript:` address. Only `http` and `https` links are rendered now.
+
+Documented limitations, which the studio guide states:
+- The studio has no tenants of its own. Every account sees every source the studio is given, so a
+  tenant's people get a studio over that tenant's `tenantScope()` views.
+- A page token stays valid while the secret, the user, and their role do. Rotate `secret` to revoke
+  every page at once.
+- Someone without a session who opens another person's personal link is signed in as that person.
+  The page shows who is signed in.
+- `FileStudioJournal` reads its whole file for each listing, so rotate a long-lived one.
+- The playground spends model budget, which is why it needs the editor role.
+
+The fuzzing behind these: every route called by every role, and over 2,000 requests with hostile
+paths, queries, and bodies. Each must answer below `500`, and no prototype may be polluted.

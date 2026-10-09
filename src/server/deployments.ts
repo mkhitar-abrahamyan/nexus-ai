@@ -229,7 +229,8 @@ export class Deployments implements ServerDeployments {
     const ids = Object.keys(revisions);
     if (ids.length === 0) throw new BadRequestError(`Assistant "${id}" needs at least one revision`, 'NO_REVISIONS');
     const live = options.live ?? (ids[ids.length - 1] as string);
-    if (!revisions[live]) throw new BadRequestError(`Assistant "${id}" has no revision "${live}"`, 'UNKNOWN_REVISION');
+    if (!own(revisions, live))
+      throw new BadRequestError(`Assistant "${id}" has no revision "${live}"`, 'UNKNOWN_REVISION');
     this.registrations.set(id, {
       revisions,
       live,
@@ -237,7 +238,7 @@ export class Deployments implements ServerDeployments {
     });
 
     const pick = (context?: AssistantRunContext): ServerAssistant =>
-      (context?.revision !== undefined ? revisions[context.revision] : undefined) ??
+      (context?.revision !== undefined ? own(revisions, context.revision) : undefined) ??
       (revisions[live] as ServerAssistant);
     const fallback = revisions[live] as ServerAssistant;
     return {
@@ -257,7 +258,7 @@ export class Deployments implements ServerDeployments {
       ...(fallback.restore ? { restore: (threadId: string, step: number) => fallback.restore?.(threadId, step) } : {}),
       ...(fallback.step ? { step: (threadId: string) => fallback.step?.(threadId) } : {}),
       route: (request) => this.route(id, request),
-      revision: (revision) => revisions[revision],
+      revision: (revision) => own(revisions, revision),
     };
   }
 
@@ -270,7 +271,7 @@ export class Deployments implements ServerDeployments {
     if (request.requested !== undefined) {
       // A queued run may name a revision only a worker carries.
       const runnable =
-        registration.revisions[request.requested] !== undefined ||
+        own(registration.revisions, request.requested) !== undefined ||
         (request.queued === true && (await this.workerRevisions(assistant)).has(request.requested));
       if (!runnable) {
         throw new BadRequestError(
@@ -565,8 +566,6 @@ export class Deployments implements ServerDeployments {
    * server calls it from `stop()`.
    */
   async detach(): Promise<void> {
-    if (this.rollupTimer) clearTimeout(this.rollupTimer);
-    this.rollupTimer = undefined;
     await this.flushRollups();
     if (!this.heartbeat) return;
     clearInterval(this.heartbeat.timer);
@@ -658,6 +657,9 @@ export class Deployments implements ServerDeployments {
 
   /** Writes the runs this replica counted and has not written yet. Failures go to `onError` and are retried. */
   flushRollups(): Promise<void> {
+    // Everything counted is written now, so the scheduled write has nothing left to do.
+    if (this.rollupTimer) clearTimeout(this.rollupTimer);
+    this.rollupTimer = undefined;
     this.flushing = this.flushing.then(() => this.writeRollups());
     return this.flushing;
   }
@@ -1176,6 +1178,11 @@ export function bucket(key: string, strategy: BucketStrategy = 'fnv1a-v1'): numb
   return (hash >>> 0) / 0x1_0000_0000;
 }
 
+/** A revision the application registered, never one of an object's own built-in properties. */
+function own(revisions: Record<string, ServerAssistant>, id: string): ServerAssistant | undefined {
+  return Object.hasOwn(revisions, id) ? revisions[id] : undefined;
+}
+
 function checkStrategy(strategy: BucketStrategy): BucketStrategy {
   if (strategy !== 'fnv1a-v1' && strategy !== 'hash-v2') {
     throw new BadRequestError(`Unknown bucket strategy "${String(strategy)}": use fnv1a-v1 or hash-v2`);
@@ -1313,7 +1320,7 @@ function servable(
   fleet?: ReadonlySet<string>,
 ): Record<string, number> {
   const kept = Object.entries(traffic).filter(
-    ([revision, weight]) => weight > 0 && (registration.revisions[revision] || fleet?.has(revision)),
+    ([revision, weight]) => weight > 0 && (own(registration.revisions, revision) || fleet?.has(revision)),
   );
   const total = kept.reduce((sum, [, weight]) => sum + weight, 0);
   if (total <= 0) return { [registration.live]: 1 };
@@ -1353,7 +1360,7 @@ function choice(
   deployment: DeploymentRecord,
   reason: RevisionChoice['reason'],
 ): RevisionChoice {
-  const here = registration.revisions[id];
+  const here = own(registration.revisions, id);
   const assistant = (here ??
     registration.revisions[registration.live] ??
     Object.values(registration.revisions)[0]) as ServerAssistant;

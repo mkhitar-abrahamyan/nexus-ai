@@ -1,4 +1,4 @@
-# The studio (experimental)
+# The studio
 
 <!-- covers: -->
 
@@ -128,7 +128,15 @@ locked down, even on its local default:
   page pointing its own domain at `127.0.0.1`. `hostAllowed()` is the check, and `allowedHosts` adds
   names when you bind elsewhere on purpose.
 - Pages are served with a strict content security policy, and every value from a trace, a model, or
-  a person is inserted as text, never as HTML.
+  a person is inserted as text, never as HTML. A link from a record is rendered only when it is
+  `http` or `https`.
+- A request body is at most `maxBodyBytes`, 1 MiB by default. A larger one is refused with `413` as
+  it arrives, before anyone is signed in. A change sends its body as `application/json`, a JSON
+  object, or it is refused with `415` or `400`.
+- A list returns at most 1,000 items, the audit log 10,000 entries, the issues view 90 days, and the
+  costs view 366 days. Asking for more is a `400`, so no request makes a store read everything.
+- `Studio.routes` lists every `StudioRoute`: its method, path, the role it needs, and the action
+  the audit log records for it.
 - On the single token, actions are recorded under `actor` — `studio` by default — so a promotion's
   history says who moved the label.
 
@@ -180,8 +188,10 @@ export const options = {
 };
 ```
 
-With accounts, every change must carry the person's page token, or bring its own `Authorization`
-header. That stops another site from using a signed-in browser against the studio. `csrfToken()`
+With accounts, every change must carry the person's page token, or bring its own bearer token in an
+`Authorization` header, as a script does. That stops another site from using a signed-in browser
+against the studio. A browser adds Basic credentials to another site's request by itself, so they
+are not proof, and a change refused for want of the page token is audited. `csrfToken()`
 derives the page token from a server `secret` and the user, and the page reads it from its session.
 Give several replicas the same `secret`.
 
@@ -193,7 +203,8 @@ threads, experiments, prompts, and bundles, each as a `StudioComment`.
 
 The log is a `StudioAuditLog`, and comments a `StudioCommentStore`. Two classes implement both:
 
-- `MemoryStudioJournal`, the default, bounded by `MemoryStudioJournalOptions`;
+- `MemoryStudioJournal`, the default, bounded by `MemoryStudioJournalOptions`: 10,000 audit entries
+  and 10,000 comments, the oldest dropped first;
 - `FileStudioJournal`, append-only JSON Lines files that survive a restart and can be shipped to a log
   system as they are. On the command line, `--journal <directory>`.
 
@@ -216,7 +227,14 @@ up — cycles — are marked, so they can be drawn around the side.
 
 ## Limitations
 
-- The studio is experimental: it is new, and its views will gain detail.
+- The studio has no tenants of its own. Every account sees every source the studio is given, so
+  give a tenant's people a studio over `tenantScope()` views of the stores, from
+  `nexus-ai-pro/tenancy`.
+- A page token stays valid while the `secret`, the user, and their role do. Rotate the secret to
+  revoke every page at once.
+- Someone without a session who opens another person's personal link is signed in as that person.
+  The page shows who is signed in.
+- `FileStudioJournal` reads its whole file for each listing, so rotate a long-lived one.
 - It reads what the stores can list. An operation store without `list()` hides the queue, and a
   graph given without a way to list threads can only open a thread by id.
 - Without `rollups`, the costs view reads up to 100,000 runs in its window, which is slow on a very

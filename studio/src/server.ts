@@ -41,7 +41,7 @@ export async function startStudio(sources: StudioSources, options: StartStudioOp
     );
   }
   const server = createServer((request, response) => {
-    void serve(studio, request, response);
+    void serve(studio, request, response, options.maxBodyBytes ?? 1_048_576);
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -62,10 +62,26 @@ export async function startStudio(sources: StudioSources, options: StartStudioOp
   };
 }
 
-async function serve(studio: Studio, request: IncomingMessage, response: ServerResponse): Promise<void> {
+async function serve(
+  studio: Studio,
+  request: IncomingMessage,
+  response: ServerResponse,
+  maxBodyBytes: number,
+): Promise<void> {
   try {
+    // A body past the limit is refused as it arrives, before it fills memory or anyone is signed in.
     const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(chunk as Buffer);
+    let size = 0;
+    for await (const chunk of request) {
+      size += (chunk as Buffer).length;
+      if (size > maxBodyBytes) {
+        response.writeHead(413, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' });
+        response.end(`A request body is at most ${maxBodyBytes} bytes`);
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk as Buffer);
+    }
     const body = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
     const headers = new Headers();
     for (const [key, value] of Object.entries(request.headers)) {
@@ -87,7 +103,9 @@ async function serve(studio: Studio, request: IncomingMessage, response: ServerR
     response.writeHead(result.status, out);
     response.end(Buffer.from(await result.arrayBuffer()));
   } catch (error) {
+    // What went wrong stays on the server: a reply could tell anyone who can reach the port about it.
+    console.error('The studio could not answer a request:', error);
     if (!response.headersSent) response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
-    response.end(error instanceof Error ? error.message : String(error));
+    response.end('The studio could not answer this request.');
   }
 }

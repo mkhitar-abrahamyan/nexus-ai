@@ -255,7 +255,8 @@ export class RunManager {
 
   /** Looks an assistant up, or refuses the request. */
   assistant(id: string): ServerAssistant {
-    const found = this.options.assistants[id];
+    // Only the application's own entries: a name such as "constructor" must not reach the prototype.
+    const found = Object.hasOwn(this.options.assistants, id) ? this.options.assistants[id] : undefined;
     if (!found) throw new BadRequestError(`Unknown assistant "${id}"`, 'UNKNOWN_ASSISTANT');
     return found;
   }

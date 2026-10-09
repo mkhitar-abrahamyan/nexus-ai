@@ -28,6 +28,7 @@
     "context-hub.commit-resolve-render": 2000,
     "insights.cluster-repeat": 300,
     "deployments.route-admit-release": 50000,
-    "deployments.attach-watch-detach": 500
+    "deployments.attach-watch-detach": 500,
+    "deployments.rollups-record-judge": 20000
   }
 }

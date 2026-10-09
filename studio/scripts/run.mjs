@@ -21,7 +21,8 @@ const args =
           .map((file) => path.join(studio, 'test', file)),
       ]
     : ['--import', 'tsx', path.resolve(target ?? ''), ...rest];
-const result = spawnSync(process.execPath, args, {
+// The studio's soak measures the heap after a collection.
+const result = spawnSync(process.execPath, ['--expose-gc', ...args], {
   stdio: 'inherit',
   env: { ...process.env, TSX_TSCONFIG_PATH: path.join(studio, 'tsconfig.json') },
 });

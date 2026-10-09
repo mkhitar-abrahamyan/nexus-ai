@@ -37,7 +37,24 @@ export interface Studio {
   handle(request: Request, info?: StudioRequestInfo): Promise<Response>;
   /** The access token. The URL to open is `http://127.0.0.1:<port>/?token=<token>`. */
   readonly token: string;
+  /** Every API route, with the role it needs and the action the audit log records for a change. */
+  readonly routes: ReadonlyArray<StudioRoute>;
 }
+
+/** One route of the studio's API. */
+export interface StudioRoute {
+  /** The HTTP method. */
+  method: string;
+  /** The path, with `:name` for each parameter, such as `/api/prompts/:name/promote`. */
+  path: string;
+  /** The least role that may call it. */
+  role: StudioRole;
+  /** What the audit log records it as, such as `prompt.promote`. */
+  action: string;
+}
+
+/** The largest request body read by default: 1 MiB. */
+const MAX_BODY_BYTES = 1_048_576;
 
 /** An error with the HTTP status the studio answers with. */
 export class StudioError extends Error {
@@ -95,11 +112,13 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   const tokenUser: StudioUser = { id: actor, role: 'admin' };
   const uiDirectory = new URL('./ui/', import.meta.url);
   const uiCache = new Map<string, string>();
-  const routes: Array<{ method: string; parts: string[]; handler: Handler; role: StudioRole; action: string }> = [];
+  const routes: Array<StudioRoute & { parts: string[]; handler: Handler }> = [];
+  const maxBodyBytes = options.maxBodyBytes ?? MAX_BODY_BYTES;
   // Reads need `viewer`; every change names the role it needs and the action the audit log records.
   const route = (method: string, path: string, handler: Handler, access: { role?: StudioRole; action?: string } = {}) =>
     routes.push({
       method,
+      path,
       parts: path.split('/').filter(Boolean),
       handler,
       role: access.role ?? 'viewer',
@@ -570,7 +589,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   // ── Issues ───────────────────────────────────────────────────────
   route('GET', '/api/issues', async ({ url }) => {
     const store = need(sources.traces, 'traces');
-    const hours = intParam(url, 'hours') ?? 24;
+    const hours = intParam(url, 'hours', 24 * 90) ?? 24;
     const end = now();
     const since = new Date(end.getTime() - hours * 3_600_000).toISOString();
     const [issues, regressions] = await Promise.all([
@@ -629,14 +648,14 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
         ...(url.searchParams.get('user') ? { user: url.searchParams.get('user') as string } : {}),
         ...(url.searchParams.get('action') ? { action: url.searchParams.get('action') as string } : {}),
         ...(url.searchParams.get('since') ? { since: url.searchParams.get('since') as string } : {}),
-        limit: intParam(url, 'limit') ?? 200,
+        limit: intParam(url, 'limit', 10_000) ?? 200,
       }),
     }),
     { role: 'admin', action: 'audit.read' },
   );
 
   // ── Costs ────────────────────────────────────────────────────────
-  route('GET', '/api/costs', async ({ url }) => costReport(intParam(url, 'days') ?? 7));
+  route('GET', '/api/costs', async ({ url }) => costReport(intParam(url, 'days', 366) ?? 7));
 
   // ── Health ───────────────────────────────────────────────────────
   route('GET', '/api/health', async () => ({
@@ -725,12 +744,13 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       : { graph: raw as StudioGraphLike };
   }
   function graphNamed(name: string): StudioGraphSource {
-    const raw = sources.graphs?.[name];
+    // Only the application's own entries: a name such as "constructor" must not reach the prototype.
+    const raw = sources.graphs && Object.hasOwn(sources.graphs, name) ? sources.graphs[name] : undefined;
     if (!raw) throw notFound('Graph', name);
     return graphSource(raw);
   }
   function reviewNamed(name: string) {
-    const queue = sources.reviews?.[name];
+    const queue = sources.reviews && Object.hasOwn(sources.reviews, name) ? sources.reviews[name] : undefined;
     if (!queue) throw notFound('Review queue', name);
     return queue;
   }
@@ -878,7 +898,10 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
    */
   function sameOrigin(request: Request, presented: ReturnType<typeof tokenOf>, user: StudioUser): boolean {
     if (!options.auth) return presented.via === 'header';
-    if (request.headers.get('authorization')) return true;
+    // A browser adds Basic and Negotiate credentials to another site's request by itself, but never a
+    // bearer token, which only a script can set, and a script on another site needs a CORS grant the
+    // studio never gives.
+    if (/^Bearer\s+\S/i.test(request.headers.get('authorization') ?? '')) return true;
     return tokensMatch(csrfToken(secret, user), request.headers.get(TOKEN_HEADER));
   }
 
@@ -909,10 +932,46 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     }
   }
 
-  async function handle(request: Request, info: StudioRequestInfo = {}): Promise<Response> {
-    const url = new URL(request.url);
-    if (!hostAllowed(request.headers.get('host') ?? url.host, options.allowedHosts)) {
+  /** The route a path and method name, with its parameters; `method` when only the method differs. */
+  function find(
+    parts: readonly string[],
+    method: string,
+  ): { route: (typeof routes)[number]; params: Record<string, string> } | 'method' | undefined {
+    let methodMismatch = false;
+    for (const candidate of routes) {
+      if (candidate.parts.length !== parts.length) continue;
+      const params: Record<string, string> = {};
+      const matched = candidate.parts.every((part, index) => {
+        if (part.startsWith(':')) {
+          params[part.slice(1)] = decodeURIComponent(parts[index] as string);
+          return true;
+        }
+        return part === parts[index];
+      });
+      if (!matched) continue;
+      if (candidate.method !== method) {
+        methodMismatch = true;
+        continue;
+      }
+      return { route: candidate, params };
+    }
+    return methodMismatch ? 'method' : undefined;
+  }
+
+  async function handle(incoming: Request, info: StudioRequestInfo = {}): Promise<Response> {
+    const url = new URL(incoming.url);
+    if (!hostAllowed(incoming.headers.get('host') ?? url.host, options.allowedHosts)) {
       return text('This host is not allowed. Open the studio at 127.0.0.1 or localhost.', 403);
+    }
+    // The body is bounded before anything else reads it, and before anyone is signed in.
+    let request = incoming;
+    let body: string | undefined;
+    if (incoming.method !== 'GET' && incoming.method !== 'HEAD' && incoming.body) {
+      body = await readBounded(incoming, maxBodyBytes);
+      if (body === undefined) {
+        return json({ error: { code: 'TOO_LARGE', message: `A request body is at most ${maxBodyBytes} bytes` } }, 413);
+      }
+      request = new Request(incoming.url, { method: incoming.method, headers: incoming.headers, body });
     }
 
     const { user, presented } = await identify(request, url, info);
@@ -950,59 +1009,63 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
         401,
       );
     }
+
+    let found: ReturnType<typeof find>;
+    try {
+      found = find(url.pathname.split('/').filter(Boolean), request.method);
+    } catch {
+      return json({ error: { code: 'BAD_REQUEST', message: 'The path is not valid percent-encoding' } }, 400);
+    }
+    if (found === undefined) {
+      return json({ error: { code: 'NOT_FOUND', message: `No route for ${url.pathname}` } }, 404);
+    }
+    if (found === 'method') {
+      return json({ error: { code: 'METHOD_NOT_ALLOWED', message: `${request.method} is not allowed here` } }, 405);
+    }
+    const { route: candidate, params } = found;
+
     const change = request.method !== 'GET';
     if (change && !sameOrigin(request, presented, user)) {
-      return json({ error: { code: 'FORBIDDEN', message: `Changes need the ${TOKEN_HEADER} header` } }, 403);
+      const message = `Changes need the ${TOKEN_HEADER} header`;
+      await record(user, candidate.action, request, url, 'denied', 403, message);
+      return json({ error: { code: 'FORBIDDEN', message } }, 403);
     }
-
-    const parts = url.pathname.split('/').filter(Boolean);
-    let methodMismatch = false;
-    for (const candidate of routes) {
-      if (candidate.parts.length !== parts.length) continue;
-      const params: Record<string, string> = {};
-      const matched = candidate.parts.every((part, index) => {
-        if (part.startsWith(':')) {
-          params[part.slice(1)] = decodeURIComponent(parts[index] as string);
-          return true;
-        }
-        return part === parts[index];
-      });
-      if (!matched) continue;
-      if (candidate.method !== request.method) {
-        methodMismatch = true;
-        continue;
-      }
-      if (!hasRole(user, candidate.role)) {
-        const message = `This needs the ${candidate.role} role; ${user.id} is a ${user.role}`;
-        await record(user, candidate.action, request, url, 'denied', 403, message);
-        return json({ error: { code: 'FORBIDDEN_ROLE', message } }, 403);
-      }
-      try {
-        const response = json(await candidate.handler({ request, url, params, user }));
-        if (change) await record(user, candidate.action, request, url, 'ok', 200);
-        return response;
-      } catch (error) {
-        const response = errorResponse(error);
-        if (change) {
-          await record(
-            user,
-            candidate.action,
-            request,
-            url,
-            'failed',
-            response.status,
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-        return response;
-      }
+    if (change && body?.trim() && !isJson(request.headers.get('content-type'))) {
+      const message = 'A change sends its body as application/json';
+      await record(user, candidate.action, request, url, 'denied', 415, message);
+      return json({ error: { code: 'UNSUPPORTED_MEDIA_TYPE', message } }, 415);
     }
-    return methodMismatch
-      ? json({ error: { code: 'METHOD_NOT_ALLOWED', message: `${request.method} is not allowed here` } }, 405)
-      : json({ error: { code: 'NOT_FOUND', message: `No route for ${url.pathname}` } }, 404);
+    if (!hasRole(user, candidate.role)) {
+      const message = `This needs the ${candidate.role} role; ${user.id} is a ${user.role}`;
+      await record(user, candidate.action, request, url, 'denied', 403, message);
+      return json({ error: { code: 'FORBIDDEN_ROLE', message } }, 403);
+    }
+    try {
+      const response = json(await candidate.handler({ request, url, params, user }));
+      if (change) await record(user, candidate.action, request, url, 'ok', 200);
+      return response;
+    } catch (error) {
+      const response = errorResponse(error);
+      if (change) {
+        await record(
+          user,
+          candidate.action,
+          request,
+          url,
+          'failed',
+          response.status,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return response;
+    }
   }
 
-  return { handle, token };
+  return {
+    handle,
+    token,
+    routes: routes.map(({ method, path, role, action }) => ({ method, path, role, action })),
+  };
 }
 
 /** Model runs carry cost; counting them alone keeps a parent that sums its children from counting twice. */
@@ -1095,22 +1158,55 @@ function required(url: URL, name: string): string {
   return value;
 }
 
-function intParam(url: URL, name: string): number | undefined {
+/** A positive whole-number parameter, at most `max`, so no one can ask a store for everything it holds. */
+function intParam(url: URL, name: string, max = 1_000): number | undefined {
   const value = url.searchParams.get(name);
   if (value === null) return undefined;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) throw badRequest(`"${name}" must be a positive whole number`);
+  if (parsed > max) throw badRequest(`"${name}" is at most ${max.toLocaleString('en-US')}`);
   return parsed;
+}
+
+/** The body as text, or `undefined` when it is longer than `max` bytes, which stops reading it. */
+async function readBounded(request: Request, max: number): Promise<string | undefined> {
+  const declared = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > max) return undefined;
+  const reader = (request.body as ReadableStream<Uint8Array>).getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
+/** Whether a content type is JSON: `application/json`, or a `+json` type, with any parameters. */
+function isJson(contentType: string | null): boolean {
+  return /^application\/(?:[\w.-]+\+)?json\s*(?:;|$)/i.test(contentType ?? '');
 }
 
 async function readJson<T>(request: Request): Promise<T> {
   const body = await request.text();
   if (!body.trim()) return {} as T;
+  let parsed: unknown;
   try {
-    return JSON.parse(body) as T;
+    parsed = JSON.parse(body);
   } catch {
     throw badRequest('The request body is not valid JSON');
   }
+  // Every route reads named fields, so anything but an object is refused here, not deep in a handler.
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw badRequest('The request body is a JSON object');
+  }
+  return parsed as T;
 }
 
 function json(value: unknown, status = 200): Response {
