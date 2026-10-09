@@ -10153,6 +10153,18 @@ last revision, and any revision the request named. The answer is a `RevisionChoi
 range and the live revision the rest. So raising a canary's share only adds threads to it, and a
 thread never flips back and forth.
 
+How the key becomes a place is the deployment's `BucketStrategy`:
+
+| Strategy | Places |
+| --- | --- |
+| `fnv1a-v1` | By FNV-1a. Random ids, which the server gives by default, spread evenly. Ids that differ only in their last characters, such as `user-1` to `user-500`, cluster, so a canary's share of them drifts from its weight. The default, and what every deployment recorded before 2.5 uses. |
+| `hash-v2` | By FNV-1a mixed with MurmurHash3's finalizer, so sequential ids spread as evenly as random ones. |
+
+A deployment records its strategy, so every replica places a thread the same way, and no thread
+moves through an upgrade. `Deployments.assistant()` takes `bucketStrategy` for a deployment recorded
+from then on, and `bucketing()` changes a recorded one. A thread already on a revision that takes
+traffic stays there; only new threads are placed by the new strategy.
+
 Every run records its `RunRevision`: the revision, its share, the deployment version, and the reason.
 The thread records its revision too, which is how a rolled-back canary sends its threads home.
 
@@ -10189,6 +10201,7 @@ Every change is a `DeploymentChange`, applied by `change()` or one of its shortc
 | `split(assistant, traffic)` | Sets several shares at once. They add up to at most 1; the live revision takes the rest. |
 | `promote(assistant, revision)` | Makes a revision live, with all the traffic. |
 | `rollback(assistant, options)` | Pulls a canary. With no canary, undoes the last promotion. `to` names a revision instead. |
+| `bucketing(assistant, strategy)` | Changes how new threads are placed in the split, keeping the split itself. |
 
 Each shortcut takes `by` and `reason`, recorded in the history. `change()` also takes
 `expectedVersion`. It refuses the change with `DEPLOYMENT_CONFLICT` when someone moved the deployment
@@ -10214,9 +10227,23 @@ began, and the last 50 changes. Each change is a `DeploymentChangeRecord`. `get(
 
 ### Reading what each revision did
 
-`stats()` summarizes each revision's runs from the server's own run records. Each `RevisionStats` has
-the run count, successes, failures, error rate, p50 and p95 latency, and mean cost. Pass `since` to
-limit it to a window, such as the time of the last change.
+`stats()` summarizes each revision's runs. Each `RevisionStats` has the run count, successes,
+failures, error rate, p50 and p95 latency, and mean cost. It reads one of two sources:
+
+- **Rollups**, with `deployment`, a version. Every replica counts the runs it finishes in a
+  `DeploymentRollup`: per revision, a `RevisionRollup` of runs, successes, failures, cancellations,
+  latency in buckets 5% apart, and cost. A run is counted under the deployment version it was routed
+  with, so one version's rollups are exactly the runs since that change, however many. Each replica
+  writes only its own record, every `rollupMs`, so counting never contends, and `rollups()` sums them
+  in one read. Percentiles from rollups are within 2.5%, and a run in flight is counted when it
+  finishes. A version no replica counted falls back to run records.
+- **Run records**, otherwise: the latest 2,000 by default, or `limit`. Pass `since` to limit them to
+  a window, such as the time of the last change.
+
+The server counts runs when it is given `deployments`: it calls `recordRun()` as each run finishes.
+`flushRollups()` writes what this replica has counted, which `detach()` and every read of rollups do
+first. `GET /deployments/:assistant` reports each revision's stats from rollups when replicas keep
+them.
 
 `samples()` returns one revision's finished runs in the shape `compareRuns()` from
 `nexus-ai-pro/insights` reads. `revisions()` lists the revisions known for an assistant: the ones
@@ -10231,7 +10258,8 @@ registered in this process, and the ones fresh replicas report.
 | `replicaTtlMs` | 3 heartbeats | How long a report counts as fresh. |
 | `cacheMs` | 2 s | How long routing reuses a read. A change elsewhere reaches every replica within this time. |
 | `historyLimit` | 50 | Changes kept per deployment. |
-| `onError` | — | Hears heartbeat failures, which never stop the server. |
+| `rollupMs` | 1 s | How long a replica gathers finished runs before writing its rollup. |
+| `onError` | — | Hears heartbeat and rollup failures, which never stop the server. A rollup that fails to write is kept and written next time. |
 | `now` | the clock | Replaces the clock, for tests. |
 
 The same object works without any assistants. Build it on the same store in a studio or a script, and
@@ -10261,6 +10289,17 @@ last changed. It uses the same statistics as the insights' regression detection:
 A regressed canary is rolled back at once. The reason in the history names what got worse. A canary
 that holds up moves to its next step, and is promoted after the last one. Without `steps`, it stays
 where it is until a person promotes it.
+
+With `from: 'rollups'`, the guard judges a canary on the rollups of the deployment's current version:
+every run since the split last changed, counted by every replica, in one read. A busy assistant is
+then judged on all of its canary's runs, not the latest 2,000, so a small rise in the error rate that
+a few thousand runs cannot show is caught. From rollups, the error rate is judged by its z-test, at
+`confidence` when it is set and with `minErrorRateIncrease`, and latency and cost by their margins.
+Feedback lives on run records, so a guard over rollups takes neither `samples` nor `feedback`.
+
+```ts
+watchCanaries({ deployments, from: 'rollups', minRuns: 500, steps: [0.25, 0.5] });
+```
 
 ### Judging with confidence, and on quality
 
@@ -10316,6 +10355,7 @@ by its output, since a run record does not keep its input.
 | `latencyIncrease`, `costIncrease` | 0.25 | The relative rise that counts. |
 | `minLatencyChangeMs` | 50 | The smallest latency rise that counts, so noise on fast runs never rolls a canary back. |
 | `steps` | none | Shares to move through while the canary holds up, before promotion. |
+| `from` | `runs` | What a canary is judged on: run samples, or `rollups` of every run since the split last changed. |
 | `samples` | run records | Where runs come from, each with its feedback. Give it traced runs to judge on their feedback instead. |
 | `feedback` | none | Feedback keys to compare, such as the ones `Deployments.evaluate()` records. |
 | `confidence` | none | Judges each metric by a bootstrap interval and a minimum effect, as below. |
@@ -10481,7 +10521,7 @@ has, and any `replicaMetadata` you add, such as the host. `replicas()` returns t
 | Route | Scope | What it does |
 | --- | --- | --- |
 | `GET /deployments` | admin | Every deployment. |
-| `GET /deployments/:assistant` | admin | One deployment, with each revision's stats since the last change. |
+| `GET /deployments/:assistant` | admin | One deployment, with each revision's stats since the last change, from rollups when replicas keep them. |
 | `POST /deployments/:assistant` | admin | A `DeploymentChange`, with `expectedVersion` if you like. |
 | `GET /replicas` | admin | Fresh replica reports. |
 | `GET /scaling`, `GET /metrics` | read, or public | The queue and this replica. |
@@ -10503,17 +10543,18 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   replicas changing one deployment in the same instant can lose one change: give the server one of
   the included stores, or pass `expectedVersion` and retry a conflict. Tenant limits and the worker
   queue are stable.
-- `bucket()` places random thread ids, which the server gives by default, evenly. Ids that differ
-  only in their last characters, such as `user-1` to `user-500`, spread unevenly over a few hundred
-  threads, so a canary's share of them drifts from its weight. Its output is part of the stability
-  promise, so threads keep their place through an upgrade.
+- `fnv1a-v1` stays the default bucket strategy through 2.x, so a deployment keyed by sequential ids
+  needs `bucketStrategy: 'hash-v2'` to split them evenly.
 - A worker of 2.4 or earlier claims a run of any revision, and runs its live revision when it lacks
   the one routed. Finish a rollout from 2.4 before images start carrying different revisions.
 - A replica that both serves the API and claims runs routes a run it has room for only among its own
   revisions. Put the API on its own replicas, with `claim: false`, for a canary that only a new
   image carries.
-- `stats()` and the guard read recent run records, 2,000 by default, so a very busy assistant is judged
-  on its latest runs.
+- Rollups are counted by replicas of 2.5 or later that are given `deployments`. During a rollout from
+  2.4, the runs older replicas finish are missing from them. A guard over run records, the default,
+  reads the latest 2,000, so judge a very busy assistant with `from: 'rollups'`.
+- One rollup record is kept per replica per deployment version. They are small, and nothing deletes
+  them.
 - The Redis operation store reads every record to find queued work unless it is given `index: true`.
   Postgres and SQLite always use an index. The [operations guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/operations.md) says when to turn it
   on.
@@ -11031,13 +11072,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 57 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 16% | none |
+| `nexus-ai-pro/server/deployments` | 54 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 51 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/evaluate` | 44 KB | 13% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 13% | none |
-| `nexus-ai-pro/server/deployments` | 41 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |

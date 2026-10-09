@@ -45,6 +45,17 @@ Graduation finished, and evaluation at production depth.
     keys rotate.
   - `generateContextKey()`, `ed25519Signer()`, and `ed25519Keyring()` make and load keys, as JSON Web
     Keys or Web Crypto keys.
+- **Canaries that stay fair.**
+  - A deployment records a `bucketStrategy`. `hash-v2` mixes the thread id's hash with
+    MurmurHash3's finalizer, so sequential ids such as `user-1` to `user-500` split as evenly as random
+    ones. `fnv1a-v1` stays the default, and every deployment recorded before keeps it, so no thread
+    moves through an upgrade. `Deployments.assistant()` takes `bucketStrategy`; `bucketing()` and a
+    `bucketing` change switch a recorded deployment. `bucket()` takes the strategy.
+  - Every replica counts the runs it finishes, per revision, in a rollup under the deployment version
+    they were routed with: counts, latency in buckets 5% apart, and cost. `stats()` with `deployment`
+    and `rollups()` sum them in one read, and `GET /deployments/:assistant` reports them.
+  - `watchCanaries({ from: 'rollups' })` judges a canary on every run since the split last changed,
+    instead of the latest 2,000 run records.
 - **Whole conversations, evaluated** (`nexus-ai-pro/evaluate/threads`).
   - `simulatedUser()` plays a user with a goal and a persona, driven by a model, and says when the goal
     was met or when it gives up. `scriptedUser()` follows a script, for deterministic tests.
@@ -66,6 +77,16 @@ Graduation finished, and evaluation at production depth.
 
 ### Proof
 
+- Ten replicas make mixed changes to one deployment at once (canaries, splits, promotions,
+  rollbacks, and a bucketing change), held until all ten arrive, on the memory server store and the
+  memory, Redis, Postgres, and SQLite stores. Every change lands, each with a version of its own, and
+  the history is one linear sequence.
+- Over 48 sets of 500 sequential thread ids, `hash-v2` places a canary's share within 2.3 standard
+  deviations of its weight, as random placement does; `fnv1a-v1` strays by up to 9.9. Over 10,000
+  sequential ids, `hash-v2` is within half a point at every weight.
+- A canary that fails 0.8% of the time against 0.5% is held by a guard over the latest 2,000 run
+  records, and rolled back by a guard over rollups, which counts all 100,000 runs from three replicas
+  in one read.
 - A simulated user holds 50 conversations with each of two versions of a support agent built with
   `createAgent()`. The thread evaluators score every conversation, and `compareExperiments()` finds
   the second version better on goals met, the judge's verdict, turns taken, and per-turn scores, with

@@ -120,13 +120,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 57 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 16% | none |
+| `nexus-ai-pro/server/deployments` | 54 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 51 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/evaluate` | 44 KB | 13% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 13% | none |
-| `nexus-ai-pro/server/deployments` | 41 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |

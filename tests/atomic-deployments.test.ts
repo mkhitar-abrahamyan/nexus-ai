@@ -184,6 +184,55 @@ test('two replicas changing one deployment in the same instant both land, on eve
   }
 });
 
+test('ten replicas making mixed changes at once all land, in one linear history, on every state store', async () => {
+  const changes: Array<[string, (deployments: Deployments, by: string) => Promise<unknown>]> = [
+    ['canary', (d, by) => d.canary('support', 'v2', 0.1, { by })],
+    ['canary', (d, by) => d.canary('support', 'v3', 0.2, { by })],
+    ['canary', (d, by) => d.canary('support', 'v2', 0.3, { by })],
+    ['split', (d, by) => d.split('support', { v2: 0.2, v3: 0.1 }, { by })],
+    ['split', (d, by) => d.split('support', { v3: 0.5 }, { by })],
+    ['promote', (d, by) => d.promote('support', 'v2', { by })],
+    ['promote', (d, by) => d.promote('support', 'v3', { by })],
+    ['rollback', (d, by) => d.rollback('support', { to: 'v1', by })],
+    ['rollback', (d, by) => d.rollback('support', { to: 'v2', by })],
+    ['bucketing', (d, by) => d.bucketing('support', 'hash-v2', { by })],
+  ];
+  for (const [name, state] of await serverStates()) {
+    const setup = replica(state);
+    const start = (await setup.canary('support', 'v2', 0.05, { by: 'setup' })).version;
+
+    // All ten read the same version, then write at once: nine lose, and decide again.
+    const gate = barrier(changes.length);
+    const results = (await Promise.all(
+      changes.map(([, apply], index) => apply(replica(meetingAt(gate, state)), `replica-${index}`)),
+    )) as Array<{ version: number }>;
+
+    const final = await setup.get('support');
+    assert.equal(final?.version, start + changes.length, `${name}: every change raised the version`);
+    assert.deepEqual(
+      results.map((result) => result.version).sort((a, b) => a - b),
+      changes.map((_, index) => start + index + 1),
+      `${name}: each change got a version of its own`,
+    );
+    const latest = final?.history.slice(0, changes.length) ?? [];
+    assert.deepEqual(
+      latest.map((entry) => entry.version),
+      changes.map((_, index) => start + changes.length - index),
+      `${name}: the history is one linear sequence`,
+    );
+    assert.deepEqual(
+      latest.map((entry) => `${entry.action}:${entry.by}`).sort(),
+      changes.map(([action], index) => `${action}:replica-${index}`).sort(),
+      `${name}: every change is in it, once`,
+    );
+    // Each change was decided on the one before it: the record is the last change's result, and the
+    // strategy the bucketing change chose survived every change after it.
+    assert.equal(final?.live, latest[0]?.live, name);
+    assert.deepEqual(final?.traffic, latest[0]?.traffic, name);
+    assert.equal(final?.bucketStrategy, 'hash-v2', `${name}: no change was decided on a stale record`);
+  }
+});
+
 test('without putIfVersion, the same race loses a change, which is why such a store is reported', async () => {
   const state = new MemoryServerStore();
   const setup = replica(state);

@@ -137,7 +137,7 @@
     "./security": 64,
     "./server": 132,
     "./server/auth": 20,
-    "./server/deployments": 46,
+    "./server/deployments": 60,
     "./server/remote": 8,
     "./server/tenancy": 20,
     "./sqlite": 48,

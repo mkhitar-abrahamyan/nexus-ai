@@ -61,6 +61,13 @@ New and stable:
   types. The signed digest's format is `nexus-context-signature`, format version 1, and a later release
   verifies it;
 - `metadata.context` on a traced model call;
+- on `nexus-ai-pro/server/deployments`, experimental with the rest of it: `BucketStrategy`,
+  `DeploymentRecord.bucketStrategy`, `RevisionedAssistantOptions.bucketStrategy`, the `bucketing`
+  change and `Deployments.bucketing()`, the strategy argument of `bucket()`; `recordRun()`,
+  `rollups()`, `flushRollups()`, `stats({ deployment })`, `DeploymentRollup`, `RevisionRollup`, and
+  `DeploymentsOptions.rollupMs`; `CanaryGuardOptions.from`. `ServerDeployments` gains an optional
+  `recordRun()`, and `RunManagerOptions.deployments`. The positions `fnv1a-v1` and `hash-v2` give a key
+  never change;
 - `nexus-ai-pro/evaluate/threads`, experimental: `simulatedUser()`, `scriptedUser()`,
   `conversationTarget()`, `graphThreadAgent()`, `formatThread()`, `goalReached()`,
   `goalCompletion()`, `turnCount()`, `turnScores()`, and their types. The score keys `goal_reached`,

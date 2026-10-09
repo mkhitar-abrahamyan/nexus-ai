@@ -162,8 +162,12 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
     admin('GET', '/deployments/:assistant', async ({ params }) => {
       const deployment = await deployments.get(params.assistant as string);
       if (!deployment) throw new NotFoundError('Deployment', params.assistant as string);
-      // Each revision's runs since the split last changed: the window a canary guard judges.
-      const stats = await deployments.stats?.(deployment.assistant, { since: deployment.history[0]?.at });
+      // Each revision's runs since the split last changed: the window a canary guard judges, from
+      // rollups when replicas keep them.
+      const stats = await deployments.stats?.(deployment.assistant, {
+        since: deployment.history[0]?.at,
+        deployment: deployment.version,
+      });
       return json(stats ? { ...deployment, stats } : deployment);
     });
     admin('POST', '/deployments/:assistant', async ({ request, params, principal }) => {

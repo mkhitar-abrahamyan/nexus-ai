@@ -223,6 +223,11 @@ export interface DeploymentRecord {
   traffic: Record<string, number>;
   /** ISO-8601 time the current canary began, when one is taking traffic. */
   canarySince?: string;
+  /**
+   * How a new thread or a stateless run is placed in the split. Absent means `fnv1a-v1`, which every
+   * deployment recorded before 2.5 uses, so no thread moves through an upgrade.
+   */
+  bucketStrategy?: BucketStrategy;
   /** ISO-8601 time of the last change. */
   updatedAt: string;
   /** Who made the last change. */
@@ -231,12 +236,24 @@ export interface DeploymentRecord {
   history: DeploymentChangeRecord[];
 }
 
+/**
+ * How a thread or run id becomes a position in a traffic split.
+ *
+ * - `fnv1a-v1` is FNV-1a over the id. It places random ids evenly, but ids that differ only in their
+ *   last characters, such as `user-1` to `user-500`, cluster, so a canary's share of them drifts from
+ *   its weight.
+ * - `hash-v2` mixes the FNV-1a hash with MurmurHash3's finalizer, so sequential ids spread as evenly
+ *   as random ones.
+ */
+export type BucketStrategy = 'fnv1a-v1' | 'hash-v2';
+
 /** A change to a deployment. */
 export type DeploymentChange =
   | { action: 'split'; traffic: Record<string, number>; reason?: string }
   | { action: 'canary'; revision: string; weight: number; reason?: string }
   | { action: 'promote'; revision: string; reason?: string }
-  | { action: 'rollback'; to?: string; reason?: string };
+  | { action: 'rollback'; to?: string; reason?: string }
+  | { action: 'bucketing'; strategy: BucketStrategy; reason?: string };
 
 /** One entry in a deployment's history. */
 export interface DeploymentChangeRecord {
@@ -250,6 +267,8 @@ export interface DeploymentChangeRecord {
   live: string;
   /** The split after it. */
   traffic: Record<string, number>;
+  /** The bucket strategy a `bucketing` change chose. */
+  bucketStrategy?: BucketStrategy;
   /** Who did it: a person, or `guard` when a canary guard acted. */
   by?: string;
   /** Why, such as the regression that triggered a rollback. */
@@ -270,8 +289,13 @@ export interface ServerDeployments {
   change(assistant: string, change: DeploymentChange, by?: string): Promise<DeploymentRecord>;
   /** The replicas whose heartbeats are fresh. */
   replicas(): Promise<ReplicaReport[]> | ReplicaReport[];
-  /** What each revision's runs did since a time, for `GET /deployments/:assistant`. */
-  stats?(assistant: string, options?: { since?: string }): Promise<unknown[]> | unknown[];
+  /**
+   * What each revision's runs did, for `GET /deployments/:assistant`: since a time, or under one
+   * deployment version.
+   */
+  stats?(assistant: string, options?: { since?: string; deployment?: number }): Promise<unknown[]> | unknown[];
+  /** Counts a finished run in this replica's rollups. The server calls it as each run finishes. */
+  recordRun?(run: RunRecord): void;
   /** Starts heartbeating this replica's report. */
   attach(report: () => ReplicaReport): Promise<void> | void;
   /** Stops heartbeating, and removes this replica's report. */

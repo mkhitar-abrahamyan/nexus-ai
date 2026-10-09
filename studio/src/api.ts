@@ -671,8 +671,12 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       deployments: await Promise.all(
         records.map(async (deployment) => ({
           ...deployment,
-          // The same window a canary guard judges: the runs since the split last changed.
-          stats: await deployments.stats(deployment.assistant, { since: deployment.history[0]?.at }),
+          // The same window a canary guard judges: the runs since the split last changed, from the
+          // replicas' rollups when they keep them (2.5 and later), and from run records otherwise.
+          stats: await deployments.stats(deployment.assistant, {
+            since: deployment.history[0]?.at,
+            deployment: deployment.version,
+          } as { since?: string }),
         })),
       ),
       replicas: await deployments.replicas(),

@@ -2,6 +2,7 @@ import { compareRuns, type Regression, type RegressionMetric, type RunSample } f
 import type { EvaluationScore, Evaluator } from '../types/evaluate.js';
 import type {
   AssistantRunContext,
+  BucketStrategy,
   DeploymentChange,
   DeploymentChangeRecord,
   DeploymentRecord,
@@ -17,6 +18,7 @@ import { AssistantCapabilityError, BadRequestError, ServerError } from './errors
 import { MemoryServerStore, RUNS_NAMESPACE } from './state.js';
 
 export type {
+  BucketStrategy,
   DeploymentChange,
   DeploymentChangeRecord,
   DeploymentRecord,
@@ -47,7 +49,12 @@ export interface DeploymentsOptions {
   cacheMs?: number;
   /** History entries kept per deployment. Defaults to 50. */
   historyLimit?: number;
-  /** Receives heartbeat failures, which never stop the server. */
+  /**
+   * How long this replica gathers the runs it finished before writing them to its rollups, in
+   * milliseconds. Defaults to 1 second. Reading rollups through this object writes its own first.
+   */
+  rollupMs?: number;
+  /** Receives heartbeat and rollup write failures, which never stop the server. */
   onError?: (error: unknown) => void;
   /** Replaces the system clock, for tests. */
   now?: () => Date;
@@ -63,13 +70,53 @@ export interface RevisionedAssistantOptions {
   live?: string;
   /** What the assistant is, reported by the assistants endpoint. */
   description?: string;
+  /**
+   * How the deployment places threads, when it is first recorded. Defaults to `fnv1a-v1`. A deployment
+   * already recorded keeps its own; `Deployments.bucketing()` changes it.
+   */
+  bucketStrategy?: BucketStrategy;
+}
+
+/** One revision's finished runs, as a replica counts them for one deployment version. */
+export interface RevisionRollup {
+  /** Runs counted: succeeded, failed, and cancelled. */
+  runs: number;
+  /** Runs that succeeded or are awaiting input. */
+  succeeded: number;
+  /** Runs that failed or expired. */
+  failed: number;
+  /** Runs that were cancelled, which count neither way. */
+  cancelled: number;
+  /**
+   * Durations of succeeded and failed runs, as counts by bucket. A bucket's key is its index; each is
+   * 5% wider than the one before, so a percentile read from them is within 2.5% of the true one.
+   */
+  latency: Record<string, number>;
+  /** Total recorded cost of succeeded and failed runs, in US dollars. */
+  cost: number;
+  /** How many of those runs recorded a cost. */
+  costed: number;
+}
+
+/** What one replica counted under one deployment version, as stored in the state store. */
+export interface DeploymentRollup {
+  /** The assistant. */
+  assistant: string;
+  /** The deployment version the runs were routed under. */
+  deployment: number;
+  /** The replica that counted them. */
+  replica: string;
+  /** ISO-8601 time it was last written. */
+  updatedAt: string;
+  /** The counts, per revision. */
+  revisions: Record<string, RevisionRollup>;
 }
 
 /** What one revision's runs did, from `Deployments.stats()`. */
 export interface RevisionStats {
   /** The revision. */
   revision: string;
-  /** Runs recorded for it, finished or not. */
+  /** Runs recorded for it: finished or not from run records, and finished or cancelled from rollups. */
   runs: number;
   /** Runs that succeeded or are awaiting input. */
   succeeded: number;
@@ -115,13 +162,19 @@ export interface RunEvaluationReport {
 
 const DEPLOYMENTS = ['nexus', 'server', 'deployments'];
 const REPLICAS = ['nexus', 'server', 'replicas'];
+const ROLLUPS = ['nexus', 'server', 'rollups'];
 const EPSILON = 1e-9;
 /** Times a change is decided again after other replicas changed the deployment first. */
 const MAX_CHANGE_ATTEMPTS = 10;
+/** Each latency bucket is this much wider than the one before. */
+const LATENCY_GROWTH = 1.05;
+/** Rollups this replica keeps in memory, so a run finishing costs no read. */
+const ROLLUPS_KEPT = 100;
 
 interface Registration {
   revisions: Record<string, ServerAssistant>;
   live: string;
+  bucketStrategy?: BucketStrategy;
 }
 
 /**
@@ -148,6 +201,14 @@ export class Deployments implements ServerDeployments {
   private readonly registrations = new Map<string, Registration>();
   private readonly cache = new Map<string, { record: DeploymentRecord; at: number }>();
   private heartbeat?: { timer: ReturnType<typeof setInterval>; id: string };
+  /** Runs finished here and not yet written, per assistant and deployment version. */
+  private readonly pending = new Map<string, DeploymentRollup>();
+  /** This replica's rollups as last written, so a write needs no read. */
+  private readonly written = new Map<string, DeploymentRollup>();
+  private rollupTimer?: ReturnType<typeof setTimeout>;
+  private flushing: Promise<void> = Promise.resolve();
+  /** Names this replica's rollups before the server attaches it with its own id. */
+  private readonly unattached = `replica-${globalThis.crypto.randomUUID().slice(0, 8)}`;
 
   constructor(private readonly options: DeploymentsOptions = {}) {
     this.state = options.state ?? new MemoryServerStore();
@@ -169,7 +230,11 @@ export class Deployments implements ServerDeployments {
     if (ids.length === 0) throw new BadRequestError(`Assistant "${id}" needs at least one revision`, 'NO_REVISIONS');
     const live = options.live ?? (ids[ids.length - 1] as string);
     if (!revisions[live]) throw new BadRequestError(`Assistant "${id}" has no revision "${live}"`, 'UNKNOWN_REVISION');
-    this.registrations.set(id, { revisions, live });
+    this.registrations.set(id, {
+      revisions,
+      live,
+      ...(options.bucketStrategy ? { bucketStrategy: checkStrategy(options.bucketStrategy) } : {}),
+    });
 
     const pick = (context?: AssistantRunContext): ServerAssistant =>
       (context?.revision !== undefined ? revisions[context.revision] : undefined) ??
@@ -228,7 +293,7 @@ export class Deployments implements ServerDeployments {
     const revision = pickRevision(
       traffic,
       deployment.live,
-      bucket(`${assistant}:${request.threadId ?? request.runId}`),
+      bucket(`${assistant}:${request.threadId ?? request.runId}`, deployment.bucketStrategy),
     );
     return choice(revision, registration, deployment, 'split');
   }
@@ -271,14 +336,16 @@ export class Deployments implements ServerDeployments {
    * - `promote` makes a revision live, with all the traffic.
    * - `rollback` sends all traffic back to the live revision when a canary has any; otherwise it
    *   makes the previous live revision live again. `to` names the revision instead.
+   * - `bucketing` changes how new threads are placed in the split, keeping the split itself.
    *
    * `expectedVersion` applies a change only to the version it was decided on, and throws
    * `DEPLOYMENT_CONFLICT` otherwise, so two people — or a person and a canary guard — cannot undo each
    * other without noticing.
    *
    * Changes to one deployment through this object apply one at a time, so two made at once on one
-   * replica both land, in order. The state store has no atomic compare-and-set, so two replicas
-   * changing one deployment in the same instant can still lose one change: make changes from one
+   * replica both land, in order. Across replicas, a state store with `putIfVersion()` makes each
+   * change atomic: a replica that loses a race decides again on the winner's record. Without it, two
+   * replicas changing one deployment in the same instant can lose one change: make changes from one
    * place, or pass `expectedVersion` and retry a conflict.
    */
   async change(
@@ -353,7 +420,12 @@ export class Deployments implements ServerDeployments {
 
     let live = current.live;
     let traffic: Record<string, number>;
+    let strategy = current.bucketStrategy;
     switch (change.action) {
+      case 'bucketing':
+        strategy = checkStrategy(change.strategy);
+        traffic = current.traffic;
+        break;
       case 'split':
         for (const revision of Object.keys(change.traffic)) check(revision);
         traffic = normalize(change.traffic, live);
@@ -383,7 +455,7 @@ export class Deployments implements ServerDeployments {
         break;
       }
       default:
-        throw new BadRequestError('A change needs an action: split, canary, promote, or rollback');
+        throw new BadRequestError('A change needs an action: split, canary, promote, rollback, or bucketing');
     }
 
     const at = this.now().toISOString();
@@ -392,6 +464,7 @@ export class Deployments implements ServerDeployments {
       version: current.version + 1,
       live,
       traffic,
+      ...(strategy ? { bucketStrategy: strategy } : {}),
       updatedAt: at,
       ...(by ? { updatedBy: by } : {}),
       history: [
@@ -401,6 +474,7 @@ export class Deployments implements ServerDeployments {
           action: change.action,
           live,
           traffic,
+          ...(change.action === 'bucketing' ? { bucketStrategy: strategy } : {}),
           ...(by ? { by } : {}),
           ...(change.reason ? { reason: change.reason } : {}),
         },
@@ -435,6 +509,14 @@ export class Deployments implements ServerDeployments {
   /** Pulls a canary, or undoes the last promotion when there is none; `to` names the revision instead. */
   rollback(assistant: string, options: { to?: string; by?: string; reason?: string } = {}) {
     return this.change(assistant, { action: 'rollback', to: options.to, reason: options.reason }, options.by);
+  }
+
+  /**
+   * Changes how new threads and stateless runs are placed in the split. A thread already on a revision
+   * that takes traffic stays there; new threads are placed by the new strategy.
+   */
+  bucketing(assistant: string, strategy: BucketStrategy, options: { by?: string; reason?: string } = {}) {
+    return this.change(assistant, { action: 'bucketing', strategy, reason: options.reason }, options.by);
   }
 
   /** Replicas whose heartbeat is fresh, newest first. */
@@ -478,8 +560,14 @@ export class Deployments implements ServerDeployments {
     await beat();
   }
 
-  /** Stops heartbeating and removes this replica's report. The server calls it from `stop()`. */
+  /**
+   * Writes the runs this replica counted, stops heartbeating, and removes this replica's report. The
+   * server calls it from `stop()`.
+   */
   async detach(): Promise<void> {
+    if (this.rollupTimer) clearTimeout(this.rollupTimer);
+    this.rollupTimer = undefined;
+    await this.flushRollups();
     if (!this.heartbeat) return;
     clearInterval(this.heartbeat.timer);
     const id = this.heartbeat.id;
@@ -493,17 +581,124 @@ export class Deployments implements ServerDeployments {
   }
 
   /**
-   * What each revision's runs did, from the server's run records in the same store: counts, error
-   * rate, latency percentiles, and mean cost. `since` limits it to runs created from that time, such
-   * as the start of a canary; `limit` bounds how many recent runs are read, 2,000 by default.
+   * What each revision's runs did: counts, error rate, latency percentiles, and mean cost.
+   *
+   * With `deployment`, a version, they come from the rollups of every run routed under it, on every
+   * replica: the whole window a canary guard judges, in one read. Percentiles are then within 2.5%.
+   * Runs in flight are counted when they finish. A version no replica counted, such as one served
+   * only by replicas older than 2.5, falls back to run records.
+   *
+   * Otherwise they come from the server's run records in the same store. `since` limits them to runs
+   * created from that time, such as the start of a canary; `limit` bounds how many recent runs are
+   * read, 2,000 by default.
    */
-  async stats(assistant: string, options: { since?: string; limit?: number } = {}): Promise<RevisionStats[]> {
+  async stats(
+    assistant: string,
+    options: { since?: string; limit?: number; deployment?: number } = {},
+  ): Promise<RevisionStats[]> {
+    if (options.deployment !== undefined) {
+      const rollups = await this.rollups(assistant, options.deployment);
+      if (rollups.size > 0) return [...rollups].map(([revision, rollup]) => rollupStats(revision, rollup));
+    }
     const byRevision = new Map<string, RunRecord[]>();
     for (const run of await this.runs(assistant, options)) {
       const revision = run.revision?.id ?? '';
       byRevision.set(revision, [...(byRevision.get(revision) ?? []), run]);
     }
     return [...byRevision].map(([revision, runs]) => summarize(revision, runs));
+  }
+
+  /**
+   * Every revision's rollup under one deployment version, summed over the replicas that counted its
+   * runs. This replica's runs not yet written are written first.
+   */
+  async rollups(assistant: string, deployment: number): Promise<Map<string, RevisionRollup>> {
+    await this.flushRollups();
+    const stored = await this.state.list<DeploymentRollup>([...ROLLUPS, assistant, String(deployment)], {
+      limit: 10_000,
+    });
+    const total = new Map<string, RevisionRollup>();
+    for (const rollup of stored) {
+      for (const [revision, counts] of Object.entries(rollup.revisions)) {
+        total.set(revision, addCounts(total.get(revision), counts));
+      }
+    }
+    return total;
+  }
+
+  /**
+   * Counts a finished run in this replica's rollup for the deployment version it was routed under.
+   * The server calls it as each run finishes. Counts are written every `rollupMs`, each replica to its
+   * own record, so counting never contends with another replica.
+   */
+  recordRun(run: RunRecord): void {
+    const revision = run.revision;
+    if (!revision) return;
+    const outcome = outcomeOf(run);
+    if (!outcome) return;
+    const key = `${run.assistant}\u0000${revision.deployment}`;
+    const rollup = this.pending.get(key) ?? {
+      assistant: run.assistant,
+      deployment: revision.deployment,
+      replica: '',
+      updatedAt: '',
+      revisions: {},
+    };
+    rollup.revisions[revision.id] = addCounts(rollup.revisions[revision.id], countsOf(run, outcome));
+    this.pending.set(key, rollup);
+    if (!this.rollupTimer) {
+      this.rollupTimer = setTimeout(() => {
+        this.rollupTimer = undefined;
+        void this.flushRollups();
+      }, this.options.rollupMs ?? 1_000);
+      // Counting reports on the process; it must never be what keeps it running.
+      this.rollupTimer.unref?.();
+    }
+  }
+
+  /** Writes the runs this replica counted and has not written yet. Failures go to `onError` and are retried. */
+  flushRollups(): Promise<void> {
+    this.flushing = this.flushing.then(() => this.writeRollups());
+    return this.flushing;
+  }
+
+  private async writeRollups(): Promise<void> {
+    const batch = [...this.pending.values()];
+    this.pending.clear();
+    const replica = this.heartbeat?.id ?? this.unattached;
+    for (const delta of batch) {
+      const namespace = [...ROLLUPS, delta.assistant, String(delta.deployment)];
+      const key = `${replica}\u0000${delta.assistant}\u0000${delta.deployment}`;
+      try {
+        // A replica that restarts under the same id carries on from what it wrote before.
+        const base = this.written.get(key) ?? (await this.state.get<DeploymentRollup>(namespace, replica));
+        const revisions = { ...base?.revisions };
+        for (const [revision, counts] of Object.entries(delta.revisions)) {
+          revisions[revision] = addCounts(revisions[revision], counts);
+        }
+        const next: DeploymentRollup = {
+          assistant: delta.assistant,
+          deployment: delta.deployment,
+          replica,
+          updatedAt: this.now().toISOString(),
+          revisions,
+        };
+        await this.state.put(namespace, replica, next);
+        this.written.delete(key);
+        this.written.set(key, next);
+        if (this.written.size > ROLLUPS_KEPT) this.written.delete(this.written.keys().next().value as string);
+      } catch (error) {
+        // Kept for the next write, so a store that refuses one write loses no count.
+        const pendingKey = `${delta.assistant}\u0000${delta.deployment}`;
+        const again = this.pending.get(pendingKey);
+        if (again) {
+          for (const [revision, counts] of Object.entries(delta.revisions)) {
+            again.revisions[revision] = addCounts(again.revisions[revision], counts);
+          }
+        } else this.pending.set(pendingKey, delta);
+        this.options.onError?.(error);
+      }
+    }
   }
 
   /**
@@ -615,6 +810,7 @@ export class Deployments implements ServerDeployments {
       version: 0,
       live: registration.live,
       traffic: { [registration.live]: 1 },
+      ...(registration.bucketStrategy ? { bucketStrategy: registration.bucketStrategy } : {}),
       updatedAt: new Date(0).toISOString(),
       history: [],
     };
@@ -661,6 +857,16 @@ export interface CanaryGuardOptions {
    */
   steps?: readonly number[];
   /**
+   * What a canary is judged on.
+   *
+   * - `runs`, the default, reads run samples: the server's run records since the split last changed,
+   *   the latest 2,000, or those `samples` returns.
+   * - `rollups` reads the counts every replica keeps under the deployment's current version: every run
+   *   since the split last changed, however many, in one read. It judges the error rate, p95 latency,
+   *   and mean cost, not feedback, so it cannot be combined with `samples` or `feedback`.
+   */
+  from?: 'runs' | 'rollups';
+  /**
    * Where a revision's runs come from. Defaults to the server's run records. Give it runs from a
    * trace store to judge on feedback scores too, with `feedback` naming the keys.
    */
@@ -677,6 +883,9 @@ export interface CanaryGuardOptions {
    * `minErrorRateIncrease`, `latencyIncrease` with `minLatencyChangeMs`, `costIncrease`, and
    * `minFeedbackDrop`. A real regression rolls back, and noise or a trivial change does not. Without
    * it, the error rate uses a z-test at 95%, and latency and cost use their margins alone.
+   *
+   * From rollups, the error rate is judged by a z-test at this confidence, with
+   * `minErrorRateIncrease`, and latency and cost by their margins.
    */
   confidence?: number;
   /** The smallest rise in the error rate, absolute, that counts under `confidence`. Defaults to 0.02. */
@@ -738,32 +947,43 @@ export function watchCanaries(options: CanaryGuardOptions): CanaryGuard {
   const deployments = options.deployments;
   const minRuns = options.minRuns ?? 20;
   const by = options.by ?? 'guard';
+  const fromRollups = options.from === 'rollups';
+  if (fromRollups && (options.samples || options.feedback?.length)) {
+    throw new TypeError('A canary guard over rollups judges counts, so it takes neither samples nor feedback');
+  }
   const samples =
     options.samples ??
     ((request: { assistant: string; revision: string; since: string }) =>
       deployments.samples(request.assistant, request.revision, request.since));
 
-  async function judge(deployment: DeploymentRecord, canary: string): Promise<CanaryDecision> {
+  /** What got worse, and how many finished runs each side had, over the canary's window. */
+  async function measure(
+    deployment: DeploymentRecord,
+    canary: string,
+  ): Promise<{ regressions: Regression[]; counted: { live: number; canary: number } }> {
+    const group = `${deployment.assistant}@${canary}`;
+    const metrics = options.metrics ?? ['error-rate', 'latency'];
+    if (fromRollups) {
+      const rollups = await deployments.rollups(deployment.assistant, deployment.version);
+      const live = rollups.get(deployment.live);
+      const candidate = rollups.get(canary);
+      const counted = { live: finishedOf(live), canary: finishedOf(candidate) };
+      if (counted.live < minRuns || counted.canary < minRuns) return { regressions: [], counted };
+      return {
+        regressions: compareRollups(live as RevisionRollup, candidate as RevisionRollup, group, metrics),
+        counted,
+      };
+    }
     const since = deployment.history[0]?.at ?? deployment.canarySince ?? deployment.updatedAt;
     const [liveRuns, canaryRuns] = await Promise.all([
       samples({ assistant: deployment.assistant, revision: deployment.live, since }),
       samples({ assistant: deployment.assistant, revision: canary, since }),
     ]);
-    const weight = deployment.traffic[canary] ?? 0;
-    const decision: CanaryDecision = {
-      assistant: deployment.assistant,
-      canary,
-      live: deployment.live,
-      action: 'hold',
-      regressions: [],
-      samples: { live: liveRuns.length, canary: canaryRuns.length },
-      weight,
-    };
-    if (liveRuns.length < minRuns || canaryRuns.length < minRuns) return decision;
-
+    const counted = { live: liveRuns.length, canary: canaryRuns.length };
+    if (counted.live < minRuns || counted.canary < minRuns) return { regressions: [], counted };
     const regressions = compareRuns(liveRuns, canaryRuns, {
-      group: `${deployment.assistant}@${canary}`,
-      metrics: options.metrics ?? ['error-rate', 'latency'],
+      group,
+      metrics,
       feedback: options.feedback,
       minRuns,
       latencyIncrease: options.latencyIncrease,
@@ -778,6 +998,90 @@ export function watchCanaries(options: CanaryGuardOptions): CanaryGuard {
             resamples: options.resamples,
           }),
     });
+    return { regressions, counted };
+  }
+
+  /** The rollup comparison: the error rate by a z-test, and latency and cost by their margins. */
+  function compareRollups(
+    live: RevisionRollup,
+    candidate: RevisionRollup,
+    group: string,
+    metrics: readonly RegressionMetric[],
+  ): Regression[] {
+    const regressions: Regression[] = [];
+    const samples = { baseline: finishedOf(live), current: finishedOf(candidate) };
+    if (metrics.includes('error-rate')) {
+      const p1 = live.failed / samples.baseline;
+      const p2 = candidate.failed / samples.current;
+      const pooled = (live.failed + candidate.failed) / (samples.baseline + samples.current);
+      const standardError = Math.sqrt(pooled * (1 - pooled) * (1 / samples.baseline + 1 / samples.current));
+      const z = options.confidence === undefined ? 1.96 : normalQuantile((1 + options.confidence) / 2);
+      const minimum = options.confidence === undefined ? 0 : (options.minErrorRateIncrease ?? 0.02);
+      if (p2 > p1 && standardError > 0 && (p2 - p1) / standardError >= z && p2 - p1 >= minimum) {
+        regressions.push({
+          group,
+          metric: 'error-rate',
+          baseline: p1,
+          current: p2,
+          change: p2 - p1,
+          samples,
+          summary: `${group}: error rate rose from ${rate(p1)} to ${rate(p2)}`,
+        });
+      }
+    }
+    if (metrics.includes('latency')) {
+      const before = latencyPercentile(live.latency, 0.95);
+      const after = latencyPercentile(candidate.latency, 0.95);
+      if (
+        before !== undefined &&
+        after !== undefined &&
+        before > 0 &&
+        after >= before * (1 + (options.latencyIncrease ?? 0.25)) &&
+        after - before >= (options.minLatencyChangeMs ?? 50)
+      ) {
+        regressions.push({
+          group,
+          metric: 'latency-p95',
+          baseline: before,
+          current: after,
+          change: after / before - 1,
+          samples,
+          summary: `${group}: p95 latency rose from ${Math.round(before)}ms to ${Math.round(after)}ms`,
+        });
+      }
+    }
+    if (metrics.includes('cost') && live.costed > 0 && candidate.costed > 0) {
+      const before = live.cost / live.costed;
+      const after = candidate.cost / candidate.costed;
+      if (before > 0 && after >= before * (1 + (options.costIncrease ?? 0.25))) {
+        regressions.push({
+          group,
+          metric: 'cost',
+          baseline: before,
+          current: after,
+          change: after / before - 1,
+          samples,
+          summary: `${group}: mean cost rose from $${before.toFixed(4)} to $${after.toFixed(4)}`,
+        });
+      }
+    }
+    return regressions;
+  }
+
+  async function judge(deployment: DeploymentRecord, canary: string): Promise<CanaryDecision> {
+    const { regressions, counted } = await measure(deployment, canary);
+    const weight = deployment.traffic[canary] ?? 0;
+    const decision: CanaryDecision = {
+      assistant: deployment.assistant,
+      canary,
+      live: deployment.live,
+      action: 'hold',
+      regressions: [],
+      samples: counted,
+      weight,
+    };
+    if (counted.live < minRuns || counted.canary < minRuns) return decision;
+
     if (regressions.length > 0) {
       await deployments.change(
         deployment.assistant,
@@ -799,7 +1103,7 @@ export function watchCanaries(options: CanaryGuardOptions): CanaryGuard {
           action: 'canary',
           revision: canary,
           weight: next,
-          reason: `canary ${canary} held up at ${percent(weight)} over ${canaryRuns.length} runs`,
+          reason: `canary ${canary} held up at ${percent(weight)} over ${counted.canary} runs`,
           expectedVersion: deployment.version,
         },
         by,
@@ -849,14 +1153,139 @@ export function watchCanaries(options: CanaryGuardOptions): CanaryGuard {
   return { check, stop: () => clearInterval(timer) };
 }
 
-/** A stable position in [0, 1) for a key: FNV-1a, so the same thread always lands in the same place. */
-export function bucket(key: string): number {
+/**
+ * A stable position in [0, 1) for a key, so the same thread always lands in the same place. The
+ * strategy defaults to `fnv1a-v1`, whose positions never change; `hash-v2` spreads sequential keys
+ * evenly too.
+ */
+export function bucket(key: string, strategy: BucketStrategy = 'fnv1a-v1'): number {
   let hash = 0x811c9dc5;
   for (let index = 0; index < key.length; index += 1) {
     hash ^= key.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
+  if (strategy === 'hash-v2') {
+    // MurmurHash3's finalizer: every input bit reaches every output bit, so keys that differ only in
+    // their last characters land far apart.
+    hash ^= hash >>> 16;
+    hash = Math.imul(hash, 0x85ebca6b);
+    hash ^= hash >>> 13;
+    hash = Math.imul(hash, 0xc2b2ae35);
+    hash ^= hash >>> 16;
+  }
   return (hash >>> 0) / 0x1_0000_0000;
+}
+
+function checkStrategy(strategy: BucketStrategy): BucketStrategy {
+  if (strategy !== 'fnv1a-v1' && strategy !== 'hash-v2') {
+    throw new BadRequestError(`Unknown bucket strategy "${String(strategy)}": use fnv1a-v1 or hash-v2`);
+  }
+  return strategy;
+}
+
+type Outcome = 'succeeded' | 'failed' | 'cancelled';
+
+function outcomeOf(run: RunRecord): Outcome | undefined {
+  if (run.status === 'succeeded' || run.status === 'awaiting_input') return 'succeeded';
+  if (run.status === 'failed' || run.status === 'expired') return 'failed';
+  // A run cancelled while awaiting input was already counted when it paused.
+  if (run.status === 'cancelled') return run.interrupt === undefined ? 'cancelled' : undefined;
+  return undefined;
+}
+
+function countsOf(run: RunRecord, outcome: Outcome): RevisionRollup {
+  const finished = outcome !== 'cancelled';
+  return {
+    runs: 1,
+    succeeded: outcome === 'succeeded' ? 1 : 0,
+    failed: outcome === 'failed' ? 1 : 0,
+    cancelled: outcome === 'cancelled' ? 1 : 0,
+    latency: finished && run.durationMs !== undefined ? { [String(latencyIndex(run.durationMs))]: 1 } : {},
+    cost: finished && run.cost !== undefined ? run.cost : 0,
+    costed: finished && run.cost !== undefined ? 1 : 0,
+  };
+}
+
+function addCounts(a: RevisionRollup | undefined, b: RevisionRollup): RevisionRollup {
+  if (!a) return { ...b, latency: { ...b.latency } };
+  const latency = { ...a.latency };
+  for (const [index, count] of Object.entries(b.latency)) latency[index] = (latency[index] ?? 0) + count;
+  return {
+    runs: a.runs + b.runs,
+    succeeded: a.succeeded + b.succeeded,
+    failed: a.failed + b.failed,
+    cancelled: a.cancelled + b.cancelled,
+    latency,
+    cost: a.cost + b.cost,
+    costed: a.costed + b.costed,
+  };
+}
+
+function finishedOf(rollup: RevisionRollup | undefined): number {
+  return rollup ? rollup.succeeded + rollup.failed : 0;
+}
+
+/** The latency bucket a duration falls in: 0 up to 1ms, then one per 5% step. */
+function latencyIndex(ms: number): number {
+  return ms <= 1 ? 0 : Math.ceil(Math.log(ms) / Math.log(LATENCY_GROWTH));
+}
+
+/** A percentile of bucketed durations, at the geometric middle of its bucket. */
+function latencyPercentile(latency: Record<string, number>, p: number): number | undefined {
+  const buckets = Object.entries(latency)
+    .map(([index, count]) => [Number(index), count] as const)
+    .sort((a, b) => a[0] - b[0]);
+  const total = buckets.reduce((sum, [, count]) => sum + count, 0);
+  if (total === 0) return undefined;
+  const rank = Math.max(1, Math.ceil(p * total));
+  let seen = 0;
+  for (const [index, count] of buckets) {
+    seen += count;
+    if (seen >= rank) return index === 0 ? 1 : LATENCY_GROWTH ** (index - 0.5);
+  }
+  return undefined;
+}
+
+function rollupStats(revision: string, rollup: RevisionRollup): RevisionStats {
+  const finished = finishedOf(rollup);
+  const p50 = latencyPercentile(rollup.latency, 0.5);
+  const p95 = latencyPercentile(rollup.latency, 0.95);
+  return {
+    revision,
+    runs: rollup.runs,
+    succeeded: rollup.succeeded,
+    failed: rollup.failed,
+    cancelled: rollup.cancelled,
+    errorRate: finished === 0 ? 0 : rollup.failed / finished,
+    ...(p50 !== undefined && p95 !== undefined ? { p50Ms: Math.round(p50), p95Ms: Math.round(p95) } : {}),
+    ...(rollup.costed > 0 ? { meanCost: rollup.cost / rollup.costed } : {}),
+  };
+}
+
+/** The standard normal quantile, by Acklam's approximation, accurate to about 1e-9. */
+function normalQuantile(p: number): number {
+  const a = [
+    -39.69683028665376, 220.9460984245205, -275.9285104469687, 138.357751867269, -30.66479806614716, 2.506628277459239,
+  ];
+  const b = [-54.47609879822406, 161.5858368580409, -155.6989798598866, 66.80131188771972, -13.28068155288572];
+  const c = [
+    -0.007784894002430293, -0.3223964580411365, -2.400758277161838, -2.549732539343734, 4.374664141464968,
+    2.938163982698783,
+  ];
+  const d = [0.007784695709041462, 0.3224671290700398, 2.445134137142996, 3.754408661907416];
+  const tail = (q: number) =>
+    (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+    ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  if (p <= 0) return -Infinity;
+  if (p >= 1) return Infinity;
+  if (p < 0.02425) return tail(Math.sqrt(-2 * Math.log(p)));
+  if (p > 1 - 0.02425) return -tail(Math.sqrt(-2 * Math.log(1 - p)));
+  const q = p - 0.5;
+  const r = q * q;
+  return (
+    ((((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q) /
+    (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1)
+  );
 }
 
 /**
@@ -963,6 +1392,11 @@ function percentile(values: readonly number[], p: number): number {
 
 function round(value: number): number {
   return Math.round(value * 1e6) / 1e6;
+}
+
+/** An error rate as compareRuns() writes one, to a tenth of a percent. */
+function rate(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 function percent(value: number): string {

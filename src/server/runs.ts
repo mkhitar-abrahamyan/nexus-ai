@@ -20,6 +20,7 @@ import type {
   RunStatus,
   ScalingSnapshot,
   ServerAssistant,
+  ServerDeployments,
   ServerStateStore,
   TenantGate,
   ThreadBusyPolicy,
@@ -96,6 +97,8 @@ export interface RunManagerOptions {
   recoverEveryMs?: number;
   /** Per-tenant limits, enforced when a run is accepted. See `tenantLimits()` in `nexus-ai-pro/server/tenancy`. */
   tenants?: TenantGate;
+  /** The deployments registry, which counts each finished run in this replica's rollups. */
+  deployments?: Pick<ServerDeployments, 'recordRun'>;
   /** What to do when a thread is already running something. Defaults to `reject`. */
   onBusy?: ThreadBusyPolicy;
   /** How long a run may take before it expires, in milliseconds. */
@@ -1054,6 +1057,11 @@ export class RunManager {
     this.metrics.count('nexus_server_runs_finished_total', { ...labels, status: run.status });
     if (run.durationMs !== undefined) {
       this.metrics.observe('nexus_server_run_duration_seconds', labels, run.durationMs / 1000);
+    }
+    try {
+      this.options.deployments?.recordRun?.(run);
+    } catch (error) {
+      this.report(error, { runId: run.id });
     }
   }
 
