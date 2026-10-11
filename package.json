@@ -660,6 +660,16 @@
         "default": "./dist-cjs/protocols/acp.js"
       }
     },
+    "./protocols/acp/editor": {
+      "import": {
+        "types": "./dist/protocols/acp-editor.d.ts",
+        "default": "./dist/protocols/acp-editor.js"
+      },
+      "require": {
+        "types": "./dist-cjs/protocols/acp-editor.d.ts",
+        "default": "./dist-cjs/protocols/acp-editor.js"
+      }
+    },
     "./tracing": {
       "import": {
         "types": "./dist/tracing/index.d.ts",
@@ -2294,6 +2304,9 @@
       ],
       "protocols/acp": [
         "dist-cjs/protocols/acp.d.ts"
+      ],
+      "protocols/acp/editor": [
+        "dist-cjs/protocols/acp-editor.d.ts"
       ],
       "context-hub": [
         "dist-cjs/context-hub/index.d.ts"

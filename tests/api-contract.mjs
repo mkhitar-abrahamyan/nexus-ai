@@ -112,6 +112,7 @@ const expectedSubpaths = [
   './protocols/ag-ui',
   './protocols/a2a',
   './protocols/acp',
+  './protocols/acp/editor',
   './tracing',
   './tracing/otlp',
   './tracing/rollups',

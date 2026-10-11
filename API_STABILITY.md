@@ -60,6 +60,13 @@ New and stable:
   `GetExtendedAgentCard`; the client's new methods, `A2aListTasksOptions`, and `A2aTaskPage`; and
   the error codes `pushNotificationNotSupported` and `extendedCardNotConfigured`.
 
+- on `nexus-ai-pro/protocols/acp`: `AcpSessionStore`, `AcpSessionRecord`, `MemoryAcpSessionStore`,
+  `storeAcpSessions()`, `AcpOptions.sessions` and `editor`, `AcpEditorBridge`, `AcpConnection`,
+  `AcpClientCapabilities`, `session/load`, image and audio blocks, and the fourth argument of
+  `AcpOptions.input`;
+- `nexus-ai-pro/protocols/acp/editor`: `acpEditor()`, `AcpEditor`, `AcpEditorOptions`, and the tool
+  names `editor_read_file`, `editor_write_file`, and `editor_run_command`.
+
 A streamed A2A task now reports its move to `TASK_STATE_WORKING` as a status update, before its
 other events.
 

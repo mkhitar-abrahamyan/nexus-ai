@@ -48,11 +48,23 @@ Protocols complete, and progress on every stream.
   - The client gains `extendedCard()`, `listTasks()`, `subscribe()`, `setPushNotification()`,
     `listPushNotifications()`, `deletePushNotification()`, and `push` and `returnImmediately` when
     sending.
+- **ACP, durable and complete.**
+  - Sessions live in an `AcpSessionStore`: `MemoryAcpSessionStore` by default, or
+    `storeAcpSessions()` over any long-term `Store`. The agent offers `session/load`, replays the
+    conversation, and asks again a question it was waiting on.
+  - A prompt can carry images and audio, which reach the model as content parts.
+  - `acpEditor()`, on the new `nexus-ai-pro/protocols/acp/editor`, gives an agent the editor's files,
+    terminal, and MCP servers, as tools from its `toolSource`, each declaring what it touches.
+    `serveAcp()` takes it as `editor`, and detaches it when the editor closes its end.
 - **A `step` graph event.** `GraphRunOptions.onEvent` receives `step` after each superstep, with the
   state after it.
 
 ### Proof
 
+- An ACP session paused on a question survives the agent's restart, on memory and SQLite; the
+  editor reopens it, sees the conversation replayed, and answers. An image and audio reach the model.
+  Through the bridge, an agent reads, writes (after the person allows it), and runs the tests in the
+  editor, and searches docs through an MCP server the editor offered, started as a real process.
 - An A2A task paused for an approval survives a restart and is finished by another replica, sending
   its email once, on the memory, SQLite, Postgres, and Redis stores. A running task is followed where
   it runs and from another replica; a cancel on one replica stands against the other. Every state

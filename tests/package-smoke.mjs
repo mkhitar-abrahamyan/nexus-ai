@@ -169,6 +169,7 @@ const imports = [
       'formatThread',
     ],
   },
+  { specifier: 'nexus-ai-pro/protocols/acp/editor', exports: ['acpEditor'] },
   {
     specifier: 'nexus-ai-pro/postgres',
     exports: [

@@ -1,6 +1,6 @@
 # Agent protocols
 
-<!-- covers: ./protocols/ag-ui ./protocols/a2a ./protocols/acp -->
+<!-- covers: ./protocols/ag-ui ./protocols/a2a ./protocols/acp ./protocols/acp/editor -->
 
 Three open protocols put an agent where other software already expects one:
 - **AG-UI** connects an agent to a user interface. Any AG-UI frontend renders the run as it happens:
@@ -304,9 +304,10 @@ Each editor session is a conversation on its own thread, and `AcpSessionInfo` de
 - the MCP servers the editor offered.
 
 A prompt is a list of `AcpContentBlock` values. Text is read as written, an embedded file is
-fenced under its URI, and a link is named. The default graph input is `{ messages }`: the session's
-conversation and the prompt. `AcpOptions.input` builds another from the prompt text, the session,
-and the history.
+fenced under its URI, and a link is named. An image or audio block reaches the model as an image or
+audio part beside the text: the agent tells the editor in `initialize` that it reads both. The
+default graph input is `{ messages }`: the session's conversation and the prompt. `AcpOptions.input`
+builds another from the prompt text, the session, the history, and the blocks.
 
 While the prompt runs, the editor receives each `AcpSessionUpdate`:
 - the agent's text as it streams, and its reasoning as thought;
@@ -319,6 +320,59 @@ While the prompt runs, the editor receives each `AcpSessionUpdate`:
 
 `AcpOptions.kind` decides a tool's kind. By default, the kind is guessed from the name:
 `read_file` reads, `edit_file` edits, and `execute` runs a command.
+
+### Sessions an editor reopens
+
+Sessions live in an `AcpSessionStore`, each as an `AcpSessionRecord`: the session, its
+conversation, the question it waits on, and the person's standing choices to always allow or
+reject a tool.
+- `MemoryAcpSessionStore` is the default.
+- `storeAcpSessions()` keeps them in any long-term `Store`: the memory, Redis, Postgres, or SQLite
+  store.
+
+The agent offers `session/load`. After the agent restarts, the editor reopens a session by its id.
+The agent then replays the conversation as updates (the person's messages, its own, and each tool
+call with its result) and asks again any question it was waiting on, so the next prompt answers it.
+A store outside the process makes a session survive a restart; give the graph a durable
+checkpointer too, so the paused run resumes. Audio is kept in a session as a note that it was
+heard, not as its bytes.
+
+### The editor's files, terminal, and MCP servers
+
+`acpEditor()`, on `nexus-ai-pro/protocols/acp/editor`, gives an agent what the editor offers, as an
+`AcpEditor`. Pass it to `serveAcp()` as `editor`, an `AcpEditorBridge`, and its `toolSource` to the
+agent:
+
+```ts
+import { createAgent } from 'nexus-ai-pro/agent';
+import { serveAcp } from 'nexus-ai-pro/protocols/acp';
+import { acpEditor } from 'nexus-ai-pro/protocols/acp/editor';
+
+const editor = acpEditor();
+const agent = createAgent({
+  client: ai,
+  toolSource: editor.toolSource,
+  interruptOn: { editor_write_file: true, editor_run_command: true },
+});
+serveAcp(agent, { input: process.stdin, output: process.stdout }, { editor });
+```
+
+Each session gets the tools the editor said it can serve, in `initialize`, as `AcpClientCapabilities`:
+- `editor_read_file` reads through the editor, including changes the person has not saved;
+- `editor_write_file` writes through the editor, which shows the change;
+- `editor_run_command` runs a command in the editor's terminal, which the person sees, and returns
+  its output and exit code. A cancelled run kills the command, and the terminal is always released;
+- the tools of each MCP server the editor offered for the session, prefixed by the server's name.
+  Servers started over stdio run in the session's directory, and HTTP servers are reached as given.
+
+A relative path is taken from the session's directory. Each tool declares what it touches, as
+`filesystem:read:<path>`, `filesystem:write:<path>`, or `shell:<command>`, so a permission policy
+decides it, and an approval asks the person in the editor. The bridge asks the editor through an
+`AcpConnection`, which `serveAcp()` attaches. When the editor closes its end, the bridge closes the
+MCP servers it started.
+
+`AcpEditorOptions` turns off `files`, `terminal`, or `mcp`, and sets `mcpTimeoutMs` (30 seconds),
+`mcpFetch`, `maxOutputBytes` (64 KB), and `onError` for a server that fails to start.
 
 The prompt answers with an `AcpStopReason`:
 - `end_turn` when the agent answered;
@@ -373,10 +427,10 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
   its process lost.
 - **A2A coverage.** Only the JSON-RPC binding is served. A webhook receives state changes, not each
   piece of streamed text.
-- **ACP sessions live in memory too.** The agent does not offer `session/load`, and it reads text
-  prompts only, not images or audio. It does not use the editor's file system or terminal, or
-  connect the MCP servers the editor offers. Those reach `input` through the session, for a graph
-  that uses them.
+- **ACP turns.** A session survives a restart between turns. A turn the agent was in the middle of,
+  such as one waiting on an approval in the editor, is lost with its process.
+- **The editor's MCP servers.** Servers over stdio and HTTP are connected; an SSE server is not. A
+  server's tools declare no capabilities, so a permission policy needs a rule for them by name.
 
 <!-- reference:start -->
 ## Reference
@@ -423,15 +477,30 @@ specific entry point that provides it.
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `ACP_PROTOCOL_VERSION` | constant | The protocol version this module speaks. |
-| `AcpContentBlock` | interface | One block of a prompt: text, a file the editor embedded, or a link to one. |
+| `AcpClientCapabilities` | interface | What the editor said it can do for the agent, in `initialize`. |
+| `AcpConnection` | interface | The connection to the editor, as a bridge sees it. |
+| `AcpContentBlock` | interface | One block of a prompt: text, an image, audio, a file the editor embedded, or a link to one. |
+| `AcpEditorBridge` | interface | Something that uses the editor's connection, such as `acpEditor()`. |
 | `AcpOptions` | interface | Options for `serveAcp()`. |
 | `AcpServer` | interface | A running ACP connection. |
 | `AcpSessionInfo` | interface | An editor session, as `input` sees it. |
+| `AcpSessionRecord` | interface | A session as a store keeps it. |
+| `AcpSessionStore` | interface | Where an ACP agent keeps its sessions. |
 | `AcpSessionUpdate` | type | What the agent tells the editor during a turn: ACP's `session/update`. |
 | `AcpStopReason` | type | Why a prompt's turn ended. |
 | `AcpStreams` | interface | Where the agent reads and writes: `process.stdin` and `process.stdout`, or any pair like them. |
 | `AcpToolKind` | type | What a tool call does, so the editor can show it: ACP's tool kinds. |
+| `MemoryAcpSessionStore` | class | Sessions in this process: the default. |
 | `serveAcp` | function | Serves a graph to an editor over ACP. |
+| `storeAcpSessions` | function | Sessions in any long-term `Store`: the memory, Redis, Postgres, or SQLite store. |
+
+### `nexus-ai-pro/protocols/acp/editor`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `acpEditor` | function | The editor's files, terminal, and MCP servers, as tools an agent's `toolSource` supplies per session. |
+| `AcpEditor` | interface | The editor, as tools for an agent. |
+| `AcpEditorOptions` | interface | Options for `acpEditor()`. |
 
 ### `nexus-ai-pro/protocols/ag-ui`
 

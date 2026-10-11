@@ -9,10 +9,15 @@
  *
  * A tool call that needs approval asks the editor, which shows the person allow and reject choices.
  * A choice to always allow or always reject is kept for the rest of the session.
+ *
+ * Sessions live in an `AcpSessionStore`, so an editor reopens one with `session/load` after the agent
+ * restarts. A prompt may carry images and audio. An `AcpEditorBridge`, such as `acpEditor()` from
+ * `nexus-ai-pro/protocols/acp/editor`, gives the agent the editor's files, terminal, and MCP servers.
  */
 import type { GraphEvent } from '../types/graph.js';
-import type { Message } from '../types/messages.js';
+import type { ContentPart, Message } from '../types/messages.js';
 import type { Principal } from '../types/principal.js';
+import type { Store } from '../types/store.js';
 import {
   answerOf,
   asText,
@@ -37,12 +42,16 @@ export type AcpToolKind = 'read' | 'edit' | 'delete' | 'move' | 'search' | 'exec
 /** Why a prompt's turn ended. */
 export type AcpStopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled';
 
-/** One block of a prompt: text, a file the editor embedded, or a link to one. */
+/** One block of a prompt: text, an image, audio, a file the editor embedded, or a link to one. */
 export interface AcpContentBlock {
-  /** `text`, `resource`, `resource_link`, or a kind this agent does not read, such as `image`. */
+  /** `text`, `image`, `audio`, `resource`, `resource_link`, or a kind this agent does not read. */
   type: string;
   /** A text block's text. */
   text?: string;
+  /** An image or audio block's bytes, as base64. */
+  data?: string;
+  /** An image or audio block's media type, such as `image/png` or `audio/wav`. */
+  mimeType?: string;
   /** A link's URI. */
   uri?: string;
   /** A link's name. */
@@ -80,7 +89,7 @@ export interface AcpOptions {
    * The graph input for a prompt. Defaults to `{ messages }`: the session's conversation and the
    * prompt, which is what an agent from `createAgent()` takes.
    */
-  input?: (prompt: string, session: AcpSessionInfo, history: Message[]) => unknown;
+  input?: (prompt: string, session: AcpSessionInfo, history: Message[], blocks: AcpContentBlock[]) => unknown;
   /**
    * The answer the next prompt gives a question that is not a tool approval. Such a question is
    * asked as the agent's message, and the turn ends. Defaults to the prompt's text.
@@ -90,6 +99,93 @@ export interface AcpOptions {
   kind?: (name: string, args: unknown) => AcpToolKind;
   /** Who the agent acts for: the person at the editor. */
   principal?: Principal;
+  /**
+   * Where sessions are kept. Defaults to memory; `storeAcpSessions()` keeps them in a long-term store,
+   * so an editor reopens a session with `session/load` after the agent restarts. A question the last
+   * turn asked is kept too; a turn the agent was in the middle of is not.
+   */
+  sessions?: AcpSessionStore;
+  /** Gives the agent what the editor offers: its files, its terminal, and its MCP servers. */
+  editor?: AcpEditorBridge;
+}
+
+/** What the editor said it can do for the agent, in `initialize`. */
+export interface AcpClientCapabilities {
+  /** Reading and writing files through the editor, including ones it has open and unsaved. */
+  fs?: { readTextFile?: boolean; writeTextFile?: boolean };
+  /** Running commands in the editor's terminals. */
+  terminal?: boolean;
+}
+
+/** The connection to the editor, as a bridge sees it. */
+export interface AcpConnection {
+  /** Asks the editor something, such as `fs/read_text_file`, and resolves with its answer or rejects with its error. */
+  request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown>;
+  /** What the editor can do, from `initialize`. */
+  capabilities(): AcpClientCapabilities;
+  /** A session's directory and MCP servers. */
+  session(sessionId: string): AcpSessionInfo | undefined;
+}
+
+/** Something that uses the editor's connection, such as `acpEditor()`. `serveAcp()` attaches it when it starts. */
+export interface AcpEditorBridge {
+  /** Receives the connection to the editor. */
+  attach(connection: AcpConnection): void;
+  /** Called when the editor closes its end, or the server is closed: the place to stop what it started. */
+  detach?(): void | Promise<void>;
+}
+
+/** A session as a store keeps it. */
+export interface AcpSessionRecord {
+  /** The session. */
+  info: AcpSessionInfo;
+  /** The conversation, tool calls included. Audio is kept as a note of it, not its bytes. */
+  history: Message[];
+  /** The questions the last turn asked, which the next prompt answers. */
+  pending?: ProtocolInterrupt[];
+  /** Approvals already given for the paused run, sent with those answers. */
+  answered?: Record<string, unknown>;
+  /** Tool names a person chose to always allow (true) or always reject (false). */
+  always: Array<[string, boolean]>;
+  /** ISO-8601 time it was last written. */
+  updatedAt: string;
+}
+
+/** Where an ACP agent keeps its sessions. */
+export interface AcpSessionStore {
+  /** A session's record. */
+  get(sessionId: string): Promise<AcpSessionRecord | undefined> | AcpSessionRecord | undefined;
+  /** Writes a session's record. */
+  put(record: AcpSessionRecord): Promise<void> | void;
+}
+
+/** Sessions in this process: the default. */
+export class MemoryAcpSessionStore implements AcpSessionStore {
+  private readonly records = new Map<string, AcpSessionRecord>();
+
+  /** A session's record, as a copy. */
+  get(sessionId: string): AcpSessionRecord | undefined {
+    const record = this.records.get(sessionId);
+    return record ? structuredClone(record) : undefined;
+  }
+
+  /** Writes a session's record. */
+  put(record: AcpSessionRecord): void {
+    this.records.set(record.info.id, structuredClone(record));
+  }
+}
+
+/** Sessions in any long-term `Store`: the memory, Redis, Postgres, or SQLite store. */
+export function storeAcpSessions(store: Store, options: { namespace?: readonly string[] } = {}): AcpSessionStore {
+  const namespace = [...(options.namespace ?? ['nexus', 'acp', 'sessions'])];
+  return {
+    async get(sessionId) {
+      return (await store.get<AcpSessionRecord>(namespace, sessionId))?.value;
+    },
+    async put(record) {
+      await store.put(namespace, record.info.id, record);
+    },
+  };
 }
 
 /** A running ACP connection. */
@@ -126,6 +222,19 @@ type Incoming = { jsonrpc?: string; id?: string | number | null; method?: string
  */
 export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: AcpOptions = {}): AcpServer {
   const sessions = new Map<string, Session>();
+  const store = options.sessions ?? new MemoryAcpSessionStore();
+  let capabilities: AcpClientCapabilities = {};
+  /** Writes a session as it stands, with audio kept as a note. */
+  const save = async (session: Session) => {
+    await store.put({
+      info: session.info,
+      history: storable(session.history),
+      ...(session.pending ? { pending: session.pending } : {}),
+      ...(session.answered ? { answered: session.answered } : {}),
+      always: [...session.always],
+      updatedAt: new Date().toISOString(),
+    });
+  };
   const waiting = new Map<string | number, (message: Incoming) => void>();
   let requests = 0;
   const write = (message: unknown) => streams.output.write(`${JSON.stringify(message)}\n`);
@@ -192,6 +301,7 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
     session.controller = controller;
     const id = session.info.id;
     const text = promptText(blocks);
+    const media = mediaParts(blocks);
     let spoke = false;
     // A result does not repeat its arguments, which its diff needs.
     const calls = new Map<string, Record<string, unknown>>();
@@ -215,11 +325,13 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
     };
 
     try {
-      return await turn(session, text, runOptions, controller.signal, () => spoke);
+      return await turn(session, text, media, blocks, runOptions, controller.signal, () => spoke);
     } catch (error) {
       // A cancelled run may end by throwing; the editor is owed a turn that ended as cancelled.
       if (controller.signal.aborted) return 'cancelled';
       throw error;
+    } finally {
+      await save(session);
     }
   };
 
@@ -227,12 +339,16 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
   const turn = async (
     session: Session,
     text: string,
+    media: ContentPart[],
+    blocks: AcpContentBlock[],
     runOptions: ProtocolRunOptions,
     signal: AbortSignal,
     spoke: () => boolean,
   ): Promise<AcpStopReason> => {
     const id = session.info.id;
-    const user = messageOf('user', text);
+    const user: Message = media.length
+      ? { role: 'user', content: [...(text ? [{ type: 'text' as const, text }] : []), ...media] }
+      : messageOf('user', text);
     let result: ProtocolResult;
     if (session.pending?.length) {
       const answers = {
@@ -246,7 +362,7 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
     } else {
       const history = session.history;
       result = await graph.invoke(
-        options.input ? options.input(text, session.info, history) : { messages: [...history, user] },
+        options.input ? options.input(text, session.info, history, blocks) : { messages: [...history, user] },
         runOptions,
       );
       session.history = [...history, user];
@@ -288,11 +404,12 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
     const params = message.params ?? {};
     switch (message.method) {
       case 'initialize':
+        capabilities = (params.clientCapabilities ?? {}) as AcpClientCapabilities;
         return {
           protocolVersion: ACP_PROTOCOL_VERSION,
           agentCapabilities: {
-            loadSession: false,
-            promptCapabilities: { image: false, audio: false, embeddedContext: true },
+            loadSession: true,
+            promptCapabilities: { image: true, audio: true, embeddedContext: true },
           },
           authMethods: [],
           ...(options.agentInfo ? { agentInfo: options.agentInfo } : {}),
@@ -305,8 +422,39 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
           cwd: typeof params.cwd === 'string' ? params.cwd : '',
           mcpServers: Array.isArray(params.mcpServers) ? params.mcpServers : [],
         };
-        sessions.set(info.id, { info, history: [], always: new Map() });
+        const session: Session = { info, history: [], always: new Map() };
+        sessions.set(info.id, session);
+        await save(session);
         return { sessionId: info.id };
+      }
+      case 'session/load': {
+        const sessionId = String(params.sessionId ?? '');
+        const record = await store.get(sessionId);
+        if (!record) throw Object.assign(new Error(`Session ${sessionId} was not found`), { code: -32602 });
+        // The editor may reopen it elsewhere, with other servers.
+        const info: AcpSessionInfo = {
+          id: sessionId,
+          cwd: typeof params.cwd === 'string' ? params.cwd : record.info.cwd,
+          mcpServers: Array.isArray(params.mcpServers) ? params.mcpServers : record.info.mcpServers,
+        };
+        const session: Session = {
+          info,
+          history: record.history,
+          ...(record.pending ? { pending: record.pending } : {}),
+          ...(record.answered ? { answered: record.answered } : {}),
+          always: new Map(record.always),
+        };
+        sessions.get(sessionId)?.controller?.abort();
+        sessions.set(sessionId, session);
+        for (const update of replay(session.history, kind)) notify(sessionId, update);
+        if (session.pending?.length) {
+          notify(sessionId, {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: session.pending.map(questionOf).join('\n') },
+          });
+        }
+        await save(session);
+        return null;
       }
       case 'session/prompt': {
         const session = sessions.get(String(params.sessionId));
@@ -343,6 +491,18 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
     );
   };
 
+  options.editor?.attach({
+    async request(method, params, signal) {
+      const response = await request(method, params, signal ?? new AbortController().signal);
+      if (response.error) throw Object.assign(new Error(response.error.message), { code: response.error.code });
+      const outcome = (response.result as { outcome?: { outcome?: string } } | undefined)?.outcome;
+      if (signal?.aborted && outcome?.outcome === 'cancelled') throw new Error('The request was cancelled');
+      return response.result;
+    },
+    capabilities: () => capabilities,
+    session: (sessionId) => sessions.get(sessionId)?.info,
+  });
+
   const closed = (async () => {
     const decoder = new TextDecoder();
     let buffer = '';
@@ -362,12 +522,15 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
         newline = buffer.indexOf('\n');
       }
     }
+    // The editor closed its end: what the bridge started for it, such as MCP servers, stops too.
+    await options.editor?.detach?.();
   })();
 
   return {
     closed,
     close() {
       for (const session of sessions.values()) session.controller?.abort();
+      void options.editor?.detach?.();
     },
   };
 }
@@ -465,6 +628,87 @@ function questionOf(interrupt: ProtocolInterrupt): string {
     interrupt.reason ??
     (interrupt.payload === undefined ? 'The agent needs an answer to continue.' : asText(interrupt.payload))
   );
+}
+
+/** A prompt's image and audio blocks, as content parts the model sees. */
+function mediaParts(blocks: readonly AcpContentBlock[]): ContentPart[] {
+  const parts: ContentPart[] = [];
+  for (const block of blocks) {
+    if (block.type === 'image' && block.data) {
+      parts.push({
+        type: 'image',
+        source: { base64: block.data, ...(block.mimeType ? { mimeType: block.mimeType } : {}) },
+      });
+    } else if (block.type === 'image' && block.uri) {
+      parts.push({ type: 'image', source: { url: block.uri } });
+    } else if (block.type === 'audio' && block.data) {
+      const bytes = Uint8Array.from(atob(block.data), (character) => character.charCodeAt(0));
+      parts.push({
+        type: 'audio',
+        source: { buffer: bytes as never, ...(block.mimeType ? { format: block.mimeType.split('/')[1] } : {}) },
+      });
+    }
+  }
+  return parts;
+}
+
+/** A history a store can keep as JSON: audio becomes a note that it was heard, images stay. */
+function storable(history: readonly Message[]): Message[] {
+  return history.map((message) =>
+    Array.isArray(message.content) && message.content.some((part) => part.type === 'audio')
+      ? {
+          ...message,
+          content: message.content.map((part) =>
+            part.type === 'audio' ? { type: 'text' as const, text: '[audio the user sent]' } : part,
+          ),
+        }
+      : message,
+  );
+}
+
+/** A session's history as the updates an editor replays when it loads the session. */
+function replay(history: readonly Message[], kind: (name: string, args: unknown) => AcpToolKind): AcpSessionUpdate[] {
+  const updates: AcpSessionUpdate[] = [];
+  for (const message of history) {
+    const blocks = (
+      Array.isArray(message.content) ? message.content : [{ type: 'text' as const, text: message.content }]
+    ).flatMap((part): Array<Record<string, unknown>> => {
+      if (part.type === 'text' && part.text) return [{ type: 'text', text: part.text }];
+      if (part.type === 'image' && 'base64' in part.source) {
+        return [{ type: 'image', data: part.source.base64, mimeType: part.source.mimeType ?? 'image/png' }];
+      }
+      return [];
+    });
+    if (message.role === 'user') {
+      for (const content of blocks) updates.push({ sessionUpdate: 'user_message_chunk', content });
+    } else if (message.role === 'assistant') {
+      for (const content of blocks) updates.push({ sessionUpdate: 'agent_message_chunk', content });
+      for (const call of message.toolCalls ?? []) {
+        let args: unknown = call.function.arguments;
+        try {
+          args = JSON.parse(call.function.arguments);
+        } catch {
+          // Kept as written.
+        }
+        updates.push({
+          sessionUpdate: 'tool_call',
+          toolCallId: call.id,
+          title: titleOf(call.function.name, args),
+          kind: kind(call.function.name, args),
+          status: 'completed',
+          rawInput: args,
+        });
+      }
+    } else if (message.role === 'tool' && message.toolCallId) {
+      updates.push({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: message.toolCallId,
+        status: 'completed',
+        content: blocks.map((content) => ({ type: 'content', content })),
+      });
+    }
+  }
+  return updates;
 }
 
 /** A prompt's blocks as one text: embedded files fenced with their URI, links named. */

@@ -922,7 +922,8 @@ test('ACP: rejecting runs nothing, cancelling ends the turn, and questions are a
 
   // Protocol errors: an unknown session, an unknown method, and a line that is not JSON.
   assert.equal((await chat.request('session/prompt', { sessionId: 'missing', prompt: [] })).error.code, -32602);
-  assert.equal((await chat.request('session/load', {})).error.code, -32601);
+  assert.equal((await chat.request('session/load', {})).error.code, -32602, 'no such session to load');
+  assert.equal((await chat.request('session/set_mode', {})).error.code, -32601);
   assert.deepEqual((await chat.request('authenticate', { methodId: 'none' })).result, {});
   chat.raw('not json\n');
   await new Promise((resolve) => setTimeout(resolve, 1));

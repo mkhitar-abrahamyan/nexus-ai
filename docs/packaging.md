@@ -149,9 +149,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/stores` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
+| `nexus-ai-pro/protocols/acp` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
+| `nexus-ai-pro/protocols/acp/editor` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/assets` | 19 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
@@ -168,7 +170,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 5% | none |
 | `nexus-ai-pro/sqlite/operations` | 15 KB | 4% | none |
-| `nexus-ai-pro/protocols/acp` | 15 KB | 4% | none |
 | `nexus-ai-pro/tracing/otlp` | 15 KB | 4% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |
 | `nexus-ai-pro/prompts/client` | 15 KB | 4% | none |
