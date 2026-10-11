@@ -184,7 +184,8 @@ test('a frontend tool is offered to the model, run by the frontend, and its resu
   const finished = first.find((event) => event.type === 'RUN_FINISHED');
   assert.deepEqual(finished?.outcome, { type: 'success' });
   assert.equal(
-    (first.find((event) => event.type === 'STATE_SNAPSHOT')?.snapshot as { stopReason: string }).stopReason,
+    (first.find((event) => event.type === 'STATE_SNAPSHOT')?.snapshot as { stopReason?: string } | undefined)
+      ?.stopReason,
     'client_tools',
   );
 

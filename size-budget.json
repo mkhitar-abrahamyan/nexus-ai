@@ -94,7 +94,7 @@
     "./prompts/file": 6,
     "./prompts/redis": 6,
     "./prompts/registry": 40,
-    "./protocols/a2a": 22,
+    "./protocols/a2a": 40,
     "./protocols/acp": 18,
     "./protocols/ag-ui": 16,
     "./providers": 14,

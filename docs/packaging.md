@@ -133,6 +133,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 11% | none |
+| `nexus-ai-pro/protocols/a2a` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/voice` | 33 KB | 10% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
@@ -151,7 +152,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
-| `nexus-ai-pro/protocols/a2a` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/assets` | 19 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |

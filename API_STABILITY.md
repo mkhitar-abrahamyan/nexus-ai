@@ -52,7 +52,16 @@ New and stable:
 - `AgUiOptions.stateDeltas`, `messagesSnapshot`, and `frontendTools`, and `AgUiPatchOperation`;
 - `CreateAgentOptions.toolSource` and `ToolSourceContext`; `ClientToolDefinition`, the `clientTools`
   channel, and the `AgentStopReason` member `client_tools`;
-- the `step` member of `GraphEvent`.
+- the `step` member of `GraphEvent`;
+- on `nexus-ai-pro/protocols/a2a`: `A2aTaskStore`, `A2aTaskRecord`, `A2aTaskQuery`,
+  `MemoryA2aTaskStore`, `storeA2aTasks()`; `A2aServerOptions.store`, `pushNotifications`,
+  `extendedCard`, `pollMs`, and `onError`; `A2aPushOptions` and `A2aPushNotificationConfig`; the
+  methods `ListTasks`, `SubscribeToTask`, the four push notification config methods, and
+  `GetExtendedAgentCard`; the client's new methods, `A2aListTasksOptions`, and `A2aTaskPage`; and
+  the error codes `pushNotificationNotSupported` and `extendedCardNotConfigured`.
+
+A streamed A2A task now reports its move to `TASK_STATE_WORKING` as a status update, before its
+other events.
 
 `GraphEvent` and `AgentStopReason` gain members, as the compatibility rules allow in a minor
 release. Code that switches over either exhaustively should handle the new ones.

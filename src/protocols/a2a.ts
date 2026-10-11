@@ -5,7 +5,11 @@
  * The server publishes an agent card at `/.well-known/agent-card.json` and answers JSON-RPC 2.0 over
  * HTTP:
  * - `SendMessage`, and `SendStreamingMessage` with its events;
- * - `GetTask` and `CancelTask`.
+ * - `GetTask`, `ListTasks`, `SubscribeToTask`, and `CancelTask`;
+ * - push notification configs, when it pushes, and `GetExtendedAgentCard`, when it has one.
+ *
+ * Tasks live in an `A2aTaskStore`: memory by default, or any long-term store, so a restart or another
+ * replica picks a task up.
  *
  * A task that pauses for an answer is `TASK_STATE_INPUT_REQUIRED`, and a message naming the task
  * resumes it. The client and `a2aTool()` speak the same protocol to any A2A agent. A remote agent is
@@ -14,6 +18,7 @@
 import type { GraphEvent, GraphToolEvent } from '../types/graph.js';
 import type { Message, ToolDefinition } from '../types/messages.js';
 import type { Principal } from '../types/principal.js';
+import type { Store } from '../types/store.js';
 import {
   answerOf,
   approvalOf,
@@ -162,7 +167,9 @@ export type A2aStreamEvent =
 export const A2A_ERRORS = {
   taskNotFound: -32001,
   taskNotCancelable: -32002,
+  pushNotificationNotSupported: -32003,
   unsupportedOperation: -32004,
+  extendedCardNotConfigured: -32007,
   versionNotSupported: -32009,
 } as const;
 
@@ -178,6 +185,169 @@ export class A2aError extends Error {
     super(message);
     this.name = 'A2aError';
   }
+}
+
+// ── Tasks, kept ─────────────────────────────────────────────────────
+
+/** Where a task's updates are pushed: a webhook the calling agent gave. */
+export interface A2aPushNotificationConfig {
+  /** Its id, unique within the task. Given one when it has none. */
+  id?: string;
+  /** Where each update is POSTed. */
+  url: string;
+  /** Sent back as the `X-A2A-Notification-Token` header, so the receiver knows the update is its own. */
+  token?: string;
+}
+
+/** A task as a store keeps it: the task, its messages, the questions it waits on, and its webhooks. */
+export interface A2aTaskRecord {
+  /** The task. */
+  task: A2aTask;
+  /** Every message of the task, the caller's and the agent's. */
+  history: A2aMessage[];
+  /** The questions the paused run asked, which the next message answers. */
+  interrupts?: ProtocolInterrupt[];
+  /** Where its updates are pushed. */
+  push?: A2aPushNotificationConfig[];
+  /** ISO-8601 time it was last written. */
+  updatedAt: string;
+}
+
+/** Which tasks `A2aTaskStore.list()` returns. */
+export interface A2aTaskQuery {
+  /** Only this conversation's. */
+  contextId?: string;
+  /** Only those in this state. */
+  state?: A2aTaskState;
+  /** Most returned. */
+  limit: number;
+  /** Skipped first, for paging. */
+  offset: number;
+}
+
+/**
+ * Where an A2A agent keeps its tasks and conversations. A store outside the process lets a restart, or
+ * another replica, pick a task up: answer a task's question, read it, list it, or cancel it.
+ */
+export interface A2aTaskStore {
+  /** A task's record. */
+  get(taskId: string): Promise<A2aTaskRecord | undefined> | A2aTaskRecord | undefined;
+  /** Writes a task's record. */
+  put(record: A2aTaskRecord): Promise<void> | void;
+  /** Tasks, most recently written first, and how many match when the store knows. */
+  list(
+    query: A2aTaskQuery,
+  ): Promise<{ records: A2aTaskRecord[]; total?: number }> | { records: A2aTaskRecord[]; total?: number };
+  /** A conversation's transcript, as the agent last left it. */
+  conversation(contextId: string): Promise<Message[] | undefined> | Message[] | undefined;
+  /** Writes a conversation's transcript. */
+  saveConversation(contextId: string, messages: Message[]): Promise<void> | void;
+}
+
+/** Tasks and conversations in this process: the default, for one replica. */
+export class MemoryA2aTaskStore implements A2aTaskStore {
+  private readonly tasks = new Map<string, A2aTaskRecord>();
+  private readonly conversations = new Map<string, Message[]>();
+  private readonly max: number;
+
+  constructor(options: { maxTasks?: number } = {}) {
+    this.max = options.maxTasks ?? 10_000;
+  }
+
+  /** A task's record, as a copy. */
+  get(taskId: string): A2aTaskRecord | undefined {
+    const record = this.tasks.get(taskId);
+    return record ? structuredClone(record) : undefined;
+  }
+
+  /** Writes a task's record, dropping the least recently written beyond `maxTasks`. */
+  put(record: A2aTaskRecord): void {
+    remember(this.tasks, record.task.id, structuredClone(record), this.max);
+  }
+
+  /** Tasks, most recently written first, with how many match. */
+  list(query: A2aTaskQuery): { records: A2aTaskRecord[]; total: number } {
+    const matching = [...this.tasks.values()]
+      .filter(
+        (record) =>
+          (query.contextId === undefined || record.task.contextId === query.contextId) &&
+          (query.state === undefined || record.task.status.state === query.state),
+      )
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return {
+      records: matching.slice(query.offset, query.offset + query.limit).map((record) => structuredClone(record)),
+      total: matching.length,
+    };
+  }
+
+  /** A conversation's transcript. */
+  conversation(contextId: string): Message[] | undefined {
+    const messages = this.conversations.get(contextId);
+    return messages ? structuredClone(messages) : undefined;
+  }
+
+  /** Writes a conversation's transcript. */
+  saveConversation(contextId: string, messages: Message[]): void {
+    remember(this.conversations, contextId, structuredClone(messages), this.max);
+  }
+}
+
+/**
+ * Tasks and conversations in any long-term `Store`: the memory, Redis, Postgres, or SQLite store, so
+ * every replica sees one set. Listing filters on the task's fields in the store; it does not count
+ * all matches, so `total` is unknown.
+ */
+export function storeA2aTasks(store: Store, options: { namespace?: readonly string[] } = {}): A2aTaskStore {
+  const base = [...(options.namespace ?? ['nexus', 'a2a'])];
+  const tasks = [...base, 'tasks'];
+  const conversations = [...base, 'conversations'];
+  return {
+    async get(taskId) {
+      return (await store.get<A2aTaskRecord>(tasks, taskId))?.value;
+    },
+    async put(record) {
+      await store.put(tasks, record.task.id, record);
+    },
+    async list(query) {
+      const filter: Record<string, unknown> = {
+        ...(query.contextId === undefined ? {} : { 'task.contextId': query.contextId }),
+        ...(query.state === undefined ? {} : { 'task.status.state': query.state }),
+      };
+      const items = await store.search<A2aTaskRecord>(tasks, {
+        limit: query.limit,
+        offset: query.offset,
+        ...(Object.keys(filter).length ? { filter } : {}),
+      });
+      return { records: items.map((item) => item.value) };
+    },
+    async conversation(contextId) {
+      return (await store.get<{ messages: Message[] }>(conversations, contextId))?.value.messages;
+    },
+    async saveConversation(contextId, messages) {
+      await store.put(conversations, contextId, { messages });
+    },
+  };
+}
+
+// ── The server ──────────────────────────────────────────────────────
+
+/** Options for pushing task updates to the webhooks callers give. */
+export interface A2aPushOptions {
+  /**
+   * Signs every delivery with an \`x-nexus-signature\` header, as the server's operation webhooks are,
+   * so a receiver checks it with \`verifyOperationWebhook()\` from \`nexus-ai-pro/operations\`.
+   */
+  secret?: string;
+  /**
+   * Allows webhooks on loopback, private, and link-local addresses, and plain \`http\`. Off by default,
+   * so a caller cannot make the agent reach into its own network. Turn it on for tests, or when every
+   * caller is trusted.
+   */
+  allowPrivateNetworks?: boolean;
+  /** Replaces \`fetch\` for deliveries: a client with its own address checks, a proxy, or a test. */
+  fetch?: typeof globalThis.fetch;
+  /** How long one delivery may take, in milliseconds. Defaults to 5 seconds. */
+  timeoutMs?: number;
 }
 
 /** Options for `a2aHandler()`. */
@@ -198,22 +368,29 @@ export interface A2aServerOptions {
   answer?: (message: A2aMessage, interrupt: ProtocolInterrupt) => unknown;
   /** Who the task is for, from the request: the place to authenticate the calling agent. */
   principal?: (request: Request) => Principal | undefined | Promise<Principal | undefined>;
-  /** Most tasks and contexts kept in memory. Defaults to 10,000 each. */
+  /**
+   * Where tasks and conversations are kept. Defaults to memory, for one replica; \`storeA2aTasks()\`
+   * keeps them in a shared store. A task resumed elsewhere needs the graph's own checkpointer to be
+   * shared too.
+   */
+  store?: A2aTaskStore;
+  /** Most tasks and contexts the default memory store keeps. Defaults to 10,000 each. */
   maxTasks?: number;
+  /** Pushes each task's updates to the webhooks callers give. Without it, push notifications are not offered. */
+  pushNotifications?: A2aPushOptions;
+  /**
+   * The extended card an authenticated caller may read with `GetExtendedAgentCard`: more skills, or
+   * anything else this caller may see. Without it, there is no extended card.
+   */
+  extendedCard?: (principal: Principal) => Partial<A2aAgentCard> | Promise<Partial<A2aAgentCard>>;
+  /** How often `SubscribeToTask` reads a task another replica runs, in milliseconds. Defaults to 1 second. */
+  pollMs?: number;
+  /** Receives push delivery failures, which never fail a task. */
+  onError?: (error: unknown) => void;
 }
 
-/** Where a streaming task's text and tool progress go as they happen. */
-interface TaskSink {
-  text(delta: string): void;
-  progress(tool: GraphToolEvent): void;
-}
-
-interface TaskRecord {
-  task: A2aTask;
-  history: A2aMessage[];
-  controller: AbortController;
-  interrupts?: ProtocolInterrupt[];
-}
+/** Where a running task's events go: every stream and subscriber following it here. */
+type Listener = (event: A2aStreamEvent) => void;
 
 const TERMINAL = new Set<A2aTaskState>([
   'TASK_STATE_COMPLETED',
@@ -221,6 +398,9 @@ const TERMINAL = new Set<A2aTaskState>([
   'TASK_STATE_CANCELED',
   'TASK_STATE_REJECTED',
 ]);
+
+/** A status a stream or subscription ends on: one where the task stops, or waits. */
+const settled = (state: A2aTaskState) => TERMINAL.has(state) || state === 'TASK_STATE_INPUT_REQUIRED';
 
 /**
  * An HTTP handler that serves a graph as an A2A agent: `GET` the card, `POST` JSON-RPC. Mount it
@@ -239,19 +419,21 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
     version: options.card.version,
     ...(options.card.provider ? { provider: options.card.provider } : {}),
     supportedInterfaces: [{ url: options.card.url, protocolBinding: 'JSONRPC', protocolVersion: A2A_PROTOCOL_VERSION }],
-    capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false },
+    capabilities: {
+      streaming: true,
+      pushNotifications: Boolean(options.pushNotifications),
+      extendedAgentCard: Boolean(options.extendedCard),
+    },
     defaultInputModes: options.card.defaultInputModes ?? ['text/plain', 'application/json'],
     defaultOutputModes: options.card.defaultOutputModes ?? ['text/plain'],
     skills: options.card.skills,
   };
-  const max = options.maxTasks ?? 10_000;
-  const tasks = new Map<string, TaskRecord>();
-  const contexts = new Map<string, Message[]>();
-  const remember = <V>(map: Map<string, V>, key: string, value: V) => {
-    map.delete(key);
-    map.set(key, value);
-    if (map.size > max) map.delete(map.keys().next().value as string);
-  };
+  const store = options.store ?? new MemoryA2aTaskStore({ maxTasks: options.maxTasks ?? 10_000 });
+  /** The tasks this process is running, which a cancel here stops at once. */
+  const running = new Map<string, AbortController>();
+  const listeners = new Map<string, Set<Listener>>();
+  /** Each task's deliveries, in order. */
+  const deliveries = new Map<string, Promise<void>>();
   const answer =
     options.answer ??
     ((message: A2aMessage, interrupt: ProtocolInterrupt) => {
@@ -261,30 +443,86 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
       return toolCallOf(interrupt) ? approvalOf(text) : text;
     });
 
-  /** Runs, or resumes, the graph for a task, reporting text and tool progress as they happen. */
+  const publish = (taskId: string, event: A2aStreamEvent) => {
+    for (const listener of listeners.get(taskId) ?? []) listener(event);
+  };
+  const listen = (taskId: string, listener: Listener) => {
+    const set = listeners.get(taskId) ?? new Set<Listener>();
+    set.add(listener);
+    listeners.set(taskId, set);
+    return () => {
+      set.delete(listener);
+      if (set.size === 0) listeners.delete(taskId);
+    };
+  };
+
+  /** Posts an update to each of the task's webhooks, after the ones before it. */
+  const pushUpdate = (record: A2aTaskRecord, event: A2aStreamEvent) => {
+    const push = options.pushNotifications;
+    if (!push || !record.push?.length) return;
+    const configs = [...record.push];
+    const body = JSON.stringify(event);
+    const previous = deliveries.get(record.task.id) ?? Promise.resolve();
+    const next = previous.then(async () => {
+      for (const config of configs) {
+        try {
+          await deliver(config, body, push);
+        } catch (error) {
+          options.onError?.(error);
+        }
+      }
+    });
+    deliveries.set(record.task.id, next);
+    void next.finally(() => {
+      if (deliveries.get(record.task.id) === next) deliveries.delete(record.task.id);
+    });
+  };
+
+  /** Moves a task to a state: written, then told to every stream, subscriber, and webhook. */
+  const changeStatus = async (record: A2aTaskRecord, state: A2aTaskState, message?: A2aMessage) => {
+    setStatus(record.task, state, message);
+    record.updatedAt = new Date().toISOString();
+    await store.put(record);
+    const event: A2aStreamEvent = {
+      statusUpdate: { taskId: record.task.id, contextId: record.task.contextId, status: record.task.status },
+    };
+    publish(record.task.id, event);
+    pushUpdate(record, event);
+  };
+
+  /** Runs, or resumes, the graph for a task, telling its listeners about text and progress as they happen. */
   const execute = async (
-    record: TaskRecord,
+    record: A2aTaskRecord,
     message: A2aMessage,
     principal: Principal | undefined,
-    sink?: TaskSink,
   ): Promise<void> => {
     const task = record.task;
+    const controller = new AbortController();
+    running.set(task.id, controller);
+    let streamed = false;
     const runOptions: ProtocolRunOptions = {
       threadId: task.id,
-      signal: record.controller.signal,
+      signal: controller.signal,
       ...(principal ? { principal } : {}),
-      ...(sink
-        ? {
-            onEvent: (event: GraphEvent) => {
-              if (event.namespace) return;
-              if (event.type === 'message' && event.chunk.kind !== 'reasoning') sink.text(event.chunk.content);
-              else if (event.type === 'tool' && event.tool.phase === 'progress') sink.progress(event.tool);
+      onEvent: (event: GraphEvent) => {
+        if (event.namespace) return;
+        if (event.type === 'message' && event.chunk.kind !== 'reasoning' && event.chunk.content) {
+          publish(task.id, {
+            artifactUpdate: {
+              taskId: task.id,
+              contextId: task.contextId,
+              artifact: { artifactId: `${task.id}:answer`, name: 'answer', parts: [{ text: event.chunk.content }] },
+              append: streamed,
             },
-          }
-        : {}),
+          });
+          streamed = true;
+        } else if (event.type === 'tool' && event.tool.phase === 'progress') {
+          publish(task.id, { statusUpdate: progressUpdate(task, event.tool) });
+        }
+      },
     };
-    setStatus(task, 'TASK_STATE_WORKING');
     try {
+      await changeStatus(record, 'TASK_STATE_WORKING');
       let result: ProtocolResult;
       if (record.interrupts?.length) {
         const answers = Object.fromEntries(
@@ -293,19 +531,20 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
         record.interrupts = undefined;
         result = await graph.resumeInterruptsWith(task.id, answers, runOptions);
       } else {
-        const history = contexts.get(task.contextId) ?? [];
+        const history = (await store.conversation(task.contextId)) ?? [];
         const said = messageOf('user', textOfParts(message.parts));
         result = await graph.invoke(
           options.input ? options.input(message, history) : { messages: [...history, said] },
           runOptions,
         );
-        remember(contexts, task.contextId, [...history, said]);
+        await store.saveConversation(task.contextId, [...history, said]);
       }
-      if (record.controller.signal.aborted) return;
+      // A cancel here or on another replica stands: the result is not recorded over it.
+      if (controller.signal.aborted || (await store.get(task.id))?.task.status.state === 'TASK_STATE_CANCELED') return;
       if (result.status === 'awaiting_input' && result.interrupts?.length) {
         record.interrupts = result.interrupts;
-        setStatus(
-          task,
+        await changeStatus(
+          record,
           'TASK_STATE_INPUT_REQUIRED',
           agentMessage(task, result.interrupts.map((item) => item.reason ?? 'Input is required').join('\n'), {
             interrupts: result.interrupts,
@@ -315,27 +554,46 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
         const text = answerOf(result.state);
         const reply = agentMessage(task, text);
         record.history.push(reply);
-        const before = contexts.get(task.contextId) ?? [];
-        remember(contexts, task.contextId, transcriptOf(result.state, [...before, messageOf('assistant', text)]));
+        const before = (await store.conversation(task.contextId)) ?? [];
+        await store.saveConversation(
+          task.contextId,
+          transcriptOf(result.state, [...before, messageOf('assistant', text)]),
+        );
         task.artifacts = [{ artifactId: `${task.id}:answer`, name: 'answer', parts: [{ text }] }];
-        setStatus(task, 'TASK_STATE_COMPLETED', reply);
+        if (streamed) {
+          publish(task.id, {
+            artifactUpdate: {
+              taskId: task.id,
+              contextId: task.contextId,
+              artifact: { artifactId: `${task.id}:answer`, name: 'answer', parts: [] },
+              append: true,
+              lastChunk: true,
+            },
+          });
+        }
+        await changeStatus(record, 'TASK_STATE_COMPLETED', reply);
       }
     } catch (error) {
-      if (record.controller.signal.aborted) return;
-      setStatus(task, 'TASK_STATE_FAILED', agentMessage(task, error instanceof Error ? error.message : String(error)));
+      if (controller.signal.aborted) return;
+      await changeStatus(
+        record,
+        'TASK_STATE_FAILED',
+        agentMessage(task, error instanceof Error ? error.message : String(error)),
+      );
+    } finally {
+      running.delete(task.id);
     }
   };
 
   /** The task a message starts, or the paused one it answers. */
-  const taskFor = (message: A2aMessage): TaskRecord | { error: number; message: string } => {
+  const taskFor = async (message: A2aMessage): Promise<A2aTaskRecord | { error: number; message: string }> => {
     if (message.taskId) {
-      const existing = tasks.get(message.taskId);
+      const existing = await store.get(message.taskId);
       if (!existing) return { error: A2A_ERRORS.taskNotFound, message: `Task ${message.taskId} was not found` };
       if (existing.task.status.state !== 'TASK_STATE_INPUT_REQUIRED') {
         return { error: A2A_ERRORS.unsupportedOperation, message: `Task ${message.taskId} is not waiting for input` };
       }
       existing.history.push(message);
-      existing.controller = new AbortController();
       return existing;
     }
     const contextId = message.contextId ?? protocolId('context');
@@ -344,13 +602,84 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
       contextId,
       status: { state: 'TASK_STATE_SUBMITTED', timestamp: new Date().toISOString() },
     };
-    const record: TaskRecord = {
+    const record: A2aTaskRecord = {
       task,
       history: [{ ...message, contextId, taskId: task.id }],
-      controller: new AbortController(),
+      updatedAt: new Date().toISOString(),
     };
-    remember(tasks, task.id, record);
+    await store.put(record);
     return record;
+  };
+
+  /** A stream of a task's events: the task, then each event until it finishes or waits. */
+  const follow = (
+    id: unknown,
+    record: A2aTaskRecord,
+    start: (() => Promise<void>) | undefined,
+    signal: AbortSignal,
+  ): Response => {
+    const encoder = new TextEncoder();
+    const taskId = record.task.id;
+    const body = new ReadableStream<Uint8Array>({
+      start: async (controller) => {
+        let open = true;
+        const send = (result: A2aStreamEvent) => {
+          if (open) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`));
+        };
+        const close = () => {
+          if (!open) return;
+          open = false;
+          stop();
+          controller.close();
+        };
+        send({ task: view(record) });
+        const stop = listen(taskId, (event) => {
+          send(event);
+          if ('statusUpdate' in event && settled(event.statusUpdate.status.state)) close();
+        });
+        signal.addEventListener('abort', close, { once: true });
+        if (start) {
+          await start();
+          close();
+        } else if (!running.has(taskId)) {
+          // Another replica runs it: read the task until it finishes or waits, and report each change.
+          let last = record.task.status.timestamp;
+          while (open) {
+            await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 1_000));
+            const current = await store.get(taskId);
+            if (!current || !open) break;
+            if (current.task.status.timestamp !== last) {
+              last = current.task.status.timestamp;
+              send({
+                statusUpdate: { taskId, contextId: current.task.contextId, status: current.task.status },
+              });
+            }
+            if (settled(current.task.status.state)) break;
+          }
+          close();
+        }
+      },
+    });
+    return new Response(body, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } });
+  };
+
+  /** A task's webhook config, from either shape a caller may send. */
+  const pushConfigOf = (params: Record<string, unknown>): A2aPushNotificationConfig | undefined => {
+    const config = (params.pushNotificationConfig ?? params.config) as A2aPushNotificationConfig | undefined;
+    return config && typeof config.url === 'string' ? config : undefined;
+  };
+
+  /** Adds a webhook to a task, after checking where it points. */
+  const addPush = (record: A2aTaskRecord, config: A2aPushNotificationConfig): A2aPushNotificationConfig => {
+    const refusal = pushRefusal(config.url, options.pushNotifications?.allowPrivateNetworks === true);
+    if (refusal) throw Object.assign(new Error(refusal), { code: -32602 });
+    const kept: A2aPushNotificationConfig = {
+      id: config.id ?? protocolId('push'),
+      url: config.url,
+      ...(config.token ? { token: config.token } : {}),
+    };
+    record.push = [...(record.push ?? []).filter((item) => item.id !== kept.id), kept];
+    return kept;
   };
 
   return async (request) => {
@@ -382,109 +711,229 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
     }
     const params = call.params ?? {};
     const principal = await options.principal?.(request);
+    const pushOn = Boolean(options.pushNotifications);
 
-    switch (call.method) {
-      case 'SendMessage':
-      case 'SendStreamingMessage': {
-        const message = params.message as A2aMessage | undefined;
-        if (!message || !Array.isArray(message.parts))
-          return rpcError(id, -32602, 'params.message with parts is required');
-        const record = taskFor(message);
-        if ('error' in record) return rpcError(id, record.error, record.message);
-        if (call.method === 'SendMessage') {
-          const configuration = (params.configuration ?? {}) as { returnImmediately?: boolean; historyLength?: number };
-          const running = execute(record, message, principal);
-          if (!configuration.returnImmediately) await running;
-          return rpcResult(id, { task: view(record, configuration.historyLength) });
+    try {
+      switch (call.method) {
+        case 'SendMessage':
+        case 'SendStreamingMessage': {
+          const message = params.message as A2aMessage | undefined;
+          if (!message || !Array.isArray(message.parts))
+            return rpcError(id, -32602, 'params.message with parts is required');
+          const configuration = (params.configuration ?? {}) as {
+            returnImmediately?: boolean;
+            historyLength?: number;
+            pushNotificationConfig?: A2aPushNotificationConfig;
+          };
+          if (configuration.pushNotificationConfig && !pushOn) {
+            return rpcError(id, A2A_ERRORS.pushNotificationNotSupported, 'This agent does not push notifications');
+          }
+          const record = await taskFor(message);
+          if ('error' in record) return rpcError(id, record.error, record.message);
+          if (configuration.pushNotificationConfig) {
+            addPush(record, configuration.pushNotificationConfig);
+            await store.put(record);
+          }
+          if (call.method === 'SendMessage') {
+            const run = execute(record, message, principal);
+            if (!configuration.returnImmediately) await run;
+            return rpcResult(id, { task: view(record, configuration.historyLength) });
+          }
+          return follow(id, record, () => execute(record, message, principal), request.signal);
         }
-        return streamTask(id, record, (sink) => execute(record, message, principal, sink));
-      }
-      case 'GetTask': {
-        const record = tasks.get(String(params.id ?? ''));
-        if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
-        return rpcResult(id, view(record, typeof params.historyLength === 'number' ? params.historyLength : undefined));
-      }
-      case 'CancelTask': {
-        const record = tasks.get(String(params.id ?? ''));
-        if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
-        if (TERMINAL.has(record.task.status.state)) {
-          return rpcError(id, A2A_ERRORS.taskNotCancelable, `Task ${record.task.id} has already finished`);
+        case 'GetTask': {
+          const record = await store.get(String(params.id ?? ''));
+          if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
+          return rpcResult(
+            id,
+            view(record, typeof params.historyLength === 'number' ? params.historyLength : undefined),
+          );
         }
-        record.controller.abort(new Error('Cancelled by the calling agent'));
-        setStatus(record.task, 'TASK_STATE_CANCELED');
-        return rpcResult(id, view(record));
+        case 'ListTasks': {
+          const pageSize = Math.min(100, Math.max(1, Number(params.pageSize ?? 50) || 50));
+          const offset = Math.max(0, Number.parseInt(String(params.pageToken ?? '0'), 10) || 0);
+          const listed = await store.list({
+            ...(typeof params.contextId === 'string' ? { contextId: params.contextId } : {}),
+            ...(typeof params.status === 'string' ? { state: params.status as A2aTaskState } : {}),
+            limit: pageSize,
+            offset,
+          });
+          const historyLength = typeof params.historyLength === 'number' ? params.historyLength : undefined;
+          const more =
+            listed.total === undefined ? listed.records.length === pageSize : offset + pageSize < listed.total;
+          return rpcResult(id, {
+            tasks: listed.records.map((record) => view(record, historyLength)),
+            nextPageToken: more ? String(offset + pageSize) : '',
+            pageSize,
+            ...(listed.total === undefined ? {} : { totalSize: listed.total }),
+          });
+        }
+        case 'SubscribeToTask': {
+          const record = await store.get(String(params.id ?? ''));
+          if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
+          if (TERMINAL.has(record.task.status.state)) {
+            return rpcError(id, A2A_ERRORS.unsupportedOperation, `Task ${record.task.id} has already finished`);
+          }
+          if (record.task.status.state === 'TASK_STATE_INPUT_REQUIRED') {
+            return follow(id, record, async () => undefined, request.signal);
+          }
+          return follow(id, record, undefined, request.signal);
+        }
+        case 'CancelTask': {
+          const record = await store.get(String(params.id ?? ''));
+          if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
+          if (TERMINAL.has(record.task.status.state)) {
+            return rpcError(id, A2A_ERRORS.taskNotCancelable, `Task ${record.task.id} has already finished`);
+          }
+          running.get(record.task.id)?.abort(new Error('Cancelled by the calling agent'));
+          await changeStatus(record, 'TASK_STATE_CANCELED');
+          return rpcResult(id, view(record));
+        }
+        case 'CreateTaskPushNotificationConfig':
+        case 'GetTaskPushNotificationConfig':
+        case 'ListTaskPushNotificationConfig':
+        case 'DeleteTaskPushNotificationConfig': {
+          if (!pushOn) {
+            return rpcError(id, A2A_ERRORS.pushNotificationNotSupported, 'This agent does not push notifications');
+          }
+          const taskId = String(params.taskId ?? params.id ?? '');
+          const record = await store.get(taskId);
+          if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${taskId} was not found`);
+          const shaped = (config: A2aPushNotificationConfig) => ({ taskId, pushNotificationConfig: config });
+          if (call.method === 'CreateTaskPushNotificationConfig') {
+            const config = pushConfigOf(params);
+            if (!config) return rpcError(id, -32602, 'params.pushNotificationConfig with a url is required');
+            const kept = addPush(record, config);
+            await store.put(record);
+            return rpcResult(id, shaped(kept));
+          }
+          if (call.method === 'ListTaskPushNotificationConfig') return rpcResult(id, (record.push ?? []).map(shaped));
+          const configId = String(params.pushNotificationConfigId ?? params.configId ?? '');
+          const found = record.push?.find((item) => item.id === configId);
+          if (!found) return rpcError(id, -32602, `Task ${taskId} has no push config ${configId}`);
+          if (call.method === 'GetTaskPushNotificationConfig') return rpcResult(id, shaped(found));
+          record.push = record.push?.filter((item) => item.id !== configId);
+          await store.put(record);
+          return rpcResult(id, null);
+        }
+        case 'GetExtendedAgentCard': {
+          if (!options.extendedCard) {
+            return rpcError(id, A2A_ERRORS.extendedCardNotConfigured, 'This agent has no extended card');
+          }
+          if (!principal) {
+            return rpcError(
+              id,
+              A2A_ERRORS.extendedCardNotConfigured,
+              'The extended card needs an authenticated caller',
+            );
+          }
+          return rpcResult(id, { ...card, ...(await options.extendedCard(principal)) });
+        }
+        default:
+          return rpcError(id, -32601, `Method ${call.method} is not supported`);
       }
-      default:
-        return rpcError(id, -32601, `Method ${call.method} is not supported`);
+    } catch (error) {
+      const code = (error as { code?: unknown })?.code;
+      return rpcError(
+        id,
+        typeof code === 'number' ? code : -32603,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   };
 }
 
 /** A task as returned, with as much of its history as was asked for. */
-function view(record: TaskRecord, historyLength?: number): A2aTask {
+function view(record: A2aTaskRecord, historyLength?: number): A2aTask {
   return {
     ...record.task,
     ...(historyLength === undefined || historyLength <= 0 ? {} : { history: record.history.slice(-historyLength) }),
   };
 }
 
-function streamTask(id: unknown, record: TaskRecord, run: (sink: TaskSink) => Promise<void>): Response {
-  const encoder = new TextEncoder();
-  const task = record.task;
-  const body = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const send = (result: A2aStreamEvent) =>
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`));
-      send({ task: { ...task } });
-      let streamed = false;
-      await run({
-        text(delta) {
-          if (!delta) return;
-          send({
-            artifactUpdate: {
-              taskId: task.id,
-              contextId: task.contextId,
-              artifact: { artifactId: `${task.id}:answer`, name: 'answer', parts: [{ text: delta }] },
-              append: streamed,
-            },
-          });
-          streamed = true;
-        },
-        // A tool's progress is the task's status while it works: what is happening, and as data.
-        progress(tool) {
-          send({
-            statusUpdate: {
-              taskId: task.id,
-              contextId: task.contextId,
-              status: {
-                state: 'TASK_STATE_WORKING',
-                message: agentMessage(task, `${tool.name}: ${asText(tool.progress)}`, {
-                  toolCallId: tool.id,
-                  tool: tool.name,
-                  progress: tool.progress,
-                }),
-                timestamp: new Date().toISOString(),
-              },
-            },
-          });
-        },
-      });
-      if (streamed) {
-        send({
-          artifactUpdate: {
-            taskId: task.id,
-            contextId: task.contextId,
-            artifact: { artifactId: `${task.id}:answer`, name: 'answer', parts: [] },
-            append: true,
-            lastChunk: true,
-          },
-        });
-      }
-      send({ statusUpdate: { taskId: task.id, contextId: task.contextId, status: task.status } });
-      controller.close();
+/** A tool's progress, as the working status of its task: what is happening in text, and as data. */
+function progressUpdate(task: A2aTask, tool: GraphToolEvent) {
+  return {
+    taskId: task.id,
+    contextId: task.contextId,
+    status: {
+      state: 'TASK_STATE_WORKING' as const,
+      message: agentMessage(task, `${tool.name}: ${asText(tool.progress)}`, {
+        toolCallId: tool.id,
+        tool: tool.name,
+        progress: tool.progress,
+      }),
+      timestamp: new Date().toISOString(),
     },
+  };
+}
+
+/**
+ * Why a webhook URL is refused, or `undefined` when it may be used. Unless private networks are
+ * allowed, it must be `https` to a host that is not a loopback, private, or link-local address or name.
+ * A name is checked as written; a client passed as `fetch` can check the addresses it resolves to.
+ */
+function pushRefusal(raw: string, allowPrivate: boolean): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return 'A push notification URL must be a URL';
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'A push notification URL must be http or https';
+  if (allowPrivate) return undefined;
+  if (url.protocol !== 'https:') return 'A push notification URL must be https';
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const privateName =
+    host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal');
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host)?.slice(1).map(Number);
+  const privateV4 =
+    v4 !== undefined &&
+    (v4[0] === 10 ||
+      v4[0] === 127 ||
+      v4[0] === 0 ||
+      (v4[0] === 169 && v4[1] === 254) ||
+      (v4[0] === 172 && (v4[1] ?? 0) >= 16 && (v4[1] ?? 0) <= 31) ||
+      (v4[0] === 192 && v4[1] === 168) ||
+      (v4[0] === 100 && (v4[1] ?? 0) >= 64 && (v4[1] ?? 0) <= 127));
+  const privateV6 =
+    host.includes(':') &&
+    (host === '::1' || host === '::' || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith('::ffff:'));
+  if (privateName || privateV4 || privateV6) {
+    return `A push notification URL may not point at a private address: ${url.hostname}`;
+  }
+  return undefined;
+}
+
+/** Posts one update to a webhook: signed when there is a secret, with the caller's token. */
+async function deliver(config: A2aPushNotificationConfig, body: string, push: A2aPushOptions): Promise<void> {
+  const fetcher = push.fetch ?? globalThis.fetch;
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (config.token) headers['x-a2a-notification-token'] = config.token;
+  if (push.secret) headers['x-nexus-signature'] = await signature(body, push.secret);
+  const response = await fetcher(config.url, {
+    method: 'POST',
+    headers,
+    body,
+    signal: AbortSignal.timeout(push.timeoutMs ?? 5_000),
+    redirect: 'manual',
   });
-  return new Response(body, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } });
+  if (!response.ok) throw new Error(`A push notification to ${config.url} answered ${response.status}`);
+}
+
+/** The operation webhooks' signature, `t=<seconds>,v1=<hex HMAC-SHA256 of "<seconds>.<body>">`, through Web Crypto. */
+async function signature(body: string, secret: string): Promise<string> {
+  const seconds = Math.floor(Date.now() / 1000);
+  const encoder = new TextEncoder();
+  const key = await globalThis.crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const digest = new Uint8Array(await globalThis.crypto.subtle.sign('HMAC', key, encoder.encode(`${seconds}.${body}`)));
+  return `t=${seconds},v1=${[...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
 function setStatus(task: A2aTask, state: A2aTaskState, message?: A2aMessage): void {
@@ -506,6 +955,12 @@ function textOfParts(parts: readonly A2aPart[]): string {
     .map((part) => (part.text !== undefined ? part.text : part.data !== undefined ? JSON.stringify(part.data) : ''))
     .filter(Boolean)
     .join('\n');
+}
+
+function remember<V>(map: Map<string, V>, key: string, value: V, max: number): void {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > max) map.delete(map.keys().next().value as string);
 }
 
 function rpcResult(id: unknown, result: unknown): Response {
@@ -536,22 +991,64 @@ export interface A2aSendOptions {
   taskId?: string;
   /** Structured data sent beside the text, such as `{ approved: true }`. */
   data?: unknown;
+  /** A webhook for this task's updates, when the agent pushes them. */
+  push?: A2aPushNotificationConfig;
+  /** Returns the task while it runs, instead of when it is done. */
+  returnImmediately?: boolean;
   /** Cancels the request. */
   signal?: AbortSignal;
+}
+
+/** Which tasks `A2aClient.listTasks()` asks for. */
+export interface A2aListTasksOptions {
+  /** Only this conversation's. */
+  contextId?: string;
+  /** Only those in this state. */
+  status?: A2aTaskState;
+  /** Tasks per page, up to 100. Defaults to 50. */
+  pageSize?: number;
+  /** The `nextPageToken` of the page before. */
+  pageToken?: string;
+  /** Messages of each task's history to include. */
+  historyLength?: number;
+}
+
+/** A page of tasks. */
+export interface A2aTaskPage {
+  /** The tasks. */
+  tasks: A2aTask[];
+  /** The token for the next page, or empty when this is the last. */
+  nextPageToken: string;
+  /** The page size used. */
+  pageSize: number;
+  /** How many tasks match, when the agent's store counts them. */
+  totalSize?: number;
 }
 
 /** A client for one A2A agent. */
 export interface A2aClient {
   /** The agent's card, fetched once. */
   card(): Promise<A2aAgentCard>;
+  /** The card for an authenticated caller, as `GetExtendedAgentCard` returns it. */
+  extendedCard(): Promise<A2aAgentCard>;
   /** Sends a message and waits for the task it starts or continues. */
   send(text: string, options?: A2aSendOptions): Promise<A2aTask>;
   /** Sends a message and reads the task's events as they arrive. */
   stream(text: string, options?: A2aSendOptions): AsyncGenerator<A2aStreamEvent>;
   /** Reads a task. */
   getTask(taskId: string, historyLength?: number): Promise<A2aTask>;
+  /** Lists tasks, a page at a time. */
+  listTasks(options?: A2aListTasksOptions): Promise<A2aTaskPage>;
+  /** Follows a task that is still running, from now until it finishes or waits. */
+  subscribe(taskId: string, options?: { signal?: AbortSignal }): AsyncGenerator<A2aStreamEvent>;
   /** Cancels a task. */
   cancel(taskId: string): Promise<A2aTask>;
+  /** Adds a webhook for a task's updates. */
+  setPushNotification(taskId: string, config: A2aPushNotificationConfig): Promise<A2aPushNotificationConfig>;
+  /** A task's webhooks. */
+  listPushNotifications(taskId: string): Promise<A2aPushNotificationConfig[]>;
+  /** Removes one of a task's webhooks. */
+  deletePushNotification(taskId: string, configId: string): Promise<void>;
 }
 
 /** A client for an A2A agent, by its card or endpoint URL. */
@@ -587,6 +1084,37 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
     if (body.error) throw new A2aError(body.error.code, body.error.message, body.error.data);
     return body.result as T;
   };
+  /** Reads a stream of JSON-RPC results sent as Server-Sent Events. */
+  async function* events(response: Response): AsyncGenerator<A2aStreamEvent> {
+    if (!(response.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      const body = (await response.json()) as { error?: { code: number; message: string } };
+      throw new A2aError(body.error?.code ?? response.status, body.error?.message ?? 'The agent did not stream');
+    }
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const data = frame
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trim())
+          .join('');
+        if (data) {
+          const parsed = JSON.parse(data) as { result?: A2aStreamEvent; error?: { code: number; message: string } };
+          if (parsed.error) throw new A2aError(parsed.error.code, parsed.error.message);
+          if (parsed.result) yield parsed.result;
+        }
+        boundary = buffer.indexOf('\n\n');
+      }
+    }
+  }
   const message = (text: string, send: A2aSendOptions): A2aMessage => ({
     messageId: protocolId('message'),
     role: 'ROLE_USER',
@@ -594,13 +1122,18 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
     ...(send.contextId ? { contextId: send.contextId } : {}),
     ...(send.taskId ? { taskId: send.taskId } : {}),
   });
+  const configuration = (send: A2aSendOptions) => ({
+    returnImmediately: send.returnImmediately === true,
+    ...(send.push ? { pushNotificationConfig: send.push } : {}),
+  });
 
   return {
     card,
+    extendedCard: () => call<A2aAgentCard>('GetExtendedAgentCard', {}),
     async send(text, send = {}) {
       const result = await call<{ task?: A2aTask; message?: A2aMessage }>(
         'SendMessage',
-        { message: message(text, send), configuration: { returnImmediately: false } },
+        { message: message(text, send), configuration: configuration(send) },
         send.signal,
       );
       if (result.task) return result.task;
@@ -614,35 +1147,37 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
       };
     },
     async *stream(text, send = {}) {
-      const response = await post('SendStreamingMessage', { message: message(text, send) }, send.signal);
-      const reader = (response.body as ReadableStream<Uint8Array>).getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let boundary = buffer.indexOf('\n\n');
-        while (boundary !== -1) {
-          const frame = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
-          const data = frame
-            .split('\n')
-            .filter((line) => line.startsWith('data:'))
-            .map((line) => line.slice(5).trim())
-            .join('');
-          if (data) {
-            const parsed = JSON.parse(data) as { result?: A2aStreamEvent; error?: { code: number; message: string } };
-            if (parsed.error) throw new A2aError(parsed.error.code, parsed.error.message);
-            if (parsed.result) yield parsed.result;
-          }
-          boundary = buffer.indexOf('\n\n');
-        }
-      }
+      const response = await post(
+        'SendStreamingMessage',
+        { message: message(text, send), ...(send.push ? { configuration: configuration(send) } : {}) },
+        send.signal,
+      );
+      yield* events(response);
     },
     getTask: (taskId, historyLength) =>
       call<A2aTask>('GetTask', { id: taskId, ...(historyLength ? { historyLength } : {}) }),
+    listTasks: (list = {}) => call<A2aTaskPage>('ListTasks', list),
+    async *subscribe(taskId, subscribe = {}) {
+      yield* events(await post('SubscribeToTask', { id: taskId }, subscribe.signal));
+    },
     cancel: (taskId) => call<A2aTask>('CancelTask', { id: taskId }),
+    async setPushNotification(taskId, config) {
+      const result = await call<{ pushNotificationConfig: A2aPushNotificationConfig }>(
+        'CreateTaskPushNotificationConfig',
+        { taskId, pushNotificationConfig: config },
+      );
+      return result.pushNotificationConfig;
+    },
+    async listPushNotifications(taskId) {
+      const result = await call<Array<{ pushNotificationConfig: A2aPushNotificationConfig }>>(
+        'ListTaskPushNotificationConfig',
+        { taskId },
+      );
+      return result.map((item) => item.pushNotificationConfig);
+    },
+    async deletePushNotification(taskId, configId) {
+      await call('DeleteTaskPushNotificationConfig', { taskId, pushNotificationConfigId: configId });
+    },
   };
 }
 

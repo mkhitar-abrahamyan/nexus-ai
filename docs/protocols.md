@@ -149,7 +149,7 @@ const handler = a2aHandler(researcher, {
 A `GET` returns the `A2aAgentCard` at `/.well-known/agent-card.json`. `A2aServerOptions.card` gives
 the name, description, version, provider, and each `A2aSkill`. The handler fills in the rest:
 - the JSON-RPC interface at the card's `url`;
-- the capabilities: streaming, and no push notifications;
+- the capabilities: streaming, and push notifications and an extended card when they are set up;
 - the input and output media types, unless given.
 
 A `POST` is a JSON-RPC call:
@@ -160,7 +160,18 @@ A `POST` is a JSON-RPC call:
   status update while it runs, whose message says what is happening in text and carries the
   progress as data.
 - `GetTask` reads a task, with as much of its history as `historyLength` asks for.
-- `CancelTask` stops a task that is still running.
+- `ListTasks` lists tasks, most recent first, by `contextId` and by `status`, a page at a time:
+  `pageSize` (50, at most 100) and the `nextPageToken` of the page before. A page is an
+  `A2aTaskPage`, with `totalSize` when the store counts.
+- `SubscribeToTask` follows a task still running, from now until it finishes or waits: the task,
+  then its events. It works on any replica. Where the task runs, the events come as they happen;
+  elsewhere, the replica reads the task every `pollMs` (1 second) and reports each change.
+- `CancelTask` stops a task that is still running. On another replica, it stands too: the replica
+  running the task finishes its work but does not record it over the cancel.
+- `CreateTaskPushNotificationConfig`, `GetTaskPushNotificationConfig`,
+  `ListTaskPushNotificationConfig`, and `DeleteTaskPushNotificationConfig` manage a task's
+  webhooks, when the agent pushes. `SendMessage` takes one too, in its configuration.
+- `GetExtendedAgentCard` returns the card for an authenticated caller, when the agent has one.
 
 A message is made of `A2aPart` values: text, data, or a file by URL or bytes. Who sent it is an
 `A2aRole`. A task moves through the `A2aTaskState` values. A finished task carries its answer as an
@@ -189,21 +200,62 @@ Errors use A2A's codes, listed in `A2A_ERRORS`, beside JSON-RPC's own:
 - an `A2A-Version` header this agent does not speak.
 
 `A2aServerOptions.principal` authenticates the calling agent, and its tasks run as that principal.
-`maxTasks` bounds the tasks and contexts kept in memory.
+
+### Tasks that outlive the process
+
+Tasks and conversations live in an `A2aTaskStore`. Each task is an `A2aTaskRecord`: the task, its
+messages, the questions it waits on, and its webhooks. `A2aTaskQuery` is what a listing asks for.
+- `MemoryA2aTaskStore` is the default, for one replica. `maxTasks` bounds the tasks and contexts
+  it keeps, 10,000 each.
+- `storeA2aTasks()` keeps them in any long-term `Store`: the memory, Redis, Postgres, or SQLite
+  store, so every replica shares them. Listing filters in the store and does not count.
+
+A task paused for an answer then survives a restart: another replica reads it, and the message
+that answers it resumes the run there. The graph resumes from its own checkpoints, so give it a
+shared checkpointer too.
+
+```ts
+import { a2aHandler, storeA2aTasks } from 'nexus-ai-pro/protocols/a2a';
+
+const agent = createAgent({ client: ai, tools, interruptOn: { send_email: true }, checkpointer: postgresCheckpointer });
+export const handler = a2aHandler(agent, { card, store: storeA2aTasks(postgresStore) });
+```
+
+### Push notifications and the extended card
+
+With `pushNotifications`, a caller can give a task a webhook, an `A2aPushNotificationConfig` with a
+URL and a token. Each change of the task's state is then POSTed to it as a status update, in order:
+- with the caller's token as `X-A2A-Notification-Token`;
+- signed with `A2aPushOptions.secret` as the server's operation webhooks are, in
+  `x-nexus-signature`, so the receiver checks it with `verifyOperationWebhook()`;
+- within `timeoutMs` (5 seconds), without following a redirect. A failed delivery goes to `onError`
+  and never fails the task.
+
+A webhook is a URL a caller chose, which the agent then fetches. So it must be `https`, and not a
+loopback, private, or link-local address or name such as `localhost` or `metadata.internal`.
+`allowPrivateNetworks` turns that off, for tests or trusted callers. A name is checked as written,
+not as it resolves; to close a name that resolves to a private address, pass a `fetch` that checks
+the address it connects to, or send deliveries through an egress proxy.
+
+`extendedCard` gives an authenticated caller more of the card, such as skills only partners see. It
+is called with the caller's principal, and `GetExtendedAgentCard` refuses a caller without one.
 
 ### Calling other agents
 
 `a2aClient()` talks to any A2A agent. `A2aClientOptions` takes the agent's card URL, or its
 endpoint, whose origin serves the card. Pass `fetch` and `headers` for authentication or a proxy.
 An `A2aClient` can:
-- read the `card()`;
+- read the `card()`, and the `extendedCard()`;
 - `send()` a message and wait for its task;
 - `stream()` a task's events;
-- read a task with `getTask()`;
-- `cancel()` one.
+- read a task with `getTask()`, list them with `listTasks()`, and follow one with `subscribe()`;
+- `cancel()` one;
+- manage a task's webhooks with `setPushNotification()`, `listPushNotifications()`, and
+  `deletePushNotification()`.
 
 `A2aSendOptions` continues a conversation by `contextId`, answers a task by `taskId`, sends data
-beside the text, or cancels by signal. A JSON-RPC error raises an `A2aError` with its code.
+beside the text, gives a webhook as `push`, returns at once with `returnImmediately`, or cancels by
+signal. `A2aListTasksOptions` filters and pages a listing. A JSON-RPC error raises an `A2aError` with its code.
 
 `a2aTool()` makes a remote agent one more tool. `A2aToolOptions` gives the tool's name and a
 description written for the model. Each call is a task, and the result reports:
@@ -316,10 +368,11 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
 - **AG-UI.** A state delta compares JSON: a value JSON cannot carry, such as a `Date` or a `Map`,
   reaches the frontend as JSON makes it. A change inside an array other than appending replaces the
   whole array.
-- **A2A tasks live in memory.** A restart forgets them, so serve one process per agent or put a
-  sticky route in front. The agent's own checkpoints are as durable as its checkpointer.
-- **A2A coverage.** Only the JSON-RPC binding is served, without `ListTasks`, `SubscribeToTask`,
-  push notifications, or an extended card.
+- **A2A tasks running when their process stops.** A task paused for an answer survives anything,
+  but one that was working stays `TASK_STATE_WORKING` until it is cancelled: nothing resumes a run
+  its process lost.
+- **A2A coverage.** Only the JSON-RPC binding is served. A webhook receives state changes, not each
+  piece of streamed text.
 - **ACP sessions live in memory too.** The agent does not offer `session/load`, and it reads text
   prompts only, not images or audio. It does not use the editor's file system or terminal, or
   connect the MCP servers the editor offers. Those reach `input` through the session, for a graph
@@ -344,17 +397,26 @@ specific entry point that provides it.
 | `A2aClientOptions` | interface | Options for `a2aClient()`. |
 | `A2aError` | class | Raised by the client when an agent answers with a JSON-RPC error. |
 | `a2aHandler` | function | An HTTP handler that serves a graph as an A2A agent: `GET` the card, `POST` JSON-RPC. |
+| `A2aListTasksOptions` | interface | Which tasks `A2aClient.listTasks()` asks for. |
 | `A2aMessage` | interface | A message between agents. |
 | `A2aPart` | interface | One part of a message or an artifact: text, structured data, or a file by URL or bytes. |
+| `A2aPushNotificationConfig` | interface | Where a task's updates are pushed: a webhook the calling agent gave. |
+| `A2aPushOptions` | interface | Options for pushing task updates to the webhooks callers give. |
 | `A2aRole` | type | Who a message is from. |
 | `A2aSendOptions` | interface | What to send: text, and optionally data, a conversation, or the paused task it answers. |
 | `A2aServerOptions` | interface | Options for `a2aHandler()`. |
 | `A2aSkill` | interface | A skill an agent card advertises. |
 | `A2aStreamEvent` | type | A streamed event: a task, a status change, or a piece of an artifact. |
 | `A2aTask` | interface | A unit of work an agent was asked to do. |
+| `A2aTaskPage` | interface | A page of tasks. |
+| `A2aTaskQuery` | interface | Which tasks `A2aTaskStore.list()` returns. |
+| `A2aTaskRecord` | interface | A task as a store keeps it: the task, its messages, the questions it waits on, and its webhooks. |
 | `A2aTaskState` | type | Where a task stands. |
+| `A2aTaskStore` | interface | Where an A2A agent keeps its tasks and conversations. |
 | `a2aTool` | function | A remote A2A agent as a tool another agent can call. |
 | `A2aToolOptions` | interface | Options for `a2aTool()`. |
+| `MemoryA2aTaskStore` | class | Tasks and conversations in this process: the default, for one replica. |
+| `storeA2aTasks` | function | Tasks and conversations in any long-term `Store`: the memory, Redis, Postgres, or SQLite store, so every replica sees one set. |
 
 ### `nexus-ai-pro/protocols/acp`
 

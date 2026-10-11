@@ -214,6 +214,8 @@ test('progress reaches AG-UI as custom events, A2A as working status, and ACP as
     }
   }
   assert.deepEqual(states, [
+    // The task starts working, then each report is its status while it works.
+    { state: 'TASK_STATE_WORKING' },
     { state: 'TASK_STATE_WORKING', progress: { done: 1, of: 3 } },
     { state: 'TASK_STATE_WORKING', progress: { done: 2, of: 3 } },
     { state: 'TASK_STATE_WORKING', progress: { done: 3, of: 3 } },

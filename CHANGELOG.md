@@ -35,11 +35,29 @@ Protocols complete, and progress on every stream.
   tool never replaces a tool of the agent's own.
 - **Tools that depend on the run.** `CreateAgentOptions.toolSource` supplies tools per run, from a
   `ToolSourceContext`, offered and run like `tools`, under the same permission policy.
+- **A2A, durable and complete.**
+  - Tasks and conversations live in an `A2aTaskStore`: `MemoryA2aTaskStore` by default, or
+    `storeA2aTasks()` over any long-term `Store`, so a task paused for an answer survives a restart
+    and another replica finishes it.
+  - `ListTasks` by context and state, a page at a time; `SubscribeToTask` on any replica; and a
+    cancel that stands against the replica running the task.
+  - Push notifications, with `pushNotifications`: each state change POSTed to a task's webhook,
+    with the caller's token and signed as the server's operation webhooks are. A webhook must be
+    `https` and not a private address, unless `allowPrivateNetworks` is set.
+  - `GetExtendedAgentCard`, with `extendedCard`, for authenticated callers.
+  - The client gains `extendedCard()`, `listTasks()`, `subscribe()`, `setPushNotification()`,
+    `listPushNotifications()`, `deletePushNotification()`, and `push` and `returnImmediately` when
+    sending.
 - **A `step` graph event.** `GraphRunOptions.onEvent` receives `step` after each superstep, with the
   state after it.
 
 ### Proof
 
+- An A2A task paused for an approval survives a restart and is finished by another replica, sending
+  its email once, on the memory, SQLite, Postgres, and Redis stores. A running task is followed where
+  it runs and from another replica; a cancel on one replica stands against the other. Every state
+  change reaches the webhook, signed and with the caller's token, and nine webhook URLs that point
+  into the agent's own network or are not https are refused.
 - An AG-UI client applying a run's snapshot and its deltas rebuilds the final state exactly, with
   each new message one `add`. A frontend tool is offered to the model beside the agent's own; the
   agent runs its own call, waits without calling the model again, and continues from the page's
