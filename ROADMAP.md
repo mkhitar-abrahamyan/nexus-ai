@@ -59,17 +59,18 @@ another orchestration abstraction.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release.
+Each gap is written down in a guide's limitations today, and each is closed by one release. A gap
+marked *built* is closed on `main` and leaves this table when its release ships.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.6 |
-| Images have not recorded live conformance on all three backends | API stability | 2.6 |
-| A tool reports nothing until it returns | agents guide | 2.6 |
-| AG-UI reports state once, at the end, and does not run the tools a frontend offers | protocols guide | 2.6 |
-| A2A tasks live in memory, and A2A has no `ListTasks`, `SubscribeToTask`, or push notifications | protocols guide | 2.6 |
-| ACP sessions live in memory, with no `session/load`, no media prompts, and no use of the editor's file system, terminal, or MCP servers | protocols guide | 2.6 |
-| CI does not open a browser | runtimes guide | 2.6 |
+| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.7 |
+| Images have not recorded live conformance on all three backends | API stability | 2.7 |
+| A tool reports nothing until it returns | agents guide | 2.6, built |
+| AG-UI reports state once, at the end, and does not run the tools a frontend offers | protocols guide | 2.6, built |
+| A2A tasks live in memory, and A2A has no `ListTasks`, `SubscribeToTask`, or push notifications | protocols guide | 2.6, built |
+| ACP sessions live in memory, with no `session/load`, no media prompts, and no use of the editor's file system, terminal, or MCP servers | protocols guide | 2.6, built |
+| CI does not open a browser | runtimes guide | 2.6, built |
 | Tool selection runs on the application's side; a provider's own tool search is not used | agents guide | 2.7 |
 | The workspace has no glob or grep, and helpers are fixed when the agent is built and run one at a time, in process | deep-agent guide | 2.7 |
 | The only sandbox shipped is for development | deep-agent guide | 2.7 |
@@ -83,6 +84,9 @@ Each gap is written down in a guide's limitations today, and each is closed by o
 An agent behind any of the three protocols behaves as it does in process: it survives a restart,
 reports progress while a tool works, and is tested against the previous release on the other side
 of the wire.
+
+Built on `main`: everything below except the live graduation carried from 2.5, which needs the
+scheduled live workflow's credentials and moves to 2.7.
 
 **Tool progress, end to end.** A tool can report progress while it runs. A `ToolDefinition` gains an
 optional `stream`: an async generator that yields progress and returns the result, beside
@@ -107,9 +111,6 @@ extended card for authenticated callers.
 `session/load`. A prompt can carry images and audio. With the editor's consent, the agent works
 through the editor's file system and terminal, and connects the MCP servers the editor offers.
 
-**Carried from 2.5: live graduation.** The remote vector stores and images graduate when the
-scheduled live workflow passes against each. It needs the repository's live credentials.
-
 **Interoperability, proven.**
 - A browser runs in CI: Chromium imports the portable entry points and runs a graph and an agent
   against a mock.
@@ -122,9 +123,6 @@ scheduled live workflow passes against each. It needs the repository's live cred
   result after it.
 - An A2A task and an ACP session survive a server restart halfway through, and resume on another
   replica.
-- The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores pass their contract against the real
-  servers, and images record live conformance on all three backends, each published with its
-  graduation checklist.
 - An AG-UI client sees each state change as a delta that rebuilds the final state, and runs a
   frontend tool that the agent waits for.
 - A 2.5 client and a 2.6 server, and a 2.6 client and a 2.5 server, pass the protocol suites.
@@ -135,6 +133,10 @@ scheduled live workflow passes against each. It needs the repository's live cred
 
 Agents work on larger tool sets and workspaces, with helpers that run beside them. Evaluation grows
 its own datasets and runs continuously, within a budget.
+
+**Carried: live graduation.** The remote vector stores and images graduate when the scheduled live
+workflow passes against each, published with their checklists. It needs the repository's live
+credentials.
 
 **Agent execution.**
 - **Provider tool search.** A tool marked `deferred` is sent to a provider that offers its own tool
