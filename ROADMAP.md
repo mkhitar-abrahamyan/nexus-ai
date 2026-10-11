@@ -4,10 +4,10 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.5.0**. 159 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.6.0**. 160 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, and 98 completion
-registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 991
-unit tests and 30 studio tests pass; coverage sits at **95.4% lines / 81.9% branches / 91.5%
+registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 1,014
+unit tests and 30 studio tests pass; coverage sits at **95.6% lines / 82.1% branches / 91.7%
 functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry
 drift, `llms.txt` drift, per-subpath size, documentation and guide coverage, the root import, a graph
 benchmark with a durability budget, runtime and memory-retention budgets, load and soak budgets for
@@ -15,10 +15,12 @@ every graduated surface, crash injection on five checkpointers, an upgrade from 
 2.1.0, and 2.3.0 packages, ten-worker races and tenant isolation on every shared store, ten replicas
 changing one deployment at once on every state store, sandbox conformance, a permission policy in a
 real tool loop, retrieval and tool-selection experiments, a crash halfway through a 100,000-document
-ingestion, the agent protocols driven from the other side of the wire, every studio route called by
-every role and with hostile input, the imports of every entry point for anything Node-only, the
-portable kernel on Node, Deno, Bun, and an edge runtime, mock conformance, packed-package smoke, API
-contract, consumer type resolution, and clean install on Node 22 and 24.
+ingestion, the agent protocols driven from the other side of the wire and against the published
+2.5.0 in both directions, a tool's progress on every stream, every studio route called by every role
+and with hostile input, the imports of every entry point for anything Node-only, the portable kernel
+on Node, Deno, Bun, an edge runtime, and headless Chromium, mock conformance, packed-package smoke,
+API contract, consumer type resolution, and clean install on Node 22 and 24. Every night, each agent
+protocol is driven by the reference client of its own project.
 
 ---
 
@@ -37,9 +39,9 @@ behaves under a crash, a slow database, a rolling deploy, a thousand workers, or
 
 **What every release protects:**
 
-- No required dependency, and a size budget on every entry point. Today the root import is 341 KB, and
-  an entry point costs a fraction of it: `/agent` 31%, `/graph` 24%, `/operations` 16%, `/evaluate`
-  13%, `/tracing` 9%, `/mcp` 5%, `/store` 2%. `npm run size:check` fails the build when an entry point
+- No required dependency, and a size budget on every entry point. Today the root import is 342 KB, and
+  an entry point costs a fraction of it: `/agent` 32%, `/graph` 24%, `/operations` 16%, `/evaluate`
+  13%, `/tracing` 9%, `/mcp` 6%, `/store` 2%. `npm run size:check` fails the build when an entry point
   grows past its budget or picks up a dependency.
 - A runtime and memory budget. `npm run bench:runtime` fails the release gate when a measured path
   slows past its budget, relative to the machine it runs on, or when a run leaves memory behind.
@@ -59,73 +61,17 @@ another orchestration abstraction.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release. A gap
-marked *built* is closed on `main` and leaves this table when its release ships.
+Each gap is written down in a guide's limitations today, and each is closed by one release.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
 | The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.7 |
 | Images have not recorded live conformance on all three backends | API stability | 2.7 |
-| A tool reports nothing until it returns | agents guide | 2.6, built |
-| AG-UI reports state once, at the end, and does not run the tools a frontend offers | protocols guide | 2.6, built |
-| A2A tasks live in memory, and A2A has no `ListTasks`, `SubscribeToTask`, or push notifications | protocols guide | 2.6, built |
-| ACP sessions live in memory, with no `session/load`, no media prompts, and no use of the editor's file system, terminal, or MCP servers | protocols guide | 2.6, built |
-| CI does not open a browser | runtimes guide | 2.6, built |
 | Tool selection runs on the application's side; a provider's own tool search is not used | agents guide | 2.7 |
 | The workspace has no glob or grep, and helpers are fixed when the agent is built and run one at a time, in process | deep-agent guide | 2.7 |
 | The only sandbox shipped is for development | deep-agent guide | 2.7 |
 | Datasets are written by hand or exported from traces; nothing generates them from documents or attacks | evaluation guide | 2.7 |
 | An experiment has no spend cap, and online evaluation is a method a replica calls, not a worker | evaluation guide | 2.7 |
-
----
-
-## 2.6.0: protocols complete, and progress on every stream
-
-An agent behind any of the three protocols behaves as it does in process: it survives a restart,
-reports progress while a tool works, and is tested against the previous release on the other side
-of the wire.
-
-Built on `main`: everything below except the live graduation carried from 2.5, which needs the
-scheduled live workflow's credentials and moves to 2.7.
-
-**Tool progress, end to end.** A tool can report progress while it runs. A `ToolDefinition` gains an
-optional `stream`: an async generator that yields progress and returns the result, beside
-`execute`. Its progress becomes the graph's tool events. From there it reaches:
-- the event stream and server-sent events;
-- AG-UI, A2A, and ACP;
-- traces;
-- the studio.
-
-A tool without `stream` behaves as today.
-
-**AG-UI, complete.** State is reported as it changes, with `STATE_DELTA` patches after a snapshot,
-and the transcript with `MESSAGES_SNAPSHOT`. Tools the frontend offers run in the frontend: the run
-pauses on the call, and resumes when the frontend sends the result.
-
-**A2A, durable and complete.** Tasks live in a task store, with memory, Redis, Postgres, and SQLite
-stores, so a restart or another replica picks a task up. The agent serves `ListTasks`,
-`SubscribeToTask`, push notifications to a webhook signed as the server's webhooks are, and an
-extended card for authenticated callers.
-
-**ACP, durable and complete.** Sessions live in a session store and the agent offers
-`session/load`. A prompt can carry images and audio. With the editor's consent, the agent works
-through the editor's file system and terminal, and connects the MCP servers the editor offers.
-
-**Interoperability, proven.**
-- A browser runs in CI: Chromium imports the portable entry points and runs a graph and an agent
-  against a mock.
-- The previous minor's client is driven against this release's server, and the other way round, on
-  every protocol and the server's HTTP API.
-- A nightly matrix runs each protocol against the reference client of its own project.
-
-**Proof.**
-- A long-running tool's progress arrives on every stream while it runs, in order, and the
-  result after it.
-- An A2A task and an ACP session survive a server restart halfway through, and resume on another
-  replica.
-- An AG-UI client sees each state change as a delta that rebuilds the final state, and runs a
-  frontend tool that the agent waits for.
-- A 2.5 client and a 2.6 server, and a 2.6 client and a 2.5 server, pass the protocol suites.
 
 ---
 

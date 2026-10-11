@@ -270,12 +270,18 @@ Shipped so far:
 - 2.5 graduation finished, and conversations evaluated: deployments that change atomically across
   replicas, revision worker pools, fair canaries judged on every run, and the studio out of
   experimental after a threat review; Postgres tenant usage; signed context named on every trace;
-  simulated users and thread evaluators; and a doctor that knows the opt-in settings.
+  simulated users and thread evaluators; and a doctor that knows the opt-in settings;
+- 2.6 protocols complete, and progress on every stream: a tool's progress reaching the event stream,
+  the protocols, traces, and the studio; AG-UI state deltas and frontend tools; A2A tasks and ACP
+  sessions that survive a restart, with push notifications, `session/load`, and the editor's files,
+  terminal, and MCP servers; and every protocol proven in a browser, against the previous release,
+  and against its reference client.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.6 completes the agent protocols: tool progress on every stream, AG-UI deltas and frontend
-tools, A2A tasks and ACP sessions that survive a restart, and a browser in CI. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
+Next, 2.7 lets agents do more: provider tool search, an interpreter contract, workspace search,
+helpers that run beside the agent, and a container sandbox. Evaluation grows its own datasets and
+runs on workers, within a budget. The [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists the
 releases after it.
 
 ## Before Production
