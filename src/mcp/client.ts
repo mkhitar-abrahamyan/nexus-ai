@@ -1,5 +1,6 @@
-import type { ToolDefinition } from '../types/messages.js';
+import type { ToolContext, ToolDefinition } from '../types/messages.js';
 import {
+  isNotification,
   isRequest,
   isResponse,
   type JsonRpcId,
@@ -74,6 +75,11 @@ export class McpClient {
     { resolve: (value: unknown) => void; reject: (error: unknown) => void; timer: NodeJS.Timeout }
   >();
   private nextId = 1;
+  /** Where each progress token's reports go, while its tool call runs. */
+  private readonly progress = new Map<
+    string,
+    (progress: { progress: number; total?: number; message?: string }) => void
+  >();
   private initialized = false;
   private connecting: Promise<{ name?: string; version?: string }> | undefined;
   private serverInfo: { name?: string; version?: string } = {};
@@ -123,10 +129,25 @@ export class McpClient {
    * Calls a tool. A tool that fails reports `isError` rather than throwing; a protocol failure
    * throws `McpError`.
    */
-  async callTool(name: string, args: Record<string, unknown> = {}): Promise<McpToolResult> {
+  async callTool(
+    name: string,
+    args: Record<string, unknown> = {},
+    options: { progress?: (progress: { progress: number; total?: number; message?: string }) => void } = {},
+  ): Promise<McpToolResult> {
     await this.connect();
-    const result = (await this.request('tools/call', { name, arguments: args })) as McpToolResult;
-    return { content: result?.content ?? [], ...(result?.isError ? { isError: true } : {}) };
+    // With `progress`, the call names a token, and the server's notifications for it arrive there.
+    const token = options.progress ? `progress-${this.nextId}` : undefined;
+    if (token && options.progress) this.progress.set(token, options.progress);
+    try {
+      const result = (await this.request('tools/call', {
+        name,
+        arguments: args,
+        ...(token ? { _meta: { progressToken: token } } : {}),
+      })) as McpToolResult;
+      return { content: result?.content ?? [], ...(result?.isError ? { isError: true } : {}) };
+    } finally {
+      if (token) this.progress.delete(token);
+    }
   }
 
   /** Lists the server's resources. */
@@ -174,8 +195,9 @@ export class McpClient {
       name: options.prefix ? `${options.prefix}_${descriptor.name}` : descriptor.name,
       description: descriptor.description ?? `MCP tool ${descriptor.name}`,
       parameters: descriptor.inputSchema ?? { type: 'object', properties: {} },
-      execute: async (args: Record<string, unknown>) => {
-        const result = await this.callTool(descriptor.name, args);
+      execute: async (args: Record<string, unknown>, context?: ToolContext) => {
+        const progress = context?.progress;
+        const result = await this.callTool(descriptor.name, args, progress ? { progress } : {});
         const text = result.content
           .map((part) => part.text ?? (part.type === 'text' ? '' : JSON.stringify(part)))
           .filter(Boolean)
@@ -222,6 +244,21 @@ export class McpClient {
         message.result,
         message.error ? new McpError(message.error.message, message.error.code, message.error.data) : undefined,
       );
+      return;
+    }
+    if (isNotification(message) && message.method === 'notifications/progress') {
+      const params = (message.params ?? {}) as {
+        progressToken?: unknown;
+        progress?: unknown;
+        total?: unknown;
+        message?: unknown;
+      };
+      const report = this.progress.get(String(params.progressToken));
+      report?.({
+        progress: typeof params.progress === 'number' ? params.progress : 0,
+        ...(typeof params.total === 'number' ? { total: params.total } : {}),
+        ...(typeof params.message === 'string' ? { message: params.message } : {}),
+      });
       return;
     }
     // A server may ask the client for things (sampling, roots). Refusing politely is better than

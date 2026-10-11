@@ -1,22 +1,53 @@
 import type { ContentPart, Message, ToolContext, ToolDefinition, ToolOutput } from '../types/messages.js';
 import type { ToolExecutionResult } from '../types/agent.js';
 
-/** Defines a tool the model can call, typing its arguments. */
-export function tool<TArgs extends Record<string, unknown> = Record<string, unknown>>(definition: {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-  /** Runs the tool. In an agent, `context` says who the run is for and carries its signal and store. */
-  execute: (args: TArgs, context: ToolContext) => Promise<unknown> | unknown;
-  /** What the tool does to the world, for a permission policy; see `ToolDefinition.capabilities`. */
-  capabilities?: readonly string[] | ((args: TArgs) => readonly string[]);
-}): ToolDefinition {
+/** How a tool built with `tool()` runs: once, with `execute`, or reporting progress, with `stream`. */
+export type ToolBody<TArgs> =
+  | {
+      /** Runs the tool. In an agent, `context` says who the run is for and carries its signal and store. */
+      execute: (args: TArgs, context: ToolContext) => Promise<unknown> | unknown;
+      stream?: never;
+    }
+  | {
+      /**
+       * Runs the tool, yielding progress while it works and returning the result. See
+       * `ToolDefinition.stream`.
+       */
+      stream: (args: TArgs, context: ToolContext) => AsyncGenerator<unknown, unknown, undefined>;
+      execute?: never;
+    };
+
+/**
+ * Defines a tool the model can call, typing its arguments. A tool given `stream` gets an `execute`
+ * too, which runs the stream and reports each yield to `context.progress`, so it works wherever a
+ * tool is executed.
+ */
+export function tool<TArgs extends Record<string, unknown> = Record<string, unknown>>(
+  definition: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    /** What the tool does to the world, for a permission policy; see `ToolDefinition.capabilities`. */
+    capabilities?: readonly string[] | ((args: TArgs) => readonly string[]);
+  } & ToolBody<TArgs>,
+): ToolDefinition {
   const capabilities = definition.capabilities;
+  const stream = definition.stream;
+  const execute = definition.execute;
   return {
     name: definition.name,
     description: definition.description,
     parameters: definition.parameters,
-    execute: async (args, context) => definition.execute(args as TArgs, context ?? {}),
+    ...(stream
+      ? {
+          stream: (args: Record<string, unknown>, context?: ToolContext) => stream(args as TArgs, context ?? {}),
+          execute: async (args: Record<string, unknown>, context?: ToolContext) =>
+            drain(stream(args as TArgs, context ?? {}), context?.progress),
+        }
+      : {
+          execute: async (args: Record<string, unknown>, context?: ToolContext) =>
+            (execute as NonNullable<typeof execute>)(args as TArgs, context ?? {}),
+        }),
     ...(capabilities === undefined
       ? {}
       : {
@@ -59,6 +90,25 @@ export function toolMessageContent(result: ToolExecutionResult): Message['conten
   return JSON.stringify(result.ok ? (result.result ?? null) : { error: result.error });
 }
 
+/**
+ * Runs a tool's stream to its end: each yield goes to `progress`, and what the generator returns is
+ * the result. A `progress` that throws never fails the tool.
+ */
+async function drain(
+  generator: AsyncGenerator<unknown, unknown, undefined>,
+  progress: ((value: unknown) => void) | undefined,
+): Promise<unknown> {
+  for (;;) {
+    const step = await generator.next();
+    if (step.done) return step.value;
+    try {
+      progress?.(step.value);
+    } catch {
+      // Reporting is best effort; the work goes on.
+    }
+  }
+}
+
 /** Runs tool calls by name, reporting failures as results rather than throwing. */
 export class ToolExecutor {
   private tools = new Map<string, ToolDefinition>();
@@ -98,12 +148,15 @@ export class ToolExecutor {
       return { ok: false, error: `Tool "${name}" is not registered` };
     }
 
-    if (!toolDefinition.execute) {
-      return { ok: false, error: `Tool "${name}" does not have an execute function` };
+    if (!toolDefinition.execute && !toolDefinition.stream) {
+      return { ok: false, error: `Tool "${name}" does not have an execute or stream function` };
     }
 
     try {
-      const result = await toolDefinition.execute(args, context);
+      // A stream reports its progress as it goes; `execute` reports only what it calls itself.
+      const result = toolDefinition.stream
+        ? await drain(toolDefinition.stream(args, context), context?.progress)
+        : await (toolDefinition.execute as NonNullable<ToolDefinition['execute']>)(args, context);
       return { ok: true, result };
     } catch (err) {
       return {

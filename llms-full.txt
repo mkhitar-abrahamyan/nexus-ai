@@ -2504,6 +2504,39 @@ const result = await ai.agent({
 });
 ```
 
+## Tools that report progress
+
+A tool that takes a while can say how far it has got. Give it `stream` instead of `execute`: an
+async generator that yields progress and returns the result.
+
+```ts
+const importFiles = tool({
+  name: 'import_files',
+  description: 'Imports the files in a folder.',
+  parameters: { type: 'object', properties: { folder: { type: 'string' } } },
+  async *stream({ folder }, { signal }) {
+    const files = await list(String(folder));
+    for (const [index, file] of files.entries()) {
+      await importOne(file, { signal });
+      yield { done: index + 1, of: files.length, file };
+    }
+    return `imported ${files.length} files`;
+  },
+});
+```
+
+An agent turns each yield into a `progress` tool event while the tool runs, between its `start` and
+its `result`. From there it reaches everything that reads the agent's events:
+- `events()`, and the server's event stream for a graph assistant recording `tools`;
+- AG-UI, A2A, and ACP, each in its own way;
+- an MCP client that asked for progress;
+- traces, which keep it on the tool's run;
+- the studio, which shows it with the run.
+
+An `execute` tool can report too, through `context.progress`. `tool()` gives a `stream` tool an
+`execute` as well, which runs the stream and reports each yield to `context.progress`, so it works
+wherever a tool is executed. `ToolBody` is the type of the choice between the two.
+
 ## Tools that return images and files
 
 A tool's result usually goes back to the model as JSON. A tool that made an image, or found a file,
@@ -2605,7 +2638,8 @@ An agent passes every tool a `ToolContext` as the second argument of `execute`, 
 - `signal`, the run's signal;
 - `store`, which in a tenant's run is the tenant's view of it;
 - `principal`, who the run is for: the caller the server authenticated, with their roles and
-  scopes.
+  scopes;
+- `progress`, which reports how far the tool has got.
 
 A tool can therefore act as that user and no one else, stop when the run is cancelled, and remember
 things per tenant. Middleware reads the principal as `context.principal`, and a permission policy
@@ -2979,8 +3013,9 @@ The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven 
 
 ## Limitations
 
-- A tool reports nothing while it runs: its result arrives when it returns. A graph node can report
-  progress with `context.tool()`, but a `ToolDefinition` cannot.
+- Progress is whatever a tool reports. Nothing estimates it for a tool that reports nothing, and
+  the runtime does not throttle reports, so a tool that loops quickly should report every so often,
+  not on every pass.
 - Tool selection runs on the application's side. `toolSelector()` narrows the tools before each
   model call, and a provider's own tool search is not used.
 
@@ -3273,6 +3308,11 @@ protocol failure throws `McpError`.
 With `toNexusTools()`, a `prefix` keeps two servers' `search` tools apart. Each tool returns its text,
 and a failure throws, so the agent sees a failed tool call.
 
+`callTool()` takes a `progress` listener. The call then names a progress token, and each
+`notifications/progress` the server sends for it arrives there, with its progress, total, and
+message. A tool from `toNexusTools()` passes them to the agent's `context.progress`, so a remote
+tool's progress reaches the agent's events like a local one's.
+
 ## Transports
 
 `createStdioTransport()` starts a server as a child process and speaks to it over stdin and stdout.
@@ -3311,8 +3351,10 @@ adds a tool later. `connect()` starts serving over a transport, `close()` stops,
 one message directly, for a host that carries messages itself.
 
 It answers `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, and `resources/read`.
-A tool without an `execute` function is a schema for a model to call elsewhere, so the server
-reports it as unknown when called. A tool that throws answers with `isError` and the message rather
+A tool with neither `execute` nor `stream` is a schema for a model to call elsewhere, so the server
+reports it as unknown when called. A `stream` tool runs too, and when the call names a
+`progressToken`, each report goes back as `notifications/progress`: a number is the progress, an
+object's `progress`, `total`, and `message` are used, and anything else is the message. A tool that throws answers with `isError` and the message rather
 than failing the request. `createStdioServerTransport()` serves over this process's stdin and stdout,
 which is how an editor or desktop assistant launches it; nothing else may be written to stdout.
 
@@ -3455,7 +3497,9 @@ writes as one `data:` frame:
 - `RUN_STARTED` first;
 - `STEP_STARTED` and `STEP_FINISHED` around each node the graph runs;
 - `TEXT_MESSAGE_START`, `TEXT_MESSAGE_CONTENT` with each streamed piece, and `TEXT_MESSAGE_END`;
-- `TOOL_CALL_START`, `TOOL_CALL_ARGS`, and `TOOL_CALL_END` for each call, then `TOOL_CALL_RESULT`;
+- `TOOL_CALL_START`, `TOOL_CALL_ARGS`, and `TOOL_CALL_END` for each call, then `TOOL_CALL_RESULT`.
+  While the tool runs, each report of its progress is a `CUSTOM` event named `tool_progress`, whose
+  value has the call's id and name and the progress;
 - `STATE_SNAPSHOT` with the final state, unless `stateSnapshot` is false;
 - last, `RUN_FINISHED` with the answer as its `result`, or `RUN_ERROR` with the failure's message
   and code.
@@ -3526,7 +3570,9 @@ A `POST` is a JSON-RPC call:
 - `SendMessage` starts a task from an `A2aMessage` and returns the `A2aTask` when it is done.
   With `returnImmediately`, it returns the task while it runs.
 - `SendStreamingMessage` streams `A2aStreamEvent` values: the task, then the answer as artifact
-  updates while it streams, then the final status.
+  updates while it streams, then the final status. A tool's progress is a `TASK_STATE_WORKING`
+  status update while it runs, whose message says what is happening in text and carries the
+  progress as data.
 - `GetTask` reads a task, with as much of its history as `historyLength` asks for.
 - `CancelTask` stops a task that is still running.
 
@@ -3629,6 +3675,7 @@ While the prompt runs, the editor receives each `AcpSessionUpdate`:
 - each tool call, then its result:
   - the call has a title and an `AcpToolKind`, and the file it touches when it has a `path`
     argument;
+  - while it runs, each report of its progress updates the call, still `in_progress`;
   - the result is text, and an edit's result is also a diff;
 - the plan, whenever `write_todos` records one.
 
@@ -3877,6 +3924,8 @@ changing what you pass.
 ## Graphs and model calls
 
 `traceGraph()` records a graph or agent run: a root run with one child per task, retries included.
+Each tool call is a run inside its node's. A tool that reports progress keeps it in the run's
+`metadata.progress`: each report with when it came, the latest 50.
 `GraphTracingOptions` names the root, labels it `graph` or `agent`, and adds tags, metadata, and
 inputs. It returns `GraphTracing`:
 
@@ -9453,7 +9502,7 @@ Every source is optional. The studio shows a view for each one it is given, and 
 
 | View | Source | What you can do |
 | --- | --- | --- |
-| Traces | `traces` | Filter runs by status, kind, name, model, and time; open a run tree with inputs, outputs, cost, and latency; compare two traces; record feedback on a run |
+| Traces | `traces` | Filter runs by status, kind, name, model, and time; open a run tree with inputs, outputs, cost, latency, and a tool's progress; compare two traces; record feedback on a run |
 | Threads | `graphs` | See each graph's diagram with the next nodes highlighted; list threads; read state at any step; fork from a step; edit state; answer an interrupt |
 | Inbox | `graphs`, `reviews`, `proposals` | Every thread waiting for a human, every review item waiting for a grade, and every proposed fix waiting for promotion, in one list |
 | Issues | `traces` | Failing and slow runs clustered by what went wrong, and what got worse than the week before |
@@ -11068,14 +11117,14 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 341 KB | 100% | none |
+| `nexus-ai-pro` | 342 KB | 100% | none |
 | `nexus-ai-pro/config` | 334 KB | 98% | none |
-| `nexus-ai-pro/core` | 329 KB | 96% | none |
+| `nexus-ai-pro/core` | 330 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
-| `nexus-ai-pro/deep-agent` | 138 KB | 40% | none |
+| `nexus-ai-pro/deep-agent` | 139 KB | 41% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 115 KB | 34% | none |
-| `nexus-ai-pro/agent` | 105 KB | 31% | none |
+| `nexus-ai-pro/agent` | 106 KB | 31% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
 | `nexus-ai-pro/postgres` | 84 KB | 25% | none |
 | `nexus-ai-pro/providers/groq` | 83 KB | 24% | none |
@@ -11109,29 +11158,30 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 11% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
+| `nexus-ai-pro/voice` | 33 KB | 10% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 10% | none |
-| `nexus-ai-pro/voice` | 32 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 31 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 30 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
+| `nexus-ai-pro/runtime` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/images/stores` | 25 KB | 7% | none |
-| `nexus-ai-pro/runtime` | 24 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
+| `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
-| `nexus-ai-pro/mcp/registry` | 20 KB | 6% | none |
+| `nexus-ai-pro/protocols/a2a` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/assets` | 19 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
-| `nexus-ai-pro/protocols/a2a` | 19 KB | 6% | none |
+| `nexus-ai-pro/mcp` | 19 KB | 6% | none |
+| `nexus-ai-pro/connectors` | 19 KB | 6% | none |
 | `nexus-ai-pro/lifecycle` | 19 KB | 6% | none |
-| `nexus-ai-pro/connectors` | 18 KB | 5% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 17 KB | 5% | none |
@@ -11139,7 +11189,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
-| `nexus-ai-pro/mcp` | 16 KB | 5% | none |
 | `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 16 KB | 5% | none |
 | `nexus-ai-pro/sqlite/operations` | 15 KB | 4% | none |
@@ -11151,11 +11200,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
 | `nexus-ai-pro/rag/pipeline` | 14 KB | 4% | none |
+| `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
-| `nexus-ai-pro/voice/session` | 12 KB | 4% | none |
 | `nexus-ai-pro/agent/sandbox` | 12 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/files` | 12 KB | 4% | none |

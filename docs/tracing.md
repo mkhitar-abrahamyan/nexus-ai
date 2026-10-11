@@ -181,6 +181,8 @@ changing what you pass.
 ## Graphs and model calls
 
 `traceGraph()` records a graph or agent run: a root run with one child per task, retries included.
+Each tool call is a run inside its node's. A tool that reports progress keeps it in the run's
+`metadata.progress`: each report with when it came, the latest 50.
 `GraphTracingOptions` names the root, labels it `graph` or `agent`, and adds tags, metadata, and
 inputs. It returns `GraphTracing`:
 

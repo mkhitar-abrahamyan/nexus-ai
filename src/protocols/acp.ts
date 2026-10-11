@@ -4,7 +4,7 @@
  *
  * Each editor session is a conversation. While a prompt runs, the editor sees:
  * - the agent's text as it streams;
- * - each tool call, with its kind, the file it touches, and its result or diff;
+ * - each tool call, with its kind, the file it touches, its progress, and its result or diff;
  * - the plan, as `write_todos` records it.
  *
  * A tool call that needs approval asks the editor, which shows the person allow and reject choices.
@@ -403,6 +403,16 @@ function toolUpdates(
       });
     }
     return updates;
+  }
+  if (tool.phase === 'progress') {
+    return [
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: tool.id,
+        status: 'in_progress',
+        content: [{ type: 'content', content: { type: 'text', text: asText(tool.progress) } }],
+      },
+    ];
   }
   if (tool.phase !== 'result' && tool.phase !== 'error') return [];
   const content: unknown[] = [];

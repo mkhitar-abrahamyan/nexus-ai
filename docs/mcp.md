@@ -53,6 +53,11 @@ protocol failure throws `McpError`.
 With `toNexusTools()`, a `prefix` keeps two servers' `search` tools apart. Each tool returns its text,
 and a failure throws, so the agent sees a failed tool call.
 
+`callTool()` takes a `progress` listener. The call then names a progress token, and each
+`notifications/progress` the server sends for it arrives there, with its progress, total, and
+message. A tool from `toNexusTools()` passes them to the agent's `context.progress`, so a remote
+tool's progress reaches the agent's events like a local one's.
+
 ## Transports
 
 `createStdioTransport()` starts a server as a child process and speaks to it over stdin and stdout.
@@ -91,8 +96,10 @@ adds a tool later. `connect()` starts serving over a transport, `close()` stops,
 one message directly, for a host that carries messages itself.
 
 It answers `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, and `resources/read`.
-A tool without an `execute` function is a schema for a model to call elsewhere, so the server
-reports it as unknown when called. A tool that throws answers with `isError` and the message rather
+A tool with neither `execute` nor `stream` is a schema for a model to call elsewhere, so the server
+reports it as unknown when called. A `stream` tool runs too, and when the call names a
+`progressToken`, each report goes back as `notifications/progress`: a number is the progress, an
+object's `progress`, `total`, and `message` are used, and anything else is the message. A tool that throws answers with `isError` and the message rather
 than failing the request. `createStdioServerTransport()` serves over this process's stdin and stdout,
 which is how an editor or desktop assistant launches it; nothing else may be written to stdout.
 

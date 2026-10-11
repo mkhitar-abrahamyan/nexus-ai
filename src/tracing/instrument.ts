@@ -3,6 +3,9 @@ import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import type { RunHandle, Tracer } from './tracer.js';
 
+/** Progress reports a tool run keeps: the latest, when a long tool reports often. */
+const MAX_PROGRESS = 50;
+
 /** Options for `traceGraph()`. */
 export interface GraphTracingOptions {
   /** Name of the root run. Defaults to `graph`. */
@@ -49,6 +52,8 @@ export function traceGraph(tracer: Tracer, options: GraphTracingOptions = {}): G
   const retries = new Map<string, number>();
   const emitted = new Map<string, unknown[]>();
   const tools = new Map<string, RunHandle>();
+  /** Progress each tool call reported, kept with its run when it finishes. */
+  const progress = new Map<string, Array<{ at: string; progress: unknown }>>();
 
   const onEvent = (event: GraphEvent): void => {
     switch (event.type) {
@@ -84,14 +89,25 @@ export function traceGraph(tracer: Tracer, options: GraphTracingOptions = {}): G
           );
           return;
         }
-        if (event.tool.phase === 'progress') return;
+        if (event.tool.phase === 'progress') {
+          // The latest reports are the ones worth keeping when a long tool reports often.
+          const reports = [
+            ...(progress.get(key) ?? []),
+            { at: new Date().toISOString(), progress: event.tool.progress },
+          ];
+          progress.set(key, reports.slice(-MAX_PROGRESS));
+          return;
+        }
         const handle = tools.get(key);
         if (!handle) return;
         tools.delete(key);
+        const reported = progress.get(key);
+        progress.delete(key);
+        const metadata = reported ? { metadata: { progress: reported } } : {};
         void handle.finish(
           event.tool.phase === 'error'
-            ? { error: new Error(event.tool.error ?? 'The tool failed') }
-            : { outputs: event.tool.result },
+            ? { error: new Error(event.tool.error ?? 'The tool failed'), ...metadata }
+            : { outputs: event.tool.result, ...metadata },
         );
         return;
       }

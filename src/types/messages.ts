@@ -131,6 +131,13 @@ export interface ToolDefinition {
    */
   execute?: (args: Record<string, unknown>, context?: ToolContext) => Promise<unknown>;
   /**
+   * Runs the tool and reports progress while it works: an async generator that yields progress, such
+   * as `{ done: 3, of: 10 }`, and returns the result. An agent turns each yield into a `progress` tool
+   * event, which reaches the event stream, the agent protocols, and traces. Preferred over `execute`
+   * where both are given.
+   */
+  stream?: (args: Record<string, unknown>, context?: ToolContext) => AsyncGenerator<unknown, unknown, undefined>;
+  /**
    * What the tool does to the world, as capabilities a permission policy decides on:
    * `filesystem:read` or `filesystem:write` with an optional path, `network` with an optional host,
    * `shell` with an optional command, `code`, or a name of the application's own such as `payments`.
@@ -173,6 +180,11 @@ export interface ToolContext {
   signal?: AbortSignal;
   /** Long-term memory. In a tenant's run, the tenant's view of it. */
   store?: Store;
+  /**
+   * Reports progress while the tool works, as a `stream` tool's yields do: an agent turns each call
+   * into a `progress` tool event. Absent outside an agent, so a tool calls it as `context.progress?.()`.
+   */
+  progress?: (progress: unknown) => void;
 }
 
 /** What a tool returned, correlated with the call that asked for it. */

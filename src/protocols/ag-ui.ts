@@ -7,7 +7,7 @@
  * - the run starting and finishing;
  * - each step;
  * - text as it streams;
- * - each tool call with its arguments and result;
+ * - each tool call with its arguments, its progress, and its result;
  * - the final state.
  *
  * A run that pauses for a person ends with an interrupt outcome naming each question. The frontend
@@ -288,6 +288,13 @@ function translator(push: (event: AgUiEvent) => void) {
           push({ type: 'TOOL_CALL_START', toolCallId: tool.id, toolCallName: tool.name });
           push({ type: 'TOOL_CALL_ARGS', toolCallId: tool.id, delta: asText(tool.args ?? {}) });
           push({ type: 'TOOL_CALL_END', toolCallId: tool.id });
+        } else if (tool.phase === 'progress') {
+          // AG-UI has no tool progress of its own; a custom event carries it to the application.
+          push({
+            type: 'CUSTOM',
+            name: 'tool_progress',
+            value: { toolCallId: tool.id, toolCallName: tool.name, progress: tool.progress },
+          });
         } else if (tool.phase === 'result' || tool.phase === 'error') {
           push({
             type: 'TOOL_CALL_RESULT',

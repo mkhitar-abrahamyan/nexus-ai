@@ -338,6 +338,24 @@ async function renderTrace(traceId) {
       pretty(run.inputs),
       h('h2', {}, 'Outputs'),
       pretty(run.outputs),
+      // What a tool reported while it worked, in order: the run's progress, as the tracer kept it.
+      Array.isArray(run.metadata?.progress) && run.metadata.progress.length
+        ? [
+            h('h2', {}, 'Progress'),
+            h(
+              'ol',
+              { class: 'progress' },
+              run.metadata.progress.map((report) =>
+                h(
+                  'li',
+                  {},
+                  h('span', { class: 'muted' }, `${String(report.at ?? '').slice(11, 23)} `),
+                  typeof report.progress === 'string' ? report.progress : JSON.stringify(report.progress),
+                ),
+              ),
+            ),
+          ]
+        : '',
       run.metadata ? [h('h2', {}, 'Metadata'), pretty(run.metadata)] : '',
       run.feedback?.length ? [h('h2', {}, 'Feedback'), pretty(run.feedback)] : '',
       h('h2', {}, 'Add feedback'),

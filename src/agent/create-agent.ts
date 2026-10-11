@@ -399,6 +399,8 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
             ...(context.principal ? { principal: context.principal } : {}),
             signal: context.signal,
             ...(context.store ? { store: context.store } : {}),
+            progress: (progress: unknown) =>
+              context.tool({ phase: 'progress', id: call.id, name: description.name, progress }),
           });
         };
         context.tool({ phase: 'start', id: call.id, name: description.name, args });

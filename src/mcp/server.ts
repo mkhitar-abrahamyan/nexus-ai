@@ -112,9 +112,37 @@ export class McpServer {
         const tool = this.tools.get(name);
         // A tool definition without an implementation is a schema for a model to call elsewhere; this
         // server can only serve the ones it can actually run.
-        if (!tool?.execute) return { content: textContent(`Unknown tool "${name}"`), isError: true };
+        if (!tool?.execute && !tool?.stream) return { content: textContent(`Unknown tool "${name}"`), isError: true };
+        const args = (params.arguments ?? {}) as Record<string, unknown>;
+        // A client that asks for progress names a token; each report goes back as notifications/progress.
+        const token = (params._meta as { progressToken?: unknown } | undefined)?.progressToken;
+        let reports = 0;
+        const progress =
+          typeof token === 'string' || typeof token === 'number'
+            ? (value: unknown) => {
+                reports += 1;
+                void this.transport?.send({
+                  jsonrpc: '2.0',
+                  method: 'notifications/progress',
+                  params: { progressToken: token, ...progressParams(value, reports) },
+                });
+              }
+            : undefined;
         try {
-          const output = await tool.execute((params.arguments ?? {}) as Record<string, unknown>);
+          let output: unknown;
+          if (tool.stream) {
+            const generator = tool.stream(args, progress ? { progress } : {});
+            for (;;) {
+              const step = await generator.next();
+              if (step.done) {
+                output = step.value;
+                break;
+              }
+              progress?.(step.value);
+            }
+          } else {
+            output = await (tool.execute as NonNullable<ToolDefinition['execute']>)(args, progress ? { progress } : {});
+          }
           return { content: textContent(output) };
         } catch (error) {
           // A failing tool is a result the caller can reason about, not a transport error.
@@ -190,4 +218,21 @@ export function createStdioServerTransport(streams?: {
       onClose();
     },
   };
+}
+
+/**
+ * A progress report in MCP's shape: a number is the progress itself, an object may carry `progress`,
+ * `total`, and `message`, and anything else is the message, counted by its position.
+ */
+function progressParams(value: unknown, position: number): { progress: number; total?: number; message?: string } {
+  if (typeof value === 'number') return { progress: value };
+  if (value && typeof value === 'object') {
+    const report = value as { progress?: unknown; total?: unknown; message?: unknown };
+    return {
+      progress: typeof report.progress === 'number' ? report.progress : position,
+      ...(typeof report.total === 'number' ? { total: report.total } : {}),
+      message: typeof report.message === 'string' ? report.message : JSON.stringify(value),
+    };
+  }
+  return { progress: position, message: String(value) };
 }

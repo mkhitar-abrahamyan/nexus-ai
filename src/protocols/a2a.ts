@@ -11,12 +11,13 @@
  * resumes it. The client and `a2aTool()` speak the same protocol to any A2A agent. A remote agent is
  * then one more tool, which declares the host it reaches, so a permission policy decides it.
  */
-import type { GraphEvent } from '../types/graph.js';
+import type { GraphEvent, GraphToolEvent } from '../types/graph.js';
 import type { Message, ToolDefinition } from '../types/messages.js';
 import type { Principal } from '../types/principal.js';
 import {
   answerOf,
   approvalOf,
+  asText,
   messageOf,
   type ProtocolGraph,
   type ProtocolInterrupt,
@@ -201,6 +202,12 @@ export interface A2aServerOptions {
   maxTasks?: number;
 }
 
+/** Where a streaming task's text and tool progress go as they happen. */
+interface TaskSink {
+  text(delta: string): void;
+  progress(tool: GraphToolEvent): void;
+}
+
 interface TaskRecord {
   task: A2aTask;
   history: A2aMessage[];
@@ -254,23 +261,24 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
       return toolCallOf(interrupt) ? approvalOf(text) : text;
     });
 
-  /** Runs, or resumes, the graph for a task, reporting text as it streams. */
+  /** Runs, or resumes, the graph for a task, reporting text and tool progress as they happen. */
   const execute = async (
     record: TaskRecord,
     message: A2aMessage,
     principal: Principal | undefined,
-    onText?: (delta: string) => void,
+    sink?: TaskSink,
   ): Promise<void> => {
     const task = record.task;
     const runOptions: ProtocolRunOptions = {
       threadId: task.id,
       signal: record.controller.signal,
       ...(principal ? { principal } : {}),
-      ...(onText
+      ...(sink
         ? {
             onEvent: (event: GraphEvent) => {
-              if (event.type === 'message' && !event.namespace && event.chunk.kind !== 'reasoning')
-                onText(event.chunk.content);
+              if (event.namespace) return;
+              if (event.type === 'message' && event.chunk.kind !== 'reasoning') sink.text(event.chunk.content);
+              else if (event.type === 'tool' && event.tool.phase === 'progress') sink.progress(event.tool);
             },
           }
         : {}),
@@ -389,7 +397,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
           if (!configuration.returnImmediately) await running;
           return rpcResult(id, { task: view(record, configuration.historyLength) });
         }
-        return streamTask(id, record, (onText) => execute(record, message, principal, onText));
+        return streamTask(id, record, (sink) => execute(record, message, principal, sink));
       }
       case 'GetTask': {
         const record = tasks.get(String(params.id ?? ''));
@@ -420,11 +428,7 @@ function view(record: TaskRecord, historyLength?: number): A2aTask {
   };
 }
 
-function streamTask(
-  id: unknown,
-  record: TaskRecord,
-  run: (onText: (delta: string) => void) => Promise<void>,
-): Response {
+function streamTask(id: unknown, record: TaskRecord, run: (sink: TaskSink) => Promise<void>): Response {
   const encoder = new TextEncoder();
   const task = record.task;
   const body = new ReadableStream<Uint8Array>({
@@ -433,17 +437,37 @@ function streamTask(
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`));
       send({ task: { ...task } });
       let streamed = false;
-      await run((delta) => {
-        if (!delta) return;
-        send({
-          artifactUpdate: {
-            taskId: task.id,
-            contextId: task.contextId,
-            artifact: { artifactId: `${task.id}:answer`, name: 'answer', parts: [{ text: delta }] },
-            append: streamed,
-          },
-        });
-        streamed = true;
+      await run({
+        text(delta) {
+          if (!delta) return;
+          send({
+            artifactUpdate: {
+              taskId: task.id,
+              contextId: task.contextId,
+              artifact: { artifactId: `${task.id}:answer`, name: 'answer', parts: [{ text: delta }] },
+              append: streamed,
+            },
+          });
+          streamed = true;
+        },
+        // A tool's progress is the task's status while it works: what is happening, and as data.
+        progress(tool) {
+          send({
+            statusUpdate: {
+              taskId: task.id,
+              contextId: task.contextId,
+              status: {
+                state: 'TASK_STATE_WORKING',
+                message: agentMessage(task, `${tool.name}: ${asText(tool.progress)}`, {
+                  toolCallId: tool.id,
+                  tool: tool.name,
+                  progress: tool.progress,
+                }),
+                timestamp: new Date().toISOString(),
+              },
+            },
+          });
+        },
       });
       if (streamed) {
         send({

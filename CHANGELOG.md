@@ -4,6 +4,30 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Protocols complete, and progress on every stream.
+
+### Added
+
+- **Tool progress, end to end.**
+  - A `ToolDefinition` can have `stream`: an async generator that yields progress and returns the
+    result. `tool()` takes one instead of `execute`, and gives it an `execute` that runs the stream,
+    so it works wherever a tool is executed. `ToolExecutor` runs a stream itself.
+  - `ToolContext.progress` reports progress from any tool. An agent sets it, and turns each report
+    into a `progress` tool event while the tool runs.
+  - Progress reaches the event stream and the server's run events; AG-UI, as a `CUSTOM`
+    `tool_progress` event; A2A, as a working status update with the progress as data; ACP, as an
+    update of the tool call in progress; traces, in the tool run's `metadata.progress`; and the
+    studio's run view.
+  - MCP: `McpServer` runs `stream` tools and sends `notifications/progress` for a call that names a
+    `progressToken`. `McpClient.callTool()` takes a `progress` listener, and the tools from
+    `toNexusTools()` pass a remote tool's progress to the agent.
+
+### Proof
+
+- A tool that will not go on until a reader has seen its first report finishes on every stream: the
+  event stream, the server's events, AG-UI, A2A, ACP, and MCP. Its reports arrive in order, after the
+  call and before the result, and its traced run keeps them.
+
 ## [2.5.0] - 2026-10-09
 
 Graduation finished, and conversations evaluated.

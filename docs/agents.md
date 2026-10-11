@@ -31,6 +31,39 @@ const result = await ai.agent({
 });
 ```
 
+## Tools that report progress
+
+A tool that takes a while can say how far it has got. Give it `stream` instead of `execute`: an
+async generator that yields progress and returns the result.
+
+```ts
+const importFiles = tool({
+  name: 'import_files',
+  description: 'Imports the files in a folder.',
+  parameters: { type: 'object', properties: { folder: { type: 'string' } } },
+  async *stream({ folder }, { signal }) {
+    const files = await list(String(folder));
+    for (const [index, file] of files.entries()) {
+      await importOne(file, { signal });
+      yield { done: index + 1, of: files.length, file };
+    }
+    return `imported ${files.length} files`;
+  },
+});
+```
+
+An agent turns each yield into a `progress` tool event while the tool runs, between its `start` and
+its `result`. From there it reaches everything that reads the agent's events:
+- `events()`, and the server's event stream for a graph assistant recording `tools`;
+- AG-UI, A2A, and ACP, each in its own way;
+- an MCP client that asked for progress;
+- traces, which keep it on the tool's run;
+- the studio, which shows it with the run.
+
+An `execute` tool can report too, through `context.progress`. `tool()` gives a `stream` tool an
+`execute` as well, which runs the stream and reports each yield to `context.progress`, so it works
+wherever a tool is executed. `ToolBody` is the type of the choice between the two.
+
 ## Tools that return images and files
 
 A tool's result usually goes back to the model as JSON. A tool that made an image, or found a file,
@@ -132,7 +165,8 @@ An agent passes every tool a `ToolContext` as the second argument of `execute`, 
 - `signal`, the run's signal;
 - `store`, which in a tenant's run is the tenant's view of it;
 - `principal`, who the run is for: the caller the server authenticated, with their roles and
-  scopes.
+  scopes;
+- `progress`, which reports how far the tool has got.
 
 A tool can therefore act as that user and no one else, stop when the run is cancelled, and remember
 things per tenant. Middleware reads the principal as `context.principal`, and a permission policy
@@ -506,8 +540,9 @@ The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven 
 
 ## Limitations
 
-- A tool reports nothing while it runs: its result arrives when it returns. A graph node can report
-  progress with `context.tool()`, but a `ToolDefinition` cannot.
+- Progress is whatever a tool reports. Nothing estimates it for a tool that reports nothing, and
+  the runtime does not throttle reports, so a tool that loops quickly should report every so often,
+  not on every pass.
 - Tool selection runs on the application's side. `toolSelector()` narrows the tools before each
   model call, and a provider's own tool search is not used.
 
@@ -537,6 +572,7 @@ specific entry point that provides it.
 | `AgentStopReason` | type | `completed` when the model answered, `max_iterations` when it ran out of model calls, `stopped` when a middleware ended the run through `context.stop()`. |
 | `createAgent` | function | Builds an agent and returns it as a compiled graph. |
 | `CreateAgentOptions` | interface | Options for `createAgent()`. |
+| `ToolBody` | type | How a tool built with `tool()` runs: once, with `execute`, or reporting progress, with `stream`. |
 | `ToolExecutionResult` | interface | What running one tool produced. |
 
 ### `nexus-ai-pro/agent/middleware`

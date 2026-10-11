@@ -41,6 +41,15 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.6 stage (Unreleased)
+
+Everything 2.6 adds is stable from the start and additive.
+
+New and stable:
+- `ToolDefinition.stream`, `ToolContext.progress`, and `ToolBody`; `tool()` with `stream`. The
+  AG-UI event name `tool_progress`, and the `progress` and `callId` fields of a tool run's metadata;
+- `McpClient.callTool()`'s `progress` option, and `notifications/progress` from `McpServer`.
+
 ## 2.5 stage (2.5.0)
 
 Everything 2.5 adds is stable from the start and additive.

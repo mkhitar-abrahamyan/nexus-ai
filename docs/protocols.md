@@ -61,7 +61,9 @@ writes as one `data:` frame:
 - `RUN_STARTED` first;
 - `STEP_STARTED` and `STEP_FINISHED` around each node the graph runs;
 - `TEXT_MESSAGE_START`, `TEXT_MESSAGE_CONTENT` with each streamed piece, and `TEXT_MESSAGE_END`;
-- `TOOL_CALL_START`, `TOOL_CALL_ARGS`, and `TOOL_CALL_END` for each call, then `TOOL_CALL_RESULT`;
+- `TOOL_CALL_START`, `TOOL_CALL_ARGS`, and `TOOL_CALL_END` for each call, then `TOOL_CALL_RESULT`.
+  While the tool runs, each report of its progress is a `CUSTOM` event named `tool_progress`, whose
+  value has the call's id and name and the progress;
 - `STATE_SNAPSHOT` with the final state, unless `stateSnapshot` is false;
 - last, `RUN_FINISHED` with the answer as its `result`, or `RUN_ERROR` with the failure's message
   and code.
@@ -132,7 +134,9 @@ A `POST` is a JSON-RPC call:
 - `SendMessage` starts a task from an `A2aMessage` and returns the `A2aTask` when it is done.
   With `returnImmediately`, it returns the task while it runs.
 - `SendStreamingMessage` streams `A2aStreamEvent` values: the task, then the answer as artifact
-  updates while it streams, then the final status.
+  updates while it streams, then the final status. A tool's progress is a `TASK_STATE_WORKING`
+  status update while it runs, whose message says what is happening in text and carries the
+  progress as data.
 - `GetTask` reads a task, with as much of its history as `historyLength` asks for.
 - `CancelTask` stops a task that is still running.
 
@@ -235,6 +239,7 @@ While the prompt runs, the editor receives each `AcpSessionUpdate`:
 - each tool call, then its result:
   - the call has a title and an `AcpToolKind`, and the file it touches when it has a `path`
     argument;
+  - while it runs, each report of its progress updates the call, still `in_progress`;
   - the result is text, and an edit's result is also a diff;
 - the plan, whenever `write_todos` records one.
 
