@@ -752,7 +752,13 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
     this.writers.add(writer);
     let failed = false;
     try {
-      yield* this.steps(threadId, runOptions, seed, (written, durable) => writer.persist(written, durable));
+      for await (const event of this.steps(threadId, runOptions, seed, (written, durable) =>
+        writer.persist(written, durable),
+      )) {
+        // The state after each superstep, for an observer that reports state as it changes.
+        notify(runOptions, { type: 'step', step: event.step, status: event.status, state: event.state });
+        yield event;
+      }
     } catch (error) {
       failed = true;
       throw error;

@@ -328,7 +328,8 @@ before its first step, audited and counted when it ends. `lifecycleFamily` label
 `GraphRunOptions` sets the `threadId`, `maxSteps`, a signal, metadata for every checkpoint,
 `maxConcurrency`, breakpoints for this run, `onEvent`, `onProgress`, its `durability`, and a `control`
 to drain it. `onEvent` receives each `GraphEvent`: `task_start`, `task_retry`, `task_failed`,
-`task_end` with the update and whether it was served from the cache, `checkpoint`, and `custom`. `onProgress` receives each `GraphProgress` a node reported.
+`task_end` with the update and whether it was served from the cache, `checkpoint`, `custom`, and
+`step`, with the state after each superstep. `onProgress` receives each `GraphProgress` a node reported.
 
 A node asks a question with an `InterruptRequest`: a `reason` and a JSON `payload`. Each question
 waits as a `PendingInterrupt`, with its id, node, task, step, position within the node, and when it

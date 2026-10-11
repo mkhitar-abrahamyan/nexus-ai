@@ -328,6 +328,9 @@ function fromGraphEvent<S extends ChannelSchema>(event: GraphEvent): Array<Graph
       return [
         { type: 'custom', step: event.step, node: event.node, taskId: event.taskId, data: event.data, namespace },
       ];
+    case 'step':
+      // The values projection comes from the run's own steps, with their nesting.
+      return [];
     case 'checkpoint':
       return [{ type: 'checkpoints', step: event.step, status: event.status, next: event.next, namespace }];
     case 'task_end':

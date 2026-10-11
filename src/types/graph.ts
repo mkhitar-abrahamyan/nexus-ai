@@ -688,6 +688,8 @@ export type GraphEvent = (
       cached?: boolean;
     }
   | { type: 'checkpoint'; step: number; status: GraphStatus; next: string[] }
+  /** A superstep finished: where the run stands, and the state after it. */
+  | { type: 'step'; step: number; status: GraphStatus; state: unknown }
   | { type: 'custom'; step: number; taskId: string; node: string; data: unknown }
   | { type: 'message'; step: number; taskId: string; node: string; chunk: GraphMessageChunk }
   | { type: 'tool'; step: number; taskId: string; node: string; tool: GraphToolEvent }

@@ -120,8 +120,21 @@ const agent = createAgent({
 
 const run = await agent.invoke(agentInput('Refund order 1182 and tell the customer'), { threadId });
 run.state.answer;      // the final text
-run.state.stopReason;  // 'completed' | 'max_iterations' | 'stopped'
+run.state.stopReason;  // 'completed' | 'max_iterations' | 'stopped' | 'client_tools'
 ```
+
+**Tools that depend on the run.** `toolSource` supplies tools per run: it is called with a
+`ToolSourceContext` (the thread, the tenant, the principal, and the signal) before each model call
+and each tool call, and its tools are offered and run like `tools`. They pass the same permission
+policy and approvals. A tool in `tools` wins over a source's tool of the same name. It is how an
+editor's files serve one session, or how the MCP servers one user connected serve that user.
+
+**Tools the client runs.** An input may carry `clientTools`: each a `ClientToolDefinition` with a
+name, a description, and a schema, and no implementation. The model is offered them with the
+agent's own. When it calls one, the agent reports the call as started, runs its own calls of that
+step, and ends the turn with `stopReason: 'client_tools'`. The client runs the tool and sends the
+transcript back with the result, and the next run carries on from there. A client tool named like
+one of the agent's own is ignored. AG-UI's frontend tools work this way.
 
 **Tool calls run in parallel.** Each call the model asks for becomes its own task, up to
 `toolConcurrency` at once. So three lookups take as long as the slowest one.
@@ -527,7 +540,7 @@ thrown error, so one bad call does not end a run. An unknown tool name is report
 | --- | --- |
 | `CreateAgentOptions` | What `createAgent()` takes. |
 | `AgentGraph` | What it returns: a compiled graph over `AgentChannels`. |
-| `AgentState` | The graph's state: the transcript, the iterations used, the final answer, and an `AgentStopReason`: `completed`, `max_iterations`, or `stopped` when a middleware ended the run. |
+| `AgentState` | The graph's state: the transcript, the iterations used, the final answer, and an `AgentStopReason`: `completed`, `max_iterations`, `stopped` when a middleware ended the run, or `client_tools` when it waits for a client. |
 | `agentInput()` | Wraps a question into that state. |
 | `AgentApprovalPolicy` | Decides which tools pause for a person. |
 | `AgentApproval` | A person's answer: allow, refuse with a reason the model sees, or allow with corrected arguments. |
@@ -569,11 +582,13 @@ specific entry point that provides it.
 | `AgentResult` | interface | The outcome of an `AgentLoop` run. |
 | `AgentState` | type | The agent's state. |
 | `AgentStep` | interface | One step of an `AgentLoop` run. |
-| `AgentStopReason` | type | `completed` when the model answered, `max_iterations` when it ran out of model calls, `stopped` when a middleware ended the run through `context.stop()`. |
+| `AgentStopReason` | type | `completed` when the model answered, `max_iterations` when it ran out of model calls, `stopped` when a middleware ended the run through `context.stop()`, and `client_tools` when the model called a tool the client runs, which waits for the client's result. |
+| `ClientToolDefinition` | interface | A tool the client runs, such as one an AG-UI frontend offers: a name, a description, and a schema, with no implementation on the agent's side. |
 | `createAgent` | function | Builds an agent and returns it as a compiled graph. |
 | `CreateAgentOptions` | interface | Options for `createAgent()`. |
 | `ToolBody` | type | How a tool built with `tool()` runs: once, with `execute`, or reporting progress, with `stream`. |
 | `ToolExecutionResult` | interface | What running one tool produced. |
+| `ToolSourceContext` | interface | What a tool source is told about the run it supplies tools for. |
 
 ### `nexus-ai-pro/agent/middleware`
 

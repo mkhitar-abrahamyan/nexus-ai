@@ -184,6 +184,39 @@ export interface CreateAgentOptions {
    * event once the model returns. Middleware sees the assembled response either way.
    */
   streamTokens?: boolean;
+  /**
+   * Tools that depend on the run, added to `tools` on every model call and run like them: an editor's
+   * file system for one session, or the MCP servers one user connected. A tool in `tools` wins over a
+   * source's tool of the same name.
+   */
+  toolSource?: (context: ToolSourceContext) => ToolDefinition[] | Promise<ToolDefinition[]>;
+}
+
+/** What a tool source is told about the run it supplies tools for. */
+export interface ToolSourceContext {
+  /** The run's thread. */
+  threadId: string;
+  /** The tenant the run is for. */
+  tenantId?: string;
+  /** Who the run is for. */
+  principal?: Readonly<Principal>;
+  /** Aborted when the run is cancelled. */
+  signal: AbortSignal;
+}
+
+/**
+ * A tool the client runs, such as one an AG-UI frontend offers: a name, a description, and a schema,
+ * with no implementation on the agent's side. Given in the input as `clientTools`, it is offered to
+ * the model like any tool. When the model calls one, the agent ends its turn with `stopReason:
+ * 'client_tools'`, and the client sends the result back in the next run's messages.
+ */
+export interface ClientToolDefinition {
+  /** The name the model calls it by. */
+  name: string;
+  /** What it does, written for the model. */
+  description: string;
+  /** JSON Schema for the arguments. */
+  parameters: Record<string, unknown>;
 }
 
 const agentChannels = () => ({
@@ -191,6 +224,7 @@ const agentChannels = () => ({
   iterations: counter(),
   answer: lastValue<string>(''),
   stopReason: lastValue<AgentStopReason | undefined>(undefined),
+  clientTools: lastValue<ClientToolDefinition[] | undefined>(undefined),
 });
 
 /** The agent's state channels, as a graph schema. */
@@ -205,12 +239,15 @@ export type AgentState = {
   answer: string;
   /** Why the agent stopped. */
   stopReason?: AgentStopReason;
+  /** Tools the client runs, given in the input; see `ClientToolDefinition`. */
+  clientTools?: ClientToolDefinition[];
 };
 /**
  * `completed` when the model answered, `max_iterations` when it ran out of model calls, `stopped`
- * when a middleware ended the run through `context.stop()`.
+ * when a middleware ended the run through `context.stop()`, and `client_tools` when the model called
+ * a tool the client runs, which waits for the client's result.
  */
-export type AgentStopReason = 'completed' | 'max_iterations' | 'stopped';
+export type AgentStopReason = 'completed' | 'max_iterations' | 'stopped' | 'client_tools';
 /** An agent: a compiled graph over the agent's channels. */
 export type AgentGraph = CompiledGraph<AgentChannels>;
 
@@ -234,19 +271,37 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
   const executor = new ToolExecutor(options.tools ?? []);
   const middleware = options.middleware ?? [];
   const approvals = options.interruptOn ?? {};
+  /** The run's tools: the source's for this run, then the agent's own, which win a name. */
+  const toolsFor = async (context: NodeContext<AgentChannels>): Promise<ToolExecutor> => {
+    if (!options.toolSource) return executor;
+    const supplied = await options.toolSource({
+      threadId: context.threadId,
+      ...(context.tenantId !== undefined ? { tenantId: context.tenantId } : {}),
+      ...(context.principal ? { principal: context.principal } : {}),
+      signal: context.signal,
+    });
+    return supplied.length ? new ToolExecutor([...supplied, ...executor.list()]) : executor;
+  };
 
   const graph = createGraph({ channels: agentChannels() })
     .addNode(
       'model',
       async (context) => {
         const state = context.state as AgentState;
+        const runTools = await toolsFor(context);
+        const clientTools = clientToolsOf(state, runTools);
+        // A client's tool call still unanswered: the client runs it, so the turn ends here.
+        if (clientTools.length > 0 && waitingOnClient(state.messages, clientTools)) {
+          return new Command({ update: { stopReason: 'client_tools' }, goto: END });
+        }
+        const offered = [...runTools.list(), ...clientTools];
         let request: CompletionRequest = {
           model: options.model ?? 'auto',
           messages: [
             ...(options.systemPrompt ? [{ role: 'system' as const, content: options.systemPrompt }] : []),
             ...state.messages,
           ],
-          ...(options.tools?.length ? { tools: executor.list() } : {}),
+          ...(offered.length ? { tools: offered as ToolDefinition[] } : {}),
           ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
           ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
           ...(options.responseFormat ? { responseFormat: options.responseFormat } : {}),
@@ -313,9 +368,29 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
             goto: END,
           });
         }
+        // A call to a client's tool is reported as started, for the client to run; the agent's own
+        // calls run first, and the next model step ends the turn while the client's are unanswered.
+        const forClient = new Set(clientTools.map((item) => item.name));
+        const ours = calls.filter((call) => !forClient.has(call.function.name));
+        for (const call of calls) {
+          if (!forClient.has(call.function.name)) continue;
+          const parsed = parseArguments(call.function.arguments);
+          context.tool({
+            phase: 'start',
+            id: call.id,
+            name: call.function.name,
+            args: parsed.ok ? parsed.args : call.function.arguments,
+          });
+        }
+        if (ours.length === 0) {
+          return new Command({
+            update: { messages: [assistant], iterations: 1, stopReason: 'client_tools' },
+            goto: END,
+          });
+        }
         return new Command({
           update: { messages: [assistant], iterations: 1 },
-          goto: calls.map((call) => new Send('tools', call)),
+          goto: ours.map((call) => new Send('tools', call)),
         });
       },
       { ends: ['tools', END] },
@@ -330,7 +405,8 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
         }
 
         let args = parsed.args;
-        const definition = executor.get(call.function.name);
+        const runTools = await toolsFor(context);
+        const definition = runTools.get(call.function.name);
         const capabilities = capabilitiesOf(definition, args);
         const description: AgentToolCall = {
           id: call.id,
@@ -392,7 +468,7 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
             });
             if (recheck.decision === 'deny') return { ok: false, error: `Permission denied: ${recheck.reason}` };
           }
-          return executor.execute(description.name, current.args, {
+          return runTools.execute(description.name, current.args, {
             toolCallId: call.id,
             threadId: context.threadId,
             ...(context.tenantId !== undefined ? { tenantId: context.tenantId } : {}),
@@ -519,6 +595,31 @@ function parseArguments(raw: string): ParsedArguments {
 export type { NodeContext };
 
 /** What a middleware hook reads about its step, from the node it runs in. */
+/** The client's tools the model may call: those in the input that no tool of the agent shadows. */
+function clientToolsOf(state: AgentState, runTools: ToolExecutor): ClientToolDefinition[] {
+  return (state.clientTools ?? []).filter(
+    (item) => typeof item?.name === 'string' && item.name !== '' && !runTools.has(item.name),
+  );
+}
+
+/** Whether the latest assistant turn called a client's tool that no tool message has answered yet. */
+function waitingOnClient(messages: readonly Message[], clientTools: readonly ClientToolDefinition[]): boolean {
+  const names = new Set(clientTools.map((item) => item.name));
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index] as Message;
+    if (message.role === 'user') return false;
+    if (message.role !== 'assistant' || !message.toolCalls?.length) continue;
+    const answered = new Set(
+      messages
+        .slice(index + 1)
+        .filter((item) => item.role === 'tool')
+        .map((item) => item.toolCallId),
+    );
+    return message.toolCalls.some((call) => names.has(call.function.name) && !answered.has(call.id));
+  }
+  return false;
+}
+
 function hookContext(
   context: NodeContext<AgentChannels>,
   state: AgentState,

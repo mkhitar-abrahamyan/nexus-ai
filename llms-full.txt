@@ -1976,7 +1976,8 @@ before its first step, audited and counted when it ends. `lifecycleFamily` label
 `GraphRunOptions` sets the `threadId`, `maxSteps`, a signal, metadata for every checkpoint,
 `maxConcurrency`, breakpoints for this run, `onEvent`, `onProgress`, its `durability`, and a `control`
 to drain it. `onEvent` receives each `GraphEvent`: `task_start`, `task_retry`, `task_failed`,
-`task_end` with the update and whether it was served from the cache, `checkpoint`, and `custom`. `onProgress` receives each `GraphProgress` a node reported.
+`task_end` with the update and whether it was served from the cache, `checkpoint`, `custom`, and
+`step`, with the state after each superstep. `onProgress` receives each `GraphProgress` a node reported.
 
 A node asks a question with an `InterruptRequest`: a `reason` and a JSON `payload`. Each question
 waits as a `PendingInterrupt`, with its id, node, task, step, position within the node, and when it
@@ -2593,8 +2594,21 @@ const agent = createAgent({
 
 const run = await agent.invoke(agentInput('Refund order 1182 and tell the customer'), { threadId });
 run.state.answer;      // the final text
-run.state.stopReason;  // 'completed' | 'max_iterations' | 'stopped'
+run.state.stopReason;  // 'completed' | 'max_iterations' | 'stopped' | 'client_tools'
 ```
+
+**Tools that depend on the run.** `toolSource` supplies tools per run: it is called with a
+`ToolSourceContext` (the thread, the tenant, the principal, and the signal) before each model call
+and each tool call, and its tools are offered and run like `tools`. They pass the same permission
+policy and approvals. A tool in `tools` wins over a source's tool of the same name. It is how an
+editor's files serve one session, or how the MCP servers one user connected serve that user.
+
+**Tools the client runs.** An input may carry `clientTools`: each a `ClientToolDefinition` with a
+name, a description, and a schema, and no implementation. The model is offered them with the
+agent's own. When it calls one, the agent reports the call as started, runs its own calls of that
+step, and ends the turn with `stopReason: 'client_tools'`. The client runs the tool and sends the
+transcript back with the result, and the next run carries on from there. A client tool named like
+one of the agent's own is ignored. AG-UI's frontend tools work this way.
 
 **Tool calls run in parallel.** Each call the model asks for becomes its own task, up to
 `toolConcurrency` at once. So three lookups take as long as the slowest one.
@@ -3000,7 +3014,7 @@ thrown error, so one bad call does not end a run. An unknown tool name is report
 | --- | --- |
 | `CreateAgentOptions` | What `createAgent()` takes. |
 | `AgentGraph` | What it returns: a compiled graph over `AgentChannels`. |
-| `AgentState` | The graph's state: the transcript, the iterations used, the final answer, and an `AgentStopReason`: `completed`, `max_iterations`, or `stopped` when a middleware ended the run. |
+| `AgentState` | The graph's state: the transcript, the iterations used, the final answer, and an `AgentStopReason`: `completed`, `max_iterations`, `stopped` when a middleware ended the run, or `client_tools` when it waits for a client. |
 | `agentInput()` | Wraps a question into that state. |
 | `AgentApprovalPolicy` | Decides which tools pause for a person. |
 | `AgentApproval` | A person's answer: allow, refuse with a reason the model sees, or allow with corrected arguments. |
@@ -3507,6 +3521,28 @@ writes as one `data:` frame:
 A subgraph's events belong to the parent's step, so only the graph's own nodes are reported as
 steps. Reasoning is not sent as message text.
 
+### State, transcripts, and the frontend's tools
+
+Three options turn on the rest of the protocol. Each is off by default, so a frontend sees the
+events above and nothing more until it asks:
+
+| Option | What the frontend gets |
+| --- | --- |
+| `stateDeltas` | The state as it changes: a `STATE_SNAPSHOT` after the first step, then a `STATE_DELTA` after every step that changed it. A delta is an RFC 6902 JSON Patch, a list of `AgUiPatchOperation` values. A message added to the transcript is one `add` at `/messages/-`, so a long conversation costs only what is new. |
+| `messagesSnapshot` | A `MESSAGES_SNAPSHOT` with the whole transcript before the run finishes. The frontend's messages keep their ids, a tool's result has the id of its `TOOL_CALL_RESULT`, and the rest are named after the run. |
+| `frontendTools` | The tools the frontend sends, offered to the model. |
+
+A tool the frontend offers runs in the frontend. When the model calls one, the frontend sees
+`TOOL_CALL_START`, `TOOL_CALL_ARGS`, and `TOOL_CALL_END` for it and no result, and the run finishes
+once the agent's own calls of that step are done. The frontend runs the tool and sends the
+conversation back with a `tool` message carrying the result, and the turn carries on from there.
+The agent's state says why it stopped: `stopReason: 'client_tools'`. A frontend tool named like one
+of the agent's own is ignored, so a page can never replace a tool that runs on the server.
+
+```ts
+export const POST = agUiHandler(agent, { stateDeltas: true, messagesSnapshot: true, frontendTools: true });
+```
+
 ### Questions and approvals
 
 A run that pauses ends with `RUN_FINISHED` and an interrupt outcome. Each question is an
@@ -3727,8 +3763,9 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
 
 ## Limitations
 
-- **AG-UI.** The adapter reports state once, as a snapshot when the run ends: no `STATE_DELTA` or
-  `MESSAGES_SNAPSHOT`. Tools the frontend offers reach `input`, but the adapter does not run them.
+- **AG-UI.** A state delta compares JSON: a value JSON cannot carry, such as a `Date` or a `Map`,
+  reaches the frontend as JSON makes it. A change inside an array other than appending replaces the
+  whole array.
 - **A2A tasks live in memory.** A restart forgets them, so serve one process per agent or put a
   sticky route in front. The agent's own checkpoints are as durable as its checkpointer.
 - **A2A coverage.** Only the JSON-RPC binding is served, without `ListTasks`, `SubscribeToTask`,
@@ -11121,10 +11158,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/config` | 334 KB | 98% | none |
 | `nexus-ai-pro/core` | 330 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
-| `nexus-ai-pro/deep-agent` | 139 KB | 41% | none |
+| `nexus-ai-pro/deep-agent` | 142 KB | 42% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 115 KB | 34% | none |
-| `nexus-ai-pro/agent` | 106 KB | 31% | none |
+| `nexus-ai-pro/agent` | 109 KB | 32% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
 | `nexus-ai-pro/postgres` | 84 KB | 25% | none |
 | `nexus-ai-pro/providers/groq` | 83 KB | 24% | none |
@@ -11202,6 +11239,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/rag/pipeline` | 14 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
+| `nexus-ai-pro/protocols/ag-ui` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
@@ -11229,7 +11267,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/migrations` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/lint` | 9 KB | 3% | none |
-| `nexus-ai-pro/protocols/ag-ui` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/models` | 8 KB | 2% | none |
 | `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |

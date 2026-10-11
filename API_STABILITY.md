@@ -48,7 +48,14 @@ Everything 2.6 adds is stable from the start and additive.
 New and stable:
 - `ToolDefinition.stream`, `ToolContext.progress`, and `ToolBody`; `tool()` with `stream`. The
   AG-UI event name `tool_progress`, and the `progress` and `callId` fields of a tool run's metadata;
-- `McpClient.callTool()`'s `progress` option, and `notifications/progress` from `McpServer`.
+- `McpClient.callTool()`'s `progress` option, and `notifications/progress` from `McpServer`;
+- `AgUiOptions.stateDeltas`, `messagesSnapshot`, and `frontendTools`, and `AgUiPatchOperation`;
+- `CreateAgentOptions.toolSource` and `ToolSourceContext`; `ClientToolDefinition`, the `clientTools`
+  channel, and the `AgentStopReason` member `client_tools`;
+- the `step` member of `GraphEvent`.
+
+`GraphEvent` and `AgentStopReason` gain members, as the compatibility rules allow in a minor
+release. Code that switches over either exhaustively should handle the new ones.
 
 ## 2.5 stage (2.5.0)
 

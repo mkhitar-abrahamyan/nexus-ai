@@ -22,8 +22,29 @@ Protocols complete, and progress on every stream.
     `progressToken`. `McpClient.callTool()` takes a `progress` listener, and the tools from
     `toNexusTools()` pass a remote tool's progress to the agent.
 
+- **AG-UI, complete**, each part opt-in on `AgUiOptions`:
+  - `stateDeltas` reports state as it changes: a `STATE_SNAPSHOT` after the first step, then a
+    `STATE_DELTA` with an RFC 6902 JSON Patch after every step that changed it, appending to arrays
+    item by item. `AgUiPatchOperation` is its type.
+  - `messagesSnapshot` sends the whole transcript as `MESSAGES_SNAPSHOT` before the run finishes.
+  - `frontendTools` offers the tools the frontend sends to the model. The frontend runs a call to one,
+    and the next run's messages carry its result.
+- **Tools the client runs.** An agent's input may carry `clientTools`, each a `ClientToolDefinition`.
+  The model is offered them; a call to one ends the turn with the new `stopReason: 'client_tools'`
+  once the agent's own calls of that step have run, and the client's result continues it. A client
+  tool never replaces a tool of the agent's own.
+- **Tools that depend on the run.** `CreateAgentOptions.toolSource` supplies tools per run, from a
+  `ToolSourceContext`, offered and run like `tools`, under the same permission policy.
+- **A `step` graph event.** `GraphRunOptions.onEvent` receives `step` after each superstep, with the
+  state after it.
+
 ### Proof
 
+- An AG-UI client applying a run's snapshot and its deltas rebuilds the final state exactly, with
+  each new message one `add`. A frontend tool is offered to the model beside the agent's own; the
+  agent runs its own call, waits without calling the model again, and continues from the page's
+  result in the next run. A page cannot shadow the agent's tool, and without the options the events
+  are what they were.
 - A tool that will not go on until a reader has seen its first report finishes on every stream: the
   event stream, the server's events, AG-UI, A2A, ACP, and MCP. Its reports arrive in order, after the
   call and before the result, and its traced run keeps them.

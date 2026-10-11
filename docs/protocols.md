@@ -71,6 +71,28 @@ writes as one `data:` frame:
 A subgraph's events belong to the parent's step, so only the graph's own nodes are reported as
 steps. Reasoning is not sent as message text.
 
+### State, transcripts, and the frontend's tools
+
+Three options turn on the rest of the protocol. Each is off by default, so a frontend sees the
+events above and nothing more until it asks:
+
+| Option | What the frontend gets |
+| --- | --- |
+| `stateDeltas` | The state as it changes: a `STATE_SNAPSHOT` after the first step, then a `STATE_DELTA` after every step that changed it. A delta is an RFC 6902 JSON Patch, a list of `AgUiPatchOperation` values. A message added to the transcript is one `add` at `/messages/-`, so a long conversation costs only what is new. |
+| `messagesSnapshot` | A `MESSAGES_SNAPSHOT` with the whole transcript before the run finishes. The frontend's messages keep their ids, a tool's result has the id of its `TOOL_CALL_RESULT`, and the rest are named after the run. |
+| `frontendTools` | The tools the frontend sends, offered to the model. |
+
+A tool the frontend offers runs in the frontend. When the model calls one, the frontend sees
+`TOOL_CALL_START`, `TOOL_CALL_ARGS`, and `TOOL_CALL_END` for it and no result, and the run finishes
+once the agent's own calls of that step are done. The frontend runs the tool and sends the
+conversation back with a `tool` message carrying the result, and the turn carries on from there.
+The agent's state says why it stopped: `stopReason: 'client_tools'`. A frontend tool named like one
+of the agent's own is ignored, so a page can never replace a tool that runs on the server.
+
+```ts
+export const POST = agUiHandler(agent, { stateDeltas: true, messagesSnapshot: true, frontendTools: true });
+```
+
 ### Questions and approvals
 
 A run that pauses ends with `RUN_FINISHED` and an interrupt outcome. Each question is an
@@ -291,8 +313,9 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
 
 ## Limitations
 
-- **AG-UI.** The adapter reports state once, as a snapshot when the run ends: no `STATE_DELTA` or
-  `MESSAGES_SNAPSHOT`. Tools the frontend offers reach `input`, but the adapter does not run them.
+- **AG-UI.** A state delta compares JSON: a value JSON cannot carry, such as a `Date` or a `Map`,
+  reaches the frontend as JSON makes it. A change inside an array other than appending replaces the
+  whole array.
 - **A2A tasks live in memory.** A restart forgets them, so serve one process per agent or put a
   sticky route in front. The agent's own checkpoints are as durable as its checkpointer.
 - **A2A coverage.** Only the JSON-RPC binding is served, without `ListTasks`, `SubscribeToTask`,
@@ -360,6 +383,7 @@ specific entry point that provides it.
 | `AgUiMessage` | interface | A message in AG-UI's shape. |
 | `agUiMessages` | function | The conversation from a `RunAgentInput`, as Nexus messages. |
 | `AgUiOptions` | interface | Options for `agUiEvents()` and `agUiHandler()`. |
+| `AgUiPatchOperation` | interface | One operation of an RFC 6902 JSON Patch, as `STATE_DELTA` carries them. |
 | `AgUiResumeEntry` | interface | One answer to an interrupt, in a resumed run. |
 | `AgUiRunInput` | interface | What a frontend sends to start or resume a run: AG-UI's `RunAgentInput`. |
 | `encodeAgUiEvent` | function | One event as a Server-Sent Event: `data: <json>` and a blank line. |

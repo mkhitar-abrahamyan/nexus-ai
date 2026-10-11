@@ -23,8 +23,10 @@ export {
   type AgentStopReason,
   type AgentToolCall,
   type AgentToolResult,
+  type ClientToolDefinition,
   createAgent,
   type CreateAgentOptions,
+  type ToolSourceContext,
 } from './create-agent.js';
 export type { AgentConfig, AgentResult, AgentStep, ToolExecutionResult } from '../types/agent.js';
 export type { ToolContext } from '../types/messages.js';

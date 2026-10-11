@@ -12,6 +12,10 @@
  *
  * A run that pauses for a person ends with an interrupt outcome naming each question. The frontend
  * answers with a `resume` entry per question, and the run continues where it stopped.
+ *
+ * Opt in to the rest of the protocol: state as it changes, as `STATE_DELTA` patches after a
+ * snapshot; the whole transcript as `MESSAGES_SNAPSHOT`; and the frontend's own tools, which the
+ * agent offers the model and the frontend runs.
  */
 import type { GraphEvent } from '../types/graph.js';
 import type { Message } from '../types/messages.js';
@@ -27,6 +31,7 @@ import {
   protocolId,
   textOf,
   toolCallOf,
+  transcriptOf,
 } from './shared.js';
 
 export type { ProtocolGraph, ProtocolInterrupt, ProtocolResult, ProtocolRunOptions } from './shared.js';
@@ -107,6 +112,20 @@ export interface AgUiOptions {
   principal?: (request: Request) => Principal | undefined | Promise<Principal | undefined>;
   /** Adds a `STATE_SNAPSHOT` with the final state before the run finishes. Defaults to true. */
   stateSnapshot?: boolean;
+  /**
+   * Reports state as it changes: a `STATE_SNAPSHOT` after the first step, then a `STATE_DELTA` with
+   * an RFC 6902 JSON Patch after every step that changed it. Defaults to false.
+   */
+  stateDeltas?: boolean;
+  /** Adds a `MESSAGES_SNAPSHOT` with the whole transcript before the run finishes. Defaults to false. */
+  messagesSnapshot?: boolean;
+  /**
+   * Offers the tools the frontend sends to the model, as client tools: when the model calls one, the
+   * frontend sees the call, the run finishes, and the frontend sends the result in the next run's
+   * messages. A tool of the agent's own always wins a name. Defaults to false, which passes the
+   * frontend's tools only to `input`.
+   */
+  frontendTools?: boolean;
 }
 
 /** Options for `agUiEvents()`: everything `agUiHandler()` takes, with the caller already known. */
@@ -149,7 +168,7 @@ export async function* agUiEvents(
     queue.push({ ...event, timestamp: Date.now() });
     wake?.();
   };
-  const translate = translator(push);
+  const translate = translator(push, options.stateDeltas === true);
 
   push({
     type: 'RUN_STARTED',
@@ -177,10 +196,22 @@ export async function* agUiEvents(
         );
       } else {
         const messages = agUiMessages(run.messages);
-        result = await graph.invoke(options.input ? options.input(run, messages) : { messages }, runOptions);
+        const clientTools =
+          options.frontendTools && run.tools?.length
+            ? run.tools.map((item) => ({
+                name: item.name,
+                description: item.description,
+                parameters: (item.parameters ?? { type: 'object' }) as Record<string, unknown>,
+              }))
+            : undefined;
+        result = await graph.invoke(
+          options.input ? options.input(run, messages) : { messages, ...(clientTools ? { clientTools } : {}) },
+          runOptions,
+        );
       }
       translate.close();
       if (options.stateSnapshot !== false) push({ type: 'STATE_SNAPSHOT', snapshot: result.state });
+      if (options.messagesSnapshot) push({ type: 'MESSAGES_SNAPSHOT', messages: snapshotMessages(run, result) });
       push(finishedEvent(run, result));
     } catch (error) {
       translate.close();
@@ -259,15 +290,34 @@ export function encodeAgUiEvent(event: AgUiEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
-/** Turns graph events into AG-UI events: text grouped into messages, steps, and tool calls. */
-function translator(push: (event: AgUiEvent) => void) {
+/**
+ * Turns graph events into AG-UI events: text grouped into messages, steps, tool calls, and, with
+ * `deltas`, the state after each step as a snapshot and then patches.
+ */
+function translator(push: (event: AgUiEvent) => void, deltas: boolean) {
   let open: string | undefined;
+  let reported: unknown;
+  let snapshotted = false;
   const closeMessage = () => {
     if (open) push({ type: 'TEXT_MESSAGE_END', messageId: open });
     open = undefined;
   };
   return {
     event(event: GraphEvent) {
+      if (event.type === 'step') {
+        if (!deltas || event.namespace) return;
+        // Compared as the frontend sees it: JSON, without what JSON drops.
+        const state = JSON.parse(JSON.stringify(event.state ?? null)) as unknown;
+        if (!snapshotted) {
+          push({ type: 'STATE_SNAPSHOT', snapshot: state });
+          snapshotted = true;
+        } else {
+          const delta = jsonPatch(reported, state);
+          if (delta.length > 0) push({ type: 'STATE_DELTA', delta });
+        }
+        reported = state;
+        return;
+      }
       // A subgraph's events belong to its parent's step; only the graph's own steps are reported.
       if (event.type === 'task_start' && !event.namespace) push({ type: 'STEP_STARTED', stepName: event.node });
       else if (event.type === 'task_end' && !event.namespace) {
@@ -308,6 +358,95 @@ function translator(push: (event: AgUiEvent) => void) {
     },
     close: closeMessage,
   };
+}
+
+/** One operation of an RFC 6902 JSON Patch, as `STATE_DELTA` carries them. */
+export interface AgUiPatchOperation {
+  /** `add`, `remove`, or `replace`. */
+  op: 'add' | 'remove' | 'replace';
+  /** An RFC 6901 pointer: `/messages/-` appends to `messages`, and an empty string is the whole state. */
+  path: string;
+  /** The value added or put in place. */
+  value?: unknown;
+}
+
+/**
+ * The JSON Patch that turns one JSON value into another. Items appended to an array are added one by
+ * one, so a growing transcript costs only its new messages; any other change to an array replaces it.
+ */
+function jsonPatch(before: unknown, after: unknown, path = ''): AgUiPatchOperation[] {
+  if (sameJson(before, after)) return [];
+  if (Array.isArray(before) && Array.isArray(after)) {
+    const appended = after.length >= before.length && before.every((item, index) => sameJson(item, after[index]));
+    return appended
+      ? after.slice(before.length).map((value) => ({ op: 'add' as const, path: `${path}/-`, value }))
+      : [{ op: 'replace', path, value: after }];
+  }
+  if (isRecord(before) && isRecord(after)) {
+    const operations: AgUiPatchOperation[] = [];
+    for (const key of Object.keys(before)) {
+      if (!(key in after)) operations.push({ op: 'remove', path: `${path}/${pointer(key)}` });
+    }
+    for (const [key, value] of Object.entries(after)) {
+      if (!(key in before)) operations.push({ op: 'add', path: `${path}/${pointer(key)}`, value });
+      else operations.push(...jsonPatch(before[key], value, `${path}/${pointer(key)}`));
+    }
+    return operations;
+  }
+  return [{ op: 'replace', path, value: after }];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, index) => sameJson(item, b[index]));
+  }
+  if (isRecord(a) && isRecord(b)) {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((key) => key in b && sameJson(a[key], b[key]));
+  }
+  return false;
+}
+
+/** A key as one segment of a JSON pointer, with its tildes and slashes escaped. */
+function pointer(key: string): string {
+  return key.replaceAll('~', '~0').replaceAll('/', '~1');
+}
+
+/**
+ * The run's transcript as AG-UI messages. The frontend's own messages keep their ids, a tool's result
+ * has the id of its `TOOL_CALL_RESULT`, and the rest are named after the run.
+ */
+function snapshotMessages(run: AgUiRunInput, result: ProtocolResult): AgUiMessage[] {
+  const messages = transcriptOf(result.state, agUiMessages(run.messages));
+  return messages.map((message, index) => {
+    const sent = run.messages[index];
+    const sameRole = sent && (sent.role === message.role || (sent.role === 'developer' && message.role === 'system'));
+    const id = sameRole
+      ? sent.id
+      : message.role === 'tool' && message.toolCallId
+        ? `${message.toolCallId}:result`
+        : `${run.runId}:${index}`;
+    return {
+      id,
+      role: sameRole ? sent.role : message.role,
+      content: typeof message.content === 'string' ? message.content : textOf(message.content),
+      ...(message.toolCalls?.length
+        ? {
+            toolCalls: message.toolCalls.map((call) => ({
+              id: call.id,
+              type: 'function' as const,
+              function: { name: call.function.name, arguments: call.function.arguments },
+            })),
+          }
+        : {}),
+      ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+    };
+  });
 }
 
 function finishedEvent(run: AgUiRunInput, result: ProtocolResult): AgUiEvent {

@@ -1395,7 +1395,8 @@ test('onEvent reports tasks, retries, checkpoints, and custom events as they hap
       onEvent: (event) => {
         if (event.type === 'custom') events.push(`custom:${(event.data as { token: string }).token}`);
         else if (event.type === 'checkpoint') events.push(`checkpoint:${event.step}:${event.status}`);
-        else events.push(`${event.type}:${event.node}`);
+        // Each superstep's state is reported too; this test follows the tasks.
+        else if (event.type !== 'step') events.push(`${event.type}:${event.node}`);
       },
     },
   );
