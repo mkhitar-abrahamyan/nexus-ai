@@ -56,11 +56,31 @@ Protocols complete, and progress on every stream.
   - `acpEditor()`, on the new `nexus-ai-pro/protocols/acp/editor`, gives an agent the editor's files,
     terminal, and MCP servers, as tools from its `toolSource`, each declaring what it touches.
     `serveAcp()` takes it as `editor`, and detaches it when the editor closes its end.
+- **Interoperability, proven.**
+  - A browser in CI: `npm run test:browser` serves the build to headless Chromium, which imports
+    every kernel entry point and runs a graph, an agent, and AG-UI. It runs in `npm test`.
+  - The previous minor on the other side of the wire: a 2.5 client against a 2.6 server, and the
+    other way round, on the server's HTTP API and A2A, and one harness across both releases for
+    AG-UI and ACP.
+  - A nightly `Interoperability` workflow drives each protocol with its reference client:
+    `@ag-ui/client`, `@a2a-js/sdk`, and `@agentclientprotocol/sdk`.
 - **A `step` graph event.** `GraphRunOptions.onEvent` receives `step` after each superstep, with the
   state after it.
 
+### Fixed
+
+- AG-UI: a run that paused inside a node left that node's step open, so a strict client refused its
+  `RUN_FINISHED`; and a node's tasks running side by side each started the same step. A node's tasks
+  are now one step, and every step still open is finished before the run finishes or fails. Found by
+  the reference client.
+- A2A: `ListTasks` without a status filter, as the reference SDK sends it (`UNRECOGNIZED`), matched
+  no task. An unset filter now filters nothing, and an unknown state is refused as invalid.
+
 ### Proof
 
+- Headless Chromium imports every kernel entry point and runs a graph, an agent with a streaming
+  tool, and AG-UI. A 2.5 client and a 2.6 server pass the protocol suites in both directions, and the
+  reference clients of AG-UI, A2A, and ACP each drive this release's servers through a whole run.
 - An ACP session paused on a question survives the agent's restart, on memory and SQLite; the
   editor reopens it, sees the conversation replayed, and answers. An image and audio reach the model.
   Through the bridge, an agent reads, writes (after the person allows it), and runs the tests in the

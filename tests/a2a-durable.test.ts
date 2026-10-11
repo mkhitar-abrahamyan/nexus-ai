@@ -185,6 +185,15 @@ test('tasks are listed by context and state, a page at a time', async () => {
   assert.equal((await client.listTasks({ contextId: 'ctx-a' })).tasks.length, 3);
   assert.equal((await client.listTasks({ status: 'TASK_STATE_INPUT_REQUIRED' })).tasks.length, 5);
   assert.equal((await client.listTasks({ status: 'TASK_STATE_COMPLETED' })).tasks.length, 0);
+  // An unset filter, as the protocol's unspecified state or a reference client's UNRECOGNIZED, filters
+  // nothing; a state that does not exist is refused.
+  for (const status of ['TASK_STATE_UNSPECIFIED', 'UNRECOGNIZED']) {
+    assert.equal((await client.listTasks({ status: status as never })).tasks.length, 5, status);
+  }
+  await assert.rejects(
+    client.listTasks({ status: 'TASK_STATE_NOPE' as never }),
+    (error: { code?: number }) => error.code === -32602,
+  );
   // A store-backed list filters in the store, and does not count.
   const shared = replica(storeA2aTasks(new MemoryStore()), new MemoryGraphCheckpointer(), [], { answer: () => true });
   await shared.client.send('one', { contextId: 'ctx-c' });

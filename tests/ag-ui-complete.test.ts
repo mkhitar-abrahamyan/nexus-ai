@@ -237,3 +237,36 @@ test('without the options a run reports as before, and a page cannot shadow the 
     'offered once, as the agent’s',
   );
 });
+
+test('every step a run opens is closed before it finishes, a paused one too, and parallel calls are one step', async () => {
+  // Two tool calls at once, the second waiting for approval: the run pauses inside the tools step.
+  const { client } = scripted([
+    {
+      toolCalls: [call('c1', 'lookup_flight', {}), call('c2', 'book', {})],
+      finishReason: 'tool_calls',
+    },
+  ]);
+  const book = tool({
+    name: 'book',
+    description: 'Books',
+    parameters: { type: 'object' },
+    execute: async () => 'booked',
+  });
+  const agent = createAgent({ client, model: 'mock', tools: [lookup, book], interruptOn: { book: true } });
+  const events = await collect(agUiEvents(agent, run([{ id: 'u1', role: 'user', content: 'Book NX 42' }])));
+  const open = new Map<string, number>();
+  for (const event of events) {
+    const name = String(event.stepName);
+    if (event.type === 'STEP_STARTED') {
+      assert.ok(!open.has(name), `${name} is not started twice while it runs`);
+      open.set(name, 1);
+    } else if (event.type === 'STEP_FINISHED') {
+      assert.ok(open.has(name), `${name} finishes after it started`);
+      open.delete(name);
+    } else if (event.type === 'RUN_FINISHED') {
+      assert.deepEqual([...open.keys()], [], 'no step is open when the run finishes');
+    }
+  }
+  assert.equal((events.at(-1)?.outcome as { type?: string } | undefined)?.type, 'interrupt');
+  assert.equal(events.filter((event) => event.type === 'STEP_STARTED' && event.stepName === 'tools').length, 1);
+});

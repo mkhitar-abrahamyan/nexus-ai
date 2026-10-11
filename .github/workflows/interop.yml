@@ -1,0 +1,34 @@
+name: Interoperability
+
+# Each agent protocol against the reference client of its own project, at the client's latest release:
+# @ag-ui/client drives the AG-UI handler, @a2a-js/sdk the A2A agent, and @agentclientprotocol/sdk an
+# ACP agent it starts as an editor would. Nightly, so a change on their side is caught before a user
+# finds it. The clients are installed with --ignore-scripts in a directory of their own.
+on:
+  schedule:
+    - cron: '43 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  interop:
+    name: AG-UI, A2A, and ACP against their reference clients
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies and build
+        run: npm ci && npm run build
+
+      - name: Drive each protocol with its reference client
+        run: node scripts/interop/run.mjs

@@ -3867,6 +3867,21 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
   A second prompt in the session asks nothing and carries the transcript over. Rejecting runs
   nothing, cancelling ends the turn as cancelled, and a question is asked in words.
 
+Each protocol is also tested across releases and against the reference client of its own project:
+- **The previous minor.** A 2.5 client drives this release's server, and this release's client a
+  2.5 server, on the server's HTTP API and on A2A. One harness written against AG-UI and ACP drives
+  both releases' servers. A 2.6 client asking a 2.5 agent for something 2.6 added gets a protocol
+  error, never a broken answer.
+- **Reference clients, nightly.** `scripts/interop/run.mjs` installs the latest `@ag-ui/client`,
+  `@a2a-js/sdk`, and `@agentclientprotocol/sdk` in a directory of their own, without their
+  scripts. Each drives its protocol:
+  - the AG-UI client pauses a run, resumes it, and rebuilds the state from its deltas;
+  - the A2A client sends, approves, reads, lists, and streams tasks;
+  - the ACP client starts an agent as an editor would. The agent reads a file through it, writes
+    once the client allows it, and has its session reloaded.
+
+  The `Interoperability` workflow runs it every night.
+
 ## Limitations
 
 - **AG-UI.** A state delta compares JSON: a value JSON cannot carry, such as a `Date` or a `Map`,
@@ -11559,6 +11574,10 @@ of Node's. One file, `tests/portable/kernel.mjs`, runs on four runtimes against 
   no `process`, `Buffer`, or `require`, and the tests are bundled first, as a platform's build would
   bundle them.
 - **Deno and Bun** run in CI beside it.
+- **A browser** runs on every build too. `tests/browser.mjs` serves the build to headless Chromium,
+  the browser the machine has or `CHROME_BIN`, with nothing installed for it. The page imports every
+  kernel entry point, then runs a graph, an agent with a streaming tool against a mock model, and the
+  AG-UI adapter. It fails if the page ever sees a Node.js `process`.
 
 On each runtime, the tests check the following:
 - tools and capabilities;
@@ -11577,8 +11596,8 @@ the build in two cases:
 
 ## Limitations
 
-- **Browsers are covered by the checks, not by a browser run.** The import check holds for them,
-  and the edge runtime has only the web platform's globals, but CI does not open a browser.
+- **The browser run is Chromium.** Firefox and Safari are covered by the checks and the web
+  platform's APIs, not by a run of their own.
 - **A provider key in a browser is visible to every user.** Call providers from a server or an edge
   function, or through a proxy that holds the key. Some providers also refuse cross-origin requests.
 - **SHA-256 in plain JavaScript is slower on large inputs.** It takes about 7 µs for a typical

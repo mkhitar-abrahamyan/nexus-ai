@@ -399,6 +399,15 @@ const TERMINAL = new Set<A2aTaskState>([
   'TASK_STATE_REJECTED',
 ]);
 
+/** Every task state, for checking a filter. */
+const TASK_STATES = new Set<A2aTaskState>([
+  ...TERMINAL,
+  'TASK_STATE_SUBMITTED',
+  'TASK_STATE_WORKING',
+  'TASK_STATE_INPUT_REQUIRED',
+  'TASK_STATE_AUTH_REQUIRED',
+]);
+
 /** A status a stream or subscription ends on: one where the task stops, or waits. */
 const settled = (state: A2aTaskState) => TERMINAL.has(state) || state === 'TASK_STATE_INPUT_REQUIRED';
 
@@ -752,9 +761,16 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
         case 'ListTasks': {
           const pageSize = Math.min(100, Math.max(1, Number(params.pageSize ?? 50) || 50));
           const offset = Math.max(0, Number.parseInt(String(params.pageToken ?? '0'), 10) || 0);
+          // An unset filter arrives as the protocol's unspecified state, or, from the reference SDK, as
+          // UNRECOGNIZED; either filters nothing. Any other state this agent does not know is refused.
+          const status = typeof params.status === 'string' ? params.status : '';
+          const filtered = status !== '' && status !== 'TASK_STATE_UNSPECIFIED' && status !== 'UNRECOGNIZED';
+          if (filtered && !TASK_STATES.has(status as A2aTaskState)) {
+            return rpcError(id, -32602, `"${status}" is not a task state`);
+          }
           const listed = await store.list({
-            ...(typeof params.contextId === 'string' ? { contextId: params.contextId } : {}),
-            ...(typeof params.status === 'string' ? { state: params.status as A2aTaskState } : {}),
+            ...(typeof params.contextId === 'string' && params.contextId !== '' ? { contextId: params.contextId } : {}),
+            ...(filtered ? { state: status as A2aTaskState } : {}),
             limit: pageSize,
             offset,
           });

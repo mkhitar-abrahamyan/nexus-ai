@@ -113,6 +113,10 @@ of Node's. One file, `tests/portable/kernel.mjs`, runs on four runtimes against 
   no `process`, `Buffer`, or `require`, and the tests are bundled first, as a platform's build would
   bundle them.
 - **Deno and Bun** run in CI beside it.
+- **A browser** runs on every build too. `tests/browser.mjs` serves the build to headless Chromium,
+  the browser the machine has or `CHROME_BIN`, with nothing installed for it. The page imports every
+  kernel entry point, then runs a graph, an agent with a streaming tool against a mock model, and the
+  AG-UI adapter. It fails if the page ever sees a Node.js `process`.
 
 On each runtime, the tests check the following:
 - tools and capabilities;
@@ -131,8 +135,8 @@ the build in two cases:
 
 ## Limitations
 
-- **Browsers are covered by the checks, not by a browser run.** The import check holds for them,
-  and the edge runtime has only the web platform's globals, but CI does not open a browser.
+- **The browser run is Chromium.** Firefox and Safari are covered by the checks and the web
+  platform's APIs, not by a run of their own.
 - **A provider key in a browser is visible to every user.** Call providers from a server or an edge
   function, or through a proxy that holds the key. Some providers also refuse cross-origin requests.
 - **SHA-256 in plain JavaScript is slower on large inputs.** It takes about 7 µs for a typical

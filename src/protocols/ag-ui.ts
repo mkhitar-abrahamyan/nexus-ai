@@ -298,6 +298,8 @@ function translator(push: (event: AgUiEvent) => void, deltas: boolean) {
   let open: string | undefined;
   let reported: unknown;
   let snapshotted = false;
+  /** Tasks running per node: a node is one step however many of its tasks run at once. */
+  const steps = new Map<string, number>();
   const closeMessage = () => {
     if (open) push({ type: 'TEXT_MESSAGE_END', messageId: open });
     open = undefined;
@@ -318,11 +320,20 @@ function translator(push: (event: AgUiEvent) => void, deltas: boolean) {
         reported = state;
         return;
       }
-      // A subgraph's events belong to its parent's step; only the graph's own steps are reported.
-      if (event.type === 'task_start' && !event.namespace) push({ type: 'STEP_STARTED', stepName: event.node });
-      else if (event.type === 'task_end' && !event.namespace) {
+      // A subgraph's events belong to its parent's step; only the graph's own steps are reported. A
+      // node's tasks running side by side are one step, which ends with the last of them.
+      if (event.type === 'task_start' && !event.namespace) {
+        const running = steps.get(event.node) ?? 0;
+        steps.set(event.node, running + 1);
+        if (running === 0) push({ type: 'STEP_STARTED', stepName: event.node });
+      } else if (event.type === 'task_end' && !event.namespace) {
         closeMessage();
-        push({ type: 'STEP_FINISHED', stepName: event.node });
+        const running = (steps.get(event.node) ?? 1) - 1;
+        if (running > 0) steps.set(event.node, running);
+        else {
+          steps.delete(event.node);
+          push({ type: 'STEP_FINISHED', stepName: event.node });
+        }
       } else if (event.type === 'message' && event.chunk.kind !== 'reasoning' && event.chunk.content) {
         const messageId = event.chunk.messageId ?? `${event.taskId}:${event.step}`;
         if (open !== messageId) {
@@ -356,7 +367,12 @@ function translator(push: (event: AgUiEvent) => void, deltas: boolean) {
         }
       }
     },
-    close: closeMessage,
+    /** Ends the open message, and every step a pause or a failure left open, before the run's last event. */
+    close() {
+      closeMessage();
+      for (const stepName of steps.keys()) push({ type: 'STEP_FINISHED', stepName });
+      steps.clear();
+    },
   };
 }
 

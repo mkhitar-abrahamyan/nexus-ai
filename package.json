@@ -1647,7 +1647,7 @@
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
     "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit && tsc -p tsconfig.deploy.json",
     "typecheck:examples:browser": "tsc -p tsconfig.examples.browser.json --noEmit",
-    "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:conformance:images && npm run size:check && npm run test:portable && npm run docs:check && npm run docs:guides && npm run test:studio && npm run test:smoke && npm run test:api && npm run test:types",
+    "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:conformance:images && npm run size:check && npm run test:portable && npm run test:browser && npm run docs:check && npm run docs:guides && npm run test:studio && npm run test:smoke && npm run test:api && npm run test:types",
     "test:unit": "node --import tsx --test tests/unit.ts tests/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-lines=82 --test-coverage-branches=67 --test-coverage-functions=73 tests/unit.ts tests/*.test.ts",
     "test:smoke": "node tests/package-smoke.mjs",
@@ -1669,6 +1669,7 @@
     "test:conformance:images": "tsx tests/conformance.images.ts",
     "conformance:images:record": "tsx tests/conformance.images.ts --record",
     "test:portable": "node scripts/check-portability.mjs && node tests/portable/run.mjs node && node tests/portable/edge.mjs",
+    "test:browser": "node tests/browser.mjs",
     "bench:surfaces": "node --expose-gc --no-warnings scripts/bench-surfaces.mjs"
   },
   "keywords": [
@@ -1796,6 +1797,7 @@
     "nexus-ai-pro-2-0": "npm:nexus-ai-pro@^2.0.0",
     "nexus-ai-pro-2-1": "npm:nexus-ai-pro@^2.1.0",
     "nexus-ai-pro-2-3": "npm:nexus-ai-pro@^2.3.0",
+    "nexus-ai-pro-2-5": "npm:nexus-ai-pro@^2.5.0",
     "ollama": "^0.5.6",
     "openai": "^4.52.0",
     "tsx": "^4.16.0",

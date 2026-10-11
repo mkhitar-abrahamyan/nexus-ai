@@ -35,7 +35,8 @@ jobs:
         run: npm run check:release
 
   kernel:
-    # Node.js and an edge runtime run the kernel inside check:release; these are the other two.
+    # Node.js, an edge runtime, and headless Chromium run the kernel inside check:release; these are the
+    # other two.
     name: Portable kernel on ${{ matrix.runtime }}
     runs-on: ubuntu-latest
     strategy:

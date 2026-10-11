@@ -67,6 +67,10 @@ New and stable:
 - `nexus-ai-pro/protocols/acp/editor`: `acpEditor()`, `AcpEditor`, `AcpEditorOptions`, and the tool
   names `editor_read_file`, `editor_write_file`, and `editor_run_command`.
 
+An AG-UI run reports a node's tasks running side by side as one step, and finishes every step it
+started before `RUN_FINISHED` or `RUN_ERROR`. A2A `ListTasks` refuses a status that is not a task
+state, and reads `TASK_STATE_UNSPECIFIED` and `UNRECOGNIZED` as no filter.
+
 A streamed A2A task now reports its move to `TASK_STATE_WORKING` as a status update, before its
 other events.
 

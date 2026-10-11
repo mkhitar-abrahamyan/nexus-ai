@@ -417,6 +417,21 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
   A second prompt in the session asks nothing and carries the transcript over. Rejecting runs
   nothing, cancelling ends the turn as cancelled, and a question is asked in words.
 
+Each protocol is also tested across releases and against the reference client of its own project:
+- **The previous minor.** A 2.5 client drives this release's server, and this release's client a
+  2.5 server, on the server's HTTP API and on A2A. One harness written against AG-UI and ACP drives
+  both releases' servers. A 2.6 client asking a 2.5 agent for something 2.6 added gets a protocol
+  error, never a broken answer.
+- **Reference clients, nightly.** `scripts/interop/run.mjs` installs the latest `@ag-ui/client`,
+  `@a2a-js/sdk`, and `@agentclientprotocol/sdk` in a directory of their own, without their
+  scripts. Each drives its protocol:
+  - the AG-UI client pauses a run, resumes it, and rebuilds the state from its deltas;
+  - the A2A client sends, approves, reads, lists, and streams tasks;
+  - the ACP client starts an agent as an editor would. The agent reads a file through it, writes
+    once the client allows it, and has its session reloaded.
+
+  The `Interoperability` workflow runs it every night.
+
 ## Limitations
 
 - **AG-UI.** A state delta compares JSON: a value JSON cannot carry, such as a `Date` or a `Map`,
