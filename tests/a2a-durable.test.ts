@@ -275,7 +275,10 @@ test('each update is pushed to a signed webhook, which may not point into the ag
     push: { url: 'https://hooks.example.com/a2a', token: 'caller-token' },
   });
   await client.send('yes', { taskId: task.id });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  // Deliveries go out after each change, in order, and are signed first: wait for all four.
+  for (const deadline = Date.now() + 5_000; delivered.length < 4 && Date.now() < deadline; ) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   const states = delivered.map(
     (item) => (JSON.parse(item.body) as { statusUpdate: { status: { state: string } } }).statusUpdate.status.state,
   );
