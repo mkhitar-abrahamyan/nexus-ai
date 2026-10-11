@@ -382,7 +382,16 @@ export function serverEnvironment(
  * or edge build that only uses the HTTP transport never reaches for it.
  */
 export function createStdioTransport(options: StdioClientOptions): McpTransport {
-  let child: { stdin: { write(data: string): void }; stdout: NodeJS.EventEmitter; kill(): void } | undefined;
+  let child:
+    | {
+        stdin: { write(data: string): void };
+        stdout: NodeJS.EventEmitter;
+        kill(): void;
+        exitCode: number | null;
+        signalCode: string | null;
+        once(event: 'close', listener: () => void): void;
+      }
+    | undefined;
   const decoder = new LineDecoder();
   let onMessage: (message: JsonRpcMessage) => void = () => undefined;
   let onClose: () => void = () => undefined;
@@ -412,9 +421,14 @@ export function createStdioTransport(options: StdioClientOptions): McpTransport 
     onClose(handler) {
       onClose = handler;
     },
-    close() {
-      child?.kill();
+    /** Stops the server and waits, up to two seconds, for its process to exit, so nothing it holds outlives it. */
+    async close() {
+      const running = child;
       child = undefined;
+      if (!running || running.exitCode !== null || running.signalCode !== null) return;
+      const exited = new Promise<void>((resolve) => running.once('close', () => resolve()));
+      running.kill();
+      await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 2_000).unref?.())]);
     },
   };
 }

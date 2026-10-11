@@ -198,7 +198,6 @@ test('through the editor bridge, the agent uses the editor’s files, terminal, 
   // A real directory, as an editor gives: the MCP server is started in it.
   const cwd = mkdtempSync(path.join(tmpdir(), 'nexus-acp-'));
   const appFile = path.join(cwd, 'src', 'app.ts');
-  t.after(() => rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const files = new Map([[appFile, 'broken']]);
   const editor = editorDriving(
     agent,
@@ -223,9 +222,11 @@ test('through the editor bridge, the agent uses the editor’s files, terminal, 
     },
     { editor: bridge },
   );
+  // The MCP server runs in the directory, so it stops before the directory goes.
   t.after(async () => {
     editor.close();
     await bridge.close();
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   });
   await editor.request('initialize', {
     protocolVersion: 1,

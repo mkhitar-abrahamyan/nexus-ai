@@ -75,6 +75,9 @@ Protocols complete, and progress on every stream.
   the reference client.
 - A2A: `ListTasks` without a status filter, as the reference SDK sends it (`UNRECOGNIZED`), matched
   no task. An unset filter now filters nothing, and an unknown state is refused as invalid.
+- MCP: the stdio transport's `close()` killed the server without waiting for it, so what the process
+  held, such as its working directory, could outlive the close. It now waits up to two seconds for
+  the process to exit.
 
 ### Proof
 
