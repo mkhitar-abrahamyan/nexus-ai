@@ -132,8 +132,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
+| `nexus-ai-pro/protocols/a2a` | 36 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 11% | none |
-| `nexus-ai-pro/protocols/a2a` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/voice` | 33 KB | 10% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
@@ -175,11 +175,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/prompts/client` | 15 KB | 4% | none |
 | `nexus-ai-pro/context` | 14 KB | 4% | none |
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
+| `nexus-ai-pro/protocols/ag-ui` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
 | `nexus-ai-pro/rag/pipeline` | 14 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
-| `nexus-ai-pro/protocols/ag-ui` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
