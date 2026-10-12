@@ -13,6 +13,7 @@ import {
   createAgent,
   type CreateAgentOptions,
 } from '../agent/create-agent.js';
+import { codeTool, type Interpreter } from '../agent/interpreter.js';
 import { contextEditor, type ContextEditorOptions } from '../agent/middleware/context-editor.js';
 import { type ContextOffloadOptions, filesystemContext } from '../agent/middleware/filesystem.js';
 import { toolSelector, type ToolSelectorOptions } from '../agent/middleware/tool-selector.js';
@@ -69,6 +70,12 @@ export interface DeepAgentOptions extends Omit<CreateAgentOptions, 'systemPrompt
   commands?: readonly string[];
   /** Records a plan with `write_todos` and keeps it current. Defaults to true. */
   planning?: boolean;
+  /**
+   * Runs the model's code with the agent's own tools callable from it, as `run_code`, so many calls
+   * take one step. Every call the code makes is decided by the agent's policy, and a tool that needs
+   * approval cannot be called from code. Given one, the default policy grants `code`.
+   */
+  interpreter?: Interpreter;
   /** Helpers the agent can delegate to through one `delegate` tool. */
   subagents?: readonly DeepSubagent[];
   /** Skills the agent can load through `load_skill`. */
@@ -115,6 +122,7 @@ const CORE_TOOLS = [
   'grep_files',
   'read_media',
   'run_command',
+  'run_code',
 ];
 
 /**
@@ -141,6 +149,7 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
     sandbox,
     commands = [],
     planning = true,
+    interpreter,
     subagents = [],
     skills = [],
     include = ['AGENTS.md'],
@@ -156,17 +165,29 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
   const workspace: ToolDefinition[] = sandbox
     ? [...sandboxTools(sandbox, { shell: commands.length > 0, mount: MOUNT }), editFileTool(sandbox)]
     : [];
-  const own: ToolDefinition[] = [
+  // A helper has no checkpoints, and code cannot pause, so a tool that needs approval is called only
+  // by the agent itself, directly.
+  const approved = new Set(Object.keys(agentOptions.interruptOn ?? {}));
+  const policy = permissions === false ? undefined : (permissions ?? defaultPolicy(commands, Boolean(interpreter)));
+  const direct: ToolDefinition[] = [
     ...(planning ? [writeTodosTool()] : []),
     ...(skills.length > 0 ? [loadSkillTool(skills, sandbox)] : []),
     ...workspace,
     ...extraTools,
   ];
+  const own: ToolDefinition[] = [
+    ...direct,
+    ...(interpreter
+      ? [
+          codeTool(interpreter, {
+            tools: direct.filter((candidate) => !approved.has(candidate.name)),
+            ...(policy ? { permissions: policy } : {}),
+          }),
+        ]
+      : []),
+  ];
 
   const helpers = new Map<string, AgentGraph>();
-  // A helper has no checkpoints, so it can never pause for a person: a tool that needs approval stays
-  // with the agent that can.
-  const approved = new Set(Object.keys(agentOptions.interruptOn ?? {}));
   const { interruptOn: _approvals, ...helperOptions } = agentOptions;
   for (const helper of subagents) {
     const allowed = helper.tools ? new Set(helper.tools) : undefined;
@@ -181,7 +202,7 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
         tools: own.filter(
           (candidate) => !approved.has(candidate.name) && (allowed ? allowed.has(candidate.name) : true),
         ),
-        ...(permissions === false ? {} : { permissions: permissions ?? defaultPolicy(commands) }),
+        ...(policy ? { permissions: policy } : {}),
         // A helper works in a fresh context; it keeps no checkpoints of its own between delegations.
         checkpointer: false,
       }),
@@ -221,22 +242,27 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
       sandbox: Boolean(sandbox),
       search: Boolean(sandbox?.glob && sandbox.grep),
       media: Boolean(sandbox?.readBytes),
+      code: interpreter?.language,
       commands,
       subagents,
       skills,
     }),
     tools,
     middleware: [...kit, ...middleware],
-    ...(permissions === false ? {} : { permissions: permissions ?? defaultPolicy(commands) }),
+    ...(policy ? { permissions: policy } : {}),
   });
 }
 
-/** The policy a deep agent gets unless given one: the workspace, the commands, and its own tools. */
-function defaultPolicy(commands: readonly string[]): PermissionPolicyLike {
+/**
+ * The policy a deep agent gets unless given one: the workspace, the commands, and its own tools, and
+ * code when it was given an interpreter.
+ */
+function defaultPolicy(commands: readonly string[], code: boolean): PermissionPolicyLike {
   return permissionPolicy({
     filesystem: { write: [`${MOUNT}/**`] },
     shell: { allow: commands },
     tools: { write_todos: 'allow', delegate: 'allow', load_skill: 'allow' },
+    ...(code ? { code: 'allow' as const } : {}),
   });
 }
 
@@ -249,6 +275,7 @@ function systemPrompt(
     sandbox: boolean;
     search: boolean;
     media: boolean;
+    code: string | undefined;
     commands: readonly string[];
     subagents: readonly DeepSubagent[];
     skills: readonly DeepSkill[];
@@ -271,6 +298,11 @@ function systemPrompt(
     }
     if (parts.media) lines.push('Look at images, audio, and PDFs with read_media.');
     if (parts.commands.length > 0) lines.push(`You may run these commands: ${parts.commands.join(', ')}.`);
+  }
+  if (parts.code) {
+    lines.push(
+      `When a task takes many tool calls, or a filter on what they return, write ${parts.code} for run_code and call the tools from it in one step.`,
+    );
   }
   if (parts.subagents.length > 0) {
     lines.push('', 'Delegate a self-contained piece of work with delegate, to one of:');

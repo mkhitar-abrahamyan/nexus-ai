@@ -96,8 +96,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 342 KB | 100% | none |
 | `nexus-ai-pro/config` | 334 KB | 98% | none |
 | `nexus-ai-pro/core` | 330 KB | 96% | none |
+| `nexus-ai-pro/deep-agent` | 167 KB | 49% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
-| `nexus-ai-pro/deep-agent` | 153 KB | 45% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 115 KB | 34% | none |
 | `nexus-ai-pro/agent` | 109 KB | 32% | none |
@@ -165,6 +165,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 17 KB | 5% | none |
+| `nexus-ai-pro/agent/interpreter` | 17 KB | 5% | none |
 | `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |

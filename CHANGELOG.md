@@ -28,6 +28,14 @@ Agents that do more, and evaluation that runs on its own.
   512 MB, one CPU, and 256 processes; nothing of the host is mounted. A command past its timeout is
   killed inside the container with everything it started. Files, glob, grep, and media work inside
   it. `ContainerSandboxOptions` sets the image, binary, working directory, network, and limits.
+- **An interpreter contract**, on the new `nexus-ai-pro/agent/interpreter`. An `Interpreter` runs a
+  snippet that calls the agent's tools as `await tools.<name>(args)`, so many calls take one step.
+  `codeTool()` offers it to a model as `run_code`: it declares `code`, and the policy decides each
+  call the code makes as it decides the model's own, refusing one it would ask a person about.
+  `workerInterpreter()` is the JavaScript reference: a fresh worker per run, a 64 MB heap, a
+  10-second timeout, and caps on calls and logs. It is not a security boundary.
+  `runInterpreterConformance()` checks any interpreter. `DeepAgentOptions.interpreter` adds
+  `run_code` over the deep agent's own tools, and its default policy then grants code.
 
 ### Proof
 
@@ -41,6 +49,10 @@ Agents that do more, and evaluation that runs on its own.
   requires one. A command cannot find a host file anywhere in the container, cannot reach the host or
   the internet, while the same probe from a container with a network can; a command over a 64 MB
   limit is stopped; and a timeout leaves nothing it started running.
+- The worker interpreter passes the interpreter conformance suite. An agent totals three orders and
+  describes one from code in one model round trip, while the refund in the same code, which the
+  policy asks about, never runs; a deep agent searches and reads its workspace from code, and a
+  command its policy denies is denied from code too.
 
 ## [2.6.0] - 2026-10-11
 

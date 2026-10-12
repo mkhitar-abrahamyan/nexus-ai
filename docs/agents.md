@@ -1,6 +1,6 @@
 # Agents and tools
 
-<!-- covers: ./agent ./agent/middleware ./agent/permissions ./agent/sandbox ./agent/sandbox/container ./connectors -->
+<!-- covers: ./agent ./agent/middleware ./agent/permissions ./agent/sandbox ./agent/sandbox/container ./agent/interpreter ./connectors -->
 <!-- sources: src/agent src/connectors -->
 
 Tool-calling agents, from `nexus-ai-pro/agent`. There are two:
@@ -340,6 +340,41 @@ commands the agent runs. `network: true` joins the runtime's default network, an
 `isolation` then no longer claims the network. `runArgs` passes anything else to `run`, such as
 `--user` with a volume that user can write.
 
+**An interpreter.** A model that needs fifty tool calls, three at once, or a filter on a large
+result can write code that makes them, run in one step, instead of a model round trip per call.
+The `Interpreter` contract, on `nexus-ai-pro/agent/interpreter`, runs a snippet: the body of an
+async function that calls `await tools.<name>(args)`, logs with `console`, and `return`s a value.
+`run()` takes `InterpreterRunOptions`: the `InterpreterFunction`s the code may call, a timeout, and a
+signal. It returns an `InterpreterResult` with the value or the error, the logs, and each
+`InterpreterCall` the code made. A run never throws.
+
+`codeTool()` puts an interpreter in front of a model as `run_code`, with `CodeToolOptions` naming the
+tools the code may call. It declares `code`, so a policy must grant code before it runs at all. The
+policy then decides each call the code makes, as it decides the model's own. A call it would ask a
+person about is refused inside code, since code cannot pause; the model can make that call
+directly.
+
+`workerInterpreter()` is the reference, for JavaScript. Each run gets a fresh worker thread, under
+`WorkerInterpreterOptions`:
+- a heap of 64 MB;
+- a timeout of 10 seconds;
+- 100 calls;
+- 64,000 characters of logs.
+
+An endless loop or a runaway allocation ends the run, not the process. Like the reference sandbox,
+it is not a security boundary: the code runs with the process's own access. Run untrusted code
+behind a container or a VM. `runInterpreterConformance()` checks any JavaScript interpreter against
+the contract, as an `InterpreterConformanceReport`: values, logs, and calls in order and at once;
+failures caught in the code; errors reported; and a loop and an allocation stopped, with the
+interpreter usable afterwards.
+
+```ts
+import { codeTool, workerInterpreter } from 'nexus-ai-pro/agent/interpreter';
+
+const runCode = codeTool(workerInterpreter(), { tools: [lookupOrder, refundOrder], permissions });
+const agent = createAgent({ client: ai, tools: [runCode, lookupOrder, refundOrder], permissions });
+```
+
 ## Middleware
 
 `AgentMiddleware` wraps the parts of a run worth controlling. It has four hooks, each optional,
@@ -630,6 +665,22 @@ specific entry point that provides it.
 | `ToolBody` | type | How a tool built with `tool()` runs: once, with `execute`, or reporting progress, with `stream`. |
 | `ToolExecutionResult` | interface | What running one tool produced. |
 | `ToolSourceContext` | interface | What a tool source is told about the run it supplies tools for. |
+
+### `nexus-ai-pro/agent/interpreter`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `codeTool` | function | A tool that runs a model's code in an interpreter, with `tools` callable from it, and returns what the code returned and logged, and the calls it made. |
+| `CodeToolOptions` | interface | Options for `codeTool()`. |
+| `Interpreter` | interface | Runs code. |
+| `InterpreterCall` | interface | One call the code made. |
+| `InterpreterConformanceReport` | interface | What `runInterpreterConformance()` found. |
+| `InterpreterFunction` | type | A function the code calls as `await tools.<name>(args)`. |
+| `InterpreterResult` | interface | What a run did. |
+| `InterpreterRunOptions` | interface | Options for one run. |
+| `runInterpreterConformance` | function | Checks a JavaScript interpreter against the contract, without a test framework: |
+| `workerInterpreter` | function | A reference interpreter, for JavaScript: each run gets a fresh worker thread with a heap limit, stopped at its timeout, so an endless loop or a runaway allocation ends the run, not the process. |
+| `WorkerInterpreterOptions` | interface | Options for `workerInterpreter()`. |
 
 ### `nexus-ai-pro/agent/middleware`
 

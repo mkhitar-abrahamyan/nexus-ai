@@ -172,6 +172,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/protocols/acp/editor', exports: ['acpEditor'] },
   { specifier: 'nexus-ai-pro/agent/sandbox/container', exports: ['containerSandbox'] },
   {
+    specifier: 'nexus-ai-pro/agent/interpreter',
+    exports: ['codeTool', 'runInterpreterConformance', 'workerInterpreter'],
+  },
+  {
     specifier: 'nexus-ai-pro/postgres',
     exports: [
       'PostgresOperationStore',

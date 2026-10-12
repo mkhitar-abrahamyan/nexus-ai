@@ -580,6 +580,16 @@
         "default": "./dist-cjs/agent/sandbox-container.js"
       }
     },
+    "./agent/interpreter": {
+      "import": {
+        "types": "./dist/agent/interpreter.d.ts",
+        "default": "./dist/agent/interpreter.js"
+      },
+      "require": {
+        "types": "./dist-cjs/agent/interpreter.d.ts",
+        "default": "./dist-cjs/agent/interpreter.js"
+      }
+    },
     "./agent/middleware": {
       "import": {
         "types": "./dist/agent/middleware/index.d.ts",
@@ -2010,6 +2020,9 @@
       ],
       "agent/sandbox/container": [
         "dist-cjs/agent/sandbox-container.d.ts"
+      ],
+      "agent/interpreter": [
+        "dist-cjs/agent/interpreter.d.ts"
       ],
       "agent/middleware": [
         "dist-cjs/agent/middleware/index.d.ts"

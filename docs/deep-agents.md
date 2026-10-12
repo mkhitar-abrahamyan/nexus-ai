@@ -46,7 +46,8 @@ const run = await agent.invoke(agentInput('The test fails. Fix it.'), { threadId
 | Offloading | A tool result over 20,000 characters is written to `.context/` and left as a preview and a path. | `filesystemContext()` |
 | Context editing | Old tool results are cleared from what the model is sent past 60,000 estimated tokens. | `contextEditor()` |
 | Tool selection | With `toolSelection`, only the relevant tools are sent; the deep agent's own are always kept. | `toolSelector()` |
-| Permissions | A policy that grants the workspace, the `commands`, and the agent's own tools, and denies everything else. | `permissionPolicy()` |
+| Code | With `interpreter`, `run_code`: the model's code calls the agent's own tools in one step, each call decided by the policy. A tool that needs approval is not callable from code. | `codeTool()` |
+| Permissions | A policy that grants the workspace, the `commands`, the agent's own tools, and code when it has an interpreter, and denies everything else. | `permissionPolicy()` |
 
 `DeepAgentOptions` takes everything `createAgent()` takes, except the system prompt, which the
 preset composes from `instructions`, plus the parts above. Each part can be turned off or replaced:

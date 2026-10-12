@@ -53,7 +53,11 @@ New and stable:
   `nexus-ai-pro/runtime`; the `base64` source of `AudioContent`;
 - `nexus-ai-pro/agent/sandbox/container`: `containerSandbox()` and `ContainerSandboxOptions`, with
   their defaults: no network, every capability dropped, no new privileges, 512 MB of memory and swap,
-  one CPU, and 256 processes.
+  one CPU, and 256 processes;
+- `nexus-ai-pro/agent/interpreter`: `Interpreter`, `InterpreterFunction`, `InterpreterRunOptions`,
+  `InterpreterResult`, `InterpreterCall`, `workerInterpreter()` and `WorkerInterpreterOptions`,
+  `codeTool()` and `CodeToolOptions` with the tool name `run_code`, and `runInterpreterConformance()`
+  with `InterpreterConformanceReport`; `DeepAgentOptions.interpreter`.
 
 `sandboxTools()` offers the new tools only for a sandbox that implements the methods behind them, so
 a sandbox of the application's own offers the same tools as before. A deep agent over

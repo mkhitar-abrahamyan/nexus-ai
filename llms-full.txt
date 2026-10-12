@@ -2825,6 +2825,41 @@ commands the agent runs. `network: true` joins the runtime's default network, an
 `isolation` then no longer claims the network. `runArgs` passes anything else to `run`, such as
 `--user` with a volume that user can write.
 
+**An interpreter.** A model that needs fifty tool calls, three at once, or a filter on a large
+result can write code that makes them, run in one step, instead of a model round trip per call.
+The `Interpreter` contract, on `nexus-ai-pro/agent/interpreter`, runs a snippet: the body of an
+async function that calls `await tools.<name>(args)`, logs with `console`, and `return`s a value.
+`run()` takes `InterpreterRunOptions`: the `InterpreterFunction`s the code may call, a timeout, and a
+signal. It returns an `InterpreterResult` with the value or the error, the logs, and each
+`InterpreterCall` the code made. A run never throws.
+
+`codeTool()` puts an interpreter in front of a model as `run_code`, with `CodeToolOptions` naming the
+tools the code may call. It declares `code`, so a policy must grant code before it runs at all. The
+policy then decides each call the code makes, as it decides the model's own. A call it would ask a
+person about is refused inside code, since code cannot pause; the model can make that call
+directly.
+
+`workerInterpreter()` is the reference, for JavaScript. Each run gets a fresh worker thread, under
+`WorkerInterpreterOptions`:
+- a heap of 64 MB;
+- a timeout of 10 seconds;
+- 100 calls;
+- 64,000 characters of logs.
+
+An endless loop or a runaway allocation ends the run, not the process. Like the reference sandbox,
+it is not a security boundary: the code runs with the process's own access. Run untrusted code
+behind a container or a VM. `runInterpreterConformance()` checks any JavaScript interpreter against
+the contract, as an `InterpreterConformanceReport`: values, logs, and calls in order and at once;
+failures caught in the code; errors reported; and a loop and an allocation stopped, with the
+interpreter usable afterwards.
+
+```ts
+import { codeTool, workerInterpreter } from 'nexus-ai-pro/agent/interpreter';
+
+const runCode = codeTool(workerInterpreter(), { tools: [lookupOrder, refundOrder], permissions });
+const agent = createAgent({ client: ai, tools: [runCode, lookupOrder, refundOrder], permissions });
+```
+
 ## Middleware
 
 `AgentMiddleware` wraps the parts of a run worth controlling. It has four hooks, each optional,
@@ -3136,7 +3171,8 @@ const run = await agent.invoke(agentInput('The test fails. Fix it.'), { threadId
 | Offloading | A tool result over 20,000 characters is written to `.context/` and left as a preview and a path. | `filesystemContext()` |
 | Context editing | Old tool results are cleared from what the model is sent past 60,000 estimated tokens. | `contextEditor()` |
 | Tool selection | With `toolSelection`, only the relevant tools are sent; the deep agent's own are always kept. | `toolSelector()` |
-| Permissions | A policy that grants the workspace, the `commands`, and the agent's own tools, and denies everything else. | `permissionPolicy()` |
+| Code | With `interpreter`, `run_code`: the model's code calls the agent's own tools in one step, each call decided by the policy. A tool that needs approval is not callable from code. | `codeTool()` |
+| Permissions | A policy that grants the workspace, the `commands`, the agent's own tools, and code when it has an interpreter, and denies everything else. | `permissionPolicy()` |
 
 `DeepAgentOptions` takes everything `createAgent()` takes, except the system prompt, which the
 preset composes from `instructions`, plus the parts above. Each part can be turned off or replaced:
@@ -11336,8 +11372,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 342 KB | 100% | none |
 | `nexus-ai-pro/config` | 334 KB | 98% | none |
 | `nexus-ai-pro/core` | 330 KB | 96% | none |
+| `nexus-ai-pro/deep-agent` | 167 KB | 49% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
-| `nexus-ai-pro/deep-agent` | 153 KB | 45% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 115 KB | 34% | none |
 | `nexus-ai-pro/agent` | 109 KB | 32% | none |
@@ -11405,6 +11441,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 17 KB | 5% | none |
+| `nexus-ai-pro/agent/interpreter` | 17 KB | 5% | none |
 | `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
@@ -11669,7 +11706,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 161 entry points, 127 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 162 entry points, 128 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |
@@ -11713,6 +11750,7 @@ These run anywhere, and load a Node module only when a feature that needs it is 
 | Entry point | Loads, when used |
 | --- | --- |
 | `nexus-ai-pro/images/evals` | `node:zlib`; the `Buffer` global |
+| `nexus-ai-pro/agent/interpreter` | `node:worker_threads` |
 | `nexus-ai-pro/loaders/text` | `node:fs/promises`, `node:path` |
 | `nexus-ai-pro/loaders/markdown` | `node:fs/promises` |
 | `nexus-ai-pro/loaders/html` | `node:fs/promises` |
