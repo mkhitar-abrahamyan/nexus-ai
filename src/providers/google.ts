@@ -13,6 +13,7 @@ import {
   documentPlaceholder,
   imagePlaceholder,
   mediaOf,
+  offeredTools,
   textOf,
   toolArguments,
   toolNameFor,
@@ -239,7 +240,7 @@ export class GoogleProvider extends BaseProvider {
       generationConfig.responseSchema = request.responseFormat.schema;
     }
 
-    const tools = this.formatToolsGoogle(request.tools);
+    const tools = this.formatToolsGoogle(offeredTools(request));
 
     return this.compact({
       contents,

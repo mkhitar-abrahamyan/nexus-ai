@@ -131,6 +131,7 @@ const CORE_TOOLS = [
   'read_media',
   'run_command',
   'run_code',
+  'search_tools',
 ];
 
 /**

@@ -220,7 +220,7 @@ test('a document part passes the request schema, and an unknown part type still 
     model: 'm',
     messages: [{ role: 'user', content: [{ type: 'spreadsheet' } as never] }],
   });
-  assert.match(findings[0]?.message ?? '', /text, image, audio, video, document, or asset/);
+  assert.match(findings[0]?.message ?? '', /text, image, audio, video, document, tool_reference, or asset/);
 });
 
 test('Anthropic sends a PDF a tool read as a document block inside its tool result', async () => {

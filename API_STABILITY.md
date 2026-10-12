@@ -61,7 +61,13 @@ New and stable:
 - `DeepAgentOptions.createHelpers` and `maxBackgroundHelpers`, `DeepHelperLimits`, the `background`
   and `instructions` arguments of `delegate`, the tool name `collect_helper`, the helper thread id
   `<thread>/helper/<name>@<call id>`, and the helper namespace `<name>@<call id>`;
-- `ToolContext.forward`.
+- `ToolContext.forward`;
+- `ToolDefinition.deferred` and `tool({ deferred })`; `ToolReferenceContent` and the `tool_reference`
+  member of `ContentPart`, exported from `nexus-ai-pro/runtime`; on `nexus-ai-pro/agent`,
+  `toolSearchTool()`, `ToolSearchOptions`, `searchTools()`, `ToolSearchHit`, and `TOOL_SEARCH_NAME`
+  with the tool name `search_tools`.
+
+An agent with no deferred tool offers exactly the tools it did before.
 
 A graph run's first checkpoint carries the run's `metadata`, as every later checkpoint already did.
 

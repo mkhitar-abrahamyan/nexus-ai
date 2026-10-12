@@ -48,6 +48,13 @@ Agents that do more, and evaluation that runs on its own.
   - Streamed with `subgraphs: true`, a helper's events reach the agent's stream under its namespace,
     such as `tools/researcher@call-7`. `ToolContext.forward` lets any tool do the same for a run it
     starts.
+- **Tool search.** `ToolDefinition.deferred` (and `tool({ deferred })`) loads a tool only once the
+  model finds it. An agent with a deferred tool offers `search_tools`, which ranks the deferred tools
+  by BM25 over their names, descriptions, and arguments, and answers with `ToolReferenceContent`
+  parts. On Claude 4.5 and later every tool is sent, a deferred one with `defer_loading`, and a
+  found tool loads through a `tool_reference` block, so the tool list never changes; every other
+  model, OpenAI's and Google's included, is sent a deferred tool once it has been found.
+  `toolSearchTool()`, `searchTools()`, and `TOOL_SEARCH_NAME` are on `nexus-ai-pro/agent`.
 
 ### Changed
 
@@ -74,6 +81,10 @@ Agents that do more, and evaluation that runs on its own.
 - A background helper answers after the agent has moved on, with its events in the agent's stream. A
   crash while the agent waits for it, and a crash before the agent saved the call that started it,
   each end with one lookup, one note, and one start of the helper.
+- An agent with 500 deferred tools finishes all 40 tasks on Anthropic, OpenAI, and Google, with a
+  model that calls a tool only once that provider's request has loaded it. Anthropic is sent all 501
+  tools on every call with 500 deferred; OpenAI and Google never more than 11. The search ranks each
+  of the 500 tools first for the step that describes it.
 
 ## [2.6.0] - 2026-10-11
 

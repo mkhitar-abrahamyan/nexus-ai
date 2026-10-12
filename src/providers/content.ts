@@ -1,5 +1,12 @@
 import type { AssetInput } from '../types/images.js';
-import type { AudioContent, DocumentContent, ImageContent, Message } from '../types/messages.js';
+import type {
+  AudioContent,
+  CompletionRequest,
+  DocumentContent,
+  ImageContent,
+  Message,
+  ToolDefinition,
+} from '../types/messages.js';
 import type { ToolCall } from '../types/response.js';
 
 /**
@@ -100,6 +107,27 @@ export function mediaOf(content: Message['content']): Array<ImageContent | Audio
 
 function baseName(path: string): string {
   return path.split(/[\\/]/).pop() || 'document.pdf';
+}
+
+/** The tools a tool search has found so far in a conversation, by name. */
+export function referencedTools(messages: readonly Message[]): Set<string> {
+  const found = new Set<string>();
+  for (const message of messages) {
+    if (typeof message.content === 'string') continue;
+    for (const part of message.content) if (part.type === 'tool_reference') found.add(part.name);
+  }
+  return found;
+}
+
+/**
+ * The tools to send a provider without tool references: every tool that is not deferred, and each
+ * deferred one a tool search has found. The request's own list when nothing is deferred.
+ */
+export function offeredTools(request: CompletionRequest): ToolDefinition[] | undefined {
+  const tools = request.tools;
+  if (!tools?.some((tool) => tool.deferred)) return tools;
+  const found = referencedTools(request.messages);
+  return tools.filter((tool) => !tool.deferred || found.has(tool.name));
 }
 
 /** A message's text, with asset parts as references and other media left out. */

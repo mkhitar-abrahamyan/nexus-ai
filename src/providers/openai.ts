@@ -7,6 +7,7 @@ import {
   documentPlaceholder,
   imagePlaceholder,
   mediaOf,
+  offeredTools,
   textOf,
   wireAudio,
   wireDocument,
@@ -431,7 +432,7 @@ export class OpenAIProvider extends BaseProvider {
       };
     }
 
-    const tools = this.formatTools(request.tools);
+    const tools = this.formatTools(offeredTools(request));
     if (tools) {
       params.tools = tools;
       const toolChoice = mapChatToolChoice(request.toolChoice);
@@ -601,7 +602,7 @@ export class OpenAIProvider extends BaseProvider {
       store: false,
     };
 
-    const tools = this.formatResponsesTools(request.tools);
+    const tools = this.formatResponsesTools(offeredTools(request));
     if (tools) {
       params.tools = tools;
       const toolChoice = mapResponsesToolChoice(request.toolChoice);

@@ -126,6 +126,12 @@ function partIssues(part: unknown, path: Array<string | number>, issues: Issue[]
     }
     return;
   }
+  if (part.type === 'tool_reference') {
+    if (typeof part.name !== 'string' || part.name.length === 0) {
+      issues.push({ path: [...path, 'name'], message: 'A tool reference needs the name of a tool' });
+    }
+    return;
+  }
   if (part.type === 'asset') {
     const asset = part.asset;
     if (!isRecord(asset) || !isRecord(asset.location) || typeof asset.mimeType !== 'string') {
@@ -135,7 +141,7 @@ function partIssues(part: unknown, path: Array<string | number>, issues: Issue[]
   }
   issues.push({
     path: [...path, 'type'],
-    message: 'A part type must be text, image, audio, video, document, or asset',
+    message: 'A part type must be text, image, audio, video, document, tool_reference, or asset',
   });
 }
 

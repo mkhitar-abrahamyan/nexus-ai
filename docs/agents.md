@@ -500,6 +500,24 @@ In the benchmark in the test suite, `toolSelector()` sends 12 tools instead of 1
 
 `compareExperiments()` reports the comparison.
 
+**Tool search.** A tool marked `deferred` stays out of the model's way until it finds it. An agent
+with a deferred tool offers `search_tools` (`TOOL_SEARCH_NAME`), built by `toolSearchTool()` with
+`ToolSearchOptions`. It ranks the deferred tools by BM25 over their names, descriptions, and
+arguments, and answers with the five best by default, as tool references. `searchTools()` runs the
+same ranking alone and returns `ToolSearchHit`s.
+
+How a found tool reaches the model depends on the provider:
+- On Claude 4.5 and later, every tool is sent on every call, a deferred one with `defer_loading`.
+  It stays out of the model's context until a reference in the conversation names it. The tool list
+  at the front of the prompt never changes, so the cached prefix holds.
+- On any other model, and through any other provider, a deferred tool is sent only once a search has
+  found it.
+
+Either way the model calls a found tool on its next turn, and the agent runs it like any other. In
+the test suite, an agent with 500 deferred tools finishes every one of 40 tasks on Anthropic, OpenAI,
+and Google. Its model calls a tool only once that provider's request has loaded it. `toolSelector()`
+and tool search combine: put `search_tools` in `always`.
+
 **Context.** `contextEditor()` replaces old tool results with a short placeholder once the request
 passes `triggerTokens`, keeping the most recent few whole. Results are cleared in batches, so the
 edited prefix stays the same between edits and a provider's prompt cache keeps working. Only the
@@ -632,8 +650,8 @@ The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven 
 - Progress is whatever a tool reports. Nothing estimates it for a tool that reports nothing, and
   the runtime does not throttle reports, so a tool that loops quickly should report every so often,
   not on every pass.
-- Tool selection runs on the application's side. `toolSelector()` narrows the tools before each
-  model call, and a provider's own tool search is not used.
+- Tool search uses the agent's own ranking, not a provider's server-side search, so it works the same
+  on every provider; Anthropic loads what it finds through tool references.
 
 <!-- reference:start -->
 ## Reference
@@ -662,8 +680,13 @@ specific entry point that provides it.
 | `ClientToolDefinition` | interface | A tool the client runs, such as one an AG-UI frontend offers: a name, a description, and a schema, with no implementation on the agent's side. |
 | `createAgent` | function | Builds an agent and returns it as a compiled graph. |
 | `CreateAgentOptions` | interface | Options for `createAgent()`. |
+| `searchTools` | function | Ranks tools against a query by BM25 over their names, descriptions, and arguments. |
+| `TOOL_SEARCH_NAME` | constant | The name of the search tool an agent with deferred tools offers. |
 | `ToolBody` | type | How a tool built with `tool()` runs: once, with `execute`, or reporting progress, with `stream`. |
 | `ToolExecutionResult` | interface | What running one tool produced. |
+| `ToolSearchHit` | interface | One tool a search found, with its score. |
+| `ToolSearchOptions` | interface | Options for `toolSearchTool()`. |
+| `toolSearchTool` | function | The tool an agent offers when it has deferred tools: `search_tools`, which finds deferred tools by what a task needs and answers with them as tool references. |
 | `ToolSourceContext` | interface | What a tool source is told about the run it supplies tools for. |
 
 ### `nexus-ai-pro/agent/interpreter`

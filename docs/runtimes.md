@@ -39,6 +39,7 @@ The kernel holds these.
 - `TextContent`;
 - `ImageContent`, `AudioContent`, and `VideoContent`, whose bytes are a `BinaryBuffer`;
 - `DocumentContent`, a document such as a PDF, as bytes, base64 text, a URL, or a path;
+- `ToolReferenceContent`, a tool a search found;
 - `AssetContent`, for media held in an asset store.
 
 A `CacheHint` marks where a cacheable prefix ends, and `PromptCacheConfig` sets how a request
@@ -249,5 +250,6 @@ specific entry point that provides it.
 | `toolMessageContent` | function | What the model reads for a tool's result: the parts of a `toolOutput()`, or anything else as JSON. |
 | `toolOutput` | function | Builds a tool's result as content: text, images, and asset references, in order. |
 | `ToolOutput` | interface | What a tool returns when its result is content rather than a value to serialize: text, images, audio, documents, and asset references, in order. |
+| `ToolReferenceContent` | interface | A tool the model may now call, as a tool search found it. |
 | `VideoContent` | interface | A video part of a message. |
 <!-- reference:end -->

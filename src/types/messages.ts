@@ -110,6 +110,18 @@ export interface DocumentContent {
 }
 
 /**
+ * A tool the model may now call, as a tool search found it. A provider with tool references, such as
+ * Anthropic, loads the tool's definition where the reference stands; every other provider is sent
+ * the tool itself from then on. It carries no text the model reads.
+ */
+export interface ToolReferenceContent {
+  /** Discriminates this part in `ContentPart`. */
+  type: 'tool_reference';
+  /** The tool's name. */
+  name: string;
+}
+
+/**
  * An asset passed by reference: an image or file a tool made or stored, named in the conversation by
  * where it lives rather than carried as base64 text. Every adapter writes it as one short reference
  * line the model can repeat back to another tool. Use an image part instead to show the image.
@@ -122,7 +134,14 @@ export interface AssetContent {
 }
 
 /** One part of a multimodal message. */
-export type ContentPart = TextContent | ImageContent | AudioContent | VideoContent | DocumentContent | AssetContent;
+export type ContentPart =
+  | TextContent
+  | ImageContent
+  | AudioContent
+  | VideoContent
+  | DocumentContent
+  | ToolReferenceContent
+  | AssetContent;
 
 /**
  * What a tool returns when its result is content rather than a value to serialize: text, images,
@@ -167,6 +186,14 @@ export interface ToolDefinition {
    * the call actually uses. Never sent to a model.
    */
   capabilities?: readonly string[] | ((args: Record<string, unknown>) => readonly string[]);
+  /**
+   * Loads the tool only once the model finds it. An agent with a deferred tool offers `search_tools`,
+   * and the model calls a deferred tool after a search found it. A provider with tool references,
+   * such as Anthropic, is sent every tool but keeps a deferred one out of the model's context until it
+   * is found, so the cached prefix stays the same; any other provider is sent a deferred tool only
+   * once it has been found.
+   */
+  deferred?: boolean;
   /**
    * Ends a cacheable prefix after this tool. Only honored when the request sets
    * `cache.mode: 'explicit'` and the provider accepts caller-placed breakpoints.

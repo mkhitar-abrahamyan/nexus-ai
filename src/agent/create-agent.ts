@@ -10,6 +10,7 @@ import type { Store } from '../types/store.js';
 import { capabilitiesOf } from './capabilities.js';
 import type { PermissionPolicyLike } from './permissions.js';
 import { ToolExecutor, toolMessageContent } from './tool.js';
+import { TOOL_SEARCH_NAME, toolSearchTool } from './tool-search.js';
 
 /**
  * An agent as a graph.
@@ -268,7 +269,13 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
   }
 
   const maxIterations = Math.max(1, options.maxIterations ?? 8);
-  const executor = new ToolExecutor(options.tools ?? []);
+  // Deferred tools are found through a search the agent offers beside them.
+  const searchable = (tools: ToolExecutor): ToolExecutor => {
+    const deferred = tools.list().filter((definition) => definition.deferred);
+    if (deferred.length === 0 || tools.has(TOOL_SEARCH_NAME)) return tools;
+    return new ToolExecutor([...tools.list(), toolSearchTool(deferred)]);
+  };
+  const executor = searchable(new ToolExecutor(options.tools ?? []));
   const middleware = options.middleware ?? [];
   const approvals = options.interruptOn ?? {};
   /** The run's tools: the source's for this run, then the agent's own, which win a name. */
@@ -280,7 +287,7 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
       ...(context.principal ? { principal: context.principal } : {}),
       signal: context.signal,
     });
-    return supplied.length ? new ToolExecutor([...supplied, ...executor.list()]) : executor;
+    return supplied.length ? searchable(new ToolExecutor([...supplied, ...executor.list()])) : executor;
   };
 
   const graph = createGraph({ channels: agentChannels() })

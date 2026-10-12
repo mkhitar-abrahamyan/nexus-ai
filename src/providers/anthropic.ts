@@ -4,6 +4,7 @@ import {
   audioPlaceholder,
   documentPlaceholder,
   imagePlaceholder,
+  offeredTools,
   textOf,
   toolArguments,
   wireDocument,
@@ -315,10 +316,21 @@ type AnthropicDocumentBlock = {
   cache_control?: AnthropicCacheControl;
 };
 
+/** A tool a search found, which the API expands into the tool's definition where it stands. */
+type AnthropicToolReferenceBlock = { type: 'tool_reference'; tool_name: string; cache_control?: AnthropicCacheControl };
+
+/** What a tool result may hold. */
+type AnthropicResultBlock =
+  | AnthropicTextBlock
+  | AnthropicImageBlock
+  | AnthropicDocumentBlock
+  | AnthropicToolReferenceBlock;
+
 type AnthropicContentBlock =
   | AnthropicTextBlock
   | AnthropicImageBlock
   | AnthropicDocumentBlock
+  | AnthropicToolReferenceBlock
   | {
       type: 'tool_use';
       id: string;
@@ -329,7 +341,7 @@ type AnthropicContentBlock =
   | {
       type: 'tool_result';
       tool_use_id: string;
-      content: Array<AnthropicTextBlock | AnthropicImageBlock | AnthropicDocumentBlock>;
+      content: AnthropicResultBlock[];
       cache_control?: AnthropicCacheControl;
     };
 
@@ -337,6 +349,8 @@ interface AnthropicToolParam {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
+  /** Kept out of the model's context until a tool reference names it. */
+  defer_loading?: boolean;
   cache_control?: AnthropicCacheControl;
 }
 
@@ -393,6 +407,7 @@ export class AnthropicProvider extends BaseProvider {
   private formatMessages(
     messages: Message[],
     plan?: CachePlan,
+    references = false,
   ): { system?: string | AnthropicTextBlock[]; messages: AnthropicMessageParam[] } {
     let system: string | AnthropicTextBlock[] | undefined;
     const formatted: AnthropicMessageParam[] = [];
@@ -413,9 +428,12 @@ export class AnthropicProvider extends BaseProvider {
           type: 'tool_result',
           tool_use_id: msg.toolCallId ?? '',
           // Anthropic refuses an empty text block, so a result with no text sends none.
-          content: this.formatBlocks(msg.content).filter(
-            (block): block is AnthropicTextBlock | AnthropicImageBlock | AnthropicDocumentBlock =>
-              (block.type === 'text' && block.text.length > 0) || block.type === 'image' || block.type === 'document',
+          content: this.formatBlocks(msg.content, references).filter(
+            (block): block is AnthropicResultBlock =>
+              (block.type === 'text' && block.text.length > 0) ||
+              block.type === 'image' ||
+              block.type === 'document' ||
+              block.type === 'tool_reference',
           ),
           ...(control ? { cache_control: control } : {}),
         };
@@ -462,7 +480,7 @@ export class AnthropicProvider extends BaseProvider {
         continue;
       }
 
-      const parts = this.formatBlocks(msg.content);
+      const parts = this.formatBlocks(msg.content, references);
       if (control && parts.length) {
         parts[parts.length - 1] = { ...(parts[parts.length - 1] as AnthropicContentBlock), cache_control: control };
       }
@@ -473,7 +491,8 @@ export class AnthropicProvider extends BaseProvider {
     return { system, messages: formatted };
   }
 
-  private formatBlocks(content: Message['content']): AnthropicContentBlock[] {
+  /** A message's parts as blocks. A tool reference is a block only where the model takes them. */
+  private formatBlocks(content: Message['content'], references = false): AnthropicContentBlock[] {
     if (typeof content === 'string') return [{ type: 'text', text: content }];
     return content.map((part: ContentPart): AnthropicContentBlock => {
       switch (part.type) {
@@ -505,23 +524,39 @@ export class AnthropicProvider extends BaseProvider {
         }
         case 'audio':
           return { type: 'text', text: audioPlaceholder(part) };
+        case 'tool_reference':
+          // Elsewhere the tool is sent loaded; the reference itself says nothing to the model.
+          return references ? { type: 'tool_reference', tool_name: part.name } : { type: 'text', text: '' };
         default:
           return { type: 'text', text: `[${part.type} content is not yet supported for this provider]` };
       }
     });
   }
 
-  private formatToolsAnthropic(tools?: CompletionRequest['tools'], plan?: CachePlan): AnthropicToolParam[] | undefined {
+  /**
+   * The tools on the wire. With tool references, every tool is sent and a deferred one is marked
+   * `defer_loading`, so it stays out of the model's context until a reference names it and the
+   * tool list, the front of the cached prefix, never changes.
+   */
+  private formatToolsAnthropic(
+    tools: CompletionRequest['tools'],
+    plan: CachePlan | undefined,
+    references: boolean,
+  ): AnthropicToolParam[] | undefined {
     if (!tools || tools.length === 0) return undefined;
     const formatted: AnthropicToolParam[] = tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
       input_schema: tool.parameters,
+      ...(references && tool.deferred ? { defer_loading: true } : {}),
     }));
 
-    // One breakpoint after the whole tool block caches every definition before it.
+    // One breakpoint after the whole tool block caches every definition before it. A deferred tool
+    // cannot carry one, so it goes on the last tool that is loaded.
     if (plan?.tools) {
-      formatted[formatted.length - 1] = { ...formatted[formatted.length - 1], cache_control: plan.tools };
+      let last = formatted.length - 1;
+      while (last >= 0 && formatted[last]?.defer_loading) last -= 1;
+      if (last >= 0) formatted[last] = { ...(formatted[last] as AnthropicToolParam), cache_control: plan.tools };
     }
 
     return formatted;
@@ -640,7 +675,9 @@ export class AnthropicProvider extends BaseProvider {
 
   private createParams(request: CompletionRequest): AnthropicMessageCreateParams {
     const plan = planCache(request);
-    const { system, messages } = this.formatMessages(request.messages, plan);
+    // Claude 4.5 and later expand tool references; for an earlier model, a deferred tool is sent once found.
+    const references = (claudeModel(request.model)?.version ?? 0) >= 4.5;
+    const { system, messages } = this.formatMessages(request.messages, plan, references);
     const params: AnthropicMessageCreateParams = {
       model: request.model,
       messages,
@@ -680,7 +717,7 @@ export class AnthropicProvider extends BaseProvider {
     }
 
     if (system) params.system = system;
-    const tools = this.formatToolsAnthropic(request.tools, plan);
+    const tools = this.formatToolsAnthropic(references ? request.tools : offeredTools(request), plan, references);
     if (tools) {
       params.tools = tools;
       const toolChoice = mapToolChoice(request);

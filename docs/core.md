@@ -108,8 +108,8 @@ and `response.meta.requestId`; one is generated when you set none. `tenantId` de
 the call is charged to. `idempotencyKey` goes to providers that deduplicate retried requests.
 
 Each tool is a `ToolDefinition`: a name, a description written for the model, and a JSON Schema for
-its arguments. It can also carry an `execute` function, for loops that run tools themselves, and a
-cache breakpoint.
+its arguments. It can also carry an `execute` function, for loops that run tools themselves, a
+cache breakpoint, and `deferred`, which loads the tool only once a tool search finds it.
 
 A `Message` has a `MessageRole`, and either text or a list of `ContentPart` values:
 
@@ -119,6 +119,7 @@ A `Message` has a `MessageRole`, and either text or a list of `ContentPart` valu
 | `ImageContent` | An image from a path, a URL, bytes, base64 text, or an asset. |
 | `AudioContent`, `VideoContent` | Audio or video, or a transcript standing in for the audio. |
 | `DocumentContent` | A document, such as a PDF, from a path, a URL, bytes, or base64 text. |
+| `ToolReferenceContent` | A tool a search found, which the model may now call. |
 | `AssetContent` | An asset by reference: an image or file named by where it lives, never its bytes. |
 
 `AssetContent` is how a tool's image reaches the model without base64 text. Every adapter writes it

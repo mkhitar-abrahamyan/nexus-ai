@@ -1,5 +1,12 @@
 export { AgentLoop, type AgentModelClient as AgentLoopModelClient } from './loop.js';
 export { isToolOutput, tool, ToolExecutor, toolMessageContent, toolOutput } from './tool.js';
+export {
+  searchTools,
+  TOOL_SEARCH_NAME,
+  type ToolSearchHit,
+  type ToolSearchOptions,
+  toolSearchTool,
+} from './tool-search.js';
 export type { ToolBody } from './tool.js';
 export {
   limitToolCalls,

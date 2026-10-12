@@ -68,7 +68,7 @@ marked *built* is closed on `main` and leaves this table when its release ships.
 | --- | --- | --- |
 | The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.7 |
 | Images have not recorded live conformance on all three backends | API stability | 2.7 |
-| Tool selection runs on the application's side; a provider's own tool search is not used | agents guide | 2.7 |
+| Tool selection runs on the application's side; a provider's own tool search is not used | agents guide | 2.7, built |
 | The workspace has no glob or grep, and its tools read only text | deep-agent guide | 2.7, built |
 | Helpers are fixed when the agent is built and run one at a time, in process | deep-agent guide | 2.7, built |
 | The only sandbox shipped is for development | deep-agent guide | 2.7, built |
@@ -87,9 +87,9 @@ workflow passes against each, published with their checklists. It needs the repo
 credentials.
 
 **Agent execution.**
-- **Provider tool search.** A tool marked `deferred` is sent to a provider that offers its own tool
-  search as searchable, not loaded. A provider without one falls back to `toolSelector()`, so an
-  agent with hundreds of tools runs on every provider.
+- **Tool search.** A tool marked `deferred` is found by the model through `search_tools`. A
+  provider with tool references keeps it out of the model's context until it is found; the rest are
+  sent it once found, so an agent with hundreds of tools runs on every provider.
 - **An interpreter contract.** A small interface runs a snippet of code with the agent's tools
   callable from it, so a model can call tools from code instead of one round trip each. The reference
   runs in a worker with time and memory limits. Like the reference sandbox, it is not a security
@@ -118,8 +118,8 @@ calls to workers on durable operations. They sample, apply back pressure, and sc
 once per source, across workers and after a crash.
 
 **Proof.**
-- An agent with 500 tools finishes the tool-selection experiment on every provider, with deferred
-  tools on the providers that search and the selector on the rest.
+- An agent with 500 deferred tools finishes every task on every provider, through tool references
+  on Anthropic and found tools on the rest.
 - A background helper's result reaches the agent after the agent has moved on, and a crash in
   between repeats neither the helper nor the agent's own finished steps.
 - The container sandbox passes the sandbox conformance suite, and a command cannot reach the host's

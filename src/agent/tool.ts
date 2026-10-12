@@ -29,6 +29,8 @@ export function tool<TArgs extends Record<string, unknown> = Record<string, unkn
     parameters: Record<string, unknown>;
     /** What the tool does to the world, for a permission policy; see `ToolDefinition.capabilities`. */
     capabilities?: readonly string[] | ((args: TArgs) => readonly string[]);
+    /** Loads the tool only once the model finds it; see `ToolDefinition.deferred`. */
+    deferred?: boolean;
   } & ToolBody<TArgs>,
 ): ToolDefinition {
   const capabilities = definition.capabilities;
@@ -38,6 +40,7 @@ export function tool<TArgs extends Record<string, unknown> = Record<string, unkn
     name: definition.name,
     description: definition.description,
     parameters: definition.parameters,
+    ...(definition.deferred ? { deferred: true } : {}),
     ...(stream
       ? {
           stream: (args: Record<string, unknown>, context?: ToolContext) => stream(args as TArgs, context ?? {}),

@@ -26,6 +26,7 @@ export type {
   ToolContext,
   ToolDefinition,
   ToolOutput,
+  ToolReferenceContent,
   VideoContent,
 } from '../types/messages.js';
 export type {

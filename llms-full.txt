@@ -422,8 +422,8 @@ and `response.meta.requestId`; one is generated when you set none. `tenantId` de
 the call is charged to. `idempotencyKey` goes to providers that deduplicate retried requests.
 
 Each tool is a `ToolDefinition`: a name, a description written for the model, and a JSON Schema for
-its arguments. It can also carry an `execute` function, for loops that run tools themselves, and a
-cache breakpoint.
+its arguments. It can also carry an `execute` function, for loops that run tools themselves, a
+cache breakpoint, and `deferred`, which loads the tool only once a tool search finds it.
 
 A `Message` has a `MessageRole`, and either text or a list of `ContentPart` values:
 
@@ -433,6 +433,7 @@ A `Message` has a `MessageRole`, and either text or a list of `ContentPart` valu
 | `ImageContent` | An image from a path, a URL, bytes, base64 text, or an asset. |
 | `AudioContent`, `VideoContent` | Audio or video, or a transcript standing in for the audio. |
 | `DocumentContent` | A document, such as a PDF, from a path, a URL, bytes, or base64 text. |
+| `ToolReferenceContent` | A tool a search found, which the model may now call. |
 | `AssetContent` | An asset by reference: an image or file named by where it lives, never its bytes. |
 
 `AssetContent` is how a tool's image reaches the model without base64 text. Every adapter writes it
@@ -2985,6 +2986,24 @@ In the benchmark in the test suite, `toolSelector()` sends 12 tools instead of 1
 
 `compareExperiments()` reports the comparison.
 
+**Tool search.** A tool marked `deferred` stays out of the model's way until it finds it. An agent
+with a deferred tool offers `search_tools` (`TOOL_SEARCH_NAME`), built by `toolSearchTool()` with
+`ToolSearchOptions`. It ranks the deferred tools by BM25 over their names, descriptions, and
+arguments, and answers with the five best by default, as tool references. `searchTools()` runs the
+same ranking alone and returns `ToolSearchHit`s.
+
+How a found tool reaches the model depends on the provider:
+- On Claude 4.5 and later, every tool is sent on every call, a deferred one with `defer_loading`.
+  It stays out of the model's context until a reference in the conversation names it. The tool list
+  at the front of the prompt never changes, so the cached prefix holds.
+- On any other model, and through any other provider, a deferred tool is sent only once a search has
+  found it.
+
+Either way the model calls a found tool on its next turn, and the agent runs it like any other. In
+the test suite, an agent with 500 deferred tools finishes every one of 40 tasks on Anthropic, OpenAI,
+and Google. Its model calls a tool only once that provider's request has loaded it. `toolSelector()`
+and tool search combine: put `search_tools` in `always`.
+
 **Context.** `contextEditor()` replaces old tool results with a short placeholder once the request
 passes `triggerTokens`, keeping the most recent few whole. Results are cleared in batches, so the
 edited prefix stays the same between edits and a provider's prompt cache keeps working. Only the
@@ -3117,8 +3136,8 @@ The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven 
 - Progress is whatever a tool reports. Nothing estimates it for a tool that reports nothing, and
   the runtime does not throttle reports, so a tool that loops quickly should report every so often,
   not on every pass.
-- Tool selection runs on the application's side. `toolSelector()` narrows the tools before each
-  model call, and a provider's own tool search is not used.
+- Tool search uses the agent's own ranking, not a provider's server-side search, so it works the same
+  on every provider; Anthropic loads what it finds through tool references.
 
 ---
 
@@ -11400,32 +11419,32 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 342 KB | 100% | none |
-| `nexus-ai-pro/config` | 334 KB | 98% | none |
-| `nexus-ai-pro/core` | 330 KB | 96% | none |
-| `nexus-ai-pro/deep-agent` | 178 KB | 52% | none |
+| `nexus-ai-pro` | 343 KB | 100% | none |
+| `nexus-ai-pro/config` | 335 KB | 98% | none |
+| `nexus-ai-pro/core` | 331 KB | 97% | none |
+| `nexus-ai-pro/deep-agent` | 182 KB | 53% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 115 KB | 34% | none |
-| `nexus-ai-pro/agent` | 109 KB | 32% | none |
+| `nexus-ai-pro/agent` | 114 KB | 33% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
-| `nexus-ai-pro/providers/groq` | 87 KB | 25% | none |
-| `nexus-ai-pro/providers/mistral` | 87 KB | 25% | none |
-| `nexus-ai-pro/providers/azure-openai` | 86 KB | 25% | none |
+| `nexus-ai-pro/providers/groq` | 88 KB | 26% | none |
+| `nexus-ai-pro/providers/mistral` | 88 KB | 26% | none |
+| `nexus-ai-pro/providers/azure-openai` | 87 KB | 25% | none |
+| `nexus-ai-pro/providers/llamacpp` | 87 KB | 25% | none |
+| `nexus-ai-pro/providers/openrouter` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
-| `nexus-ai-pro/providers/llamacpp` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/lmstudio` | 86 KB | 25% | none |
-| `nexus-ai-pro/providers/openrouter` | 86 KB | 25% | none |
-| `nexus-ai-pro/providers/openai` | 85 KB | 25% | none |
-| `nexus-ai-pro/postgres` | 84 KB | 25% | none |
+| `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
+| `nexus-ai-pro/postgres` | 84 KB | 24% | none |
 | `nexus-ai-pro/graph` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 81 KB | 24% | none |
-| `nexus-ai-pro/providers/anthropic` | 78 KB | 23% | none |
+| `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
-| `nexus-ai-pro/images` | 60 KB | 18% | none |
+| `nexus-ai-pro/images` | 60 KB | 17% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
-| `nexus-ai-pro/security` | 57 KB | 17% | none |
+| `nexus-ai-pro/security` | 58 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 16% | none |
 | `nexus-ai-pro/server/deployments` | 54 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 51 KB | 15% | none |
@@ -11439,8 +11458,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 37 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
-| `nexus-ai-pro/protocols/a2a` | 36 KB | 11% | none |
-| `nexus-ai-pro/prompts/registry` | 36 KB | 11% | none |
+| `nexus-ai-pro/protocols/a2a` | 36 KB | 10% | none |
+| `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/voice` | 33 KB | 10% | none |
@@ -11493,11 +11512,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
-| `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
-| `nexus-ai-pro/rag/files` | 12 KB | 4% | none |
-| `nexus-ai-pro/tenancy` | 12 KB | 4% | none |
-| `nexus-ai-pro/rag/weaviate` | 12 KB | 4% | none |
-| `nexus-ai-pro/evals/judge` | 12 KB | 4% | none |
+| `nexus-ai-pro/postgres/rollups` | 12 KB | 3% | none |
+| `nexus-ai-pro/rag/files` | 12 KB | 3% | none |
+| `nexus-ai-pro/tenancy` | 12 KB | 3% | none |
+| `nexus-ai-pro/rag/weaviate` | 12 KB | 3% | none |
+| `nexus-ai-pro/evals/judge` | 12 KB | 3% | none |
 | `nexus-ai-pro/providers` | 11 KB | 3% | none |
 | `nexus-ai-pro/providers/base` | 11 KB | 3% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
@@ -11626,6 +11645,7 @@ The kernel holds these.
 - `TextContent`;
 - `ImageContent`, `AudioContent`, and `VideoContent`, whose bytes are a `BinaryBuffer`;
 - `DocumentContent`, a document such as a PDF, as bytes, base64 text, a URL, or a path;
+- `ToolReferenceContent`, a tool a search found;
 - `AssetContent`, for media held in an asset store.
 
 A `CacheHint` marks where a cacheable prefix ends, and `PromptCacheConfig` sets how a request
