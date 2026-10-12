@@ -297,7 +297,9 @@ export class OperationRunner<TResult = unknown> {
       );
     }
 
-    void this.execute(record, executor, handle, claimed);
+    // A store that fails under a run, such as a database going away, settles the handle with that
+    // failure instead of leaving it pending forever; the record's lease lapses for a recovery sweep.
+    this.execute(record, executor, handle, claimed).catch((error: unknown) => handle.settleFailure(error));
     return this.decorate(handle);
   }
 

@@ -179,6 +179,7 @@ const imports = [
     specifier: 'nexus-ai-pro/evaluate/generate',
     exports: ['adversarialDataset', 'promoteIssue', 'resistsAttack', 'syntheticDataset'],
   },
+  { specifier: 'nexus-ai-pro/evaluate/online', exports: ['onlineEvaluationWorker'] },
   {
     specifier: 'nexus-ai-pro/postgres',
     exports: [

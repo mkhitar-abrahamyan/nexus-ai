@@ -72,7 +72,11 @@ New and stable:
   and `SyntheticDatasetResult`; `adversarialDataset()` with `AdversarialDatasetOptions`,
   `AdversarialInputs`, `AdversarialExpected`, `AttackCarrier`, and `AttackDisguise`; `resistsAttack()`;
   `promoteIssue()` with `PromoteIssueOptions`;
-- on `nexus-ai-pro/security`: `attackSeeds()`, `AttackSeed`, and `AttackCategory`.
+- on `nexus-ai-pro/security`: `attackSeeds()`, `AttackSeed`, and `AttackCategory`;
+- `nexus-ai-pro/evaluate/online`: `onlineEvaluationWorker()`, `OnlineEvaluationWorker`,
+  `OnlineEvaluationWorkerOptions`, `OnlineEvaluationWorkerReport`, and `OnlineSchedulePass`; the
+  operation kind `online-evaluation:<source>` and the score mark `value.evaluation`;
+- `EvaluateOptions.budget` and `EvaluationBudgetError` on `nexus-ai-pro/evaluate`.
 
 An agent with no deferred tool offers exactly the tools it did before. Adversarial example ids and
 canaries are stable across runs, so experiments over the same options compare.

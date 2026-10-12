@@ -64,6 +64,20 @@ Agents that do more, and evaluation that runs on its own.
     `resistsAttack()` scores whether the canary stayed in.
   - `promoteIssue()` turns an insights issue's runs into examples that keep their run and the issue.
   - `attackSeeds()` on `nexus-ai-pro/security` returns each injection pattern's example attack.
+- **Online evaluation on workers**, on the new `nexus-ai-pro/evaluate/online`.
+  `onlineEvaluationWorker()` samples runs by a stable hash, queues one operation per run and source
+  on a shared operation store, stops queuing at `maxQueued`, and scores what it claims within a
+  budget ledger. Each score carries a mark naming its operation, so a retry after a crash writes
+  only what is missing, and each run is scored exactly once per source.
+- **A spend cap for experiments.** `evaluate()` takes `budget`. Each example run is reserved and
+  reconciled, and once the budget runs out no further example starts; `evaluate()` rejects with the
+  new `EvaluationBudgetError`, which carries the results it paid for.
+
+### Fixed
+
+- An operation whose store failed under it, such as a database going away while it recorded its
+  result, left its handle pending forever, with an unhandled rejection; the handle now fails with
+  the store's error, and the record's lease lapses for recovery.
 
 ### Changed
 
@@ -99,6 +113,11 @@ Agents that do more, and evaluation that runs on its own.
   An adversarial dataset of 75 examples gets its canary out of an unguarded agent every time and
   never out of a guarded one, which still answers the benign examples. Each attack the guardrails
   block at the input is critical or high, and each medium one is redacted on the way out.
+- Ten online-evaluation workers score 10,000 runs, each score exactly once, while one dies right
+  after writing a run's scores and before recording them; that run is taken back and found already
+  scored, and the queue stays near its limit. Workers on a budget stop at it, leave the rest queued,
+  and carry on the next period without scoring any run twice. Two sources sharing one store never
+  cross, and sampling picks the same runs on every worker. An experiment stops at its budget.
 
 ## [2.6.0] - 2026-10-11
 

@@ -1,3 +1,4 @@
+import type { BudgetLedger, BudgetReservation } from '../types/lifecycle.js';
 import { randomHex } from '../utils/ids.js';
 import { NEXUS_VERSION } from '../version.js';
 import { type EvaluationCache, evaluationCacheKey } from './cache.js';
@@ -65,8 +66,32 @@ export interface EvaluateOptions {
    * any settings object.
    */
   fingerprint?: string;
+  /**
+   * A spend cap. Each example run reserves `estimate` US dollars from `ledger`, such as a
+   * `budgetLedger()`, before it starts, and is reconciled with what it cost; a cached output costs
+   * nothing. Once the budget runs out no further example starts, the ones in flight finish, and
+   * `evaluate()` rejects with an `EvaluationBudgetError` that carries the results it paid for. The
+   * incomplete experiment is neither returned nor stored.
+   */
+  budget?: { ledger: BudgetLedger; estimate: number; tenantId?: string };
   /** Replaces the system clock, for tests. */
   now?: () => Date;
+}
+
+/**
+ * Thrown by `evaluate()` when its budget runs out before every example has run. `results` holds the
+ * examples that did run, scored; `cause` is the ledger's `BudgetExceededError`.
+ */
+export class EvaluationBudgetError extends Error {
+  constructor(
+    /** The ledger's refusal. */
+    override readonly cause: Error,
+    /** The examples that ran before the budget ran out. */
+    readonly results: ExampleResult[],
+  ) {
+    super(`The evaluation stopped at its budget after ${results.length} example runs: ${cause.message}`);
+    this.name = 'EvaluationBudgetError';
+  }
 }
 
 /**
@@ -102,19 +127,59 @@ export async function evaluate<I = unknown, O = unknown>(
 
   // The score keys each evaluator produced, for the experiment's provenance.
   const produced = evaluators.map(() => new Set<string>());
-  await runConcurrently(
-    jobs,
-    options.concurrency ?? 4,
-    async ({ example, run }) => {
-      const result = await evaluateOne(target, example, run, evaluators, options, produced);
-      results.push(result);
-      options.onResult?.(result);
-    },
-    options.signal,
-  );
+  // A spent budget stops new examples from starting, as the caller's signal does.
+  const budget = options.budget;
+  const stop = new AbortController();
+  const forward = () => stop.abort(options.signal?.reason);
+  options.signal?.addEventListener('abort', forward, { once: true });
+  let exhausted: Error | undefined;
+  try {
+    await runConcurrently(
+      jobs,
+      options.concurrency ?? 4,
+      async ({ example, run }) => {
+        let reservation: BudgetReservation | undefined;
+        if (budget) {
+          try {
+            reservation = await budget.ledger.reserve(
+              {
+                family: 'job',
+                operation: 'evaluation.experiment',
+                requestId: `${dataset.name}:${example.id}:${run}`,
+                ...(budget.tenantId !== undefined ? { tenantId: budget.tenantId } : {}),
+              },
+              budget.estimate,
+            );
+          } catch (error) {
+            // Matched by name, so this module does not load the lifecycle to recognise its refusal.
+            if ((error as Error | undefined)?.name !== 'BudgetExceededError') throw error;
+            exhausted ??= error as Error;
+            stop.abort(error);
+            return;
+          }
+        }
+        let result: ExampleResult;
+        try {
+          result = await evaluateOne(target, example, run, evaluators, options, produced);
+        } catch (error) {
+          if (reservation) await budget?.ledger.release(reservation);
+          throw error;
+        }
+        if (reservation) {
+          await budget?.ledger.reconcile(reservation, result.cached ? 0 : (result.cost ?? budget.estimate));
+        }
+        results.push(result);
+        options.onResult?.(result);
+      },
+      stop.signal,
+    );
+  } finally {
+    options.signal?.removeEventListener('abort', forward);
+  }
   // Examples that were in flight when the signal fired finished on their own terms; the experiment
   // they belong to is still incomplete, so it is neither returned nor stored.
   options.signal?.throwIfAborted();
+  if (exhausted) throw new EvaluationBudgetError(exhausted, results);
 
   // Ordered by example, then repetition, so two experiments over one dataset line up row by row.
   const order = new Map(dataset.examples.map((example, index) => [example.id, index]));

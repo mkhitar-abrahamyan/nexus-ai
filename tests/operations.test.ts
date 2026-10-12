@@ -998,3 +998,22 @@ test('the Redis operation store lists queued work and counts it for autoscaling'
   await queueContract('redis', new RedisOperationStore<string>(fakeRedis().client));
   await queueContract('memory', new MemoryOperationStore<string>());
 });
+
+test('a store that fails under a run settles its handle instead of leaving it pending', async () => {
+  const store = new MemoryOperationStore();
+  let failing = false;
+  const flaky: OperationStore = {
+    create: (record) => store.create(record),
+    read: (id) => store.read(id),
+    update: (record, sequence) => {
+      if (failing) throw new Error('the database went away');
+      return store.update(record, sequence);
+    },
+  };
+  const runner = new OperationRunner({ store: flaky });
+  const handle = await runner.submit(async () => {
+    failing = true;
+    return 'done';
+  });
+  await assert.rejects(handle.result(), /the database went away/);
+});

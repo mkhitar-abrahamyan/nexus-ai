@@ -1,6 +1,6 @@
 # Evaluation
 
-<!-- covers: ./evaluate ./evaluate/threads ./evaluate/generate ./evals ./evals/judge -->
+<!-- covers: ./evaluate ./evaluate/threads ./evaluate/generate ./evaluate/online ./evals ./evals/judge -->
 
 Evaluation from `nexus-ai-pro/evaluate`: run any target — a completion, an agent, a graph, an image operation, or plain code — over a dataset versioned by its content, score it, and compare experiments with a verdict rather than a difference of means. `nexus-ai-pro/evals` keeps the eval-case runner and the LLM judge.
 
@@ -417,6 +417,55 @@ an experiment.
 It returns an `OnlineEvaluationReport`: the runs scanned, evaluated, and queued for review, and every
 score.
 
+### On workers
+
+`evaluateOnline()` is one pass, called by whoever calls it. For production traffic, run
+`onlineEvaluationWorker()` from `nexus-ai-pro/evaluate/online` instead, on as many processes as you
+like over one operation store, such as Redis or Postgres. Each `OnlineEvaluationWorker`:
+- **samples** by a hash of the run's id and the `source`, so every worker, and every pass after a
+  restart, picks the same runs;
+- **queues** one operation per run and source, under an idempotency key, so a run is queued once
+  however many workers see it, and it stops queuing while `maxQueued` (1,000) of the source's
+  operations are waiting or running;
+- **scores** what it claims, `concurrency` (4) at a time, each evaluation first reserved from a
+  `budget` ledger at `estimate` and reconciled with `costOf`.
+
+Every score is written to the run with a mark naming its operation. An operation run again, after
+a worker died between writing a run's scores and recording them, writes only what is missing. So
+each run is scored exactly once per source, across workers and after a crash. A worker that dies
+leaves its claims to lapse after `leaseMs`, and another takes them back. When the budget is spent,
+the evaluation goes back to the queue, not to failure, and the workers stop until it allows more.
+
+`drain()` schedules and scores until nothing is left, `start()` and `stop()` keep it going, and
+`report()` returns an `OnlineEvaluationWorkerReport`: queued, scored, already scored, missing,
+failed, and why it last stopped. `schedule()` and `work()` run one step each; a scheduling pass
+returns an `OnlineSchedulePass`. `OnlineEvaluationWorkerOptions` holds the rest.
+
+```ts
+import { onlineEvaluationWorker } from 'nexus-ai-pro/evaluate/online';
+
+const worker = onlineEvaluationWorker({
+  source: 'helpfulness-v2',
+  traces,
+  operations: new RedisOperationStore(redis, { prefix: 'evaluations:', index: true }),
+  evaluators: [judge],
+  sampleRate: 0.1,
+  budget: budgetLedger({ limit: 50 }),
+  estimate: 0.002,
+});
+worker.start();
+```
+
+In the test suite, ten workers score 10,000 runs while one of them dies right after writing a run's
+scores. Every run ends with each score exactly once; the run the dead worker never recorded is taken
+back and found already scored; and the queue stays near its limit. Workers on a budget stop at it,
+leave the rest queued, and carry on the next period without scoring a run twice.
+
+**A spend cap for experiments.** `evaluate()` takes `budget`: a ledger and an estimate per example
+run. Each run is reserved before it starts and reconciled with its cost, and a cached output costs
+nothing. Once the budget runs out, no further example starts. `evaluate()` then rejects with an
+`EvaluationBudgetError` that carries the results it paid for, and the experiment is not stored.
+
 `AnnotationQueue` takes `AnnotationQueueOptions`:
 
 - the `rubric`, a list of `ReviewQuestion` values: a key, the prompt, a type, and choices for a choice
@@ -536,8 +585,10 @@ regression in a test, not to judging content in production; use a model judge fo
   something, not that the question is a good one: read a sample before trusting a verdict.
 - An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
   or `rephrase`.
-- An experiment has no spend cap of its own: bound it with the client's budget. Online evaluation runs
-  when a replica calls `Deployments.evaluate()`, not on workers of its own.
+- An online-evaluation worker reads runs newest first, a page at a time. A backlog of runs that all
+  started in the same millisecond, more than a page of them, is read one page only.
+- A budget counts reservations as spent until they are reconciled, so a worker that dies holding one
+  leaves its estimate charged for the period.
 
 <!-- reference:start -->
 ## Reference
@@ -613,6 +664,7 @@ specific entry point that provides it.
 | `evaluate` | function | Runs a target over a dataset and scores it. |
 | `evaluateOnline` | function | Scores production runs after the fact. |
 | `EvaluateOptions` | interface | Options for `evaluate()`. |
+| `EvaluationBudgetError` | class | Thrown by `evaluate()` when its budget runs out before every example has run. |
 | `EvaluationCache` | interface | Where `evaluate()` keeps target outputs between experiments. |
 | `evaluationCacheKey` | function | The cache key of one example run: a SHA-256 over the target's fingerprint, the example's id and inputs, and the repetition. |
 | `EvaluationContext` | interface | What an evaluator receives for one example. |
@@ -682,6 +734,16 @@ specific entry point that provides it.
 | `SyntheticDraft` | interface | An example the writer drafts: a question, its answer, and the words of the passage that support it. |
 | `SyntheticModelClient` | interface | A model that writes drafts. |
 | `SyntheticPassage` | interface | One passage of a document, as the writer sees it. |
+
+### `nexus-ai-pro/evaluate/online`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `onlineEvaluationWorker` | function | A worker of an online evaluation. |
+| `OnlineEvaluationWorker` | interface | A worker of an online evaluation. |
+| `OnlineEvaluationWorkerOptions` | interface | Options for `onlineEvaluationWorker()`. |
+| `OnlineEvaluationWorkerReport` | interface | What a worker has done since it was created. |
+| `OnlineSchedulePass` | interface | What one scheduling pass did. |
 
 ### `nexus-ai-pro/evaluate/threads`
 

@@ -152,7 +152,7 @@ compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, 
 
 <!-- runtimes:start -->
 
-Of 163 entry points, 128 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 164 entry points, 128 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |
@@ -176,6 +176,7 @@ Of 163 entry points, 128 run on any runtime. These need Node.js, or a runtime wi
 | `nexus-ai-pro/tracing/otlp` | `node:async_hooks` |
 | `nexus-ai-pro/evaluate` | `node:fs/promises`, `node:path`; the `process` global |
 | `nexus-ai-pro/evaluate/generate` | `node:fs/promises`, `node:path` |
+| `nexus-ai-pro/evaluate/online` | `node:crypto`; the `Buffer` global |
 | `nexus-ai-pro/insights` | the `process` global |
 | `nexus-ai-pro/connectors` | `node:dns/promises`, `node:http`, `node:https`, `node:net`; the `Buffer` global |
 | `nexus-ai-pro/server` | `node:crypto`; the `Buffer` global |

@@ -47,7 +47,14 @@ export {
   type ReviewItem,
   type ReviewQuestion,
 } from './review.js';
-export { evaluate, type EvaluateOptions, type EvaluationTarget, stats, summarize } from './run.js';
+export {
+  EvaluationBudgetError,
+  evaluate,
+  type EvaluateOptions,
+  type EvaluationTarget,
+  stats,
+  summarize,
+} from './run.js';
 export {
   type CachedOutput,
   type EvaluationCache,
