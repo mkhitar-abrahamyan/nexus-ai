@@ -4,22 +4,25 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.6.0**. 160 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.7.0**. 164 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, and 98 completion
-registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 1,014
-unit tests and 30 studio tests pass; coverage sits at **95.6% lines / 82.1% branches / 91.7%
+registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 1,055
+unit tests and 30 studio tests pass; coverage sits at **95.7% lines / 82.1% branches / 91.8%
 functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry
 drift, `llms.txt` drift, per-subpath size, documentation and guide coverage, the root import, a graph
 benchmark with a durability budget, runtime and memory-retention budgets, load and soak budgets for
 every graduated surface, crash injection on five checkpointers, an upgrade from the published 2.0.0,
 2.1.0, and 2.3.0 packages, ten-worker races and tenant isolation on every shared store, ten replicas
-changing one deployment at once on every state store, sandbox conformance, a permission policy in a
-real tool loop, retrieval and tool-selection experiments, a crash halfway through a 100,000-document
-ingestion, the agent protocols driven from the other side of the wire and against the published
-2.5.0 in both directions, a tool's progress on every stream, every studio route called by every role
-and with hostile input, the imports of every entry point for anything Node-only, the portable kernel
-on Node, Deno, Bun, an edge runtime, and headless Chromium, mock conformance, packed-package smoke,
-API contract, consumer type resolution, and clean install on Node 22 and 24. Every night, each agent
+changing one deployment at once on every state store, sandbox conformance on the reference sandbox
+and on a real container runtime, a permission policy in a real tool loop, retrieval and
+tool-selection experiments, 500 deferred tools on three providers, a crash halfway through a
+100,000-document ingestion, crashes between a deep agent and its background helper, ten
+online-evaluation workers through a crash, an adversarial dataset against an unguarded and a guarded
+agent, the agent protocols driven from the other side of the wire and against the published 2.5.0 in
+both directions, a tool's progress on every stream, every studio route called by every role and with
+hostile input, the imports of every entry point for anything Node-only, the portable kernel on Node,
+Deno, Bun, an edge runtime, and headless Chromium, mock conformance, packed-package smoke, API
+contract, consumer type resolution, and clean install on Node 22 and 24. Every night, each agent
 protocol is driven by the reference client of its own project.
 
 ---
@@ -39,8 +42,8 @@ behaves under a crash, a slow database, a rolling deploy, a thousand workers, or
 
 **What every release protects:**
 
-- No required dependency, and a size budget on every entry point. Today the root import is 342 KB, and
-  an entry point costs a fraction of it: `/agent` 32%, `/graph` 24%, `/operations` 16%, `/evaluate`
+- No required dependency, and a size budget on every entry point. Today the root import is 343 KB, and
+  an entry point costs a fraction of it: `/agent` 33%, `/graph` 24%, `/operations` 16%, `/evaluate`
   13%, `/tracing` 9%, `/mcp` 6%, `/store` 2%. `npm run size:check` fails the build when an entry point
   grows past its budget or picks up a dependency.
 - A runtime and memory budget. `npm run bench:runtime` fails the release gate when a measured path
@@ -61,77 +64,24 @@ another orchestration abstraction.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release. A gap
-marked *built* is closed on `main` and leaves this table when its release ships.
+Each gap is written down in a guide's limitations today, and each is closed by one release.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.7 |
-| Images have not recorded live conformance on all three backends | API stability | 2.7 |
-| Tool selection runs on the application's side; a provider's own tool search is not used | agents guide | 2.7, built |
-| The workspace has no glob or grep, and its tools read only text | deep-agent guide | 2.7, built |
-| Helpers are fixed when the agent is built and run one at a time, in process | deep-agent guide | 2.7, built |
-| The only sandbox shipped is for development | deep-agent guide | 2.7, built |
-| Datasets are written by hand or exported from traces; nothing generates them from documents or attacks | evaluation guide | 2.7, built |
-| An experiment has no spend cap, and online evaluation is a method a replica calls, not a worker | evaluation guide | 2.7, built |
+| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.8 |
+| Images have not recorded live conformance on all three backends | API stability | 2.8 |
 
 ---
 
-## 2.7.0: agents that do more, and evaluation that runs on its own
-
-Agents work on larger tool sets and workspaces, with helpers that run beside them. Evaluation grows
-its own datasets and runs continuously, within a budget.
+## 2.8.0: live graduation
 
 **Carried: live graduation.** The remote vector stores and images graduate when the scheduled live
 workflow passes against each, published with their checklists. It needs the repository's live
-credentials.
-
-**Agent execution.**
-- **Tool search.** A tool marked `deferred` is found by the model through `search_tools`. A
-  provider with tool references keeps it out of the model's context until it is found; the rest are
-  sent it once found, so an agent with hundreds of tools runs on every provider.
-- **An interpreter contract.** A small interface runs a snippet of code with the agent's tools
-  callable from it, so a model can call tools from code instead of one round trip each. The reference
-  runs in a worker with time and memory limits. Like the reference sandbox, it is not a security
-  boundary.
-- **Workspace search.** The workspace tools gain glob and grep, bounded in matches and bytes.
-- **Helpers that run beside the agent.** Helpers can be created during a run, from a description the
-  agent writes, within limits the application sets. A helper can run in the background while the
-  agent continues, and the agent collects its result later. A helper's events stream inside the
-  agent's own stream, under the helper's namespace.
-- **A multimodal workspace.** Files in the workspace can be images, audio, or PDFs. A tool reads them
-  as content parts the model sees, not as text.
-- **A container sandbox.** A sandbox for production, on its own subpath, drives the `docker` or
-  `podman` binary as the git loader drives `git`, with no dependency. It is held to the sandbox
-  conformance suite.
-
-**Datasets that grow.**
-- Synthetic examples are generated from documents. Each cites the passage it came from, and
-  near-duplicates are dropped.
-- Adversarial examples are generated from the guardrails' own attack patterns: injection,
-  exfiltration, and jailbreaks. A guarded agent is then evaluated against them in CI.
-- Production runs are promoted into datasets from insights, with the issue that found them.
-
-**Evaluation budgets and online-evaluation workers.** An experiment or an online evaluator runs within
-a spend cap, enforced through the lifecycle's budget. Online evaluation moves from a method a replica
-calls to workers on durable operations. They sample, apply back pressure, and score each run exactly
-once per source, across workers and after a crash.
-
-**Proof.**
-- An agent with 500 deferred tools finishes every task on every provider, through tool references
-  on Anthropic and found tools on the rest.
-- A background helper's result reaches the agent after the agent has moved on, and a crash in
-  between repeats neither the helper nor the agent's own finished steps.
-- The container sandbox passes the sandbox conformance suite, and a command cannot reach the host's
-  files or network.
-- Ten online-evaluation workers score 10,000 runs, each exactly once per source. They resume after a
-  crash without scoring a run twice, and stop at their budget.
-- A synthetic dataset built from the guides cites a source for every example. An adversarial dataset
-  fails a deliberately unguarded agent and passes a guarded one.
+credentials. The rest of 2.8 is chosen from the list below.
 
 ---
 
-## Beyond 2.7
+## Beyond 2.8
 
 Not yet scheduled, roughly in order of what applications ask for:
 
