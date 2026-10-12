@@ -96,7 +96,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 342 KB | 100% | none |
 | `nexus-ai-pro/config` | 334 KB | 98% | none |
 | `nexus-ai-pro/core` | 330 KB | 96% | none |
-| `nexus-ai-pro/deep-agent` | 167 KB | 49% | none |
+| `nexus-ai-pro/deep-agent` | 178 KB | 52% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 115 KB | 34% | none |

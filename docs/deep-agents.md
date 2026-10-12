@@ -65,9 +65,31 @@ it does not know.
 A helper is for work that would otherwise fill the main context: reviewing a change, researching a
 question, summarizing a long file. It sees only the task it is given, works with the tools named in
 its `tools` (all of the agent's but `delegate`, by default), and returns its answer as the tool
-result. It cannot delegate in turn, and it keeps no checkpoints between delegations. Because it
-cannot pause, it never gets a tool named in `interruptOn`: work that needs a person's approval stays
-with the main agent, which can pause.
+result. It cannot delegate in turn. Because it cannot pause, it never gets a tool named in
+`interruptOn`: work that needs a person's approval stays with the main agent, which can pause.
+
+**In the background.** With `background`, `delegate` returns a task id at once and the agent goes
+on working; `collect_helper` returns the helper's answer when the agent needs it, waiting up to
+`wait_seconds`, and lists the tasks when called without one. At most `maxBackgroundHelpers`, four
+by default, work at once in one thread. A helper the agent waits for keeps no checkpoints. One in
+the background keeps them in the deep agent's checkpointer, on a thread named after the call that
+started it, and `delegate` returns only once its first checkpoint is written. So a crash leaves the
+helper's finished steps behind it:
+- collecting the task in a new process carries the helper on from its last checkpoint;
+- a `delegate` call the agent repeats after the crash finds the same thread, and carries that on
+  instead of starting the helper again.
+
+Without a checkpointer, a background helper lives only as long as its process.
+
+**Helpers it creates.** With `createHelpers`, the agent can create a helper for work no declared
+helper fits: it gives `delegate` a new name and the helper's instructions. `DeepHelperLimits` bound
+what it creates: the tools a created helper may use, its model, its model calls (10 by default), and
+how many the agent may create in one thread (5 by default).
+
+**Its events.** Streamed with `subgraphs: true`, a helper's model output, tool calls, and steps reach
+the agent's own event stream under the helper's namespace, such as `tools/researcher@call-7`, in the
+background as in the foreground. A tool of your own that starts a run of its own can do the same
+through `ToolContext.forward`.
 
 A skill is for instructions that are long and rarely needed, such as a release procedure or a house
 style. The model sees one line per skill until it calls `load_skill`, so ten skills cost ten lines of
@@ -91,14 +113,23 @@ Afterwards the test passes when run outside the agent. Along the way:
 - the default policy refuses an unlisted command, a chained command, a write outside the workspace,
   and an ungranted tool of the application's own.
 
+Helpers have proofs of their own:
+- A background researcher answers only after the agent has written a note, and the agent collects
+  the answer; the researcher's tool calls reach the agent's stream under its namespace.
+- The agent creates a helper on instructions it wrote, which gets only the tools the limits allow; a
+  second one past `max` is refused.
+- A crash while the agent waits for its helper, and a crash before the agent has saved the call that
+  started it, both end with one lookup, one note, and one start of the helper.
+
 ## Limitations
 
 - The reference sandbox, `processSandbox()`, is for development. It is never a security boundary.
   Use `containerSandbox()`, from `nexus-ai-pro/agent/sandbox/container`, or a VM of your own behind
   the `Sandbox` interface, in production.
-- Helpers are fixed when the agent is built, and run in process, one delegation at a time per call.
-  A helper that should run elsewhere is an agent on another server, called through
-  `createRemoteGraph()`.
+- Helpers run in the agent's process. A helper that should run elsewhere is an agent on another
+  server, called through `createRemoteGraph()`.
+- The count of created helpers is kept by the process, so an agent that resumes after a crash may
+  create up to `max` again.
 - Workspace search is bounded: `glob_files` lists at most 500 paths and `grep_files` 200 lines.
   The reference sandbox skips files over 1 MB, binary files, `.git`, and `node_modules`. A wider
   search is a command the sandbox runs.

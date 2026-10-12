@@ -75,6 +75,15 @@ const SUBGRAPH = Symbol('nexus.graph.subgraph');
 const FORWARD_EVENT = Symbol('nexus.graph.forwardEvent');
 
 /**
+ * The function that hands a nested run's events to the run of the node whose context this is, under
+ * the node's namespace, or `undefined` when that run did not ask for subgraph events. For a node that
+ * starts runs of its own, such as an agent's tools starting a helper.
+ */
+export function forwardedEvents(context: object): ((event: GraphEvent) => void) | undefined {
+  return (context as { [FORWARD_EVENT]?: (event: GraphEvent) => void })[FORWARD_EVENT];
+}
+
+/**
  * Further updates carried by a Command, reduced after its own `update`. Used when a subgraph hands
  * control to its parent: the subgraph's shared state and the update it addressed to the parent are
  * two writes, and merging them into one object would let one overwrite the other.
@@ -282,7 +291,16 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
       }
       const state = this.seedState(input as StateUpdate<S>);
       const next = this.entryNodes();
-      return { threadId, step: 0, state, next, status: 'running', createdAt: this.now().toISOString() };
+      // The first checkpoint carries the run's metadata, as every later one does.
+      return {
+        threadId,
+        step: 0,
+        state,
+        next,
+        status: 'running',
+        createdAt: this.now().toISOString(),
+        ...(runOptions.metadata ? { metadata: runOptions.metadata } : {}),
+      };
     });
   }
 

@@ -57,7 +57,13 @@ New and stable:
 - `nexus-ai-pro/agent/interpreter`: `Interpreter`, `InterpreterFunction`, `InterpreterRunOptions`,
   `InterpreterResult`, `InterpreterCall`, `workerInterpreter()` and `WorkerInterpreterOptions`,
   `codeTool()` and `CodeToolOptions` with the tool name `run_code`, and `runInterpreterConformance()`
-  with `InterpreterConformanceReport`; `DeepAgentOptions.interpreter`.
+  with `InterpreterConformanceReport`; `DeepAgentOptions.interpreter`;
+- `DeepAgentOptions.createHelpers` and `maxBackgroundHelpers`, `DeepHelperLimits`, the `background`
+  and `instructions` arguments of `delegate`, the tool name `collect_helper`, the helper thread id
+  `<thread>/helper/<name>@<call id>`, and the helper namespace `<name>@<call id>`;
+- `ToolContext.forward`.
+
+A graph run's first checkpoint carries the run's `metadata`, as every later checkpoint already did.
 
 `sandboxTools()` offers the new tools only for a sandbox that implements the methods behind them, so
 a sandbox of the application's own offers the same tools as before. A deep agent over

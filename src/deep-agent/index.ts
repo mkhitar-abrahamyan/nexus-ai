@@ -6,13 +6,7 @@
  * and returns the same compiled graph, with the same checkpoints, approvals, events, and server
  * support as any agent.
  */
-import {
-  type AgentGraph,
-  type AgentMiddleware,
-  agentInput,
-  createAgent,
-  type CreateAgentOptions,
-} from '../agent/create-agent.js';
+import { type AgentGraph, type AgentMiddleware, createAgent, type CreateAgentOptions } from '../agent/create-agent.js';
 import { codeTool, type Interpreter } from '../agent/interpreter.js';
 import { contextEditor, type ContextEditorOptions } from '../agent/middleware/context-editor.js';
 import { type ContextOffloadOptions, filesystemContext } from '../agent/middleware/filesystem.js';
@@ -21,6 +15,9 @@ import { permissionPolicy, type PermissionPolicyLike } from '../agent/permission
 import { type Sandbox, sandboxTools } from '../agent/sandbox.js';
 import { tool } from '../agent/tool.js';
 import type { ToolDefinition } from '../types/messages.js';
+import { type DeepHelperLimits, helperTools } from './helpers.js';
+
+export type { DeepHelperLimits } from './helpers.js';
 
 /** A helper the deep agent can hand a self-contained piece of work to, with a fresh context. */
 export interface DeepSubagent {
@@ -76,8 +73,18 @@ export interface DeepAgentOptions extends Omit<CreateAgentOptions, 'systemPrompt
    * approval cannot be called from code. Given one, the default policy grants `code`.
    */
   interpreter?: Interpreter;
-  /** Helpers the agent can delegate to through one `delegate` tool. */
+  /**
+   * Helpers the agent can delegate to through one `delegate` tool. The agent waits for a helper's
+   * answer, or sets `background` and collects it later with `collect_helper`.
+   */
   subagents?: readonly DeepSubagent[];
+  /**
+   * Lets the agent create helpers during a run, from instructions it writes, within these limits.
+   * Off unless given.
+   */
+  createHelpers?: DeepHelperLimits;
+  /** How many helpers may work in the background in one thread at once. Defaults to 4. */
+  maxBackgroundHelpers?: number;
   /** Skills the agent can load through `load_skill`. */
   skills?: readonly DeepSkill[];
   /** Instruction files from the sandbox the model sees on every call. Defaults to `AGENTS.md`. */
@@ -113,6 +120,7 @@ const MOUNT = '/workspace';
 const CORE_TOOLS = [
   'write_todos',
   'delegate',
+  'collect_helper',
   'load_skill',
   'read_file',
   'write_file',
@@ -151,6 +159,8 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
     planning = true,
     interpreter,
     subagents = [],
+    createHelpers,
+    maxBackgroundHelpers = 4,
     skills = [],
     include = ['AGENTS.md'],
     offload,
@@ -187,28 +197,22 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
       : []),
   ];
 
-  const helpers = new Map<string, AgentGraph>();
-  const { interruptOn: _approvals, ...helperOptions } = agentOptions;
-  for (const helper of subagents) {
-    const allowed = helper.tools ? new Set(helper.tools) : undefined;
-    helpers.set(
-      helper.name,
-      createAgent({
-        ...helperOptions,
-        name: `${options.name ?? 'deep-agent'}.${helper.name}`,
-        ...(helper.model ? { model: helper.model } : {}),
-        maxIterations: helper.maxIterations ?? 20,
-        systemPrompt: `${helper.instructions}\n\n${WORKSPACE_NOTE}`,
-        tools: own.filter(
-          (candidate) => !approved.has(candidate.name) && (allowed ? allowed.has(candidate.name) : true),
-        ),
-        ...(policy ? { permissions: policy } : {}),
-        // A helper works in a fresh context; it keeps no checkpoints of its own between delegations.
-        checkpointer: false,
-      }),
-    );
-  }
-  const tools = [...own, ...(helpers.size > 0 ? [delegateTool(subagents, helpers)] : [])];
+  const { interruptOn: _approvals, checkpointer, ...helperOptions } = agentOptions;
+  const helping =
+    subagents.length > 0 || createHelpers
+      ? helperTools({
+          declared: subagents,
+          ...(createHelpers ? { create: createHelpers } : {}),
+          tools: own.filter((candidate) => !approved.has(candidate.name)),
+          agentOptions: helperOptions,
+          ...(policy ? { permissions: policy } : {}),
+          ...(checkpointer ? { checkpointer } : {}),
+          name: options.name ?? 'deep-agent',
+          note: WORKSPACE_NOTE,
+          maxBackground: maxBackgroundHelpers,
+        })
+      : [];
+  const tools = [...own, ...helping];
 
   const kit: AgentMiddleware[] = [
     ...(sandbox && (include.length > 0 || offload !== false)
@@ -245,6 +249,7 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
       code: interpreter?.language,
       commands,
       subagents,
+      create: Boolean(createHelpers),
       skills,
     }),
     tools,
@@ -261,7 +266,7 @@ function defaultPolicy(commands: readonly string[], code: boolean): PermissionPo
   return permissionPolicy({
     filesystem: { write: [`${MOUNT}/**`] },
     shell: { allow: commands },
-    tools: { write_todos: 'allow', delegate: 'allow', load_skill: 'allow' },
+    tools: { write_todos: 'allow', delegate: 'allow', collect_helper: 'allow', load_skill: 'allow' },
     ...(code ? { code: 'allow' as const } : {}),
   });
 }
@@ -278,6 +283,7 @@ function systemPrompt(
     code: string | undefined;
     commands: readonly string[];
     subagents: readonly DeepSubagent[];
+    create: boolean;
     skills: readonly DeepSkill[];
   },
 ): string {
@@ -304,9 +310,15 @@ function systemPrompt(
       `When a task takes many tool calls, or a filter on what they return, write ${parts.code} for run_code and call the tools from it in one step.`,
     );
   }
-  if (parts.subagents.length > 0) {
-    lines.push('', 'Delegate a self-contained piece of work with delegate, to one of:');
+  if (parts.subagents.length > 0 || parts.create) {
+    lines.push('', 'Delegate a self-contained piece of work with delegate.');
+    if (parts.subagents.length > 0) lines.push('The helpers:');
     for (const helper of parts.subagents) lines.push(`- ${helper.name}: ${helper.description}`);
+    if (parts.create)
+      lines.push('For work none of them fits, create a helper: give delegate a new name and its instructions.');
+    lines.push(
+      'Set background to keep working while a helper runs, and collect its answer with collect_helper when you need it.',
+    );
   }
   if (parts.skills.length > 0) {
     lines.push('', 'Skills you can load with load_skill when a task calls for one:');
@@ -403,35 +415,6 @@ function loadSkillTool(skills: readonly DeepSkill[], sandbox: Sandbox | undefine
       if (skill.instructions !== undefined) return skill.instructions;
       if (skill.file && sandbox) return sandbox.readFile(skill.file);
       throw new Error(`Skill "${skill.name}" has no instructions`);
-    },
-  });
-}
-
-/** One tool for every helper: the helper runs to an answer in a fresh context and returns it. */
-function delegateTool(subagents: readonly DeepSubagent[], helpers: Map<string, AgentGraph>): ToolDefinition {
-  return tool<{ agent: string; task: string }>({
-    name: 'delegate',
-    description: 'Hands a self-contained task to a helper, which works in a fresh context and returns its answer.',
-    parameters: {
-      type: 'object',
-      properties: {
-        agent: { type: 'string', enum: subagents.map((helper) => helper.name) },
-        task: { type: 'string', description: 'Everything the helper needs to know: it sees nothing else.' },
-      },
-      required: ['agent', 'task'],
-    },
-    capabilities: [],
-    execute: async ({ agent, task }, context) => {
-      const helper = helpers.get(String(agent));
-      if (!helper) throw new Error(`No helper named "${String(agent)}"`);
-      // The helper runs for the same caller: same principal, so the same tenant and permissions.
-      const result = await helper.invoke(agentInput(String(task)), {
-        ...(context.principal ? { principal: context.principal } : {}),
-        ...(context.signal ? { signal: context.signal } : {}),
-      });
-      return (
-        result.state.answer || `The ${String(agent)} helper finished without an answer (${result.state.stopReason}).`
-      );
     },
   });
 }

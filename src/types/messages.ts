@@ -1,4 +1,5 @@
 import type { CacheTtl, ReasoningEffort } from './providers.js';
+import type { GraphEvent } from './graph.js';
 import type { AssetInput } from './images.js';
 import type { Principal } from './principal.js';
 import type { Store } from './store.js';
@@ -206,6 +207,12 @@ export interface ToolContext {
    * into a `progress` tool event. Absent outside an agent, so a tool calls it as `context.progress?.()`.
    */
   progress?: (progress: unknown) => void;
+  /**
+   * Hands an event of a run the tool starts, such as a helper agent's, to the agent's own event
+   * stream, under `namespace` inside the agent's tools node. Present only when the caller streams
+   * subgraph events, so a tool calls it as `context.forward?.()`.
+   */
+  forward?: (event: GraphEvent, namespace: readonly string[]) => void;
 }
 
 /** What a tool returned, correlated with the call that asked for it. */

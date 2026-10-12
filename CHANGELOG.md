@@ -36,6 +36,24 @@ Agents that do more, and evaluation that runs on its own.
   10-second timeout, and caps on calls and logs. It is not a security boundary.
   `runInterpreterConformance()` checks any interpreter. `DeepAgentOptions.interpreter` adds
   `run_code` over the deep agent's own tools, and its default policy then grants code.
+- **Helpers beside the deep agent.**
+  - `delegate` takes `background`: it returns a task id at once, and the new `collect_helper` tool
+    returns the answer later, waiting up to `wait_seconds`. `maxBackgroundHelpers` (4) bounds how
+    many work at once.
+  - A background helper keeps checkpoints in the deep agent's checkpointer, on a thread named after
+    the call that started it. After a crash, collecting the task, or repeating the call, carries the
+    same helper on from its last checkpoint.
+  - `createHelpers` lets the agent create a helper from instructions it writes, within
+    `DeepHelperLimits`: the tools, model, model calls, and number per thread.
+  - Streamed with `subgraphs: true`, a helper's events reach the agent's stream under its namespace,
+    such as `tools/researcher@call-7`. `ToolContext.forward` lets any tool do the same for a run it
+    starts.
+
+### Changed
+
+- A graph run's first checkpoint now carries the run's `metadata`, as every later checkpoint did.
+- A deep agent with helpers offers `collect_helper` beside `delegate`, and its prompt says how to use
+  both; its default policy allows `collect_helper`.
 
 ### Proof
 
@@ -53,6 +71,9 @@ Agents that do more, and evaluation that runs on its own.
   describes one from code in one model round trip, while the refund in the same code, which the
   policy asks about, never runs; a deep agent searches and reads its workspace from code, and a
   command its policy denies is denied from code too.
+- A background helper answers after the agent has moved on, with its events in the agent's stream. A
+  crash while the agent waits for it, and a crash before the agent saved the call that started it,
+  each end with one lookup, one note, and one start of the helper.
 
 ## [2.6.0] - 2026-10-11
 

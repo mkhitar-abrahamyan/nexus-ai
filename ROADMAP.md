@@ -70,7 +70,7 @@ marked *built* is closed on `main` and leaves this table when its release ships.
 | Images have not recorded live conformance on all three backends | API stability | 2.7 |
 | Tool selection runs on the application's side; a provider's own tool search is not used | agents guide | 2.7 |
 | The workspace has no glob or grep, and its tools read only text | deep-agent guide | 2.7, built |
-| Helpers are fixed when the agent is built and run one at a time, in process | deep-agent guide | 2.7 |
+| Helpers are fixed when the agent is built and run one at a time, in process | deep-agent guide | 2.7, built |
 | The only sandbox shipped is for development | deep-agent guide | 2.7, built |
 | Datasets are written by hand or exported from traces; nothing generates them from documents or attacks | evaluation guide | 2.7 |
 | An experiment has no spend cap, and online evaluation is a method a replica calls, not a worker | evaluation guide | 2.7 |

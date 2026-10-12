@@ -1,7 +1,7 @@
 import type { OperationLifecycleLike } from '../types/lifecycle.js';
 import { appendList, counter, lastValue } from '../graph/channels.js';
-import { type CompiledGraph, createGraph } from '../graph/graph.js';
-import type { GraphCheckpointer, InterruptRequest, NodeContext } from '../types/graph.js';
+import { type CompiledGraph, createGraph, forwardedEvents } from '../graph/graph.js';
+import type { GraphCheckpointer, GraphEvent, InterruptRequest, NodeContext } from '../types/graph.js';
 import { Command, END, Send } from '../types/graph.js';
 import type { CompletionRequest, Message, ToolDefinition } from '../types/messages.js';
 import type { NexusResponse, ResponseMeta, StreamChunk, ToolCall } from '../types/response.js';
@@ -459,6 +459,8 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
 
         // The tool that runs is always the one the model named; a middleware can change only the arguments,
         // and changed arguments are decided again, so no middleware can reach what the policy denies.
+        // A tool that starts a run of its own, such as a helper, hands that run's events on through this.
+        const forward = forwardedEvents(context);
         const run = async (current: AgentToolCall): Promise<AgentToolResult> => {
           if (options.permissions && current.args !== args) {
             const recheck = await options.permissions.decide({
@@ -477,6 +479,12 @@ export function createAgent(options: CreateAgentOptions): AgentGraph {
             ...(context.store ? { store: context.store } : {}),
             progress: (progress: unknown) =>
               context.tool({ phase: 'progress', id: call.id, name: description.name, progress }),
+            ...(forward
+              ? {
+                  forward: (event: GraphEvent, namespace: readonly string[]) =>
+                    forward({ ...event, namespace: [...namespace, ...(event.namespace ?? [])] }),
+                }
+              : {}),
           });
         };
         context.tool({ phase: 'start', id: call.id, name: description.name, args });
