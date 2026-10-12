@@ -134,6 +134,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/protocols/a2a` | 36 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 11% | none |
+| `nexus-ai-pro/agent/sandbox/container` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/voice` | 33 KB | 10% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |

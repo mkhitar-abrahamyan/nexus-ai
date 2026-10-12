@@ -8,6 +8,7 @@
     "./agent/middleware": 38,
     "./agent/permissions": 10,
     "./agent/sandbox": 26,
+    "./agent/sandbox/container": 40,
     "./batch": 128,
     "./batch/anthropic": 58,
     "./batch/mock": 52,

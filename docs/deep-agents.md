@@ -22,7 +22,7 @@ const agent = createDeepAgent({
   client: ai,
   model: 'claude-sonnet-5-5',
   instructions: 'You maintain this repository.',
-  sandbox: processSandbox({ root: './checkout' }),   // development only; a container in production
+  sandbox: processSandbox({ root: './checkout' }),   // development only; containerSandbox() in production
   commands: ['node', 'npm test', 'git diff'],
   subagents: [
     { name: 'reviewer', description: 'Reviews a change for bugs', instructions: 'You review changes for bugs.', tools: ['read_file'] },
@@ -93,7 +93,8 @@ Afterwards the test passes when run outside the agent. Along the way:
 ## Limitations
 
 - The reference sandbox, `processSandbox()`, is for development. It is never a security boundary.
-  Use a container or a VM behind the `Sandbox` interface in production.
+  Use `containerSandbox()`, from `nexus-ai-pro/agent/sandbox/container`, or a VM of your own behind
+  the `Sandbox` interface, in production.
 - Helpers are fixed when the agent is built, and run in process, one delegation at a time per call.
   A helper that should run elsewhere is an agent on another server, called through
   `createRemoteGraph()`.

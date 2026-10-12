@@ -31,8 +31,14 @@ jobs:
       - name: Verify release tag
         run: node --eval "const version = require('./package.json').version; if (process.env.GITHUB_REF_NAME !== 'v' + version) throw new Error('Tag ' + process.env.GITHUB_REF_NAME + ' does not match package v' + version)"
 
+      - name: Pull the container sandbox image
+        run: docker pull node:22-alpine
+
       - name: Run release gates
         run: npm run check:release
+        env:
+          # The container sandbox's proof runs against the runner's Docker, and must not be skipped.
+          NEXUS_REQUIRE_CONTAINER: '1'
 
       - name: Publish with provenance
         run: npm publish

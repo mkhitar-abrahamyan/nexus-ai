@@ -570,6 +570,16 @@
         "default": "./dist-cjs/agent/sandbox.js"
       }
     },
+    "./agent/sandbox/container": {
+      "import": {
+        "types": "./dist/agent/sandbox-container.d.ts",
+        "default": "./dist/agent/sandbox-container.js"
+      },
+      "require": {
+        "types": "./dist-cjs/agent/sandbox-container.d.ts",
+        "default": "./dist-cjs/agent/sandbox-container.js"
+      }
+    },
     "./agent/middleware": {
       "import": {
         "types": "./dist/agent/middleware/index.d.ts",
@@ -1997,6 +2007,9 @@
       ],
       "agent/sandbox": [
         "dist-cjs/agent/sandbox.d.ts"
+      ],
+      "agent/sandbox/container": [
+        "dist-cjs/agent/sandbox-container.d.ts"
       ],
       "agent/middleware": [
         "dist-cjs/agent/middleware/index.d.ts"

@@ -1,6 +1,6 @@
 # Agents and tools
 
-<!-- covers: ./agent ./agent/middleware ./agent/permissions ./agent/sandbox ./connectors -->
+<!-- covers: ./agent ./agent/middleware ./agent/permissions ./agent/sandbox ./agent/sandbox/container ./connectors -->
 <!-- sources: src/agent src/connectors -->
 
 Tool-calling agents, from `nexus-ai-pro/agent`. There are two:
@@ -311,6 +311,34 @@ const sandbox = processSandbox({ root: './.agent-workspace' });   // development
 const report = await runSandboxConformance(() => mySandbox());    // prove your own
 const agent = createAgent({ client: ai, tools: sandboxTools(sandbox), permissions, checkpointer });
 ```
+
+**A container sandbox.** `containerSandbox()`, on `nexus-ai-pro/agent/sandbox/container`, is a sandbox
+for production. It drives the `docker` or `podman` binary, as the git loader drives `git`, with no
+dependency, and keeps each sandbox in one container, started on first use and removed by
+`dispose()`. `ContainerSandboxOptions` sets the image, the binary, the working directory, the
+network, and the limits. By default the container:
+- has no network at all;
+- drops every capability and cannot gain privileges;
+- is held to 512 MB of memory and swap, one CPU, and 256 processes;
+- mounts nothing of the host, so its files, search, and media live only inside it.
+
+A command past its timeout is killed inside the container, with everything it started. The
+container sandbox passes `runSandboxConformance()`. CI also proves that a command cannot see the
+host's files or reach the host's network, and that the memory limit holds.
+
+```ts
+import { containerSandbox } from 'nexus-ai-pro/agent/sandbox/container';
+
+const sandbox = containerSandbox({ image: 'node:22-alpine' });   // no network, 512 MB, one CPU
+const agent = createDeepAgent({ client: ai, sandbox, commands: ['node', 'npm test'] });
+// …
+await sandbox.dispose?.();
+```
+
+The image needs a POSIX shell, `cat`, `find`, and `tar`, which every common base image has, and the
+commands the agent runs. `network: true` joins the runtime's default network, and a string names one;
+`isolation` then no longer claims the network. `runArgs` passes anything else to `run`, such as
+`--user` with a volume that user can write.
 
 ## Middleware
 
@@ -692,6 +720,13 @@ specific entry point that provides it.
 | `SandboxPathError` | class | Raised when a path would leave the sandbox. |
 | `sandboxTools` | function | Tools that act through a sandbox, each declaring exactly what one call does: `run_command` declares `shell:<the command>`, and the file tools declare `filesystem:read` or `filesystem:write` with the path under `mount`. |
 | `SandboxToolsOptions` | interface | Options for `sandboxTools()`. |
+
+### `nexus-ai-pro/agent/sandbox/container`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `containerSandbox` | function | A sandbox in a container, for production. |
+| `ContainerSandboxOptions` | interface | Options for `containerSandbox()`. |
 
 ### `nexus-ai-pro/connectors`
 

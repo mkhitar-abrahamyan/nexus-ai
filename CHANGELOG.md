@@ -22,6 +22,12 @@ Agents that do more, and evaluation that runs on its own.
   inline data. Audio reaches Google, and OpenAI chat's audio models as `input_audio`. A tool's media
   follows its results on OpenAI and Google, as its images already did. Any other provider, or a
   source it cannot read, receives one line naming the part.
+- **A container sandbox**, on the new `nexus-ai-pro/agent/sandbox/container`: `containerSandbox()`
+  drives the `docker` or `podman` binary, with no dependency, one container per sandbox. By default
+  the container has no network, drops every capability, cannot gain privileges, and is held to
+  512 MB, one CPU, and 256 processes; nothing of the host is mounted. A command past its timeout is
+  killed inside the container with everything it started. Files, glob, grep, and media work inside
+  it. `ContainerSandboxOptions` sets the image, binary, working directory, network, and limits.
 
 ### Proof
 
@@ -31,6 +37,10 @@ Agents that do more, and evaluation that runs on its own.
 - An image, a PDF, and audio from a tool, after a JSON round trip, on the wire of Anthropic, OpenAI
   chat (with and without an audio model), OpenAI Responses, and Google.
 - A deep agent that greps its workspace, finds a PDF, and reads it as a document.
+- The container sandbox passes the sandbox conformance suite against a real Docker in CI, which now
+  requires one. A command cannot find a host file anywhere in the container, cannot reach the host or
+  the internet, while the same probe from a container with a network can; a command over a 64 MB
+  limit is stopped; and a timeout leaves nothing it started running.
 
 ## [2.6.0] - 2026-10-11
 

@@ -8,7 +8,15 @@
  */
 import type { ContentPart, ToolDefinition, ToolOutput } from '../types/messages.js';
 import { encodeBase64 } from '../utils/base64.js';
-import { globMatcher, MEDIA_TYPES } from './glob.js';
+import {
+  GREP_FILE_BYTES,
+  GREP_TOTAL_BYTES,
+  globMatcher,
+  MEDIA_TYPES,
+  matchingLines,
+  SKIPPED_DIRECTORIES,
+  WALK_LIMIT,
+} from './glob.js';
 
 /** Options for one command. */
 export interface SandboxExecOptions {
@@ -295,13 +303,9 @@ export function processSandbox(options: ProcessSandboxOptions): Sandbox {
         if (size === undefined || size > GREP_FILE_BYTES) continue;
         scanned += size;
         if (scanned > GREP_TOTAL_BYTES) break;
-        const bytes = await fs.readFile(file.full);
-        if (bytes.subarray(0, 8_000).includes(0)) continue;
-        for (const [index, line] of bytes.toString('utf8').split(/\r?\n/).entries()) {
-          if (!expression.test(line.slice(0, GREP_LINE_CHARS))) continue;
-          found.push({ file: file.fromRoot, line: index + 1, text: line.slice(0, 300) });
-          if (found.length >= limit) return found;
-        }
+        const lines = matchingLines(await fs.readFile(file.full), expression, limit - found.length);
+        found.push(...lines.map((match) => ({ file: file.fromRoot, ...match })));
+        if (found.length >= limit) break;
       }
       return found;
     },
@@ -311,17 +315,6 @@ export function processSandbox(options: ProcessSandboxOptions): Sandbox {
     },
   };
 }
-
-/** Directories the process sandbox's search never enters. */
-const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules']);
-/** The most directory entries one search walks. */
-const WALK_LIMIT = 20_000;
-/** Files larger than this are not searched. */
-const GREP_FILE_BYTES = 1_048_576;
-/** One search reads no more than this, in all. */
-const GREP_TOTAL_BYTES = 64 * 1_048_576;
-/** Only this much of a line is searched, so a minified file cannot stall a search. */
-const GREP_LINE_CHARS = 4_000;
 
 /** Stops a process and everything it started: the shell a command runs in starts the command itself. */
 function killTree(spawn: typeof import('node:child_process').spawn, pid: number | undefined): void {

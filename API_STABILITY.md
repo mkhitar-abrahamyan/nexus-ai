@@ -50,7 +50,10 @@ New and stable:
   `SandboxGlobOptions`, `SandboxGrepOptions`, and `SandboxMatch`; `SandboxToolsOptions.maxMediaBytes`;
   and the tool names `glob_files`, `grep_files`, and `read_media`;
 - `DocumentContent` and the `document` member of `ContentPart`, exported from
-  `nexus-ai-pro/runtime`; the `base64` source of `AudioContent`.
+  `nexus-ai-pro/runtime`; the `base64` source of `AudioContent`;
+- `nexus-ai-pro/agent/sandbox/container`: `containerSandbox()` and `ContainerSandboxOptions`, with
+  their defaults: no network, every capability dropped, no new privileges, 512 MB of memory and swap,
+  one CPU, and 256 processes.
 
 `sandboxTools()` offers the new tools only for a sandbox that implements the methods behind them, so
 a sandbox of the application's own offers the same tools as before. A deep agent over
