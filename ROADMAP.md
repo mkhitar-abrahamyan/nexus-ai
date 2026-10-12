@@ -61,14 +61,16 @@ another orchestration abstraction.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release.
+Each gap is written down in a guide's limitations today, and each is closed by one release. A gap
+marked *built* is closed on `main` and leaves this table when its release ships.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
 | The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.7 |
 | Images have not recorded live conformance on all three backends | API stability | 2.7 |
 | Tool selection runs on the application's side; a provider's own tool search is not used | agents guide | 2.7 |
-| The workspace has no glob or grep, and helpers are fixed when the agent is built and run one at a time, in process | deep-agent guide | 2.7 |
+| The workspace has no glob or grep, and its tools read only text | deep-agent guide | 2.7, built |
+| Helpers are fixed when the agent is built and run one at a time, in process | deep-agent guide | 2.7 |
 | The only sandbox shipped is for development | deep-agent guide | 2.7 |
 | Datasets are written by hand or exported from traces; nothing generates them from documents or attacks | evaluation guide | 2.7 |
 | An experiment has no spend cap, and online evaluation is a method a replica calls, not a worker | evaluation guide | 2.7 |

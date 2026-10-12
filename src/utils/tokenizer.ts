@@ -33,6 +33,8 @@ export class Tokenizer {
         if (part.type === 'image') return total + 85;
         if (part.type === 'audio') return total + 120;
         if (part.type === 'video') return total + 250;
+        // A document's size depends on its pages, which only the provider counts.
+        if (part.type === 'document') return total + 1_500;
         // An asset is sent as one reference line, never as its bytes.
         if (part.type === 'asset') return total + 30;
         return total;

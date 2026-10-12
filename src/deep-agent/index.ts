@@ -111,6 +111,9 @@ const CORE_TOOLS = [
   'write_file',
   'edit_file',
   'list_files',
+  'glob_files',
+  'grep_files',
+  'read_media',
   'run_command',
 ];
 
@@ -213,7 +216,15 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
   return createAgent({
     maxIterations: 40,
     ...agentOptions,
-    systemPrompt: systemPrompt(instructions, { planning, sandbox: Boolean(sandbox), commands, subagents, skills }),
+    systemPrompt: systemPrompt(instructions, {
+      planning,
+      sandbox: Boolean(sandbox),
+      search: Boolean(sandbox?.glob && sandbox.grep),
+      media: Boolean(sandbox?.readBytes),
+      commands,
+      subagents,
+      skills,
+    }),
     tools,
     middleware: [...kit, ...middleware],
     ...(permissions === false ? {} : { permissions: permissions ?? defaultPolicy(commands) }),
@@ -236,6 +247,8 @@ function systemPrompt(
   parts: {
     planning: boolean;
     sandbox: boolean;
+    search: boolean;
+    media: boolean;
     commands: readonly string[];
     subagents: readonly DeepSubagent[];
     skills: readonly DeepSkill[];
@@ -253,6 +266,10 @@ function systemPrompt(
     lines.push(
       `${WORKSPACE_NOTE} Read before you change a file; prefer edit_file to rewriting a whole file. A large result may be saved to a file and shown as a preview: read the file when you need the rest.`,
     );
+    if (parts.search) {
+      lines.push('Find files with glob_files and the lines you need with grep_files before reading whole files.');
+    }
+    if (parts.media) lines.push('Look at images, audio, and PDFs with read_media.');
     if (parts.commands.length > 0) lines.push(`You may run these commands: ${parts.commands.join(', ')}.`);
   }
   if (parts.subagents.length > 0) {

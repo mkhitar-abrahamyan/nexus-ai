@@ -14,6 +14,7 @@ export type {
   CacheHint,
   CompletionRequest,
   ContentPart,
+  DocumentContent,
   ImageContent,
   Message,
   MessageRole,

@@ -432,6 +432,7 @@ A `Message` has a `MessageRole`, and either text or a list of `ContentPart` valu
 | `TextContent` | Text. |
 | `ImageContent` | An image from a path, a URL, bytes, base64 text, or an asset. |
 | `AudioContent`, `VideoContent` | Audio or video, or a transcript standing in for the audio. |
+| `DocumentContent` | A document, such as a PDF, from a path, a URL, bytes, or base64 text. |
 | `AssetContent` | An asset by reference: an image or file named by where it lives, never its bytes. |
 
 `AssetContent` is how a tool's image reaches the model without base64 text. Every adapter writes it
@@ -439,6 +440,10 @@ as one short reference line, which the model can pass back to another tool. Use 
 the model should see the image itself. A tool returns either kind as a `ToolOutput`, built with
 `toolOutput()`; the [agents guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/agents.md) shows it. `BinaryBuffer` stands in for Node's `Buffer`,
 so the types also compile for a browser.
+
+A document part reaches Anthropic as a document block, OpenAI as a file, and Google as inline data.
+Audio reaches Google and OpenAI's audio models. Any other provider, or a source it cannot read, such
+as a path, receives one line naming the part instead.
 
 `NexusResponse` comes back with:
 
@@ -2756,9 +2761,20 @@ policy denies.
 a remote interpreter — through the `Sandbox` interface on `nexus-ai-pro/agent/sandbox`: `exec()`
 with `SandboxExecOptions` (a working directory, variables, standard input, a timeout, a signal),
 returning a `SandboxExecResult`; file reads and writes; and its `SandboxIsolation`, what it claims
-to isolate. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and
-`list_files`, each declaring exactly what one call does, with files under the `mount` a policy sees
+to isolate. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and,
+where the sandbox implements them, `list_files`, `glob_files`, `grep_files`, and `read_media`,
+each declaring exactly what one call does, with files under the `mount` a policy sees
 (`/workspace` by default); `SandboxToolsOptions` chooses them.
+
+**Workspace search and media.** A sandbox may also implement `glob()`, with `SandboxGlobOptions`;
+`grep()`, with `SandboxGrepOptions`, returning `SandboxMatch`es; and `readBytes()`. The tools
+built on them are bounded: `glob_files` lists at most 500 paths and `grep_files` at most 200 lines,
+each cut to 300 characters. `read_media` reads an image, audio, or a PDF as a `ToolOutput` the model
+sees rather than as text: an image part, an audio part, or a `DocumentContent` part, each as base64,
+so it survives a checkpoint. A file over `maxMediaBytes`, 10 MB by default, is refused. Anthropic
+receives a PDF inside the tool result; OpenAI and Google receive a tool's media right after the
+results. Audio reaches Google and OpenAI's audio models; any other model receives its transcript, or
+a line saying it is there.
 
 `runSandboxConformance()` checks any sandbox against the contract, with no test framework, and
 returns a `SandboxConformanceReport` of `SandboxConformanceCheck`s: output, errors, and exit codes;
@@ -2769,7 +2785,9 @@ round-trip where commands run; and paths outside the sandbox refused, as `Sandbo
 `processSandbox()` is a reference for development: commands run as ordinary processes in a
 directory, with only `PATH` and the variables given, and its file methods refuse any path outside
 `root` (`ProcessSandboxOptions`). A command it runs can still touch anything you can, and its
-`isolation` says so. It is never a security boundary.
+`isolation` says so. It is never a security boundary. Its search follows no links, skips `.git` and
+`node_modules`, and walks at most 20,000 entries; `grep()` skips files over 1 MB and binary files,
+reads at most 64 MB, and searches the first 4,000 characters of a line.
 
 ```ts
 import { processSandbox, runSandboxConformance, sandboxTools } from 'nexus-ai-pro/agent/sandbox';
@@ -3083,7 +3101,7 @@ const run = await agent.invoke(agentInput('The test fails. Fix it.'), { threadId
 | Part | What the agent gets | Built from |
 | --- | --- | --- |
 | Planning | `write_todos`: the plan, sent whole each time, each step `pending`, `in_progress`, or `completed`. It lives in the transcript, so it is checkpointed with the run and never cleared by context editing. | A tool |
-| A workspace | `read_file`, `write_file`, `list_files`, and `edit_file` in the sandbox, mounted at `/workspace`, and `run_command` when `commands` names any. | `sandboxTools()` |
+| A workspace | `read_file`, `write_file`, `list_files`, and `edit_file` in the sandbox, mounted at `/workspace`; `glob_files`, `grep_files`, and `read_media` where the sandbox can search and read bytes; and `run_command` when `commands` names any. | `sandboxTools()` |
 | Helpers | `delegate`: hands a task to a `DeepSubagent`, which runs to an answer in a fresh context, with the tools it was given, for the same principal. | `createAgent()` per helper |
 | Skills | `load_skill`: only each `DeepSkill`'s name and description sit in the prompt until the agent loads one, from its `instructions` or a `file` in the sandbox. | A tool |
 | Instruction files | `AGENTS.md`, or the files `include` names, on every call, after the system prompt. | `filesystemContext()` |
@@ -3141,8 +3159,12 @@ Afterwards the test passes when run outside the agent. Along the way:
 - Helpers are fixed when the agent is built, and run in process, one delegation at a time per call.
   A helper that should run elsewhere is an agent on another server, called through
   `createRemoteGraph()`.
-- The workspace tools read, write, edit, and list files, and run commands. There is no glob or grep
-  tool, so a search is a command the sandbox runs.
+- Workspace search is bounded: `glob_files` lists at most 500 paths and `grep_files` 200 lines.
+  The reference sandbox skips files over 1 MB, binary files, `.git`, and `node_modules`. A wider
+  search is a command the sandbox runs.
+- `read_media` sends a file of at most 10 MB, as the model's provider accepts it: a PDF reaches
+  Anthropic, OpenAI, and Google; audio reaches Google and OpenAI's audio models, and any other model
+  is told the audio is there.
 
 ---
 
@@ -11286,24 +11308,24 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/config` | 334 KB | 98% | none |
 | `nexus-ai-pro/core` | 330 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
-| `nexus-ai-pro/deep-agent` | 142 KB | 42% | none |
+| `nexus-ai-pro/deep-agent` | 153 KB | 45% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 115 KB | 34% | none |
 | `nexus-ai-pro/agent` | 109 KB | 32% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
+| `nexus-ai-pro/providers/groq` | 87 KB | 25% | none |
+| `nexus-ai-pro/providers/mistral` | 87 KB | 25% | none |
+| `nexus-ai-pro/providers/azure-openai` | 86 KB | 25% | none |
+| `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
+| `nexus-ai-pro/providers/llamacpp` | 86 KB | 25% | none |
+| `nexus-ai-pro/providers/lmstudio` | 86 KB | 25% | none |
+| `nexus-ai-pro/providers/openrouter` | 86 KB | 25% | none |
+| `nexus-ai-pro/providers/openai` | 85 KB | 25% | none |
 | `nexus-ai-pro/postgres` | 84 KB | 25% | none |
-| `nexus-ai-pro/providers/groq` | 83 KB | 24% | none |
-| `nexus-ai-pro/providers/mistral` | 83 KB | 24% | none |
-| `nexus-ai-pro/providers/azure-openai` | 82 KB | 24% | none |
-| `nexus-ai-pro/providers/deepseek` | 82 KB | 24% | none |
-| `nexus-ai-pro/providers/llamacpp` | 82 KB | 24% | none |
-| `nexus-ai-pro/providers/lmstudio` | 82 KB | 24% | none |
-| `nexus-ai-pro/providers/openai` | 82 KB | 24% | none |
-| `nexus-ai-pro/providers/openrouter` | 82 KB | 24% | none |
 | `nexus-ai-pro/graph` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 81 KB | 24% | none |
-| `nexus-ai-pro/providers/anthropic` | 75 KB | 22% | none |
-| `nexus-ai-pro/providers/google` | 69 KB | 20% | none |
+| `nexus-ai-pro/providers/anthropic` | 78 KB | 23% | none |
+| `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
 | `nexus-ai-pro/images` | 60 KB | 18% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
@@ -11338,6 +11360,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/stores` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
+| `nexus-ai-pro/agent/sandbox` | 22 KB | 6% | none |
 | `nexus-ai-pro/protocols/acp` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
@@ -11372,7 +11395,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
-| `nexus-ai-pro/agent/sandbox` | 12 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 4% | none |
 | `nexus-ai-pro/rag/files` | 12 KB | 4% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 4% | none |
@@ -11505,6 +11527,7 @@ The kernel holds these.
 **Messages.** A `Message` has a `MessageRole` and content made of `ContentPart` values:
 - `TextContent`;
 - `ImageContent`, `AudioContent`, and `VideoContent`, whose bytes are a `BinaryBuffer`;
+- `DocumentContent`, a document such as a PDF, as bytes, base64 text, a URL, or a path;
 - `AssetContent`, for media held in an asset store.
 
 A `CacheHint` marks where a cacheable prefix ends, and `PromptCacheConfig` sets how a request

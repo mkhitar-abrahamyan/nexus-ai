@@ -6,7 +6,9 @@
  * reference for development, which runs commands as ordinary processes; it says so in its
  * `isolation`, and is never a security boundary.
  */
-import type { ToolDefinition } from '../types/messages.js';
+import type { ContentPart, ToolDefinition, ToolOutput } from '../types/messages.js';
+import { encodeBase64 } from '../utils/base64.js';
+import { globMatcher, MEDIA_TYPES } from './glob.js';
 
 /** Options for one command. */
 export interface SandboxExecOptions {
@@ -36,6 +38,36 @@ export interface SandboxExecResult {
   durationMs: number;
 }
 
+/** Options for `Sandbox.glob()`. */
+export interface SandboxGlobOptions {
+  /** The directory to search, inside the sandbox. Defaults to its root. */
+  cwd?: string;
+  /** The most paths returned. Defaults to 1,000. */
+  limit?: number;
+}
+
+/** Options for `Sandbox.grep()`. */
+export interface SandboxGrepOptions {
+  /** The directory to search, inside the sandbox. Defaults to its root. */
+  cwd?: string;
+  /** Searches only the files whose paths, relative to `cwd`, match this glob. */
+  glob?: string;
+  /** Matches without regard to case. */
+  ignoreCase?: boolean;
+  /** The most matching lines returned. Defaults to 200. */
+  limit?: number;
+}
+
+/** One line `Sandbox.grep()` matched. */
+export interface SandboxMatch {
+  /** The file, relative to the sandbox's root. */
+  file: string;
+  /** The line's number, counting from 1. */
+  line: number;
+  /** The line, cut to 300 characters. */
+  text: string;
+}
+
 /** What a sandbox claims to isolate. The conformance suite checks the claims it can observe. */
 export interface SandboxIsolation {
   /** Commands cannot read or write the host's files. */
@@ -62,6 +94,19 @@ export interface Sandbox {
   listFiles?(directory?: string): Promise<string[]>;
   /** Removes a file or directory. */
   removeFile?(file: string): Promise<void>;
+  /**
+   * The files under a directory whose paths match a glob, such as `src/**\/*.ts`, sorted. The glob
+   * matches paths relative to `cwd`; the paths returned are relative to the root, as `readFile`
+   * takes them. Returns at most `limit`.
+   */
+  glob?(pattern: string, options?: SandboxGlobOptions): Promise<string[]>;
+  /**
+   * The lines matching a regular expression in the files under a directory, at most `limit`. Large
+   * files and binary files are skipped.
+   */
+  grep?(pattern: string, options?: SandboxGrepOptions): Promise<SandboxMatch[]>;
+  /** Reads a file's bytes, for an image, audio, or a document. */
+  readBytes?(file: string): Promise<Uint8Array>;
   /** Releases the sandbox. */
   dispose?(): Promise<void>;
 }
@@ -98,12 +143,16 @@ export interface ProcessSandboxOptions {
  * Its file methods refuse any path outside `root`, and commands get only `PATH` and the variables
  * given, never the host's environment. But a command it runs can read and write anything the user
  * can, and reach any host: `isolation` says so. Use a container or a VM in production.
+ *
+ * Its search skips `.git` and `node_modules`, walks at most 20,000 entries, and follows no links;
+ * `grep()` skips files over 1 MB and binary files, reads at most 64 MB, and searches the first
+ * 4,000 characters of each line.
  */
 export function processSandbox(options: ProcessSandboxOptions): Sandbox {
   // Node's modules load on first use, so importing this module needs no Node: a deep agent over a
   // container sandbox runs on any runtime, and only a process sandbox needs Node.
   const ready = (async () => {
-    const [{ spawn }, fs, { dirname, isAbsolute, relative, resolve }] = await Promise.all([
+    const [{ spawn }, fs, { dirname, isAbsolute, join, relative, resolve }] = await Promise.all([
       import('node:child_process'),
       import('node:fs/promises'),
       import('node:path'),
@@ -116,11 +165,37 @@ export function processSandbox(options: ProcessSandboxOptions): Sandbox {
       if (fromRoot.startsWith('..') || isAbsolute(fromRoot)) throw new SandboxPathError(file);
       return resolved;
     };
-    return { spawn, fs, dirname, root, inside };
+    return { spawn, fs, dirname, join, relative, root, inside };
   })();
   // A root that cannot be created fails every call; it is never an unhandled rejection on its own.
   ready.catch(() => undefined);
   const maxOutput = options.maxOutputBytes ?? 1_048_576;
+
+  // Workspace search walks the tree itself, breadth first and bounded, and never follows a link, so
+  // it cannot leave the root.
+  const walk = async (directory: string) => {
+    const { fs, join, relative, root, inside } = await ready;
+    const start = inside(directory);
+    const slash = (path: string) => path.replace(/\\/g, '/');
+    const files: Array<{ full: string; fromRoot: string; fromStart: string }> = [];
+    const queue = [start];
+    let walked = 0;
+    while (queue.length > 0 && walked < WALK_LIMIT) {
+      const current = queue.shift() as string;
+      const entries = await fs.readdir(current, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        walked += 1;
+        if (walked > WALK_LIMIT) break;
+        const full = join(current, entry.name);
+        if (entry.isDirectory()) {
+          if (!SKIPPED_DIRECTORIES.has(entry.name)) queue.push(full);
+        } else if (entry.isFile()) {
+          files.push({ full, fromRoot: slash(relative(root, full)), fromStart: slash(relative(start, full)) });
+        }
+      }
+    }
+    return files.sort((a, b) => (a.fromRoot < b.fromRoot ? -1 : a.fromRoot > b.fromRoot ? 1 : 0));
+  };
 
   return {
     name: 'process (development only)',
@@ -200,8 +275,53 @@ export function processSandbox(options: ProcessSandboxOptions): Sandbox {
       if (target === root) throw new SandboxPathError(file);
       await fs.rm(target, { recursive: true, force: true });
     },
+    async glob(pattern, globOptions = {}) {
+      const matches = globMatcher(pattern);
+      return (await walk(globOptions.cwd ?? '.'))
+        .filter((file) => matches(file.fromStart))
+        .slice(0, globOptions.limit ?? 1_000)
+        .map((file) => file.fromRoot);
+    },
+    async grep(pattern, grepOptions = {}) {
+      const { fs } = await ready;
+      const expression = new RegExp(pattern, grepOptions.ignoreCase ? 'i' : '');
+      const only = grepOptions.glob ? globMatcher(grepOptions.glob) : undefined;
+      const limit = grepOptions.limit ?? 200;
+      const found: SandboxMatch[] = [];
+      let scanned = 0;
+      for (const file of await walk(grepOptions.cwd ?? '.')) {
+        if (only && !only(file.fromStart)) continue;
+        const size = (await fs.stat(file.full).catch(() => undefined))?.size;
+        if (size === undefined || size > GREP_FILE_BYTES) continue;
+        scanned += size;
+        if (scanned > GREP_TOTAL_BYTES) break;
+        const bytes = await fs.readFile(file.full);
+        if (bytes.subarray(0, 8_000).includes(0)) continue;
+        for (const [index, line] of bytes.toString('utf8').split(/\r?\n/).entries()) {
+          if (!expression.test(line.slice(0, GREP_LINE_CHARS))) continue;
+          found.push({ file: file.fromRoot, line: index + 1, text: line.slice(0, 300) });
+          if (found.length >= limit) return found;
+        }
+      }
+      return found;
+    },
+    async readBytes(file) {
+      const { fs, inside } = await ready;
+      return fs.readFile(inside(file));
+    },
   };
 }
+
+/** Directories the process sandbox's search never enters. */
+const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules']);
+/** The most directory entries one search walks. */
+const WALK_LIMIT = 20_000;
+/** Files larger than this are not searched. */
+const GREP_FILE_BYTES = 1_048_576;
+/** One search reads no more than this, in all. */
+const GREP_TOTAL_BYTES = 64 * 1_048_576;
+/** Only this much of a line is searched, so a minified file cannot stall a search. */
+const GREP_LINE_CHARS = 4_000;
 
 /** Stops a process and everything it started: the shell a command runs in starts the command itself. */
 function killTree(spawn: typeof import('node:child_process').spawn, pid: number | undefined): void {
@@ -221,8 +341,13 @@ function killTree(spawn: typeof import('node:child_process').spawn, pid: number 
 export interface SandboxToolsOptions {
   /** Offer `run_command`. Defaults to true. */
   shell?: boolean;
-  /** Offer `read_file`, `write_file`, and `list_files`. Defaults to true. */
+  /**
+   * Offer the file tools: `read_file`, `write_file`, and, where the sandbox can, `list_files`,
+   * `glob_files`, `grep_files`, and `read_media`. Defaults to true.
+   */
   files?: boolean;
+  /** The largest file `read_media` sends to the model, in bytes. Defaults to 10 MB. */
+  maxMediaBytes?: number;
   /**
    * The path a permission policy sees the sandbox's files under. Defaults to `/workspace`, so a
    * policy granting `/workspace/**` grants the sandbox.
@@ -301,8 +426,101 @@ export function sandboxTools(sandbox: Sandbox, options: SandboxToolsOptions = {}
         execute: async (args) => list(local(args.path)),
       });
     }
+    if (sandbox.glob) {
+      const glob = sandbox.glob.bind(sandbox);
+      tools.push({
+        name: 'glob_files',
+        description: `Finds files by a glob, such as **/*.ts or src/*.{js,json}, and lists their paths relative to ${mount}, at most ${GLOB_LIMIT}.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            pattern: { type: 'string', description: 'The glob the paths must match' },
+            path: { type: 'string', description: 'The directory to search. Defaults to the whole workspace' },
+          },
+          required: ['pattern'],
+        },
+        capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
+        execute: async (args) => {
+          const files = await glob(String(args.pattern ?? '**'), { cwd: local(args.path), limit: GLOB_LIMIT + 1 });
+          if (files.length === 0) return 'No files match.';
+          const shown = files.slice(0, GLOB_LIMIT).join('\n');
+          return files.length > GLOB_LIMIT ? `${shown}\n[more files match: narrow the glob]` : shown;
+        },
+      });
+    }
+    if (sandbox.grep) {
+      const grep = sandbox.grep.bind(sandbox);
+      tools.push({
+        name: 'grep_files',
+        description: `Searches files for lines matching a regular expression and lists each as path:line: text, at most ${GREP_LIMIT}. Large and binary files are skipped.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            pattern: { type: 'string', description: 'The regular expression to find' },
+            path: { type: 'string', description: 'The directory to search. Defaults to the whole workspace' },
+            glob: { type: 'string', description: 'Searches only files matching this glob, such as **/*.ts' },
+            ignore_case: { type: 'boolean', description: 'Matches without regard to case' },
+          },
+          required: ['pattern'],
+        },
+        capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
+        execute: async (args) => {
+          const found = await grep(String(args.pattern ?? ''), {
+            cwd: local(args.path),
+            ...(typeof args.glob === 'string' && args.glob ? { glob: args.glob } : {}),
+            ignoreCase: args.ignore_case === true,
+            limit: GREP_LIMIT + 1,
+          });
+          if (found.length === 0) return 'No lines match.';
+          const shown = found
+            .slice(0, GREP_LIMIT)
+            .map((match) => `${match.file}:${match.line}: ${match.text}`)
+            .join('\n');
+          return found.length > GREP_LIMIT ? `${shown}\n[more lines match: narrow the search]` : shown;
+        },
+      });
+    }
+    if (sandbox.readBytes) {
+      const readBytes = sandbox.readBytes.bind(sandbox);
+      const maxBytes = options.maxMediaBytes ?? 10 * 1_048_576;
+      tools.push({
+        name: 'read_media',
+        description: `Shows you an image (PNG, JPEG, GIF, WebP), audio (WAV, MP3, FLAC, OGG, AAC), or a PDF in the sandbox as content you see or hear, not as text. Paths are relative to ${mount}.`,
+        parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+        capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
+        execute: async (args) => {
+          const file = local(args.path);
+          const mimeType = MEDIA_TYPES[file.split('.').pop()?.toLowerCase() ?? ''];
+          if (!mimeType) throw new Error(`${file} is not an image, audio, or PDF file; read text with read_file`);
+          const bytes = await readBytes(file);
+          if (bytes.byteLength > maxBytes) {
+            throw new Error(`${file} is ${bytes.byteLength} bytes, over the ${maxBytes}-byte limit for media`);
+          }
+          return mediaOutput(file, mimeType, bytes);
+        },
+      });
+    }
   }
   return tools;
+}
+
+/** The most paths `glob_files` lists. */
+const GLOB_LIMIT = 500;
+/** The most lines `grep_files` lists. */
+const GREP_LIMIT = 200;
+
+/** A media file as content the model sees or hears, after a line naming it. Base64 survives a checkpoint. */
+function mediaOutput(file: string, mimeType: string, bytes: Uint8Array): ToolOutput {
+  const data = encodeBase64(bytes);
+  const part: ContentPart = mimeType.startsWith('image/')
+    ? { type: 'image', source: { base64: data, mimeType } }
+    : mimeType.startsWith('audio/')
+      ? { type: 'audio', source: { base64: data, format: mimeType.slice('audio/'.length) } }
+      : { type: 'document', source: { base64: data, mimeType }, filename: file.split('/').pop() ?? file };
+  return {
+    type: 'tool_output',
+    content: [{ type: 'text', text: `${file} (${mimeType}, ${bytes.byteLength} bytes)` }, part],
+  };
 }
 
 /** One conformance check's result. */

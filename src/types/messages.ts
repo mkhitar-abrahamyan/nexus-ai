@@ -63,10 +63,14 @@ export interface ImageContent {
 export interface AudioContent {
   /** Discriminates this part in `ContentPart`. */
   type: 'audio';
-  /** Where the audio comes from: a file path, a buffer, a stream, or a transcript. */
+  /**
+   * Where the audio comes from: a file path, a buffer, base64 text, a stream, or a transcript.
+   * Base64 survives a checkpoint, which a buffer does not.
+   */
   source:
     | { path: string }
     | { buffer: BinaryBuffer; format?: string }
+    | { base64: string; format?: string }
     | { stream: NodeJS.ReadableStream; format?: string; sampleRate?: number }
     | { transcript: string };
 }
@@ -88,6 +92,23 @@ export interface VideoContent {
 }
 
 /**
+ * A document part of a message, such as a PDF, for models that read documents. A provider that takes
+ * documents receives the file itself; any other provider receives one line naming it.
+ */
+export interface DocumentContent {
+  /** Discriminates this part in `ContentPart`. */
+  type: 'document';
+  /** Where the document comes from: a file path, a URL, a buffer, or base64 text. Defaults to a PDF. */
+  source:
+    | { path: string }
+    | { url: string }
+    | { buffer: BinaryBuffer; mimeType?: string }
+    | { base64: string; mimeType?: string };
+  /** The file's name, for a provider that takes files by name. */
+  filename?: string;
+}
+
+/**
  * An asset passed by reference: an image or file a tool made or stored, named in the conversation by
  * where it lives rather than carried as base64 text. Every adapter writes it as one short reference
  * line the model can repeat back to another tool. Use an image part instead to show the image.
@@ -100,11 +121,11 @@ export interface AssetContent {
 }
 
 /** One part of a multimodal message. */
-export type ContentPart = TextContent | ImageContent | AudioContent | VideoContent | AssetContent;
+export type ContentPart = TextContent | ImageContent | AudioContent | VideoContent | DocumentContent | AssetContent;
 
 /**
  * What a tool returns when its result is content rather than a value to serialize: text, images,
- * and asset references, in order. The agent loop sends the parts as the tool message itself, so an
+ * audio, documents, and asset references, in order. The agent loop sends the parts as the tool message itself, so an
  * image a tool produced reaches the model as an image, or as a reference, instead of base64 JSON.
  * `toolOutput()` builds one.
  */

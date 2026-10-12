@@ -38,6 +38,7 @@ The kernel holds these.
 **Messages.** A `Message` has a `MessageRole` and content made of `ContentPart` values:
 - `TextContent`;
 - `ImageContent`, `AudioContent`, and `VideoContent`, whose bytes are a `BinaryBuffer`;
+- `DocumentContent`, a document such as a PDF, as bytes, base64 text, a URL, or a path;
 - `AssetContent`, for media held in an asset store.
 
 A `CacheHint` marks where a cacheable prefix ends, and `PromptCacheConfig` sets how a request
@@ -219,6 +220,7 @@ specific entry point that provides it.
 | `CacheOutcome` | interface | What the response cache did for one request: `hit` (answered from it), `miss` (looked, found nothing), `stale` (found an entry that had expired), `bypass` (the request skipped the lookup), or `error` (the cache failed, and the request went to the provider as on a miss). |
 | `CompletionRequest` | interface | A completion request: the model, the conversation, and every control over how it is answered. |
 | `ContentPart` | type | One part of a multimodal message. |
+| `DocumentContent` | interface | A document part of a message, such as a PDF, for models that read documents. |
 | `ImageContent` | interface | An image part of a message, for vision-capable models. |
 | `isToolOutput` | function | True for a result built with `toolOutput()`. |
 | `Message` | interface | One message in a conversation. |
@@ -244,6 +246,6 @@ specific entry point that provides it.
 | `ToolExecutor` | class | Runs tool calls by name, reporting failures as results rather than throwing. |
 | `toolMessageContent` | function | What the model reads for a tool's result: the parts of a `toolOutput()`, or anything else as JSON. |
 | `toolOutput` | function | Builds a tool's result as content: text, images, and asset references, in order. |
-| `ToolOutput` | interface | What a tool returns when its result is content rather than a value to serialize: text, images, and asset references, in order. |
+| `ToolOutput` | interface | What a tool returns when its result is content rather than a value to serialize: text, images, audio, documents, and asset references, in order. |
 | `VideoContent` | interface | A video part of a message. |
 <!-- reference:end -->

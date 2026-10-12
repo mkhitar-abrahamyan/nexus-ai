@@ -41,6 +41,27 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.7 stage (Unreleased)
+
+Everything 2.7 adds is stable from the start and additive.
+
+New and stable:
+- on `nexus-ai-pro/agent/sandbox`: `Sandbox.glob()`, `grep()`, and `readBytes()`, all optional;
+  `SandboxGlobOptions`, `SandboxGrepOptions`, and `SandboxMatch`; `SandboxToolsOptions.maxMediaBytes`;
+  and the tool names `glob_files`, `grep_files`, and `read_media`;
+- `DocumentContent` and the `document` member of `ContentPart`, exported from
+  `nexus-ai-pro/runtime`; the `base64` source of `AudioContent`.
+
+`sandboxTools()` offers the new tools only for a sandbox that implements the methods behind them, so
+a sandbox of the application's own offers the same tools as before. A deep agent over
+`processSandbox()` gets the three new tools and a line of its system prompt naming them.
+
+On OpenAI, a tool message whose media is not only images is followed by a user message that starts
+`Files the tools returned:`; one with only images keeps `Images the tools returned:`.
+
+`ContentPart` and `AudioContent['source']` gain members, as the compatibility rules allow in a minor
+release. Code that switches over either exhaustively should handle the new ones.
+
 ## 2.6 stage (2.6.0)
 
 Everything 2.6 adds is stable from the start and additive.

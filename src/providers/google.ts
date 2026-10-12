@@ -9,11 +9,15 @@ import { generateRequestId } from '../utils/ids.js';
 import type { AssetInput } from '../types/images.js';
 import {
   assetReference,
+  audioPlaceholder,
+  documentPlaceholder,
   imagePlaceholder,
-  imagesOf,
+  mediaOf,
   textOf,
   toolArguments,
   toolNameFor,
+  wireAudio,
+  wireDocument,
   wireImage,
 } from './content.js';
 import { createProviderHttpError, toNexusProviderError } from './errors.js';
@@ -284,8 +288,8 @@ export class GoogleProvider extends BaseProvider {
 
     for (const [index, message] of messages.entries()) {
       if (message.role === 'tool') {
-        // A result goes back under the name of the function that asked for it, with any images it
-        // returned beside it; results answering one turn share one user turn.
+        // A result goes back under the name of the function that asked for it, with any images,
+        // audio, or documents it returned beside it; results answering one turn share one user turn.
         const parts: GeminiContentPart[] = [
           {
             functionResponse: {
@@ -293,7 +297,7 @@ export class GoogleProvider extends BaseProvider {
               response: { result: textOf(message.content) },
             },
           },
-          ...this.formatParts(imagesOf(message.content)),
+          ...this.formatParts(mediaOf(message.content)),
         ];
         const previous = contents.at(-1);
         if (previous?.role === 'user' && previous.parts.every((part) => part.functionResponse || part.inlineData)) {
@@ -347,8 +351,15 @@ export class GoogleProvider extends BaseProvider {
         if (image?.kind === 'url') return { text: `[image url: ${image.url}]` };
         return { text: imagePlaceholder(part) };
       }
-      if (part.type === 'audio' && 'transcript' in part.source) {
-        return { text: part.source.transcript };
+      if (part.type === 'document') {
+        const document = wireDocument(part);
+        if (document?.kind === 'base64') return { inlineData: { mimeType: document.mimeType, data: document.data } };
+        return { text: documentPlaceholder(part) };
+      }
+      if (part.type === 'audio') {
+        const audio = wireAudio(part);
+        if (audio) return { inlineData: { mimeType: `audio/${audio.format}`, data: audio.data } };
+        return { text: audioPlaceholder(part) };
       }
       return { text: `[${part.type} content is not yet supported for Google provider]` };
     });

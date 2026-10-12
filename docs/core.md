@@ -118,6 +118,7 @@ A `Message` has a `MessageRole`, and either text or a list of `ContentPart` valu
 | `TextContent` | Text. |
 | `ImageContent` | An image from a path, a URL, bytes, base64 text, or an asset. |
 | `AudioContent`, `VideoContent` | Audio or video, or a transcript standing in for the audio. |
+| `DocumentContent` | A document, such as a PDF, from a path, a URL, bytes, or base64 text. |
 | `AssetContent` | An asset by reference: an image or file named by where it lives, never its bytes. |
 
 `AssetContent` is how a tool's image reaches the model without base64 text. Every adapter writes it
@@ -125,6 +126,10 @@ as one short reference line, which the model can pass back to another tool. Use 
 the model should see the image itself. A tool returns either kind as a `ToolOutput`, built with
 `toolOutput()`; the [agents guide](./agents.md) shows it. `BinaryBuffer` stands in for Node's `Buffer`,
 so the types also compile for a browser.
+
+A document part reaches Anthropic as a document block, OpenAI as a file, and Google as inline data.
+Audio reaches Google and OpenAI's audio models. Any other provider, or a source it cannot read, such
+as a path, receives one line naming the part instead.
 
 `NexusResponse` comes back with:
 

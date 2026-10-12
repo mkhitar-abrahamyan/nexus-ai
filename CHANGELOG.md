@@ -4,6 +4,34 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Agents that do more, and evaluation that runs on its own.
+
+### Added
+
+- **Workspace search.** A `Sandbox` may implement `glob()`, `grep()`, and `readBytes()`, with
+  `SandboxGlobOptions`, `SandboxGrepOptions`, and `SandboxMatch`. `sandboxTools()` then offers
+  `glob_files` and `grep_files`, bounded at 500 paths and 200 lines, each declaring the directory it
+  reads. `processSandbox()` implements all three: its search follows no links, skips `.git` and
+  `node_modules`, walks at most 20,000 entries, and skips files over 1 MB and binary files.
+- **A multimodal workspace.** `read_media` reads an image, audio, or a PDF in the sandbox as content
+  the model sees, as base64 so it survives a checkpoint, up to `SandboxToolsOptions.maxMediaBytes`
+  (10 MB by default). A deep agent gets all three tools when its sandbox supports them.
+- **Documents and audio reach the model.** The new `DocumentContent` part carries a document, such
+  as a PDF, and `AudioContent` takes base64 text. Anthropic receives a document as a document block,
+  inside a tool result too; OpenAI chat as a file, OpenAI Responses as an input file, and Google as
+  inline data. Audio reaches Google, and OpenAI chat's audio models as `input_audio`. A tool's media
+  follows its results on OpenAI and Google, as its images already did. Any other provider, or a
+  source it cannot read, receives one line naming the part.
+
+### Proof
+
+- Glob and grep on the reference sandbox: alternatives, `**/` matching no directory, results relative
+  to the root, a limit, a path outside the root refused, a link out of the root not followed, and
+  binary, oversized, vendored, and past-the-line-limit matches skipped.
+- An image, a PDF, and audio from a tool, after a JSON round trip, on the wire of Anthropic, OpenAI
+  chat (with and without an audio model), OpenAI Responses, and Google.
+- A deep agent that greps its workspace, finds a PDF, and reads it as a document.
+
 ## [2.6.0] - 2026-10-11
 
 Protocols complete, and progress on every stream.

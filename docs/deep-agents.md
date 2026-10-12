@@ -39,7 +39,7 @@ const run = await agent.invoke(agentInput('The test fails. Fix it.'), { threadId
 | Part | What the agent gets | Built from |
 | --- | --- | --- |
 | Planning | `write_todos`: the plan, sent whole each time, each step `pending`, `in_progress`, or `completed`. It lives in the transcript, so it is checkpointed with the run and never cleared by context editing. | A tool |
-| A workspace | `read_file`, `write_file`, `list_files`, and `edit_file` in the sandbox, mounted at `/workspace`, and `run_command` when `commands` names any. | `sandboxTools()` |
+| A workspace | `read_file`, `write_file`, `list_files`, and `edit_file` in the sandbox, mounted at `/workspace`; `glob_files`, `grep_files`, and `read_media` where the sandbox can search and read bytes; and `run_command` when `commands` names any. | `sandboxTools()` |
 | Helpers | `delegate`: hands a task to a `DeepSubagent`, which runs to an answer in a fresh context, with the tools it was given, for the same principal. | `createAgent()` per helper |
 | Skills | `load_skill`: only each `DeepSkill`'s name and description sit in the prompt until the agent loads one, from its `instructions` or a `file` in the sandbox. | A tool |
 | Instruction files | `AGENTS.md`, or the files `include` names, on every call, after the system prompt. | `filesystemContext()` |
@@ -97,5 +97,9 @@ Afterwards the test passes when run outside the agent. Along the way:
 - Helpers are fixed when the agent is built, and run in process, one delegation at a time per call.
   A helper that should run elsewhere is an agent on another server, called through
   `createRemoteGraph()`.
-- The workspace tools read, write, edit, and list files, and run commands. There is no glob or grep
-  tool, so a search is a command the sandbox runs.
+- Workspace search is bounded: `glob_files` lists at most 500 paths and `grep_files` 200 lines.
+  The reference sandbox skips files over 1 MB, binary files, `.git`, and `node_modules`. A wider
+  search is a command the sandbox runs.
+- `read_media` sends a file of at most 10 MB, as the model's provider accepts it: a PDF reaches
+  Anthropic, OpenAI, and Google; audio reaches Google and OpenAI's audio models, and any other model
+  is told the audio is there.

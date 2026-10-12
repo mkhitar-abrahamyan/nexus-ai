@@ -8,7 +8,7 @@ interface Issue {
 }
 
 const ROLES = new Set(['system', 'user', 'assistant', 'tool']);
-const MEDIA_PARTS = new Set(['image', 'audio', 'video']);
+const MEDIA_PARTS = new Set(['image', 'audio', 'video', 'document']);
 
 /**
  * Validates a request's shape before it is sent.
@@ -133,7 +133,10 @@ function partIssues(part: unknown, path: Array<string | number>, issues: Issue[]
     }
     return;
   }
-  issues.push({ path: [...path, 'type'], message: 'A part type must be text, image, audio, video, or asset' });
+  issues.push({
+    path: [...path, 'type'],
+    message: 'A part type must be text, image, audio, video, document, or asset',
+  });
 }
 
 function toolIssues(tool: unknown, path: Array<string | number>, issues: Issue[]): void {

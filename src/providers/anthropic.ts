@@ -1,5 +1,14 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
-import { assetReference, imagePlaceholder, textOf, toolArguments, wireImage } from './content.js';
+import {
+  assetReference,
+  audioPlaceholder,
+  documentPlaceholder,
+  imagePlaceholder,
+  textOf,
+  toolArguments,
+  wireDocument,
+  wireImage,
+} from './content.js';
 import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CacheHint, CompletionRequest, ContentPart, Message, ReasoningConfig } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
@@ -299,9 +308,17 @@ type AnthropicImageBlock =
     }
   | { type: 'image'; source: { type: 'url'; url: string }; cache_control?: AnthropicCacheControl };
 
+type AnthropicDocumentBlock = {
+  type: 'document';
+  source: { type: 'base64'; media_type: string; data: string } | { type: 'url'; url: string };
+  title?: string;
+  cache_control?: AnthropicCacheControl;
+};
+
 type AnthropicContentBlock =
   | AnthropicTextBlock
   | AnthropicImageBlock
+  | AnthropicDocumentBlock
   | {
       type: 'tool_use';
       id: string;
@@ -312,7 +329,7 @@ type AnthropicContentBlock =
   | {
       type: 'tool_result';
       tool_use_id: string;
-      content: Array<AnthropicTextBlock | AnthropicImageBlock>;
+      content: Array<AnthropicTextBlock | AnthropicImageBlock | AnthropicDocumentBlock>;
       cache_control?: AnthropicCacheControl;
     };
 
@@ -397,8 +414,8 @@ export class AnthropicProvider extends BaseProvider {
           tool_use_id: msg.toolCallId ?? '',
           // Anthropic refuses an empty text block, so a result with no text sends none.
           content: this.formatBlocks(msg.content).filter(
-            (block): block is AnthropicTextBlock | AnthropicImageBlock =>
-              (block.type === 'text' && block.text.length > 0) || block.type === 'image',
+            (block): block is AnthropicTextBlock | AnthropicImageBlock | AnthropicDocumentBlock =>
+              (block.type === 'text' && block.text.length > 0) || block.type === 'image' || block.type === 'document',
           ),
           ...(control ? { cache_control: control } : {}),
         };
@@ -472,6 +489,22 @@ export class AnthropicProvider extends BaseProvider {
           if (image?.kind === 'url') return { type: 'image', source: { type: 'url', url: image.url } };
           return { type: 'text', text: imagePlaceholder(part) };
         }
+        case 'document': {
+          const document = wireDocument(part);
+          const title = part.filename ? { title: part.filename } : {};
+          if (document?.kind === 'base64') {
+            return {
+              type: 'document',
+              source: { type: 'base64', media_type: document.mimeType, data: document.data },
+              ...title,
+            };
+          }
+          if (document?.kind === 'url')
+            return { type: 'document', source: { type: 'url', url: document.url }, ...title };
+          return { type: 'text', text: documentPlaceholder(part) };
+        }
+        case 'audio':
+          return { type: 'text', text: audioPlaceholder(part) };
         default:
           return { type: 'text', text: `[${part.type} content is not yet supported for this provider]` };
       }

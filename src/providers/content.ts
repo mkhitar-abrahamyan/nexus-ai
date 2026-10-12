@@ -1,5 +1,5 @@
 import type { AssetInput } from '../types/images.js';
-import type { ImageContent, Message } from '../types/messages.js';
+import type { AudioContent, DocumentContent, ImageContent, Message } from '../types/messages.js';
 import type { ToolCall } from '../types/response.js';
 
 /**
@@ -41,6 +41,65 @@ export function imagePlaceholder(part: ImageContent): string {
   if ('asset' in source) return assetReference(source.asset);
   if ('path' in source) return '[image from path requires preprocessing]';
   return '[image]';
+}
+
+/** What a document part resolves to on the wire: base64 data, a URL, or nothing a provider can read. */
+export type WireDocument =
+  | { kind: 'base64'; mimeType: string; data: string; filename: string }
+  | { kind: 'url'; mimeType: string; url: string; filename: string }
+  | undefined;
+
+/** Reads a document part as base64 data or a URL, whichever it holds. A document is a PDF unless it says otherwise. */
+export function wireDocument(part: DocumentContent): WireDocument {
+  const source = part.source;
+  const filename = part.filename ?? ('path' in source ? baseName(source.path) : 'document.pdf');
+  if ('url' in source) return { kind: 'url', mimeType: 'application/pdf', url: source.url, filename };
+  if ('base64' in source)
+    return { kind: 'base64', mimeType: source.mimeType || 'application/pdf', data: source.base64, filename };
+  if ('buffer' in source)
+    return { kind: 'base64', mimeType: source.mimeType || 'application/pdf', data: toBase64(source.buffer), filename };
+  return undefined;
+}
+
+/** The line a document part stands for when a provider cannot receive it. */
+export function documentPlaceholder(part: DocumentContent): string {
+  const source = part.source;
+  const name = part.filename ?? ('path' in source ? baseName(source.path) : undefined);
+  const named = name ? ` "${name}"` : '';
+  if ('url' in source) return `[document${named} at ${source.url}]`;
+  if ('path' in source) return `[document${named} from a path requires preprocessing]`;
+  return `[document${named} not readable by this provider]`;
+}
+
+/** What an audio part resolves to on the wire: base64 data and its format, when it holds bytes. */
+export function wireAudio(part: AudioContent): { data: string; format: string } | undefined {
+  const source = part.source;
+  if ('buffer' in source) return { data: toBase64(source.buffer), format: source.format || 'wav' };
+  if ('base64' in source) return { data: source.base64, format: source.format || 'wav' };
+  return undefined;
+}
+
+/** The text an audio part stands for when a provider cannot hear it: its transcript, when it has one. */
+export function audioPlaceholder(part: AudioContent): string {
+  return 'transcript' in part.source
+    ? part.source.transcript
+    : '[audio content is not yet supported for this provider]';
+}
+
+/** The image, audio, and document parts of a message, in order: what a tool message cannot carry on some APIs. */
+export function mediaOf(content: Message['content']): Array<ImageContent | AudioContent | DocumentContent> {
+  return typeof content === 'string'
+    ? []
+    : content.filter(
+        (part): part is ImageContent | AudioContent | DocumentContent =>
+          part.type === 'image' ||
+          part.type === 'document' ||
+          (part.type === 'audio' && !('transcript' in part.source)),
+      );
+}
+
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() || 'document.pdf';
 }
 
 /** A message's text, with asset parts as references and other media left out. */

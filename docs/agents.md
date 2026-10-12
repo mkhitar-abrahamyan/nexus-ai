@@ -276,9 +276,20 @@ policy denies.
 a remote interpreter — through the `Sandbox` interface on `nexus-ai-pro/agent/sandbox`: `exec()`
 with `SandboxExecOptions` (a working directory, variables, standard input, a timeout, a signal),
 returning a `SandboxExecResult`; file reads and writes; and its `SandboxIsolation`, what it claims
-to isolate. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and
-`list_files`, each declaring exactly what one call does, with files under the `mount` a policy sees
+to isolate. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and,
+where the sandbox implements them, `list_files`, `glob_files`, `grep_files`, and `read_media`,
+each declaring exactly what one call does, with files under the `mount` a policy sees
 (`/workspace` by default); `SandboxToolsOptions` chooses them.
+
+**Workspace search and media.** A sandbox may also implement `glob()`, with `SandboxGlobOptions`;
+`grep()`, with `SandboxGrepOptions`, returning `SandboxMatch`es; and `readBytes()`. The tools
+built on them are bounded: `glob_files` lists at most 500 paths and `grep_files` at most 200 lines,
+each cut to 300 characters. `read_media` reads an image, audio, or a PDF as a `ToolOutput` the model
+sees rather than as text: an image part, an audio part, or a `DocumentContent` part, each as base64,
+so it survives a checkpoint. A file over `maxMediaBytes`, 10 MB by default, is refused. Anthropic
+receives a PDF inside the tool result; OpenAI and Google receive a tool's media right after the
+results. Audio reaches Google and OpenAI's audio models; any other model receives its transcript, or
+a line saying it is there.
 
 `runSandboxConformance()` checks any sandbox against the contract, with no test framework, and
 returns a `SandboxConformanceReport` of `SandboxConformanceCheck`s: output, errors, and exit codes;
@@ -289,7 +300,9 @@ round-trip where commands run; and paths outside the sandbox refused, as `Sandbo
 `processSandbox()` is a reference for development: commands run as ordinary processes in a
 directory, with only `PATH` and the variables given, and its file methods refuse any path outside
 `root` (`ProcessSandboxOptions`). A command it runs can still touch anything you can, and its
-`isolation` says so. It is never a security boundary.
+`isolation` says so. It is never a security boundary. Its search follows no links, skips `.git` and
+`node_modules`, and walks at most 20,000 entries; `grep()` skips files over 1 MB and binary files,
+reads at most 64 MB, and searches the first 4,000 characters of a line.
 
 ```ts
 import { processSandbox, runSandboxConformance, sandboxTools } from 'nexus-ai-pro/agent/sandbox';
@@ -672,7 +685,10 @@ specific entry point that provides it.
 | `SandboxConformanceReport` | interface | What `runSandboxConformance()` found. |
 | `SandboxExecOptions` | interface | Options for one command. |
 | `SandboxExecResult` | interface | What a command did. |
+| `SandboxGlobOptions` | interface | Options for `Sandbox.glob()`. |
+| `SandboxGrepOptions` | interface | Options for `Sandbox.grep()`. |
 | `SandboxIsolation` | interface | What a sandbox claims to isolate. |
+| `SandboxMatch` | interface | One line `Sandbox.grep()` matched. |
 | `SandboxPathError` | class | Raised when a path would leave the sandbox. |
 | `sandboxTools` | function | Tools that act through a sandbox, each declaring exactly what one call does: `run_command` declares `shell:<the command>`, and the file tools declare `filesystem:read` or `filesystem:write` with the path under `mount`. |
 | `SandboxToolsOptions` | interface | Options for `sandboxTools()`. |

@@ -1,7 +1,17 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
 import type { ProviderCallContext } from '../types/lifecycle.js';
-import type { CompletionRequest, ContentPart, ImageContent, Message, ToolChoice } from '../types/messages.js';
-import { assetReference, imagePlaceholder, imagesOf, textOf, wireImage } from './content.js';
+import type { CompletionRequest, ContentPart, Message, ToolChoice } from '../types/messages.js';
+import {
+  assetReference,
+  audioPlaceholder,
+  documentPlaceholder,
+  imagePlaceholder,
+  mediaOf,
+  textOf,
+  wireAudio,
+  wireDocument,
+  wireImage,
+} from './content.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
 import type { OpenAIProviderConfig } from '../types/config.js';
 import { buildMeta, type UsageInput } from '../core/usage.js';
@@ -62,7 +72,11 @@ interface OpenAIChatMessage {
   tool_call_id?: string;
 }
 
-type OpenAIChatContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+type OpenAIChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+  | { type: 'input_audio'; input_audio: { data: string; format: string } }
+  | { type: 'file'; file: { filename: string; file_data: string } };
 
 interface OpenAIChatUsage {
   prompt_tokens?: number;
@@ -177,29 +191,39 @@ export class OpenAIProvider extends BaseProvider {
   /**
    * The conversation in chat form. An assistant turn carries its tool calls, and each result goes
    * back as a `tool` message under the call's id. The chat API takes only text in a tool message,
-   * so images a tool returned follow the run of tool messages as one user message.
+   * so the images, audio, and documents a tool returned follow the run of tool messages as one user
+   * message. Chat completions takes audio only on its audio models, such as `gpt-4o-audio-preview`
+   * and `gpt-audio`, so audio goes as audio only to a model named for it; any other model gets its
+   * transcript or a placeholder.
    */
-  private formatMessages(messages: Message[]): OpenAIChatMessage[] {
+  private formatMessages(messages: Message[], model?: string): OpenAIChatMessage[] {
+    const hears = /audio/i.test(model ?? '');
     const formatted: OpenAIChatMessage[] = [];
-    let toolImages: OpenAIChatContentPart[] = [];
-    const flushToolImages = (): void => {
-      if (!toolImages.length) return;
-      formatted.push({ role: 'user', content: [{ type: 'text', text: 'Images the tools returned:' }, ...toolImages] });
-      toolImages = [];
+    let toolMedia: OpenAIChatContentPart[] = [];
+    const onlyImages = (parts: OpenAIChatContentPart[]) =>
+      parts.every((part) => part.type === 'image_url' || part.type === 'text');
+    const flushToolMedia = (): void => {
+      if (!toolMedia.length) return;
+      const label = onlyImages(toolMedia) ? 'Images the tools returned:' : 'Files the tools returned:';
+      formatted.push({ role: 'user', content: [{ type: 'text', text: label }, ...toolMedia] });
+      toolMedia = [];
     };
 
     for (const msg of messages) {
       if (msg.role === 'tool') {
-        const images = imagesOf(msg.content).map((part) => this.formatContentPart(part));
-        toolImages.push(...images);
+        const media = mediaOf(msg.content).map((part) => this.formatContentPart(part, hears));
+        toolMedia.push(...media);
+        const follows = onlyImages(media)
+          ? 'The result is the images that follow.'
+          : 'The result is the content that follows.';
         formatted.push({
           role: 'tool',
           tool_call_id: msg.toolCallId ?? '',
-          content: textOf(msg.content) || (images.length ? 'The result is the images that follow.' : ''),
+          content: textOf(msg.content) || (media.length ? follows : ''),
         });
         continue;
       }
-      flushToolImages();
+      flushToolMedia();
 
       if (msg.role === 'assistant' && msg.toolCalls?.length) {
         formatted.push({
@@ -217,14 +241,16 @@ export class OpenAIProvider extends BaseProvider {
       formatted.push({
         role: msg.role,
         content:
-          typeof msg.content === 'string' ? msg.content : msg.content.map((part) => this.formatContentPart(part)),
+          typeof msg.content === 'string'
+            ? msg.content
+            : msg.content.map((part) => this.formatContentPart(part, hears)),
       });
     }
-    flushToolImages();
+    flushToolMedia();
     return formatted;
   }
 
-  private formatContentPart(part: ContentPart): OpenAIChatContentPart {
+  private formatContentPart(part: ContentPart, hears = false): OpenAIChatContentPart {
     switch (part.type) {
       case 'text':
         return { type: 'text', text: part.text };
@@ -237,6 +263,21 @@ export class OpenAIProvider extends BaseProvider {
           return { type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` } };
         }
         return { type: 'text', text: imagePlaceholder(part) };
+      }
+      case 'document': {
+        const document = wireDocument(part);
+        if (document?.kind === 'base64') {
+          return {
+            type: 'file',
+            file: { filename: document.filename, file_data: `data:${document.mimeType};base64,${document.data}` },
+          };
+        }
+        return { type: 'text', text: documentPlaceholder(part) };
+      }
+      case 'audio': {
+        const audio = hears ? wireAudio(part) : undefined;
+        if (audio) return { type: 'input_audio', input_audio: audio };
+        return { type: 'text', text: audioPlaceholder(part) };
       }
       default:
         return { type: 'text', text: `[${part.type} content is not yet supported for this provider]` };
@@ -362,7 +403,7 @@ export class OpenAIProvider extends BaseProvider {
   private createChatParams(request: CompletionRequest): OpenAIChatCompletionParams {
     const params: OpenAIChatCompletionParams = {
       model: request.model,
-      messages: this.formatMessages(request.messages),
+      messages: this.formatMessages(request.messages, request.model),
       temperature: request.temperature,
       max_tokens: request.maxTokens,
       top_p: request.topP,
@@ -600,36 +641,38 @@ export class OpenAIProvider extends BaseProvider {
 
   /**
    * The conversation as Responses input items: a tool call is a `function_call` item, its result a
-   * `function_call_output` item under the same call id, and images a tool returned follow as one
-   * user message.
+   * `function_call_output` item under the same call id, and the images and documents a tool
+   * returned follow as one user message.
    */
   private formatResponsesInput(messages: Message[]): unknown[] {
     const input: unknown[] = [];
-    let toolImages: ImageContent[] = [];
-    const flushToolImages = (): void => {
-      if (!toolImages.length) return;
+    let toolMedia: ReturnType<typeof mediaOf> = [];
+    const onlyImages = (parts: ReturnType<typeof mediaOf>) => parts.every((part) => part.type === 'image');
+    const flushToolMedia = (): void => {
+      if (!toolMedia.length) return;
+      const label = onlyImages(toolMedia) ? 'Images the tools returned:' : 'Files the tools returned:';
       input.push({
         role: 'user',
-        content: [
-          { type: 'input_text', text: 'Images the tools returned:' },
-          ...toolImages.map((part) => this.responsesImage(part)),
-        ],
+        content: [{ type: 'input_text', text: label }, ...toolMedia.map((part) => this.responsesPart(part))],
       });
-      toolImages = [];
+      toolMedia = [];
     };
 
     for (const message of messages) {
       if (message.role === 'tool') {
-        const images = imagesOf(message.content);
-        toolImages.push(...images);
+        const media = mediaOf(message.content);
+        toolMedia.push(...media);
+        const follows = onlyImages(media)
+          ? 'The result is the images that follow.'
+          : 'The result is the content that follows.';
         input.push({
           type: 'function_call_output',
           call_id: message.toolCallId ?? '',
-          output: textOf(message.content) || (images.length ? 'The result is the images that follow.' : ''),
+          output: textOf(message.content) || (media.length ? follows : ''),
         });
         continue;
       }
-      flushToolImages();
+      flushToolMedia();
 
       if (message.role === 'assistant' && message.toolCalls?.length) {
         const said = textOf(message.content);
@@ -645,24 +688,38 @@ export class OpenAIProvider extends BaseProvider {
         continue;
       }
 
-      const images = message.role === 'user' ? imagesOf(message.content) : [];
+      const media = message.role === 'user' ? mediaOf(message.content) : [];
       input.push(
-        images.length
+        media.length
           ? {
               role: message.role,
               content: [
                 { type: 'input_text', text: textOf(message.content) },
-                ...images.map((part) => this.responsesImage(part)),
+                ...media.map((part) => this.responsesPart(part)),
               ],
             }
           : { role: message.role, content: textOf(message.content) },
       );
     }
-    flushToolImages();
+    flushToolMedia();
     return input;
   }
 
-  private responsesImage(part: ImageContent): Record<string, unknown> {
+  /** An image or a document as a Responses input part. The Responses API takes no audio input. */
+  private responsesPart(part: ReturnType<typeof mediaOf>[number]): Record<string, unknown> {
+    if (part.type === 'audio') return { type: 'input_text', text: audioPlaceholder(part) };
+    if (part.type === 'document') {
+      const document = wireDocument(part);
+      if (document?.kind === 'url') return { type: 'input_file', file_url: document.url };
+      if (document?.kind === 'base64') {
+        return {
+          type: 'input_file',
+          filename: document.filename,
+          file_data: `data:${document.mimeType};base64,${document.data}`,
+        };
+      }
+      return { type: 'input_text', text: documentPlaceholder(part) };
+    }
     const image = wireImage(part);
     if (image?.kind === 'url') return { type: 'input_image', image_url: image.url };
     if (image?.kind === 'base64')
