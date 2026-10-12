@@ -120,6 +120,7 @@ const expectedSubpaths = [
   './tracing/rollups',
   './evaluate',
   './evaluate/threads',
+  './evaluate/generate',
   './postgres',
   './postgres/operations',
   './postgres/store',

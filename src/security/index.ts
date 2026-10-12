@@ -234,7 +234,7 @@ export {
   type InjectionCalibrationResult,
   SEMANTIC_INJECTION_CALIBRATION_SET,
 } from './injection-calibration.js';
-export { InjectionDetector } from './injection-detector.js';
+export { type AttackCategory, type AttackSeed, attackSeeds, InjectionDetector } from './injection-detector.js';
 export { InputGuard } from './input-guard.js';
 export { OutputGuard } from './output-guard.js';
 export { PIIDetector } from './pii-detector.js';

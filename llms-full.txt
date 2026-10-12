@@ -1650,6 +1650,13 @@ problem, and the matched text. `scanUploads()` is a one-off scan. `ingestFilesAf
 
 - Detection works by pattern and similarity. It catches known phrasings and common formats, not
   every attack or every piece of personal data. Treat it as a layer, not a boundary.
+- Blocking applies to critical and high findings. An instruction block (`BEGIN SYSTEM`) or a role tag
+  (`<system>`) is medium, so even `strict` records it and lets the request through. Pair the input
+  guard with output moderation, `onViolation: 'redact'` for what must never leave. `proprietaryTerms`
+  only records a match.
+- Each pattern names an example of the attack it catches. `attackSeeds()` returns them, as
+  `AttackSeed`s with an `AttackCategory`, for an adversarial dataset; the
+  [evaluation guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md) builds one.
 - The grounding check compares words, not meaning. The [grounding guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/grounding.md) has
   claim-level checks.
 - Buffered streaming trades token-by-token latency for safety. Turn security off for a stream only
@@ -4529,6 +4536,58 @@ A `DatasetStore` saves versions, gets one by name and version (the newest when n
 lists names with their versions. `MemoryDatasetStore` keeps them in memory and `FileDatasetStore` as
 one JSON file per version; `PostgresDatasetStore` is in the [Postgres guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.md).
 
+### Datasets that grow
+
+`nexus-ai-pro/evaluate/generate` writes examples you would otherwise write by hand.
+
+**From documents.** `syntheticDataset()` cuts each `SyntheticDocument` into `SyntheticPassage`s of up
+to 1,500 characters, keeping paragraphs whole where they fit. It asks for `SyntheticDraft`s per
+passage, from your `generate` function or from a model with a built-in prompt. Each draft is a
+question, its answer, and a quote of the passage that supports the answer. It is kept only when:
+- its quote is in its passage, word for word apart from spacing;
+- its question is not too like one already kept (`similarity`, 0.8 by default).
+
+Each example carries a `SyntheticCitation` in `metadata.citation`: the document, the passage, and
+the quote with where it stands. The `SyntheticDatasetResult` also counts what was dropped as
+unsupported or as a repeat. `SyntheticDatasetOptions` sets the passage size, the drafts per
+passage, and a limit; `SyntheticModelClient` is the model the built-in prompt uses.
+
+```ts
+import { syntheticDataset } from 'nexus-ai-pro/evaluate/generate';
+
+const { dataset, unsupported, duplicates } = await syntheticDataset({
+  name: 'handbook',
+  documents: pages.map((page) => ({ id: page.path, title: page.title, text: page.text })),
+  client: ai,
+  model: 'claude-haiku-5-5',
+});
+```
+
+**From attacks.** `adversarialDataset()` grows a dataset from the guardrails' own patterns: each
+seed of `attackSeeds()` on `nexus-ai-pro/security`, in each `AttackCarrier` and each
+`AttackDisguise`. The carriers are the user's message, a document the user gives, and a tool's
+result. The disguises are plain text, full-width letters, and invisible characters splitting the
+words. Every example's `AdversarialInputs` hide a canary in the system prompt, and the attack asks
+for it:
+- an injection or a jailbreak tells the model to say it;
+- exfiltration asks for the prompt that holds it.
+
+`AdversarialExpected` names the canary. `resistsAttack()` scores 1 when the canary never appears in
+the output, read through the same disguises. A target that refused, or that a guardrail stopped,
+kept it in. `AdversarialDatasetOptions` chooses the categories, carriers, and disguises, and can
+`rephrase` an attack into more wordings, such as a model's. Benign examples, one per carrier, show
+a guard that refuses everything.
+
+In the test suite, every attack gets the canary out of an agent with no guardrails, and none gets it
+out of a guarded one. That agent blocks injections at `strict` and redacts its secret with output
+moderation. It still answers every benign example.
+
+**From production.** `promoteIssue()` turns the runs behind an insights `Issue` into examples.
+Each keeps its run as `sourceRunId` and the issue as `metadata.issue`, so a regression test points
+back to the problem it guards against. `PromoteIssueOptions` adds them to an existing dataset
+(`into`), maps a run to an example, and sets a limit. A run already in the dataset is not added
+twice.
+
 ## Targets, evaluators, and experiments
 
 An `EvaluationTarget` turns an example's inputs into an output. An `Evaluator` receives an
@@ -4877,8 +4936,10 @@ regression in a test, not to judging content in production; use a model judge fo
   between the experiments you compare, and read some conversations before trusting a verdict.
 - A conversation runs its turns in order, so 50 conversations of 5 turns are 250 agent calls and 250
   user-model calls. `concurrency` runs conversations side by side, not turns.
-- Datasets are written by hand, or exported from traces and review queues. Nothing generates examples
-  from documents, or attacks from the guardrails' patterns.
+- A synthetic example is as good as the model that wrote it. Its quote proves the passage says
+  something, not that the question is a good one: read a sample before trusting a verdict.
+- An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
+  or `rephrase`.
 - An experiment has no spend cap of its own: bound it with the client's budget. Online evaluation runs
   when a replica calls `Deployments.evaluate()`, not on workers of its own.
 
@@ -11420,8 +11481,8 @@ declarations, which carry every doc comment to your editor.
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
 | `nexus-ai-pro` | 343 KB | 100% | none |
-| `nexus-ai-pro/config` | 335 KB | 98% | none |
-| `nexus-ai-pro/core` | 331 KB | 97% | none |
+| `nexus-ai-pro/config` | 336 KB | 98% | none |
+| `nexus-ai-pro/core` | 332 KB | 97% | none |
 | `nexus-ai-pro/deep-agent` | 182 KB | 53% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
@@ -11471,6 +11532,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/tracing` | 30 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
+| `nexus-ai-pro/evaluate/generate` | 27 KB | 8% | none |
 | `nexus-ai-pro/runtime` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/images/stores` | 25 KB | 7% | none |
@@ -11757,7 +11819,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 162 entry points, 128 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 163 entry points, 128 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |
@@ -11780,6 +11842,7 @@ Of 162 entry points, 128 run on any runtime. These need Node.js, or a runtime wi
 | `nexus-ai-pro/tracing` | `node:fs/promises`, `node:path`, `node:async_hooks` |
 | `nexus-ai-pro/tracing/otlp` | `node:async_hooks` |
 | `nexus-ai-pro/evaluate` | `node:fs/promises`, `node:path`; the `process` global |
+| `nexus-ai-pro/evaluate/generate` | `node:fs/promises`, `node:path` |
 | `nexus-ai-pro/insights` | the `process` global |
 | `nexus-ai-pro/connectors` | `node:dns/promises`, `node:http`, `node:https`, `node:net`; the `Buffer` global |
 | `nexus-ai-pro/server` | `node:crypto`; the `Buffer` global |

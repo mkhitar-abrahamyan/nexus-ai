@@ -176,6 +176,10 @@ const imports = [
     exports: ['codeTool', 'runInterpreterConformance', 'workerInterpreter'],
   },
   {
+    specifier: 'nexus-ai-pro/evaluate/generate',
+    exports: ['adversarialDataset', 'promoteIssue', 'resistsAttack', 'syntheticDataset'],
+  },
+  {
     specifier: 'nexus-ai-pro/postgres',
     exports: [
       'PostgresOperationStore',

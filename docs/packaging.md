@@ -94,8 +94,8 @@ declarations, which carry every doc comment to your editor.
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
 | `nexus-ai-pro` | 343 KB | 100% | none |
-| `nexus-ai-pro/config` | 335 KB | 98% | none |
-| `nexus-ai-pro/core` | 331 KB | 97% | none |
+| `nexus-ai-pro/config` | 336 KB | 98% | none |
+| `nexus-ai-pro/core` | 332 KB | 97% | none |
 | `nexus-ai-pro/deep-agent` | 182 KB | 53% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
@@ -145,6 +145,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/tracing` | 30 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
+| `nexus-ai-pro/evaluate/generate` | 27 KB | 8% | none |
 | `nexus-ai-pro/runtime` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/images/stores` | 25 KB | 7% | none |

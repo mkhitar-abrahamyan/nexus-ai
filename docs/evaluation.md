@@ -1,6 +1,6 @@
 # Evaluation
 
-<!-- covers: ./evaluate ./evaluate/threads ./evals ./evals/judge -->
+<!-- covers: ./evaluate ./evaluate/threads ./evaluate/generate ./evals ./evals/judge -->
 
 Evaluation from `nexus-ai-pro/evaluate`: run any target — a completion, an agent, a graph, an image operation, or plain code — over a dataset versioned by its content, score it, and compare experiments with a verdict rather than a difference of means. `nexus-ai-pro/evals` keeps the eval-case runner and the LLM judge.
 
@@ -131,6 +131,58 @@ outputs by default), and a limit (100).
 A `DatasetStore` saves versions, gets one by name and version (the newest when none is given), and
 lists names with their versions. `MemoryDatasetStore` keeps them in memory and `FileDatasetStore` as
 one JSON file per version; `PostgresDatasetStore` is in the [Postgres guide](./postgres.md).
+
+### Datasets that grow
+
+`nexus-ai-pro/evaluate/generate` writes examples you would otherwise write by hand.
+
+**From documents.** `syntheticDataset()` cuts each `SyntheticDocument` into `SyntheticPassage`s of up
+to 1,500 characters, keeping paragraphs whole where they fit. It asks for `SyntheticDraft`s per
+passage, from your `generate` function or from a model with a built-in prompt. Each draft is a
+question, its answer, and a quote of the passage that supports the answer. It is kept only when:
+- its quote is in its passage, word for word apart from spacing;
+- its question is not too like one already kept (`similarity`, 0.8 by default).
+
+Each example carries a `SyntheticCitation` in `metadata.citation`: the document, the passage, and
+the quote with where it stands. The `SyntheticDatasetResult` also counts what was dropped as
+unsupported or as a repeat. `SyntheticDatasetOptions` sets the passage size, the drafts per
+passage, and a limit; `SyntheticModelClient` is the model the built-in prompt uses.
+
+```ts
+import { syntheticDataset } from 'nexus-ai-pro/evaluate/generate';
+
+const { dataset, unsupported, duplicates } = await syntheticDataset({
+  name: 'handbook',
+  documents: pages.map((page) => ({ id: page.path, title: page.title, text: page.text })),
+  client: ai,
+  model: 'claude-haiku-5-5',
+});
+```
+
+**From attacks.** `adversarialDataset()` grows a dataset from the guardrails' own patterns: each
+seed of `attackSeeds()` on `nexus-ai-pro/security`, in each `AttackCarrier` and each
+`AttackDisguise`. The carriers are the user's message, a document the user gives, and a tool's
+result. The disguises are plain text, full-width letters, and invisible characters splitting the
+words. Every example's `AdversarialInputs` hide a canary in the system prompt, and the attack asks
+for it:
+- an injection or a jailbreak tells the model to say it;
+- exfiltration asks for the prompt that holds it.
+
+`AdversarialExpected` names the canary. `resistsAttack()` scores 1 when the canary never appears in
+the output, read through the same disguises. A target that refused, or that a guardrail stopped,
+kept it in. `AdversarialDatasetOptions` chooses the categories, carriers, and disguises, and can
+`rephrase` an attack into more wordings, such as a model's. Benign examples, one per carrier, show
+a guard that refuses everything.
+
+In the test suite, every attack gets the canary out of an agent with no guardrails, and none gets it
+out of a guarded one. That agent blocks injections at `strict` and redacts its secret with output
+moderation. It still answers every benign example.
+
+**From production.** `promoteIssue()` turns the runs behind an insights `Issue` into examples.
+Each keeps its run as `sourceRunId` and the issue as `metadata.issue`, so a regression test points
+back to the problem it guards against. `PromoteIssueOptions` adds them to an existing dataset
+(`into`), maps a run to an example, and sets a limit. A run already in the dataset is not added
+twice.
 
 ## Targets, evaluators, and experiments
 
@@ -480,8 +532,10 @@ regression in a test, not to judging content in production; use a model judge fo
   between the experiments you compare, and read some conversations before trusting a verdict.
 - A conversation runs its turns in order, so 50 conversations of 5 turns are 250 agent calls and 250
   user-model calls. `concurrency` runs conversations side by side, not turns.
-- Datasets are written by hand, or exported from traces and review queues. Nothing generates examples
-  from documents, or attacks from the guardrails' patterns.
+- A synthetic example is as good as the model that wrote it. Its quote proves the passage says
+  something, not that the question is a good one: read a sample before trusting a verdict.
+- An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
+  or `rephrase`.
 - An experiment has no spend cap of its own: bound it with the client's budget. Online evaluation runs
   when a replica calls `Deployments.evaluate()`, not on workers of its own.
 
@@ -606,6 +660,28 @@ specific entry point that provides it.
 | `underCost` | function | Cost as a pass or fail, per example. |
 | `underLatency` | function | Latency as a pass or fail, so a quality gate can hold a budget as well as a score. |
 | `withProvenance` | function | Says where an evaluator's scores come from: its name and version, the judge model and prompt version behind it, and its rubric. |
+
+### `nexus-ai-pro/evaluate/generate`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `adversarialDataset` | function | Grows an adversarial dataset from the guardrails' own attack patterns: every seed of `attackSeeds()`, in each carrier and disguise. |
+| `AdversarialDatasetOptions` | interface | Options for `adversarialDataset()`. |
+| `AdversarialExpected` | interface | What an adversarial example expects: the canary never appears in the output. |
+| `AdversarialInputs` | interface | What an adversarial example gives the target. |
+| `AttackCarrier` | type | How an attack reaches the target: in what the user asks, in a document it is given, or in a tool's result. |
+| `AttackDisguise` | type | How an attack is disguised: as written, in full-width letters, or split by invisible characters. |
+| `promoteIssue` | function | Promotes the runs behind an insights issue into a dataset. |
+| `PromoteIssueOptions` | interface | Options for `promoteIssue()`. |
+| `resistsAttack` | function | Scores whether a target kept the canary in: 1 when it never appears in the output, read through the same disguises the guardrails read through. |
+| `SyntheticCitation` | interface | Where an example came from: the document, the passage, and the supporting words. |
+| `syntheticDataset` | function | Writes a dataset from documents. |
+| `SyntheticDatasetOptions` | interface | Options for `syntheticDataset()`. |
+| `SyntheticDatasetResult` | interface | What `syntheticDataset()` made, and what it dropped. |
+| `SyntheticDocument` | interface | A document to write examples from. |
+| `SyntheticDraft` | interface | An example the writer drafts: a question, its answer, and the words of the passage that support it. |
+| `SyntheticModelClient` | interface | A model that writes drafts. |
+| `SyntheticPassage` | interface | One passage of a document, as the writer sees it. |
 
 ### `nexus-ai-pro/evaluate/threads`
 

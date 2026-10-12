@@ -740,6 +740,16 @@
         "default": "./dist-cjs/evaluate/threads.js"
       }
     },
+    "./evaluate/generate": {
+      "import": {
+        "types": "./dist/evaluate/generate.d.ts",
+        "default": "./dist/evaluate/generate.js"
+      },
+      "require": {
+        "types": "./dist-cjs/evaluate/generate.d.ts",
+        "default": "./dist-cjs/evaluate/generate.js"
+      }
+    },
     "./insights": {
       "import": {
         "types": "./dist/insights/index.d.ts",
@@ -2053,6 +2063,9 @@
       ],
       "evaluate/threads": [
         "dist-cjs/evaluate/threads.d.ts"
+      ],
+      "evaluate/generate": [
+        "dist-cjs/evaluate/generate.d.ts"
       ],
       "postgres": [
         "dist-cjs/postgres/index.d.ts"

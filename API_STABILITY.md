@@ -67,7 +67,15 @@ New and stable:
   `toolSearchTool()`, `ToolSearchOptions`, `searchTools()`, `ToolSearchHit`, and `TOOL_SEARCH_NAME`
   with the tool name `search_tools`.
 
-An agent with no deferred tool offers exactly the tools it did before.
+- `nexus-ai-pro/evaluate/generate`: `syntheticDataset()` with `SyntheticDatasetOptions`,
+  `SyntheticDocument`, `SyntheticPassage`, `SyntheticDraft`, `SyntheticCitation`, `SyntheticModelClient`,
+  and `SyntheticDatasetResult`; `adversarialDataset()` with `AdversarialDatasetOptions`,
+  `AdversarialInputs`, `AdversarialExpected`, `AttackCarrier`, and `AttackDisguise`; `resistsAttack()`;
+  `promoteIssue()` with `PromoteIssueOptions`;
+- on `nexus-ai-pro/security`: `attackSeeds()`, `AttackSeed`, and `AttackCategory`.
+
+An agent with no deferred tool offers exactly the tools it did before. Adversarial example ids and
+canaries are stable across runs, so experiments over the same options compare.
 
 A graph run's first checkpoint carries the run's `metadata`, as every later checkpoint already did.
 

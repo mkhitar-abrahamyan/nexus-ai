@@ -220,6 +220,13 @@ problem, and the matched text. `scanUploads()` is a one-off scan. `ingestFilesAf
 
 - Detection works by pattern and similarity. It catches known phrasings and common formats, not
   every attack or every piece of personal data. Treat it as a layer, not a boundary.
+- Blocking applies to critical and high findings. An instruction block (`BEGIN SYSTEM`) or a role tag
+  (`<system>`) is medium, so even `strict` records it and lets the request through. Pair the input
+  guard with output moderation, `onViolation: 'redact'` for what must never leave. `proprietaryTerms`
+  only records a match.
+- Each pattern names an example of the attack it catches. `attackSeeds()` returns them, as
+  `AttackSeed`s with an `AttackCategory`, for an adversarial dataset; the
+  [evaluation guide](./evaluation.md) builds one.
 - The grounding check compares words, not meaning. The [grounding guide](./grounding.md) has
   claim-level checks.
 - Buffered streaming trades token-by-token latency for safety. Turn security off for a stream only
@@ -235,6 +242,9 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `AttackCategory` | type | What kind of attack a guardrail pattern catches. |
+| `AttackSeed` | interface | A guardrail's attack pattern, as an attack it catches: the seed an adversarial dataset grows from. |
+| `attackSeeds` | function | The attacks the injection detector's own patterns catch, one per pattern, as seeds for an adversarial dataset. |
 | `calibrateSemanticInjectionClassifier` | function | Scores the semantic injection classifier at several thresholds, so you can pick one for your own traffic. |
 | `FileUpload` | interface | A file offered for upload. |
 | `GUARDRAIL_POLICIES` | constant | The bundled guardrail presets, as security configurations. |

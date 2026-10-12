@@ -55,6 +55,15 @@ Agents that do more, and evaluation that runs on its own.
   found tool loads through a `tool_reference` block, so the tool list never changes; every other
   model, OpenAI's and Google's included, is sent a deferred tool once it has been found.
   `toolSearchTool()`, `searchTools()`, and `TOOL_SEARCH_NAME` are on `nexus-ai-pro/agent`.
+- **Datasets that grow**, on the new `nexus-ai-pro/evaluate/generate`:
+  - `syntheticDataset()` writes examples from documents, from your function or a model. Each keeps
+    a citation of the quote that supports it, checked against its passage; unsupported drafts and
+    near-duplicate questions are dropped and counted.
+  - `adversarialDataset()` grows attacks from the guardrails' own patterns, in the user's message, a
+    document, or a tool's result, plain or disguised, each after a canary in the system prompt.
+    `resistsAttack()` scores whether the canary stayed in.
+  - `promoteIssue()` turns an insights issue's runs into examples that keep their run and the issue.
+  - `attackSeeds()` on `nexus-ai-pro/security` returns each injection pattern's example attack.
 
 ### Changed
 
@@ -85,6 +94,11 @@ Agents that do more, and evaluation that runs on its own.
   model that calls a tool only once that provider's request has loaded it. Anthropic is sent all 501
   tools on every call with 500 deferred; OpenAI and Google never more than 11. The search ranks each
   of the 500 tools first for the step that describes it.
+- A synthetic dataset written from all 39 guides cites, for every example, words that stand in its
+  guide where the citation says; an invented quote and a repeated question are dropped every time.
+  An adversarial dataset of 75 examples gets its canary out of an unguarded agent every time and
+  never out of a guarded one, which still answers the benign examples. Each attack the guardrails
+  block at the input is critical or high, and each medium one is redacted on the way out.
 
 ## [2.6.0] - 2026-10-11
 
