@@ -62,6 +62,11 @@ New and stable:
   request, and item, `batchEmbedder()` with `BatchEmbedder` and its options; the OpenAI and mock
   adapters on `/openai` and `/mock`. `GoogleEmbeddingBatchProvider` on `/google` is experimental
   until a live run is recorded;
+- on `nexus-ai-pro/images/assets`: `AssetStore.putStream()` and `getStream()`, both optional;
+  `putAssetStream()` and `readAssetStream()`, `DEFAULT_BUFFERED_ASSET_BYTES`, `AssetByteSource`,
+  `StreamAssetInput`, `AssetByteRange`, `AssetStreamOptions`, `StreamAssetDescriptor`, and
+  `PutAssetStreamOptions`; `S3LikeClient.putObjectStream()` and `getObjectStream()`, both optional.
+  The images family stays experimental, and these with it;
 - `IngestionPipelineOptions.batchEmbed` and `batchesInFlight`, and `IngestionReport.batches` and
   `batchesRecovered`. `IngestionPipelineOptions.embed` is optional when `batchEmbed` is given;
 - `nexus-ai-pro/postgres/embedding-cache`: `PostgresEmbeddingCache`, its options, and

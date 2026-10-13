@@ -203,6 +203,42 @@ corruption blast radius; per-asset sidecars let concurrent writers proceed and l
 record. `purgeExpired()` is exact but costs a directory listing, so on a large S3 bucket prefer the
 provider's own lifecycle rules and keep this as the fallback.
 
+### Streaming large assets
+
+A video, a long recording, or a scanned archive is too large to hold in memory at once. Stream it:
+
+```ts
+import { createReadStream } from 'node:fs';
+import { putAssetStream, readAssetStream } from 'nexus-ai-pro/images/assets';
+
+const stat = await putAssetStream(store, { stream: createReadStream('./lecture.mp4'), mimeType: 'video/mp4' }, {
+  tenantId: 'acme',
+  provenance,
+});
+
+// A range, for a resumed download or a player that seeks.
+const part = await readAssetStream(store, stat.assetId, 'acme', { range: { start: 0, end: 1_048_575 } });
+return new Response(part?.stream, { status: 206 });
+```
+
+The filesystem and S3 stores write a stream a chunk at a time and never hold the whole asset. Its
+size limit and SHA-256 checksum are checked as the bytes flow, and an asset that fails either leaves
+no file or object behind. They read back a stream, whole or by an `AssetByteRange`, as a
+`StreamAssetDescriptor`: the descriptor, the stream, and the bytes it holds. In the test suite, a
+gigabyte goes through each and back while memory grows by less than 128 MB.
+
+| Store | `putStream()` | `getStream()` |
+| --- | --- | --- |
+| `FilesystemAssetStore` | Writes as the disk takes it. | Reads a range from the file. |
+| `S3AssetStore` | Streams to the bucket with a client that has `putObjectStream()`; otherwise buffers within `maxAssetBytes` (64 MiB when unset). | Reads a range with `getObjectStream()`, or the object with `getObject()`. |
+| `MemoryAssetStore` | Reads the stream in, within `maxAssetBytes`. | Streams the held bytes. |
+
+`putAssetStream()` and `readAssetStream()` work with any `AssetStore`. They use the store's own
+`putStream()` and `getStream()` when it has them. Otherwise they read the stream into memory and call
+`put()`, at most `PutAssetStreamOptions.maxBufferedBytes` (`DEFAULT_BUFFERED_ASSET_BYTES`, 64 MiB), or
+stream what `get()` returns. A `StreamAssetInput` takes an `AssetByteSource`: a web `ReadableStream`,
+or any async iterable of bytes, such as a Node.js stream. `AssetStreamOptions` carries the range.
+
 ## Requests
 
 Every request shares `ImageRequestBase`. Only `prompt` is required.
@@ -416,8 +452,8 @@ values.
 
 ## Asset stores in detail
 
-An `AssetStore` has six methods. Each may answer synchronously or with a promise, as
-`AssetStoreResult` says.
+An `AssetStore` has six methods, and two optional ones for streams. Each of the six may answer
+synchronously or with a promise, as `AssetStoreResult` says.
 
 | Method | What it does |
 | --- | --- |
@@ -427,6 +463,8 @@ An `AssetStore` has six methods. Each may answer synchronously or with a promise
 | `delete()` | Removes an asset. |
 | `sign()` | Produces a URL through an `AssetSigner`, which receives an `AssetSignerContext`: the stat, the time, and the lifetime asked for in `AssetSignOptions`. |
 | `purgeExpired()` | Deletes what has expired. |
+| `putStream()` | Optional. Stores a `StreamAssetInput`, checking its size and checksum as the bytes flow. |
+| `getStream()` | Optional. Reads an asset, or an `AssetByteRange` of it, as a `StreamAssetDescriptor`. |
 
 Each store has its own options:
 
@@ -434,7 +472,7 @@ Each store has its own options:
 | --- | --- |
 | `MemoryAssetStore` | `MemoryAssetStoreOptions`: `maxEntries` (1,000), `maxTotalBytes` (64 MiB), `maxAssetBytes` (10 MiB), a default lifetime, an id generator, a clock, and a signer. `snapshot()` returns a `MemoryAssetStoreSnapshot` of what it holds against those limits. |
 | `FilesystemAssetStore` | `FilesystemAssetStoreOptions`: the `directory`, and the same size, lifetime, id, clock, and signer settings. |
-| `S3AssetStore` | `S3AssetStoreOptions`: a `client`, the `bucket`, a `prefix` (`nexus-assets/`), and the rest. The client is an `S3LikeClient` — `putObject`, `getObject`, `deleteObject`, `listObjects`, and optionally `headObject` and `getSignedUrl` — so no AWS SDK is a dependency. |
+| `S3AssetStore` | `S3AssetStoreOptions`: a `client`, the `bucket`, a `prefix` (`nexus-assets/`), and the rest. The client is an `S3LikeClient` — `putObject`, `getObject`, `deleteObject`, `listObjects`, and optionally `headObject`, `getSignedUrl`, and the streaming `putObjectStream` and `getObjectStream` — so no AWS SDK is a dependency. With the SDK, `putObjectStream` is an `Upload` from `@aws-sdk/lib-storage`, and `getObjectStream` a `GetObjectCommand` with a `Range`. |
 
 Store errors extend `AssetStoreError`:
 
@@ -514,6 +552,8 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `AssetByteRange` | interface | A range of an asset's bytes, both ends inclusive, as an HTTP `Range` header has them. |
+| `AssetByteSource` | type | Bytes as they arrive: a web stream, or any async iterable of chunks, such as a Node.js stream. |
 | `AssetCapacityConstraint` | type | Which store limit a request ran into. |
 | `AssetPutOptions` | interface | How an asset is stored: who owns it, where it came from, and how long it is kept. |
 | `AssetSigner` | type | Turns an asset into a URL a client can fetch, such as a presigned S3 URL or a route on your own server. |
@@ -526,11 +566,18 @@ specific entry point that provides it.
 | `AssetStoreResult` | type | A value a store method returns, synchronously or asynchronously. |
 | `AssetStoreSigningError` | class | Raised when a signed URL cannot be produced. |
 | `AssetStoreValidationError` | class | Raised when an asset or its options are invalid. |
+| `AssetStreamOptions` | interface | How an asset is read as a stream. |
 | `ByteAssetDescriptor` | interface | A retrieved asset descriptor whose byte payload is available to the caller. |
 | `ByteAssetInput` | interface | An asset input whose payload is already available locally as bytes. |
+| `DEFAULT_BUFFERED_ASSET_BYTES` | constant | How much a store that cannot stream reads into memory for `putAssetStream()`. |
 | `MemoryAssetStore` | class | Process-local, bounded asset storage. |
 | `MemoryAssetStoreOptions` | interface | Limits and behaviour for the in-process asset store. |
 | `MemoryAssetStoreSnapshot` | interface | What the in-process store currently holds, against its limits. |
+| `putAssetStream` | function | Stores a streamed asset in any store: through `putStream()` when the store has it, and otherwise by reading the stream into memory, up to `maxBufferedBytes`, and calling `put()`. |
+| `PutAssetStreamOptions` | interface | Options for `putAssetStream()`: how the asset is stored, and how much a store that cannot stream may buffer. |
+| `readAssetStream` | function | Reads any store's asset, or a range of it, as a stream: through `getStream()` when the store has it, and otherwise from `get()`. |
+| `StreamAssetDescriptor` | interface | An asset read as a stream: what the store knows of it, and its bytes, or the range asked for. |
+| `StreamAssetInput` | interface | An asset whose bytes arrive as a stream, for content too large to hold in memory at once. |
 
 ### `nexus-ai-pro/images/comfyui`
 

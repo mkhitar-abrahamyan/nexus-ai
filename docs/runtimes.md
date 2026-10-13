@@ -157,7 +157,7 @@ Of 171 entry points, 135 run on any runtime. These need Node.js, or a runtime wi
 | Entry point | Needs |
 | --- | --- |
 | `nexus-ai-pro/voice/openai` | the `Buffer` global |
-| `nexus-ai-pro/images` | `node:fs/promises`, `node:path` |
+| `nexus-ai-pro/images` | `node:fs`, `node:fs/promises`, `node:path`, `node:stream` |
 | `nexus-ai-pro/images/openai` | the `Buffer` global |
 | `nexus-ai-pro/images/google` | the `Buffer` global |
 | `nexus-ai-pro/images/comfyui` | the `Buffer` global |
@@ -185,7 +185,7 @@ Of 171 entry points, 135 run on any runtime. These need Node.js, or a runtime wi
 | `nexus-ai-pro/prompts/file` | `node:fs/promises`, `node:path`; the `process` global |
 | `nexus-ai-pro/testing/record` | `node:fs/promises`, `node:path`; the `Buffer` global, the `process` global |
 | `nexus-ai-pro/batch` | `node:crypto`; the `Buffer` global |
-| `nexus-ai-pro/images/stores` | `node:fs/promises`, `node:path` |
+| `nexus-ai-pro/images/stores` | `node:fs`, `node:fs/promises`, `node:path`, `node:stream` |
 | `nexus-ai-pro/telephony` | the `Buffer` global |
 | `nexus-ai-pro/telephony/realtime-bridge` | the `Buffer` global |
 | `nexus-ai-pro/telephony/twilio` | `node:crypto`; the `Buffer` global |

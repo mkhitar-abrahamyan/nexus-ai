@@ -13,6 +13,12 @@ import {
   resolveExpiration,
   sha256Checksum,
   validateByteInput,
+  validateStreamInput,
+  collectBytes,
+  bytesAsStream,
+  type AssetStreamOptions,
+  type StreamAssetDescriptor,
+  type StreamAssetInput,
   type AssetPutOptions,
   type AssetSigner,
   type AssetSignOptions,
@@ -33,8 +39,17 @@ export {
   AssetStoreError,
   AssetStoreSigningError,
   AssetStoreValidationError,
+  DEFAULT_BUFFERED_ASSET_BYTES,
+  putAssetStream,
+  readAssetStream,
 } from './asset-support.js';
 export type {
+  AssetByteRange,
+  AssetByteSource,
+  AssetStreamOptions,
+  PutAssetStreamOptions,
+  StreamAssetDescriptor,
+  StreamAssetInput,
   AssetCapacityConstraint,
   AssetPutOptions,
   AssetSigner,
@@ -132,6 +147,29 @@ export class MemoryAssetStore implements AssetStore {
     this.entries.set(assetId, entry);
     this.totalBytes += bytes.byteLength;
     return statFromEntry(entry);
+  }
+
+  /**
+   * Stores a streamed asset. A memory store holds bytes, so the stream is read in, within
+   * `maxAssetBytes`, and stored as `put()` stores it.
+   */
+  async putStream(input: StreamAssetInput, options: AssetPutOptions): Promise<AssetStat> {
+    const normalized = validateStreamInput(input);
+    const data = await collectBytes(normalized.stream, this.maxAssetBytes, 'maxAssetBytes');
+    const { stream: _stream, ...rest } = normalized;
+    return this.put({ ...rest, location: { kind: 'bytes', data } }, options);
+  }
+
+  /** Reads an asset, or a range of it, as a stream, or `undefined` as `get()` would. */
+  async getStream(
+    assetId: string,
+    tenantId: string,
+    options: AssetStreamOptions = {},
+  ): Promise<StreamAssetDescriptor | undefined> {
+    const asset = this.get(assetId, tenantId);
+    const stat = this.stat(assetId, tenantId);
+    if (!asset || !stat) return undefined;
+    return bytesAsStream(stat.descriptor, asset.location.data, options.range);
   }
 
   /**

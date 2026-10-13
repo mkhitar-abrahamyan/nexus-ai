@@ -1,4 +1,4 @@
-import { sha256Hex } from '../utils/sha256.js';
+import { createSha256, sha256Hex } from '../utils/sha256.js';
 import type {
   AssetBytesLocation,
   AssetChecksum,
@@ -81,6 +81,39 @@ export interface AssetSignerContext extends AssetStat {
  */
 export type AssetSigner = (context: AssetSignerContext) => string | URL | Promise<string | URL>;
 
+/** Bytes as they arrive: a web stream, or any async iterable of chunks, such as a Node.js stream. */
+export type AssetByteSource = ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>;
+
+/** An asset whose bytes arrive as a stream, for content too large to hold in memory at once. */
+export interface StreamAssetInput extends Omit<AssetInput, 'location'> {
+  /** The bytes. Read once. */
+  stream: AssetByteSource;
+}
+
+/** A range of an asset's bytes, both ends inclusive, as an HTTP `Range` header has them. */
+export interface AssetByteRange {
+  /** The first byte. Defaults to 0. */
+  start?: number;
+  /** The last byte. Defaults to the asset's last. */
+  end?: number;
+}
+
+/** How an asset is read as a stream. */
+export interface AssetStreamOptions {
+  /** Only these bytes, for a resumed download or a seek. */
+  range?: AssetByteRange;
+}
+
+/** An asset read as a stream: what the store knows of it, and its bytes, or the range asked for. */
+export interface StreamAssetDescriptor {
+  /** Metadata-only descriptor. Its location points back to the store. */
+  descriptor: AssetDescriptor;
+  /** The bytes. */
+  stream: ReadableStream<Uint8Array>;
+  /** The bytes the stream holds, both ends inclusive. Empty when `end` is below `start`. */
+  range: { start: number; end: number };
+}
+
 /** A value a store method returns, synchronously or asynchronously. */
 export type AssetStoreResult<T> = T | Promise<T>;
 
@@ -109,6 +142,20 @@ export interface AssetStore {
   sign(assetId: string, tenantId: string, options?: AssetSignOptions): AssetStoreResult<string | undefined>;
   /** Deletes expired assets, returning how many went. */
   purgeExpired(): AssetStoreResult<number>;
+  /**
+   * Stores an asset whose bytes arrive as a stream, never holding them all at once, and checks its
+   * size limit and checksum as they flow. Optional: `putAssetStream()` falls back to `put()`.
+   */
+  putStream?(input: StreamAssetInput, options: AssetPutOptions): Promise<AssetStat>;
+  /**
+   * Reads an asset, or a range of it, as a stream, or `undefined` as `get()` would. Optional:
+   * `readAssetStream()` falls back to `get()`.
+   */
+  getStream?(
+    assetId: string,
+    tenantId: string,
+    options?: AssetStreamOptions,
+  ): Promise<StreamAssetDescriptor | undefined>;
 }
 
 /** Limits and behaviour for the in-process asset store. */
@@ -220,7 +267,7 @@ export function validateByteInput(input: ByteAssetInput): ByteAssetInput {
 
 export function createStoredDescriptor(
   assetId: string,
-  input: ByteAssetInput,
+  input: Pick<AssetInput, 'mimeType' | 'filename' | 'metadata'>,
   provenance: AssetProvenance,
   checksum: AssetChecksum,
   byteLength: number,
@@ -345,4 +392,209 @@ export function optionalDimension(value: number | undefined, name: string): numb
 export function nonEmptyString(value: string | undefined, name: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new AssetStoreValidationError(`${name} must not be empty`);
   return value.trim();
+}
+
+// ── Streams ───────────────────────────────────────────────────────
+
+/** How much a store that cannot stream reads into memory for `putAssetStream()`. 64 MiB. */
+export const DEFAULT_BUFFERED_ASSET_BYTES = 64 * 1024 * 1024;
+
+/** Options for `putAssetStream()`: how the asset is stored, and how much a store that cannot stream may buffer. */
+export interface PutAssetStreamOptions extends AssetPutOptions {
+  /** Most bytes read into memory for a store without `putStream()`. Defaults to 64 MiB. */
+  maxBufferedBytes?: number;
+}
+
+/**
+ * Stores a streamed asset in any store: through `putStream()` when the store has it, and otherwise by
+ * reading the stream into memory, up to `maxBufferedBytes`, and calling `put()`.
+ */
+export async function putAssetStream(
+  store: AssetStore,
+  input: StreamAssetInput,
+  options: PutAssetStreamOptions,
+): Promise<AssetStat> {
+  if (store.putStream) return store.putStream(input, options);
+  const normalized = validateStreamInput(input);
+  const { maxBufferedBytes = DEFAULT_BUFFERED_ASSET_BYTES, ...putOptions } = options;
+  const data = await collectBytes(normalized.stream, maxBufferedBytes, 'maxAssetBytes');
+  const { stream: _stream, ...rest } = normalized;
+  return store.put({ ...rest, location: { kind: 'bytes', data } }, putOptions);
+}
+
+/**
+ * Reads any store's asset, or a range of it, as a stream: through `getStream()` when the store has
+ * it, and otherwise from `get()`.
+ */
+export async function readAssetStream(
+  store: AssetStore,
+  assetId: string,
+  tenantId: string,
+  options: AssetStreamOptions = {},
+): Promise<StreamAssetDescriptor | undefined> {
+  if (store.getStream) return store.getStream(assetId, tenantId, options);
+  const [asset, stat] = await Promise.all([store.get(assetId, tenantId), store.stat(assetId, tenantId)]);
+  if (!asset || !stat) return undefined;
+  return bytesAsStream(stat.descriptor, asset.location.data, options.range);
+}
+
+/** Held bytes as a stream of the range asked for, under the store's descriptor. */
+export function bytesAsStream(
+  descriptor: AssetDescriptor,
+  data: Uint8Array,
+  range?: AssetByteRange,
+): StreamAssetDescriptor {
+  const bounds = resolveRange(range, data.byteLength);
+  return { descriptor, stream: streamOf(data.subarray(bounds.start, bounds.end + 1)), range: bounds };
+}
+
+/** Checks a streamed asset's input as `validateByteInput()` checks bytes. */
+export function validateStreamInput(input: StreamAssetInput): StreamAssetInput {
+  if (!input || typeof input !== 'object') throw new AssetStoreValidationError('Asset input is required');
+  const stream = input.stream as unknown;
+  const readable = stream instanceof ReadableStream;
+  const iterable = !!stream && typeof (stream as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function';
+  if (!readable && !iterable) {
+    throw new AssetStoreValidationError('A streamed asset needs a ReadableStream or an async iterable of bytes');
+  }
+  const normalized: StreamAssetInput = { stream: input.stream, mimeType: nonEmptyString(input.mimeType, 'mimeType') };
+  if (input.filename !== undefined) normalized.filename = nonEmptyString(input.filename, 'filename');
+  if (input.checksum !== undefined) normalized.checksum = cloneChecksum(input.checksum);
+  if (input.metadata !== undefined) normalized.metadata = { ...input.metadata };
+  return normalized;
+}
+
+/** Each chunk of a byte source, in order, whatever the source is. */
+export async function* chunksOf(source: AssetByteSource): AsyncGenerator<Uint8Array> {
+  if (source instanceof ReadableStream) {
+    const reader = source.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        yield toBytes(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  for await (const chunk of source as AsyncIterable<Uint8Array>) yield toBytes(chunk);
+}
+
+/**
+ * What a store learns as a stream flows past: its size and its SHA-256. `chunks()` passes each chunk
+ * on, and fails with `AssetStoreCapacityError` the moment the size passes `maxBytes`.
+ */
+export class AssetMeter {
+  /** Bytes seen so far. */
+  byteLength = 0;
+  private readonly hash = createSha256();
+
+  constructor(private readonly maxBytes: number | undefined) {}
+
+  /** The source's chunks, counted, hashed, and checked against the limit. */
+  async *chunks(source: AssetByteSource): AsyncGenerator<Uint8Array> {
+    for await (const chunk of chunksOf(source)) {
+      this.byteLength += chunk.byteLength;
+      if (this.maxBytes !== undefined && this.byteLength > this.maxBytes) {
+        throw new AssetStoreCapacityError('maxAssetBytes', this.maxBytes, 0, this.byteLength);
+      }
+      this.hash.update(chunk);
+      yield chunk;
+    }
+  }
+
+  /** The checksum of everything seen, checked against one the caller supplied. */
+  checksum(supplied?: AssetChecksum): AssetChecksum {
+    const value = this.hash.digest();
+    if (
+      supplied &&
+      supplied.algorithm.toLowerCase().replaceAll('-', '') === 'sha256' &&
+      supplied.value.toLowerCase() !== value
+    ) {
+      throw new AssetStoreValidationError('Supplied SHA-256 checksum does not match the asset bytes');
+    }
+    return { algorithm: 'sha256', value };
+  }
+}
+
+/** A generator as a web stream, read only as fast as its reader asks. */
+export function streamFrom(chunks: AsyncIterator<Uint8Array>): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await chunks.next();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      await chunks.return?.(reason);
+    },
+  });
+}
+
+/** Bytes as a web stream, in chunks of 64 KiB. */
+export function streamOf(data: Uint8Array): ReadableStream<Uint8Array> {
+  let offset = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset >= data.byteLength) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(data.subarray(offset, offset + 65_536));
+      offset += 65_536;
+    },
+  });
+}
+
+/** Reads a whole stream into one array, refusing more than `maxBytes`. */
+export async function collectBytes(
+  source: AssetByteSource,
+  maxBytes: number,
+  constraint: AssetCapacityConstraint,
+): Promise<Uint8Array> {
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of chunksOf(source)) {
+    total += chunk.byteLength;
+    if (total > maxBytes) throw new AssetStoreCapacityError(constraint, maxBytes, 0, total);
+    parts.push(chunk);
+  }
+  const data = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    data.set(part, offset);
+    offset += part.byteLength;
+  }
+  return data;
+}
+
+/**
+ * A requested range against an asset of `byteLength` bytes. An end past the asset is cut to its last
+ * byte, as HTTP does; a start past it, or an end before the start, is refused.
+ */
+export function resolveRange(range: AssetByteRange | undefined, byteLength: number): { start: number; end: number } {
+  const start = range?.start ?? 0;
+  const end = Math.min(range?.end ?? byteLength - 1, byteLength - 1);
+  if (!Number.isSafeInteger(start) || start < 0 || (range?.end !== undefined && !Number.isSafeInteger(range.end))) {
+    throw new AssetStoreValidationError('A byte range is whole, non-negative byte positions');
+  }
+  if (byteLength === 0 && start === 0 && range?.end === undefined) return { start: 0, end: -1 };
+  if (start >= byteLength || end < start) {
+    throw new AssetStoreValidationError(
+      `The range ${start}-${range?.end ?? ''} is outside the asset's ${byteLength} bytes`,
+    );
+  }
+  return { start, end };
+}
+
+function toBytes(chunk: unknown): Uint8Array {
+  if (chunk instanceof Uint8Array) return chunk;
+  if (chunk instanceof ArrayBuffer) return new Uint8Array(chunk);
+  if (typeof chunk === 'string') return new TextEncoder().encode(chunk);
+  throw new AssetStoreValidationError('A streamed asset yields bytes');
 }

@@ -41,6 +41,11 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   (4) outstanding, and written in order. A durable run records each batch the moment it is
   submitted, and a retry collects it rather than submitting it again. `IngestionReport` counts
   `batches` and `batchesRecovered`.
+- **Streaming asset stores.** `AssetStore` gains the optional `putStream()` and `getStream()`, and
+  `putAssetStream()` with `readAssetStream()` stream through any store, falling back to `put()` and
+  `get()`. The filesystem and S3 stores write a stream a chunk at a time, checking its size limit and
+  checksum as it flows and leaving nothing behind when either fails, and read it back whole or by an
+  `AssetByteRange`. `S3LikeClient` takes an optional `putObjectStream()` and `getObjectStream()`.
 - `ChromaVectorStoreOptions.filterFields`: the fields a search can filter on. Every write then sets
   each declared field, or removes it, so a replacement needs no read and stays whole under any race;
   a filter on another field is refused.
@@ -87,6 +92,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   interleaves racing writers. Each failure above reproduces against them on the previous code.
 - `tests/upgrade-remote-stores.test.ts` reads, with this release, what the published 2.7.0 wrote into
   each store.
+- `tests/asset-streams.test.ts`: a gigabyte goes through the filesystem and S3 stores and back while
+  memory grows by less than 128 MB.
 - `tests/embedding-batch.test.ts`: an ingestion of 100,000 chunks through a batch tier dies while it
   collects its third window, and across both attempts each of its ten windows is submitted once;
   without the recorded batches, two are submitted twice.

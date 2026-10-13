@@ -120,7 +120,12 @@ export class Sha256 {
   }
 }
 
-type NativeHash = (algorithm: 'sha256') => { update(data: string | Uint8Array): { digest(encoding: 'hex'): string } };
+interface NativeHashObject {
+  update(data: string | Uint8Array): NativeHashObject;
+  digest(encoding: 'hex'): string;
+}
+
+type NativeHash = (algorithm: 'sha256') => NativeHashObject;
 
 /**
  * The runtime's own SHA-256 where it offers one synchronously: Node.js 22 and Bun, through
@@ -141,4 +146,19 @@ const nativeHash: NativeHash | undefined = (() => {
  */
 export function sha256Hex(data: string | Uint8Array): string {
   return nativeHash ? nativeHash('sha256').update(data).digest('hex') : new Sha256().update(data).digest();
+}
+
+/** A SHA-256 fed in pieces, as a stream's bytes arrive. */
+export interface IncrementalSha256 {
+  /** Adds bytes. */
+  update(data: Uint8Array): unknown;
+  /** The digest so far, as lowercase hex. Call once, at the end. */
+  digest(): string;
+}
+
+/** A SHA-256 to feed in pieces: native where the runtime has it, and the same digest everywhere else. */
+export function createSha256(): IncrementalSha256 {
+  if (!nativeHash) return new Sha256();
+  const native = nativeHash('sha256');
+  return { update: (data) => native.update(data), digest: () => native.digest('hex') };
 }

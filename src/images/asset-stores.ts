@@ -1,8 +1,20 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, open, readFile, readdir, rm, stat as statFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 
-import type { AssetDescriptor } from '../types/images.js';
+import type { AssetChecksum, AssetDescriptor } from '../types/images.js';
 import {
+  AssetMeter,
+  type AssetStreamOptions,
+  bytesAsStream,
+  collectBytes,
+  DEFAULT_BUFFERED_ASSET_BYTES,
+  resolveRange,
+  type StreamAssetDescriptor,
+  type StreamAssetInput,
+  streamFrom,
+  validateStreamInput,
   AssetStoreCapacityError,
   AssetStoreSigningError,
   AssetStoreValidationError,
@@ -145,6 +157,81 @@ export class FilesystemAssetStore implements AssetStore {
     return { ...cloneDescriptor(record.descriptor), location: { kind: 'bytes', data } };
   }
 
+  /**
+   * Writes a streamed asset to disk a chunk at a time, as fast as the disk takes it, never holding
+   * the whole asset. The size limit and checksum are checked as the bytes flow, and an asset that
+   * fails either leaves no file behind.
+   */
+  async putStream(input: StreamAssetInput, options: AssetPutOptions): Promise<AssetStat> {
+    const nowMs = this.clock().getTime();
+    const normalized = validateStreamInput(input);
+    const tenantId = nonEmptyString(options?.tenantId, 'tenantId');
+    const provenance = cloneAndValidateProvenance(options?.provenance);
+    const width = optionalDimension(options?.width, 'width');
+    const height = optionalDimension(options?.height, 'height');
+    const expiresAtMs = resolveExpiration(options, this.defaultTtlSeconds, nowMs);
+    const assetId = nonEmptyString(this.createAssetId(), 'createAssetId() result');
+    assertSafeAssetId(assetId);
+
+    await mkdir(this.directory, { recursive: true });
+    const meter = new AssetMeter(this.maxAssetBytes);
+    const file = await open(this.assetPath(assetId), 'w');
+    let checksum: AssetChecksum;
+    try {
+      for await (const chunk of meter.chunks(normalized.stream)) await file.write(chunk);
+      await file.close();
+      checksum = meter.checksum(normalized.checksum);
+    } catch (error) {
+      await file.close().catch(() => undefined);
+      await rm(this.assetPath(assetId), { force: true });
+      throw error;
+    }
+
+    const descriptor = createStoredDescriptor(
+      assetId,
+      normalized,
+      provenance,
+      checksum,
+      meter.byteLength,
+      width,
+      height,
+    );
+    descriptor.location = { kind: 'stored', assetId, uri: `file://${this.assetPath(assetId)}` };
+    const record: StoredRecord = {
+      assetId,
+      tenantId,
+      descriptor,
+      createdAt: new Date(nowMs).toISOString(),
+      ...(expiresAtMs === undefined ? {} : { expiresAt: new Date(expiresAtMs).toISOString() }),
+    };
+    await writeFile(this.recordPath(assetId), JSON.stringify(record), 'utf8');
+    return toStat(record);
+  }
+
+  /** Reads an asset, or a range of it, from disk as a stream, or `undefined` as `get()` would. */
+  async getStream(
+    assetId: string,
+    tenantId: string,
+    options: AssetStreamOptions = {},
+  ): Promise<StreamAssetDescriptor | undefined> {
+    const record = await this.ownedRecord(assetId, tenantId);
+    if (!record) return undefined;
+    let size: number;
+    try {
+      size = (await statFile(this.assetPath(record.assetId))).size;
+    } catch {
+      return undefined;
+    }
+    const range = resolveRange(options.range, size);
+    const stream =
+      range.end < range.start
+        ? new ReadableStream<Uint8Array>({ start: (controller) => controller.close() })
+        : (Readable.toWeb(
+            createReadStream(this.assetPath(record.assetId), { start: range.start, end: range.end }),
+          ) as ReadableStream<Uint8Array>);
+    return { descriptor: cloneDescriptor(record.descriptor), stream, range };
+  }
+
   /** Describes an asset without reading its bytes. */
   async stat(assetId: string, tenantId: string): Promise<AssetStat | undefined> {
     const record = await this.ownedRecord(assetId, tenantId);
@@ -266,6 +353,27 @@ export interface S3LikeClient {
   listObjects(input: { bucket: string; prefix: string }): Promise<Array<{ key: string }>>;
   /** Produces a presigned URL for an object. */
   getSignedUrl?(input: { bucket: string; key: string; expiresInSeconds?: number }): Promise<string>;
+  /**
+   * Writes an object from a stream, as a multipart upload does, for content too large to buffer.
+   * With `@aws-sdk/lib-storage`, an `Upload` over the body. Optional: without it, a streamed asset is
+   * buffered within `maxAssetBytes` and written with `putObject()`.
+   */
+  putObjectStream?(input: {
+    bucket: string;
+    key: string;
+    body: ReadableStream<Uint8Array>;
+    contentType?: string;
+    metadata?: Record<string, string>;
+  }): Promise<void>;
+  /**
+   * Reads an object, or the range of it, both ends inclusive, as a stream. Optional: without it, the
+   * object is read whole with `getObject()`.
+   */
+  getObjectStream?(input: {
+    bucket: string;
+    key: string;
+    range?: { start: number; end: number };
+  }): Promise<{ body: ReadableStream<Uint8Array> }>;
 }
 
 /** Options for a store that keeps assets in an S3-compatible bucket. */
@@ -399,6 +507,105 @@ export class S3AssetStore implements AssetStore {
         location: { kind: 'bytes', data: new Uint8Array(object.body) },
       };
     } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Stores a streamed asset. With a client that has `putObjectStream()`, the bytes flow straight to the
+   * bucket, checked against the size limit and hashed on the way; the object's metadata then carries
+   * the tenant, since the checksum is known only at the end, and the sidecar carries both. Without
+   * one, the stream is read into memory within `maxAssetBytes` (64 MiB when unset) and stored by `put()`.
+   */
+  async putStream(input: StreamAssetInput, options: AssetPutOptions): Promise<AssetStat> {
+    const client = this.options.client;
+    if (!client.putObjectStream) {
+      const normalized = validateStreamInput(input);
+      const limit = this.maxAssetBytes ?? DEFAULT_BUFFERED_ASSET_BYTES;
+      const data = await collectBytes(normalized.stream, limit, 'maxAssetBytes');
+      const { stream: _stream, ...rest } = normalized;
+      return this.put({ ...rest, location: { kind: 'bytes', data } }, options);
+    }
+    const nowMs = this.clock().getTime();
+    const normalized = validateStreamInput(input);
+    const tenantId = nonEmptyString(options?.tenantId, 'tenantId');
+    const provenance = cloneAndValidateProvenance(options?.provenance);
+    const width = optionalDimension(options?.width, 'width');
+    const height = optionalDimension(options?.height, 'height');
+    const expiresAtMs = resolveExpiration(options, this.defaultTtlSeconds, nowMs);
+    const assetId = nonEmptyString(this.createAssetId(), 'createAssetId() result');
+    assertSafeAssetId(assetId);
+
+    const meter = new AssetMeter(this.maxAssetBytes);
+    const key = this.objectKey(assetId);
+    let checksum: AssetChecksum;
+    try {
+      await client.putObjectStream({
+        bucket: this.options.bucket,
+        key,
+        body: streamFrom(meter.chunks(normalized.stream)),
+        contentType: normalized.mimeType,
+        metadata: { tenant: tenantId },
+      });
+      checksum = meter.checksum(normalized.checksum);
+    } catch (error) {
+      await client.deleteObject({ bucket: this.options.bucket, key }).catch(() => undefined);
+      throw error;
+    }
+
+    const descriptor = createStoredDescriptor(
+      assetId,
+      normalized,
+      provenance,
+      checksum,
+      meter.byteLength,
+      width,
+      height,
+    );
+    descriptor.location = { kind: 'stored', assetId, uri: `s3://${this.options.bucket}/${key}` };
+    const record: StoredRecord = {
+      assetId,
+      tenantId,
+      descriptor,
+      createdAt: new Date(nowMs).toISOString(),
+      ...(expiresAtMs === undefined ? {} : { expiresAt: new Date(expiresAtMs).toISOString() }),
+    };
+    await client.putObject({
+      bucket: this.options.bucket,
+      key: this.recordKey(assetId),
+      body: new TextEncoder().encode(JSON.stringify(record)),
+      contentType: 'application/json',
+    });
+    return toStat(record);
+  }
+
+  /**
+   * Reads an asset, or a range of it, as a stream: straight from the bucket with a client that has
+   * `getObjectStream()`, otherwise from `getObject()`.
+   */
+  async getStream(
+    assetId: string,
+    tenantId: string,
+    options: AssetStreamOptions = {},
+  ): Promise<StreamAssetDescriptor | undefined> {
+    const record = await this.ownedRecord(assetId, tenantId);
+    if (!record) return undefined;
+    const descriptor = cloneDescriptor(record.descriptor);
+    const client = this.options.client;
+    const key = this.objectKey(record.assetId);
+    try {
+      if (client.getObjectStream && descriptor.byteLength !== undefined) {
+        const range = resolveRange(options.range, descriptor.byteLength);
+        if (range.end < range.start) {
+          return { descriptor, stream: new ReadableStream({ start: (controller) => controller.close() }), range };
+        }
+        const object = await client.getObjectStream({ bucket: this.options.bucket, key, range });
+        return { descriptor, stream: object.body, range };
+      }
+      const object = await client.getObject({ bucket: this.options.bucket, key });
+      return bytesAsStream(descriptor, new Uint8Array(object.body), options.range);
+    } catch (error) {
+      if (error instanceof AssetStoreValidationError) throw error;
       return undefined;
     }
   }

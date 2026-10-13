@@ -115,8 +115,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/router` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
+| `nexus-ai-pro/images` | 72 KB | 21% | none |
 | `nexus-ai-pro/evaluate/online` | 68 KB | 20% | none |
-| `nexus-ai-pro/images` | 60 KB | 17% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
@@ -133,6 +133,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
+| `nexus-ai-pro/images/stores` | 38 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/protocols/a2a` | 36 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
@@ -149,8 +150,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 8% | none |
 | `nexus-ai-pro/runtime` | 25 KB | 7% | none |
+| `nexus-ai-pro/images/assets` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
-| `nexus-ai-pro/images/stores` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
 | `nexus-ai-pro/agent/sandbox` | 22 KB | 6% | none |
@@ -159,7 +160,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/protocols/acp/editor` | 20 KB | 6% | none |
-| `nexus-ai-pro/images/assets` | 19 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
