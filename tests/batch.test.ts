@@ -11,7 +11,8 @@ import { BatchManager } from '../src/batch/manager.js';
 import { MockBatchProvider } from '../src/batch/mock.js';
 import { OpenAIBatchProvider } from '../src/batch/openai.js';
 import { isTerminalBatchStatus } from '../src/types/batch.js';
-import type { BatchInputItem, BatchProviderCallContext } from '../src/types/batch.js';
+import { MemoryOperationStore } from '../src/operations/store.js';
+import type { BatchInputItem, BatchProvider, BatchProviderCallContext } from '../src/types/batch.js';
 
 function items(...ids: string[]): BatchInputItem[] {
   return ids.map((customId) => ({
@@ -331,6 +332,49 @@ test('the OpenAI adapter parses JSONL output into items', async () => {
   assert.equal(results[1]?.error?.code, 'server_error');
 });
 
+test('the OpenAI adapter reads the error file too, so a failed request is never missing', async () => {
+  const output = JSON.stringify({
+    custom_id: 'a',
+    response: { status_code: 200, body: { model: 'gpt-5.4-mini', choices: [{ message: { content: 'ok' } }] } },
+  });
+  const errors = JSON.stringify({
+    custom_id: 'b',
+    response: { status_code: 400, body: { error: { message: 'invalid model', code: 'model_not_found' } } },
+    error: null,
+  });
+  const onlyErrors = new OpenAIBatchProvider({
+    apiKey: 'key',
+    fetch: jsonFetch({
+      '/files/err-1/content': errors,
+      '/batches/batch-2': { id: 'batch-2', status: 'completed', output_file_id: null, error_file_id: 'err-1' },
+    }),
+  });
+  assert.deepEqual(await onlyErrors.results({ id: 'batch-2', provider: 'openai' }, context()), [
+    { customId: 'b', error: { message: 'invalid model', code: 'model_not_found', status: 400 } },
+  ]);
+  const both = new OpenAIBatchProvider({
+    apiKey: 'key',
+    fetch: jsonFetch({
+      '/files/out-1/content': output,
+      '/files/err-1/content': errors,
+      '/batches/batch-3': { id: 'batch-3', status: 'completed', output_file_id: 'out-1', error_file_id: 'err-1' },
+    }),
+  });
+  const results = await both.results({ id: 'batch-3', provider: 'openai' }, context());
+  assert.deepEqual(
+    results.map((item) => [item.customId, item.error ? 'failed' : item.response?.content]),
+    [
+      ['a', 'ok'],
+      ['b', 'failed'],
+    ],
+  );
+});
+
+test('the OpenAI adapter refuses the embeddings endpoint, whose items are not completions', async () => {
+  const provider = new OpenAIBatchProvider({ apiKey: 'key', endpoint: '/v1/embeddings', fetch: jsonFetch({}) });
+  await assert.rejects(() => provider.submit({ items: items('a') }, context()), /OpenAIEmbeddingBatchProvider/);
+});
+
 test('the OpenAI adapter surfaces an HTTP failure', async () => {
   const provider = new OpenAIBatchProvider({
     apiKey: 'key',
@@ -427,4 +471,35 @@ test('the Anthropic adapter parses succeeded and errored results', async () => {
 test('both hosted adapters declare the discounted tier', () => {
   assert.equal(new OpenAIBatchProvider({ apiKey: 'k' }).info.capabilities.discount, 0.5);
   assert.equal(new AnthropicBatchProvider({ apiKey: 'k' }).info.capabilities.discount, 0.5);
+});
+
+// ── Crash safety ───────────────────────────────────────────────────
+
+test('a worker that dies after submitting collects the same batch on the next attempt, never a second', async () => {
+  const mock = new MockBatchProvider({ statuses: ['in_progress', 'completed'] });
+  let submits = 0;
+  let polls = 0;
+  const provider: BatchProvider = {
+    info: mock.info,
+    submit: (request, callContext) => {
+      submits += 1;
+      return mock.submit(request, callContext);
+    },
+    poll: (ref, callContext) => {
+      polls += 1;
+      // The first attempt dies while it waits: after the provider accepted the batch.
+      if (polls === 1) throw new Error('worker died while collecting');
+      return mock.poll(ref, callContext);
+    },
+    results: (ref, callContext) => mock.results(ref, callContext),
+  };
+  const batch = new BatchManager(
+    { providers: { mock: provider }, defaultProvider: 'mock', pollIntervalMs: 1 },
+    { operations: { store: new MemoryOperationStore(), retry: { maxAttempts: 2, baseDelayMs: 1 } } },
+  );
+  const handle = await batch.submit({ items: items('a', 'b') });
+  const result = await handle.result();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.items.length, 2);
+  assert.equal(submits, 1, 'the second attempt collected the batch the first one submitted');
 });

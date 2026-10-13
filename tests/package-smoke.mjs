@@ -82,6 +82,10 @@ const imports = [
     specifier: 'nexus-ai-pro/embeddings/cache',
     exports: ['MemoryEmbeddingCache', 'RedisEmbeddingCache', 'tieredEmbeddingCache', 'embeddingCacheKey'],
   },
+  { specifier: 'nexus-ai-pro/embeddings/batch', exports: ['EmbeddingBatchManager', 'batchEmbedder'] },
+  { specifier: 'nexus-ai-pro/embeddings/batch/openai', exports: ['OpenAIEmbeddingBatchProvider'] },
+  { specifier: 'nexus-ai-pro/embeddings/batch/google', exports: ['GoogleEmbeddingBatchProvider'] },
+  { specifier: 'nexus-ai-pro/embeddings/batch/mock', exports: ['MockEmbeddingBatchProvider'] },
   {
     specifier: 'nexus-ai-pro/operations',
     exports: ['OperationRunner', 'MemoryOperationStore', 'LocalOperationHandle', 'OperationCancelledError'],

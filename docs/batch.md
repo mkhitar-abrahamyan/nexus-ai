@@ -65,6 +65,9 @@ await batch.cancel(ref);
 Polling backs off from the configured interval up to `maxPollIntervalMs`, so a 24-hour batch does
 not generate 2,880 polls while a fast one is still caught by the first few short intervals.
 
+A submission records its batch the moment the provider accepts it. A worker that dies while it waits
+is replaced by one that collects that batch, never a second, which the provider would run and bill.
+
 ## Configuring the manager
 
 `BatchConfig` registers providers, names the default, and sets the poll interval, its upper bound
@@ -124,7 +127,7 @@ Two adapters are bundled. Both take an API key, a base URL, headers, and a repla
 
 | Adapter | Options | Also sets |
 | --- | --- | --- |
-| `OpenAIBatchProvider` | `OpenAIBatchProviderOptions` | The endpoint each item targets. |
+| `OpenAIBatchProvider` | `OpenAIBatchProviderOptions` | The endpoint each item targets. Results include the failed requests, from the error file. Embeddings are batched on `nexus-ai-pro/embeddings/batch/openai`. |
 | `AnthropicBatchProvider` | `AnthropicBatchProviderOptions` | The output token limit for an item that names none. |
 
 ## Testing without a provider

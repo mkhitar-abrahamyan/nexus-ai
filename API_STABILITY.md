@@ -57,11 +57,20 @@ New and stable:
   `EmbeddingProviderMediaPart`; `inputModalities` on `EmbeddingProviderCapabilities` and
   `EmbeddingModelCapabilities`, and `costPerImage`; `MockEmbeddingProviderOptions.describeMedia`. An
   adapter that declares no `inputModalities` is sent text only, as before;
+- `nexus-ai-pro/embeddings/batch`: `EmbeddingBatchManager` and its config and runtime, its request,
+  item, result, and output types, the `EmbeddingBatchProvider` contract with its info, capabilities,
+  request, and item, `batchEmbedder()` with `BatchEmbedder` and its options; the OpenAI and mock
+  adapters on `/openai` and `/mock`. `GoogleEmbeddingBatchProvider` on `/google` is experimental
+  until a live run is recorded;
+- `IngestionPipelineOptions.batchEmbed` and `batchesInFlight`, and `IngestionReport.batches` and
+  `batchesRecovered`. `IngestionPipelineOptions.embed` is optional when `batchEmbed` is given;
 - `nexus-ai-pro/postgres/embedding-cache`: `PostgresEmbeddingCache`, its options, and
   `embeddingCacheMigrations()`; `nexus-ai-pro/sqlite/embedding-cache`: `SqliteEmbeddingCache`, its
   options, and `sqliteEmbeddingCacheMigrations()`.
 
-Changed, each to keep a promise the store already made:
+Changed, each to keep a promise the surface already made:
+- `OpenAIBatchProvider` refuses `endpoint: '/v1/embeddings'` with a `BatchCapabilityError`; it sent
+  chat bodies there, which never embedded anything.
 - The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores refuse a `topK` that is not a positive
   integer with a `RangeError`. An absent `topK`, or 0, still means 5.
 - A replacement in Chroma removes the metadata fields the new version lacks; before, Chroma merged

@@ -30,6 +30,17 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   sends text and data-URI images as `inputs`. `gemini-embedding-2` joins the registry, with
   `costPerImage`, and `embed-v4.0` takes images. `MockEmbeddingProviderOptions.describeMedia` puts a
   medium and its caption in one space for tests.
+- **A batch tier for embeddings**, on the new `nexus-ai-pro/embeddings/batch`: `EmbeddingBatchManager`
+  submits, polls, collects, and prices at the provider's batch rate, usually half, with `submit()`,
+  `start()`, `resume()`, `status()`, and `cancel()`. Adapters: `OpenAIEmbeddingBatchProvider` on
+  `/openai`, `GoogleEmbeddingBatchProvider` (`asyncBatchEmbedContent`, media included) on `/google`,
+  and `MockEmbeddingBatchProvider` on `/mock`. `batchEmbedder()` gives an ingestion pipeline a batch
+  tier.
+- **Ingestion through a batch tier.** `IngestionPipelineOptions.batchEmbed` takes a batch tier in
+  place of `embed`. Chunks are gathered into windows, each one provider batch, with `batchesInFlight`
+  (4) outstanding, and written in order. A durable run records each batch the moment it is
+  submitted, and a retry collects it rather than submitting it again. `IngestionReport` counts
+  `batches` and `batchesRecovered`.
 - `ChromaVectorStoreOptions.filterFields`: the fields a search can filter on. Every write then sets
   each declared field, or removes it, so a replacement needs no read and stays whole under any race;
   a filter on another field is refused.
@@ -56,6 +67,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - A replacement could keep a filter field the new version lacks, so a filter, such as a tenant's,
   still found the chunk by its old value. In Chroma, which merges metadata, it happened on every
   replacement, and kept a replaced `source` too; in Redis, when two writers raced.
+- `BatchManager` submitted a batch again when a worker died after submitting it and before collecting
+  it, so the provider ran, and billed, both. A submission now records its batch the moment it exists,
+  and a later attempt collects that one.
+- `OpenAIBatchProvider` read only the output file, so every request that failed was missing from the
+  results; it now reads the error file too. It also refuses the `/v1/embeddings` endpoint its options
+  offered, since it sent chat bodies there: embeddings are batched by `OpenAIEmbeddingBatchProvider`.
 - After two writers replaced one object, Weaviate's filter index could return it for a value it no
   longer had. Every filtered hit is now checked against the object's own fields, and the store asks
   for more when a stale entry took a place.
@@ -70,6 +87,9 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   interleaves racing writers. Each failure above reproduces against them on the previous code.
 - `tests/upgrade-remote-stores.test.ts` reads, with this release, what the published 2.7.0 wrote into
   each store.
+- `tests/embedding-batch.test.ts`: an ingestion of 100,000 chunks through a batch tier dies while it
+  collects its third window, and across both attempts each of its ten windows is submitted once;
+  without the recorded batches, two are submitted twice.
 - `tests/embeddings-media.test.ts`: a text query finds the image it describes through one vector
   space, and media never reaches a model that takes text only.
 - `tests/embedding-cache.test.ts`: a second process embeds a 2,000-text batch with no provider call

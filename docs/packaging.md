@@ -99,7 +99,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/deep-agent` | 182 KB | 53% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
-| `nexus-ai-pro/batch` | 115 KB | 34% | none |
+| `nexus-ai-pro/batch` | 116 KB | 34% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
 | `nexus-ai-pro/providers/groq` | 88 KB | 26% | none |
@@ -122,13 +122,14 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 16% | none |
 | `nexus-ai-pro/server/deployments` | 54 KB | 16% | none |
-| `nexus-ai-pro/batch/openai` | 51 KB | 15% | none |
+| `nexus-ai-pro/batch/openai` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
 | `nexus-ai-pro/evaluate` | 46 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 13% | none |
 | `nexus-ai-pro/embeddings` | 40 KB | 12% | none |
+| `nexus-ai-pro/embeddings/batch` | 40 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
@@ -170,6 +171,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/interpreter` | 17 KB | 5% | none |
 | `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
+| `nexus-ai-pro/rag/pipeline` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
 | `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
@@ -183,7 +185,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
 | `nexus-ai-pro/protocols/ag-ui` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
-| `nexus-ai-pro/rag/pipeline` | 14 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
@@ -199,6 +200,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
 | `nexus-ai-pro/embeddings/cache` | 11 KB | 3% | none |
+| `nexus-ai-pro/embeddings/batch/google` | 11 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
@@ -214,6 +216,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/lint` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
+| `nexus-ai-pro/embeddings/batch/openai` | 8 KB | 2% | none |
 | `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 8 KB | 2% | none |
 | `nexus-ai-pro/evaluate/threads` | 8 KB | 2% | none |
@@ -223,6 +226,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/ops/rate-limit-adapters` | 7 KB | 2% | none |
 | `nexus-ai-pro/loaders` | 7 KB | 2% | none |
 | `nexus-ai-pro/rag/elasticsearch` | 7 KB | 2% | none |
+| `nexus-ai-pro/embeddings/batch/mock` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/fulltext` | 6 KB | 2% | none |
 | `nexus-ai-pro/postgres/evaluate` | 6 KB | 2% | none |
 | `nexus-ai-pro/server/remote` | 6 KB | 2% | none |

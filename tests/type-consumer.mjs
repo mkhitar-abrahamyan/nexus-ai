@@ -292,6 +292,11 @@ import {
   type EmbeddingCacheStore,
 } from 'nexus-ai-pro/embeddings/cache';
 import { PostgresEmbeddingCache } from 'nexus-ai-pro/postgres/embedding-cache';
+import { batchEmbedder, EmbeddingBatchManager, type EmbeddingBatchResult } from 'nexus-ai-pro/embeddings/batch';
+import { OpenAIEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/openai';
+import { createIngestionPipeline } from 'nexus-ai-pro/rag/pipeline';
+import { GoogleEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/google';
+import { MockEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/mock';
 import { SqliteEmbeddingCache } from 'nexus-ai-pro/sqlite/embedding-cache';
 import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/telephony';
 import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
@@ -807,6 +812,25 @@ const sharedEmbeddingCaches: EmbeddingCacheStore[] = [
   new PostgresEmbeddingCache({ query: async () => ({ rows: [], rowCount: 0 }) }, { table: 'app.embedding_cache' }),
   new SqliteEmbeddingCache({ run: () => ({ changes: 0 }), all: () => [], exec: () => undefined }),
 ];
+const embeddingBatches = new EmbeddingBatchManager({
+  providers: {
+    openai: new OpenAIEmbeddingBatchProvider({ apiKey: 'key' }),
+    google: new GoogleEmbeddingBatchProvider({ apiKey: 'key' }),
+    mock: new MockEmbeddingBatchProvider(),
+  },
+  defaultProvider: 'openai',
+});
+const batchedIngestion = createIngestionPipeline({
+  name: 'corpus',
+  manifest: new MemoryStore(),
+  vectors: new RagMemoryVectorStore(),
+  batchEmbed: batchEmbedder(embeddingBatches, { model: 'text-embedding-3-small', size: 20_000 }),
+  embeddingModel: 'text-embedding-3-small',
+});
+const batchCost: Promise<number> = embeddingBatches
+  .submit({ model: 'text-embedding-3-small', items: [{ customId: 'a', input: 'text' }] })
+  .then((handle) => handle.result())
+  .then((result: EmbeddingBatchResult) => result.cost.amount);
 const embeddingsWithSharedCache = new SubpathEmbeddingManager({
   cache: { store: sharedEmbeddingCaches[0], ttlSeconds: 86_400 },
 });
@@ -967,6 +991,8 @@ void embeddingResponse;
 void embeddingVector;
 void resolvedEmbeddingModel;
 void embeddingsWithSharedCache;
+void batchedIngestion;
+void batchCost;
 void doneChunk;
 void directRealtimeSession;
 void realtimeAgent;

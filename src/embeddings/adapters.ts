@@ -11,6 +11,7 @@ import type {
 } from '../types/embeddings.js';
 import { createProviderHttpError, toNexusProviderError } from '../providers/errors.js';
 import { EmbeddingProviderResponseError, EmbeddingValidationError } from './errors.js';
+import { GOOGLE_TASK_TYPES, googleParts, usesTaskPrefix } from './google-wire.js';
 
 /**
  * Hosted embedding adapters.
@@ -160,13 +161,6 @@ export class OpenAIEmbeddingProvider extends HttpEmbeddingProvider {
   }
 }
 
-const GOOGLE_TASK_TYPES: Record<EmbeddingInputType, string> = {
-  document: 'RETRIEVAL_DOCUMENT',
-  query: 'RETRIEVAL_QUERY',
-  classification: 'CLASSIFICATION',
-  clustering: 'CLUSTERING',
-};
-
 interface GoogleEmbeddingPayload {
   embeddings?: Array<{ values?: number[] }>;
 }
@@ -206,7 +200,7 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
     const model = request.model;
     const qualified = model.startsWith('models/') ? model : `models/${model}`;
     // gemini-embedding-2 refuses a task type; it reads the task from a prefix on the text instead.
-    const prefixed = /^(models\/)?gemini-embedding-2/.test(model);
+    const prefixed = usesTaskPrefix(model);
     const contents = request.contents ?? request.input.map((text) => [{ type: 'text' as const, text }]);
     const payload = (await this.post(
       `${this.baseUrl('https://generativelanguage.googleapis.com/v1beta')}/${qualified}:batchEmbedContents`,
@@ -235,36 +229,6 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
       raw: payload,
     };
   }
-}
-
-/** The text prefix gemini-embedding-2 reads its task from, by input type. */
-const GOOGLE_TASK_PREFIXES: Record<EmbeddingInputType, (text: string) => string> = {
-  query: (text) => `task: search result | query: ${text}`,
-  document: (text) => `title: none | text: ${text}`,
-  classification: (text) => `task: classification | query: ${text}`,
-  clustering: (text) => `task: clustering | query: ${text}`,
-};
-
-/**
- * An input's parts as Google's: text as text, the first carrying the task prefix when one is given,
- * and media inline, or by a Files API URI. Google does not fetch any other URL.
- */
-function googleParts(parts: readonly EmbeddingProviderPart[], prefixFor: EmbeddingInputType | undefined) {
-  let prefixed = prefixFor === undefined;
-  return parts.map((part) => {
-    if (part.type === 'text') {
-      if (prefixed) return { text: part.text };
-      prefixed = true;
-      return { text: GOOGLE_TASK_PREFIXES[prefixFor as EmbeddingInputType](part.text) };
-    }
-    if (part.data !== undefined) return { inlineData: { mimeType: part.mimeType, data: part.data } };
-    if (part.url?.startsWith('https://generativelanguage.googleapis.com/')) {
-      return { fileData: { mimeType: part.mimeType, fileUri: part.url } };
-    }
-    throw new EmbeddingValidationError(
-      `Google embeds media from its bytes or a Files API URI, not from ${part.url}; pass the ${part.type} as bytes`,
-    );
-  });
 }
 
 const COHERE_INPUT_TYPES: Record<EmbeddingInputType, string> = {

@@ -9,7 +9,9 @@
  * halfway leaves a manifest that says exactly what finished; the next run skips it, and inside a
  * durable operation it starts at the document it stopped on.
  */
+import type { BatchEmbedder } from '../embeddings/batch.js';
 import type { EmbeddingProvider, VectorStore } from '../hallucination/retrieval.js';
+import type { BatchJobRef } from '../types/batch.js';
 import type { OperationContext, OperationExecutor } from '../types/operations.js';
 import type { Store } from '../types/store.js';
 import { type DocumentSource, ingestDocuments, type IngestionOptions, type RagChunk } from './ingestion.js';
@@ -35,8 +37,18 @@ export interface IngestionPipelineOptions {
    * that is `shared` needs no place here: the vector store's writes already reach it.
    */
   keywords?: readonly SparseRetriever[];
-  /** Embeds chunk texts. Called only for chunks that are new or changed. */
-  embed: EmbeddingProvider;
+  /** Embeds chunk texts. Called only for chunks that are new or changed. Needed unless `batchEmbed` is given. */
+  embed?: EmbeddingProvider;
+  /**
+   * Embeds through a provider's batch tier instead, at its batch price: `batchEmbedder()` from
+   * `nexus-ai-pro/embeddings/batch`. Chunks to embed are gathered into windows of its `size`, each
+   * submitted as one batch, and each window is written once its batch completes, in order. Inside a
+   * durable operation every batch is recorded the moment it exists, so a later attempt collects it
+   * rather than submitting it again. Taken over `embed` when both are given.
+   */
+  batchEmbed?: BatchEmbedder;
+  /** Provider batches waited on at once, with `batchEmbed`; each holds its window in memory. Defaults to 4. */
+  batchesInFlight?: number;
   /** The embedding model, recorded with every document: a different one re-embeds everything. */
   embeddingModel: string;
   /** How documents are split. Different options re-chunk every document. */
@@ -84,6 +96,10 @@ export interface IngestionReport {
   chunksDeleted: number;
   /** Documents a resumed run skipped because an earlier attempt had finished them. */
   resumed: number;
+  /** Provider batches submitted, with `batchEmbed`. */
+  batches?: number;
+  /** Provider batches an earlier attempt submitted, which this run collected instead of submitting again. */
+  batchesRecovered?: number;
 }
 
 /** What the manifest records for one document. */
@@ -115,7 +131,26 @@ export interface IngestionPipeline {
 /** Where a durable run got to, as it records it with `heartbeat()`. */
 interface IngestionCheckpoint {
   pipeline: string;
+  /** Documents finished: every one up to here is written and recorded. */
   documents: number;
+  /** Provider batches submitted and not yet written, each named by the chunks it embeds. */
+  inflight?: Array<{ key: string; ref: BatchJobRef }>;
+}
+
+/** One batch of documents, compared with the manifest: what to embed, write, and remove. */
+interface Plan {
+  writes: Array<{ id: string; version: string; chunks: RagChunk[]; hashes: string[] }>;
+  stale: string[];
+  toEmbed: RagChunk[];
+}
+
+/** A window of plans with one provider batch, waiting to be written. */
+interface Window {
+  plans: Plan[];
+  /** The run's document count once the window is written. */
+  documents: number;
+  key?: string;
+  ref?: BatchJobRef;
 }
 
 /**
@@ -142,6 +177,9 @@ interface IngestionCheckpoint {
 export function createIngestionPipeline(options: IngestionPipelineOptions): IngestionPipeline {
   const batchSize = options.batchSize ?? 64;
   if (!(Number.isInteger(batchSize) && batchSize > 0)) throw new RangeError('batchSize must be a positive integer');
+  if (!options.embed && !options.batchEmbed) throw new TypeError('An ingestion pipeline needs embed or batchEmbed');
+  const inFlight = options.batchesInFlight ?? 4;
+  if (!(Number.isInteger(inFlight) && inFlight > 0)) throw new RangeError('batchesInFlight must be a positive integer');
   const namespace = ['nexus', 'ingestion', options.name, 'documents'];
   const keywords = options.keywords ?? [];
   const chunkingVersion = stableJson(options.chunking ?? {});
@@ -186,15 +224,18 @@ export function createIngestionPipeline(options: IngestionPipelineOptions): Inge
         resumed: 0,
       };
       const previous = runOptions.operation?.previousHeartbeat as IngestionCheckpoint | undefined;
+      const resuming = previous?.pipeline === options.name ? previous : undefined;
       // Documents an earlier attempt of this operation finished; they are counted, not read again.
-      const skip = previous?.pipeline === options.name ? previous.documents : 0;
+      const skip = resuming?.documents ?? 0;
       const seen = new Set<string>();
       let batch: Array<{ document: DocumentSource; id: string }> = [];
+      const batched = options.batchEmbed;
+      if (batched) {
+        report.batches = 0;
+        report.batchesRecovered = 0;
+      }
 
-      const flush = async () => {
-        if (batch.length === 0) return;
-        const current = batch;
-        batch = [];
+      const plan = async (current: Array<{ document: DocumentSource; id: string }>): Promise<Plan> => {
         const versions = await Promise.all(
           current.map(({ document }) =>
             hashText(stableJson([document.text, document.source ?? null, document.metadata ?? null])),
@@ -202,7 +243,7 @@ export function createIngestionPipeline(options: IngestionPipelineOptions): Inge
         );
         const recorded = await Promise.all(current.map(({ id }) => read(id)));
 
-        const writes: Array<{ id: string; version: string; chunks: RagChunk[]; hashes: string[] }> = [];
+        const writes: Plan['writes'] = [];
         const stale: string[] = [];
         const toEmbed: RagChunk[] = [];
         for (const [index, { document, id }] of current.entries()) {
@@ -243,15 +284,15 @@ export function createIngestionPipeline(options: IngestionPipelineOptions): Inge
             stale.push(...Object.keys(before.chunks).filter((chunkId) => !kept.has(chunkId) || !reusable[chunkId]));
           writes.push({ id, version, chunks, hashes });
         }
+        return { writes, stale, toEmbed };
+      };
 
-        // The stores first, then the manifest: a crash in between repeats a write, never loses one.
+      // The stores first, then the manifest: a crash in between repeats a write, never loses one.
+      const commit = async ({ writes, stale, toEmbed }: Plan, vectors: number[][]): Promise<void> => {
+        if (vectors.length !== toEmbed.length) {
+          throw new RangeError(`The embedding returned ${vectors.length} vectors for ${toEmbed.length} texts`);
+        }
         if (toEmbed.length > 0) {
-          const vectors = await options.embed(toEmbed.map((chunk) => chunk.content));
-          if (vectors.length !== toEmbed.length) {
-            throw new RangeError(
-              `The embedding function returned ${vectors.length} vectors for ${toEmbed.length} texts`,
-            );
-          }
           await Promise.all([
             options.vectors.add(toEmbed.map((chunk, index) => ({ ...chunk, embedding: vectors[index] as number[] }))),
             ...keywords.map((index) => index.add(toEmbed)),
@@ -275,10 +316,83 @@ export function createIngestionPipeline(options: IngestionPipelineOptions): Inge
             }),
           ),
         );
-        await runOptions.operation?.heartbeat({
+      };
+
+      // With a batch tier: windows of plans, each one provider batch, written in order.
+      const inflight: Window[] = [];
+      let open: Plan[] = [];
+      let openChunks = 0;
+      let finished = skip;
+      const checkpoint = () =>
+        runOptions.operation?.heartbeat({
           pipeline: options.name,
-          documents: report.documents,
+          documents: finished,
+          ...(batched
+            ? {
+                inflight: inflight.flatMap((window) =>
+                  window.key && window.ref ? [{ key: window.key, ref: window.ref }] : [],
+                ),
+              }
+            : {}),
         } satisfies IngestionCheckpoint);
+
+      const submitWindow = async (embedder: BatchEmbedder): Promise<void> => {
+        // At most `batchesInFlight` batches are outstanding: the oldest is written before another goes.
+        while (inflight.length >= inFlight) await writeOldest(embedder);
+        const window: Window = { plans: open, documents: report.documents };
+        open = [];
+        openChunks = 0;
+        const toEmbed = window.plans.flatMap((planned) => planned.toEmbed);
+        if (toEmbed.length > 0) {
+          // A window is named by its chunks, which a resumed run rebuilds the same from the same corpus.
+          window.key = await hashText(stableJson(toEmbed.map((chunk) => chunk.id)));
+          const recorded = resuming?.inflight?.find((entry) => entry.key === window.key);
+          if (recorded) {
+            window.ref = recorded.ref;
+            report.batchesRecovered = (report.batchesRecovered ?? 0) + 1;
+          } else {
+            window.ref = await embedder.submit(
+              toEmbed.map((chunk) => chunk.content),
+              window.key,
+            );
+            report.batches = (report.batches ?? 0) + 1;
+          }
+        }
+        inflight.push(window);
+        await checkpoint();
+      };
+
+      const writeOldest = async (embedder: BatchEmbedder): Promise<void> => {
+        const window = inflight[0] as Window;
+        const vectors = window.ref ? await embedder.collect(window.ref, runOptions.signal) : [];
+        let offset = 0;
+        for (const planned of window.plans) {
+          await commit(planned, vectors.slice(offset, offset + planned.toEmbed.length));
+          offset += planned.toEmbed.length;
+        }
+        inflight.shift();
+        finished = window.documents;
+        await checkpoint();
+        runOptions.onProgress?.({ ...report });
+      };
+
+      const flush = async () => {
+        if (batch.length === 0) return;
+        const current = batch;
+        batch = [];
+        const planned = await plan(current);
+        if (batched) {
+          open.push(planned);
+          openChunks += planned.toEmbed.length;
+          if (openChunks >= batched.size) await submitWindow(batched);
+          return;
+        }
+        const vectors = planned.toEmbed.length
+          ? await (options.embed as EmbeddingProvider)(planned.toEmbed.map((chunk) => chunk.content))
+          : [];
+        await commit(planned, vectors);
+        finished = report.documents;
+        await checkpoint();
         runOptions.onProgress?.({ ...report });
       };
 
@@ -300,6 +414,13 @@ export function createIngestionPipeline(options: IngestionPipelineOptions): Inge
       }
       runOptions.signal?.throwIfAborted();
       await flush();
+      if (batched) {
+        if (open.length > 0) await submitWindow(batched);
+        while (inflight.length > 0) {
+          runOptions.signal?.throwIfAborted();
+          await writeOldest(batched);
+        }
+      }
 
       if (runOptions.deleteMissing !== false) {
         const missing: string[] = [];

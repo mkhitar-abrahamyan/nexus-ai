@@ -10,7 +10,6 @@ import type {
   BatchProviderCallContext,
   BatchSubmitRequest,
 } from '../types/batch.js';
-import { isTerminalBatchStatus } from '../types/batch.js';
 import type { DurableOperationHandle, OperationRunnerConfig } from '../types/operations.js';
 import type { ResponseCost, TokenUsage } from '../types/response.js';
 import { OperationRunner } from '../operations/runner.js';
@@ -20,6 +19,7 @@ import { generateRequestId } from '../utils/ids.js';
 import { withLifecycle } from '../lifecycle/run.js';
 import type { OperationLifecycleLike } from '../types/lifecycle.js';
 import { BatchCapabilityError, BatchProviderNotFoundError, BatchValidationError } from './errors.js';
+import { pollUntilSettled } from './poll.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const DEFAULT_MAX_POLL_INTERVAL_MS = 300_000;
@@ -126,7 +126,13 @@ export class BatchManager {
               attempt: operation.attempt,
             };
 
-            const ref = await provider.submit(request, context);
+            // A batch an earlier attempt submitted is collected, never submitted again: the provider
+            // would run, and bill, both. Its ref is recorded the moment it exists.
+            let ref = (operation.previousHeartbeat as { batchRef?: BatchJobRef } | undefined)?.batchRef;
+            if (!ref) {
+              ref = await provider.submit(request, context);
+              await operation.heartbeat({ batchRef: ref });
+            }
             operation.report({ completed: 0, total: request.items.length, message: `submitted as ${ref.id}` });
             return this.collect(provider, ref, request, operation, context);
           },
@@ -191,26 +197,17 @@ export class BatchManager {
     operation: { report: (progress: { completed?: number; total?: number; message?: string }) => void } | undefined,
     context: BatchProviderCallContext,
   ): Promise<BatchJobResult> {
-    const baseInterval = request.pollIntervalMs ?? this.config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-    const maxInterval = this.config.maxPollIntervalMs ?? DEFAULT_MAX_POLL_INTERVAL_MS;
-    let interval = baseInterval;
-    let state = await provider.poll(ref, context);
-
-    while (!isTerminalBatchStatus(state.status)) {
-      if (context.signal.aborted) throw context.signal.reason ?? new Error('aborted');
-
-      operation?.report({
-        completed: state.counts?.completed,
-        total: state.counts?.total,
-        message: state.status,
-      });
-
-      await delay(interval, context.signal);
-      // A batch measured in hours does not deserve a fixed short interval; backing off keeps the
-      // poll count sane without delaying a fast batch, which the first few short polls still catch.
-      interval = Math.min(Math.round(interval * 1.5), maxInterval);
-      state = await provider.poll(ref, context);
-    }
+    const state = await pollUntilSettled(() => provider.poll(ref, context), {
+      intervalMs: request.pollIntervalMs ?? this.config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+      maxIntervalMs: this.config.maxPollIntervalMs ?? DEFAULT_MAX_POLL_INTERVAL_MS,
+      signal: context.signal,
+      onState: (current) =>
+        operation?.report({
+          completed: current.counts?.completed,
+          total: current.counts?.total,
+          message: current.status,
+        }),
+    });
 
     const items = state.status === 'completed' ? await provider.results(ref, context) : [];
     const counts = state.counts ?? countItems(items, request.items?.length);
@@ -353,19 +350,4 @@ function sumUsage(items: BatchOutputItem[]): TokenUsage {
     outputTokens += usage.outputTokens;
   }
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
-}
-
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    function onAbort(): void {
-      clearTimeout(timer);
-      resolve();
-    }
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
 }

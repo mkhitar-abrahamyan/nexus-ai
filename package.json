@@ -430,6 +430,46 @@
         "default": "./dist-cjs/embeddings/cache.js"
       }
     },
+    "./embeddings/batch": {
+      "import": {
+        "types": "./dist/embeddings/batch.d.ts",
+        "default": "./dist/embeddings/batch.js"
+      },
+      "require": {
+        "types": "./dist-cjs/embeddings/batch.d.ts",
+        "default": "./dist-cjs/embeddings/batch.js"
+      }
+    },
+    "./embeddings/batch/openai": {
+      "import": {
+        "types": "./dist/embeddings/batch-openai.d.ts",
+        "default": "./dist/embeddings/batch-openai.js"
+      },
+      "require": {
+        "types": "./dist-cjs/embeddings/batch-openai.d.ts",
+        "default": "./dist-cjs/embeddings/batch-openai.js"
+      }
+    },
+    "./embeddings/batch/google": {
+      "import": {
+        "types": "./dist/embeddings/batch-google.d.ts",
+        "default": "./dist/embeddings/batch-google.js"
+      },
+      "require": {
+        "types": "./dist-cjs/embeddings/batch-google.d.ts",
+        "default": "./dist-cjs/embeddings/batch-google.js"
+      }
+    },
+    "./embeddings/batch/mock": {
+      "import": {
+        "types": "./dist/embeddings/batch-mock.d.ts",
+        "default": "./dist/embeddings/batch-mock.js"
+      },
+      "require": {
+        "types": "./dist-cjs/embeddings/batch-mock.d.ts",
+        "default": "./dist-cjs/embeddings/batch-mock.js"
+      }
+    },
     "./operations": {
       "import": {
         "types": "./dist/operations/index.d.ts",
@@ -2032,6 +2072,18 @@
       ],
       "embeddings/cache": [
         "dist-cjs/embeddings/cache.d.ts"
+      ],
+      "embeddings/batch": [
+        "dist-cjs/embeddings/batch.d.ts"
+      ],
+      "embeddings/batch/openai": [
+        "dist-cjs/embeddings/batch-openai.d.ts"
+      ],
+      "embeddings/batch/google": [
+        "dist-cjs/embeddings/batch-google.d.ts"
+      ],
+      "embeddings/batch/mock": [
+        "dist-cjs/embeddings/batch-mock.d.ts"
       ],
       "operations": [
         "dist-cjs/operations/index.d.ts"

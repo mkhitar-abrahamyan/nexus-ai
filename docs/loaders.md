@@ -77,7 +77,7 @@ chunks of its own section, and adding a section leaves the others alone.
 - the `manifest` store;
 - the vector store;
 - any keyword indexes kept in step;
-- the `embed` function and the `embeddingModel`;
+- the `embed` function and the `embeddingModel`, or a `batchEmbed` tier instead of `embed`;
 - the chunking and the batch size.
 
 A `MemoryStore` keeps 10,000 items unless given a larger `maxItems`. A manifest has one item per
@@ -87,7 +87,9 @@ document, so size it to the corpus or keep it in a database.
 run belongs to. `run()` returns an `IngestionReport`, which counts:
 - documents read, unchanged, added, updated, and deleted;
 - chunks embedded, kept, and deleted;
-- documents a resumed run skipped.
+- documents a resumed run skipped;
+- with a batch tier, the provider `batches` submitted, and the `batchesRecovered` from an earlier
+  attempt.
 
 `document()` reads one document's manifest record, and `remove()` removes documents from every
 store.
@@ -118,6 +120,38 @@ const handle = await runner.submit(ingestionExecutor(pipeline, () => loadDirecto
 
 In the test suite, an ingestion of 100,000 documents dies halfway, and its retry embeds no chunk that
 had finished. A second run after ten documents are edited embeds exactly ten chunks.
+
+### Through a provider's batch tier
+
+A large ingestion can embed at a provider's batch price, usually half, if it can wait hours instead
+of seconds. Give `batchEmbed` a `batchEmbedder()` from the
+[embeddings guide](./embeddings.md#a-batch-tier-for-large-jobs) in place of `embed`:
+
+```ts
+import { batchEmbedder, EmbeddingBatchManager } from 'nexus-ai-pro/embeddings/batch';
+import { OpenAIEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/openai';
+
+const batches = new EmbeddingBatchManager({ providers: { openai: new OpenAIEmbeddingBatchProvider({ apiKey }) } });
+const pipeline = createIngestionPipeline({
+  name: 'archive',
+  manifest: store,
+  vectors,
+  batchEmbed: batchEmbedder(batches, { model: 'text-embedding-3-small', size: 20_000 }),
+  batchesInFlight: 4,
+  embeddingModel: 'text-embedding-3-small',
+});
+```
+
+The run gathers the chunks to embed into windows of the embedder's `size`, and submits each window
+as one provider batch. It writes each window once its batch completes, in order, with
+`batchesInFlight` (4) batches outstanding at most. A batch that does not complete, or fails any
+input, fails the run before its window is written.
+
+Inside a durable operation, each batch is recorded the moment it is submitted. A retry rebuilds the
+same windows from the same corpus, and collects a recorded batch instead of submitting it again. Only
+a batch submitted in the instant before a crash, and not yet recorded, can be submitted twice. In the
+test suite, an ingestion of 100,000 chunks dies while it collects its third window, and across both
+attempts each of its ten windows is submitted once.
 
 ## Files
 
