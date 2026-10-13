@@ -295,6 +295,7 @@ import { PostgresEmbeddingCache } from 'nexus-ai-pro/postgres/embedding-cache';
 import { batchEmbedder, EmbeddingBatchManager, type EmbeddingBatchResult } from 'nexus-ai-pro/embeddings/batch';
 import { OpenAIEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/openai';
 import { createIngestionPipeline } from 'nexus-ai-pro/rag/pipeline';
+import { parseRegistryData, withRegistryData, type RegistryData } from 'nexus-ai-pro/models/data';
 import { GoogleEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/google';
 import { MockEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/mock';
 import { SqliteEmbeddingCache } from 'nexus-ai-pro/sqlite/embedding-cache';
@@ -812,6 +813,8 @@ const sharedEmbeddingCaches: EmbeddingCacheStore[] = [
   new PostgresEmbeddingCache({ query: async () => ({ rows: [], rowCount: 0 }) }, { table: 'app.embedding_cache' }),
   new SqliteEmbeddingCache({ run: () => ({ changes: 0 }), all: () => [], exec: () => undefined }),
 ];
+const suppliedRegistry: RegistryData = parseRegistryData('{}');
+const configuredWithData = withRegistryData({ providers: {} }, suppliedRegistry);
 const embeddingBatches = new EmbeddingBatchManager({
   providers: {
     openai: new OpenAIEmbeddingBatchProvider({ apiKey: 'key' }),
@@ -992,6 +995,7 @@ void embeddingVector;
 void resolvedEmbeddingModel;
 void embeddingsWithSharedCache;
 void batchedIngestion;
+void configuredWithData;
 void batchCost;
 void doneChunk;
 void directRealtimeSession;

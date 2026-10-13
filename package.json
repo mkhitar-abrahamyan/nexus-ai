@@ -1440,6 +1440,16 @@
         "default": "./dist-cjs/models/registry.js"
       }
     },
+    "./models/data": {
+      "import": {
+        "types": "./dist/models/data.d.ts",
+        "default": "./dist/models/data.js"
+      },
+      "require": {
+        "types": "./dist-cjs/models/data.d.ts",
+        "default": "./dist-cjs/models/data.js"
+      }
+    },
     "./capabilities": {
       "import": {
         "types": "./dist/capabilities/negotiate.d.ts",
@@ -2345,6 +2355,9 @@
       ],
       "models": [
         "dist-cjs/models/registry.d.ts"
+      ],
+      "models/data": [
+        "dist-cjs/models/data.d.ts"
       ],
       "capabilities": [
         "dist-cjs/capabilities/negotiate.d.ts"

@@ -18,6 +18,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | --- | --- |
 | `nexus scan` | Checks files for secrets, PII, and prompt-injection patterns. |
 | `nexus models` | Lists the bundled model registry. |
+| `nexus models export`, `check`, `refresh` | Write the bundled registry as a file, check a file, and compare one with the providers' own model lists. |
 | `nexus optimize` | Previews token optimization for a request or a prompt file. |
 | `nexus eval` | Runs JSON or JS eval cases. |
 | `nexus eval run`, `compare`, `gate` | Run an evaluation module to an experiment file, compare two, and fail a build only on a regression beyond noise. |
@@ -40,6 +41,21 @@ nexus optimize prompt.txt --model gpt-5.4-mini --max-input-tokens 4000
 
 `nexus scan` exits 1 when it finds something, unless you pass `--no-fail`. It never prints a matched
 value unless you ask with `--reveal-values`, in an interactive terminal.
+
+## Registry data
+
+```bash
+nexus models export --out registry.json
+nexus models check registry.json
+nexus models refresh --file registry.json --providers openai,anthropic,google
+```
+
+`export` writes the bundled registry as a file to keep and update. `check` validates a file, lists
+every problem with its path, and exits 1 when there is one; for a valid file it shows what differs
+from the bundled data. `refresh` reads each provider's model list with the key in its usual variable,
+such as `OPENAI_API_KEY`, and reports models the data lacks and models the provider no longer lists.
+A provider without a key is skipped, and `--strict` exits 1 when anything differs. Prices are in no
+provider's list, so they stay a check against its pricing page.
 
 ## Evaluation
 

@@ -87,6 +87,7 @@ const expectedSubpaths = [
   './embeddings/mock',
   './embeddings/models',
   './embeddings/cache',
+  './models/data',
   './embeddings/batch',
   './embeddings/batch/openai',
   './embeddings/batch/google',

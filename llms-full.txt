@@ -1422,10 +1422,47 @@ It applies when a model declares no cached-read or cache-write price of its own.
 | `checkRegistryFreshness()` | `RegistryFreshness`: when the data was verified, its age, the window (180 days), whether it is stale, and entries older than the window. |
 | `assertRegistryFreshness()` | Throws when the data is stale, for a release check. |
 
+## Registry data you supply
+
+Prices and models change faster than a runtime is released. Keep the registry as a file of your own,
+check it, and hand it to the client: the next call is priced from it. Nothing is fetched from a
+server; the file lives in your repository, a volume, or your configuration.
+
+```ts
+import { readFile } from 'node:fs/promises';
+import { NexusAI } from 'nexus-ai-pro';
+import { parseRegistryData, withRegistryData } from 'nexus-ai-pro/models/data';
+
+const data = parseRegistryData(await readFile('./registry.json', 'utf8'));
+const ai = new NexusAI(withRegistryData({ providers }, data));
+```
+
+A `RegistryData` file declares its format, `REGISTRY_DATA_FORMAT` (`nexus-registry/1`), its own
+`version`, when it was verified, and where. It holds completion `models`, `aliases`, and
+`aliasMetadata`, and `embeddingModels` and `embeddingAliases`. Every entry has the shape of a bundled
+one.
+
+| Function | Does |
+| --- | --- |
+| `bundledRegistryData()` | The data this release bundles, as a file to start from or compare with. |
+| `checkRegistryData()` | Every problem with a file, each with its path, such as `models.gpt-5.4-mini.costPer1kInput`; empty when it is valid. An alias must name a model the file or the bundled data has. |
+| `parseRegistryData()` | Reads JSON text or a parsed value, and throws a `RegistryDataError` listing every problem. |
+| `withRegistryData()` | A client configuration with the file layered in: your own `models.registry` entries first, then the file's, then the bundled ones. Embedding entries go to `embeddings.models` the same way. |
+| `diffRegistryData()` | A `RegistryDiff`: models added and removed, each changed model's `RegistryFieldChange` list, and aliases moved. |
+| `registryDataAgeDays()` | How many days old a file is. |
+
+`withRegistryData()` also sets `models.verifiedAt`, so `checkRegistryFreshness()` and `nexus doctor`
+measure the registry's age from the file. `nexus models export`, `check`, and `refresh` work with the
+file from the command line; the [CLI guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md#registry-data) shows them. In the test suite, a
+price raised tenfold in a supplied file makes the next call cost ten times as much.
+
 ## Limitations
 
 - Bundled prices and capabilities are defaults, verified on the date the registry records. A
-  provider can change either between releases; override entries with `models.registry`.
+  provider can change either between releases; supply newer registry data, or override entries with
+  `models.registry`.
+- No provider publishes prices in its model list, so `nexus models refresh` finds new and retired
+  models, and a changed price is still checked against the provider's pricing page.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
 
@@ -11585,6 +11622,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | --- | --- |
 | `nexus scan` | Checks files for secrets, PII, and prompt-injection patterns. |
 | `nexus models` | Lists the bundled model registry. |
+| `nexus models export`, `check`, `refresh` | Write the bundled registry as a file, check a file, and compare one with the providers' own model lists. |
 | `nexus optimize` | Previews token optimization for a request or a prompt file. |
 | `nexus eval` | Runs JSON or JS eval cases. |
 | `nexus eval run`, `compare`, `gate` | Run an evaluation module to an experiment file, compare two, and fail a build only on a regression beyond noise. |
@@ -11607,6 +11645,21 @@ nexus optimize prompt.txt --model gpt-5.4-mini --max-input-tokens 4000
 
 `nexus scan` exits 1 when it finds something, unless you pass `--no-fail`. It never prints a matched
 value unless you ask with `--reveal-values`, in an interactive terminal.
+
+## Registry data
+
+```bash
+nexus models export --out registry.json
+nexus models check registry.json
+nexus models refresh --file registry.json --providers openai,anthropic,google
+```
+
+`export` writes the bundled registry as a file to keep and update. `check` validates a file, lists
+every problem with its path, and exits 1 when there is one; for a valid file it shows what differs
+from the bundled data. `refresh` reads each provider's model list with the key in its usual variable,
+such as `OPENAI_API_KEY`, and reports models the data lacks and models the provider no longer lists.
+A provider without a key is skipped, and `--strict` exits 1 when anything differs. Prices are in no
+provider's list, so they stay a check against its pricing page.
 
 ## Evaluation
 
@@ -11877,9 +11930,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/mistral` | 88 KB | 26% | none |
 | `nexus-ai-pro/providers/azure-openai` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/llamacpp` | 87 KB | 25% | none |
+| `nexus-ai-pro/providers/lmstudio` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/openrouter` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
-| `nexus-ai-pro/providers/lmstudio` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
 | `nexus-ai-pro/postgres` | 84 KB | 24% | none |
 | `nexus-ai-pro/graph` | 81 KB | 24% | none |
@@ -11895,6 +11948,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/server/deployments` | 54 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
+| `nexus-ai-pro/models/data` | 51 KB | 15% | none |
 | `nexus-ai-pro/evaluate` | 46 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
@@ -11956,10 +12010,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
 | `nexus-ai-pro/protocols/ag-ui` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
+| `nexus-ai-pro/doctor` | 14 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
-| `nexus-ai-pro/doctor` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/rag/redis` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 3% | none |
@@ -12211,7 +12265,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 171 entry points, 135 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 172 entry points, 136 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

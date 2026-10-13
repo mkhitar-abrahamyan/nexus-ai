@@ -1,6 +1,6 @@
 # Providers, routing, and the model registry
 
-<!-- covers: ./providers ./providers/anthropic ./providers/azure-openai ./providers/base ./providers/cohere ./providers/deepseek ./providers/errors ./providers/google ./providers/groq ./providers/llamacpp ./providers/lmstudio ./providers/mistral ./providers/ollama ./providers/openai ./providers/openrouter ./providers/type-guards ./models ./router -->
+<!-- covers: ./providers ./providers/anthropic ./providers/azure-openai ./providers/base ./providers/cohere ./providers/deepseek ./providers/errors ./providers/google ./providers/groq ./providers/llamacpp ./providers/lmstudio ./providers/mistral ./providers/ollama ./providers/openai ./providers/openrouter ./providers/type-guards ./models ./models/data ./router -->
 <!-- sources: src/router -->
 
 Twelve completion providers behind one contract, the routing that chooses between them, and the model
@@ -271,10 +271,47 @@ It applies when a model declares no cached-read or cache-write price of its own.
 | `checkRegistryFreshness()` | `RegistryFreshness`: when the data was verified, its age, the window (180 days), whether it is stale, and entries older than the window. |
 | `assertRegistryFreshness()` | Throws when the data is stale, for a release check. |
 
+## Registry data you supply
+
+Prices and models change faster than a runtime is released. Keep the registry as a file of your own,
+check it, and hand it to the client: the next call is priced from it. Nothing is fetched from a
+server; the file lives in your repository, a volume, or your configuration.
+
+```ts
+import { readFile } from 'node:fs/promises';
+import { NexusAI } from 'nexus-ai-pro';
+import { parseRegistryData, withRegistryData } from 'nexus-ai-pro/models/data';
+
+const data = parseRegistryData(await readFile('./registry.json', 'utf8'));
+const ai = new NexusAI(withRegistryData({ providers }, data));
+```
+
+A `RegistryData` file declares its format, `REGISTRY_DATA_FORMAT` (`nexus-registry/1`), its own
+`version`, when it was verified, and where. It holds completion `models`, `aliases`, and
+`aliasMetadata`, and `embeddingModels` and `embeddingAliases`. Every entry has the shape of a bundled
+one.
+
+| Function | Does |
+| --- | --- |
+| `bundledRegistryData()` | The data this release bundles, as a file to start from or compare with. |
+| `checkRegistryData()` | Every problem with a file, each with its path, such as `models.gpt-5.4-mini.costPer1kInput`; empty when it is valid. An alias must name a model the file or the bundled data has. |
+| `parseRegistryData()` | Reads JSON text or a parsed value, and throws a `RegistryDataError` listing every problem. |
+| `withRegistryData()` | A client configuration with the file layered in: your own `models.registry` entries first, then the file's, then the bundled ones. Embedding entries go to `embeddings.models` the same way. |
+| `diffRegistryData()` | A `RegistryDiff`: models added and removed, each changed model's `RegistryFieldChange` list, and aliases moved. |
+| `registryDataAgeDays()` | How many days old a file is. |
+
+`withRegistryData()` also sets `models.verifiedAt`, so `checkRegistryFreshness()` and `nexus doctor`
+measure the registry's age from the file. `nexus models export`, `check`, and `refresh` work with the
+file from the command line; the [CLI guide](./cli.md#registry-data) shows them. In the test suite, a
+price raised tenfold in a supplied file makes the next call cost ten times as much.
+
 ## Limitations
 
 - Bundled prices and capabilities are defaults, verified on the date the registry records. A
-  provider can change either between releases; override entries with `models.registry`.
+  provider can change either between releases; supply newer registry data, or override entries with
+  `models.registry`.
+- No provider publishes prices in its model list, so `nexus models refresh` finds new and retired
+  models, and a changed price is still checked against the provider's pricing page.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
 
@@ -292,7 +329,7 @@ specific entry point that provides it.
 | `AliasStage` | type | Publication stage of a model alias. |
 | `assertRegistryFreshness` | function | Throws when the bundled registry has not been verified inside the configured window. |
 | `CacheTtl` | type | Lifetime of a provider-side prompt cache entry. |
-| `checkRegistryFreshness` | function | Measures how old the bundled registry data is. |
+| `checkRegistryFreshness` | function | Measures how old the registry data is: the supplied data's, when `models.verifiedAt` says when it was checked, otherwise the bundled data's. |
 | `DEFAULT_CACHE_PRICING` | constant | Fallback cache pricing as a multiple of the standard input rate, applied when a model does not declare `costPer1kCachedInput` or `costPer1kCacheWrite`. |
 | `describeModel` | function | Reports where a model entry came from and when it was last checked. |
 | `getAliasMetadata` | function | Stage and provenance for every alias, with application-registered metadata layered on top. |
@@ -320,6 +357,22 @@ specific entry point that provides it.
 | `resolveModelAlias` | function | Resolves an alias, checking application aliases before bundled ones. |
 | `resolveProvider` | function | The provider a model name belongs to, from its prefix, or `null` when the name gives no clue. |
 | `RoutingModelPreference` | type | A model the router should prefer, optionally weighted above others. |
+
+### `nexus-ai-pro/models/data`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `bundledRegistryData` | function | The data this release bundles, as a file: the starting point for one an application keeps and updates itself, or a baseline to compare one with. |
+| `checkRegistryData` | function | Every problem with a value as registry data, each with the path of its field; empty when it is valid. |
+| `diffRegistryData` | function | What changed from one version of registry data to another: models, fields, and aliases. |
+| `parseRegistryData` | function | Reads registry data from JSON text or a parsed value, throwing `RegistryDataError` with every problem. |
+| `REGISTRY_DATA_FORMAT` | constant | The format a registry data file declares, which a later release reads too. |
+| `RegistryData` | interface | Model and embedding registry data, as a file. |
+| `registryDataAgeDays` | function | How many whole days old registry data is. |
+| `RegistryDataError` | class | Raised by `parseRegistryData()` for a file that is not valid registry data, naming every problem. |
+| `RegistryDiff` | interface | How two versions of registry data differ, for completion and embedding models alike. |
+| `RegistryFieldChange` | interface | One field that differs between two versions of a model's entry. |
+| `withRegistryData` | function | A client configuration with registry data layered in: the configuration's own entries first, then the file's, then the bundled ones. |
 
 ### `nexus-ai-pro/providers/anthropic`
 

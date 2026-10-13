@@ -67,6 +67,11 @@ New and stable:
   `StreamAssetInput`, `AssetByteRange`, `AssetStreamOptions`, `StreamAssetDescriptor`, and
   `PutAssetStreamOptions`; `S3LikeClient.putObjectStream()` and `getObjectStream()`, both optional.
   The images family stays experimental, and these with it;
+- `nexus-ai-pro/models/data`: `RegistryData`, `REGISTRY_DATA_FORMAT`, `checkRegistryData()`,
+  `parseRegistryData()` with `RegistryDataError`, `bundledRegistryData()`, `withRegistryData()`,
+  `diffRegistryData()` with `RegistryDiff` and `RegistryFieldChange`, and `registryDataAgeDays()`;
+  `ModelRegistryConfig.verifiedAt` and `DoctorOptions.models`; the commands `nexus models export`,
+  `check`, and `refresh`. The `nexus-registry/1` format is read by every 2.x release;
 - `IngestionPipelineOptions.batchEmbed` and `batchesInFlight`, and `IngestionReport.batches` and
   `batchesRecovered`. `IngestionPipelineOptions.embed` is optional when `batchEmbed` is given;
 - `nexus-ai-pro/postgres/embedding-cache`: `PostgresEmbeddingCache`, its options, and

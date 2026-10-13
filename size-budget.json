@@ -75,6 +75,7 @@
     "./mcp": 22,
     "./mcp/registry": 24,
     "./models": 42,
+    "./models/data": 58,
     "./next": 2,
     "./operations": 62,
     "./operations/adapters": 22,

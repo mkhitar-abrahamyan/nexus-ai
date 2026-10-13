@@ -198,7 +198,8 @@ const DEFAULT_MAX_AGE_DAYS = 180;
 const MS_PER_DAY = 86_400_000;
 
 /**
- * Measures how old the bundled registry data is.
+ * Measures how old the registry data is: the supplied data's, when `models.verifiedAt` says when it
+ * was checked, otherwise the bundled data's.
  *
  * Model metadata and pricing drift silently as providers change their lineups, so a release check
  * can fail on this rather than discovering the drift from a wrong cost estimate in production.
@@ -208,7 +209,8 @@ export function checkRegistryFreshness(
 ): RegistryFreshness {
   const now = options.now || new Date();
   const maxAgeDays = options.maxAgeDays ?? options.config?.models?.maxAgeDays ?? DEFAULT_MAX_AGE_DAYS;
-  const baseline = Date.parse(REGISTRY_PROVENANCE.verifiedAt);
+  const verifiedAt = options.config?.models?.verifiedAt ?? REGISTRY_PROVENANCE.verifiedAt;
+  const baseline = Date.parse(verifiedAt);
   const ageDays = Math.floor((now.getTime() - baseline) / MS_PER_DAY);
 
   const staleModels: string[] = [];
@@ -219,7 +221,7 @@ export function checkRegistryFreshness(
   }
 
   return {
-    verifiedAt: REGISTRY_PROVENANCE.verifiedAt,
+    verifiedAt,
     ageDays,
     stale: ageDays > maxAgeDays || staleModels.length > 0,
     maxAgeDays,

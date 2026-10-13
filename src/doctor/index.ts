@@ -7,6 +7,7 @@
  * is loaded only when its check runs, so an application can call `diagnose()` at boot or from a
  * health endpoint.
  */
+import type { NexusAIConfig } from '../types/config.js';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { MigrationStatus, SchemaMigration } from '../utils/schema-migrations.js';
@@ -87,8 +88,13 @@ export interface DoctorOptions {
   maxQueueAgeMs?: number;
   /** A client, read for provider health. */
   ai?: { getProviderHealth(): ReadonlyArray<{ providerName: string; healthy: boolean; stale?: boolean }> };
-  /** How old the bundled model registry may be, in days. Defaults to the registry's own window. */
+  /** How old the model registry may be, in days. Defaults to the registry's own window. */
   registryMaxAgeDays?: number;
+  /**
+   * The application's model registry configuration, such as `withRegistryData()` produced, so the
+   * registry's age is measured from the data it supplies rather than the bundled data.
+   */
+  models?: NexusAIConfig['models'];
   /** How the application is deployed. */
   deployment?: DoctorDeployment;
   /** Replaces the clock, for tests. */
@@ -156,7 +162,7 @@ export async function diagnose(options: DoctorOptions = {}): Promise<DoctorRepor
   await run('node', 'Node.js version', () => nodeCheck(options.nodeVersion ?? process.versions.node));
   await run('peers', 'Optional packages', () => peersCheck(options.resolvePackage ?? defaultResolver()));
   await run('credentials', 'Provider credentials', () => credentialsCheck(options.env ?? process.env));
-  await run('registry', 'Model registry age', () => registryCheck(now(), options.registryMaxAgeDays));
+  await run('registry', 'Model registry age', () => registryCheck(now(), options.registryMaxAgeDays, options.models));
   await run('database', 'Database connectivity', () => databaseCheck(options.database));
   await run('migrations', 'Schema migrations', () => migrationsCheck(options.database));
   await run('redis', 'Redis', () => redisCheck(options.redis));
@@ -212,14 +218,23 @@ function credentialsCheck(env: Record<string, string | undefined>): Omit<DoctorC
       };
 }
 
-async function registryCheck(now: Date, maxAgeDays: number | undefined): Promise<Omit<DoctorCheck, 'id' | 'title'>> {
+async function registryCheck(
+  now: Date,
+  maxAgeDays: number | undefined,
+  models: NexusAIConfig['models'] | undefined,
+): Promise<Omit<DoctorCheck, 'id' | 'title'>> {
   const { checkRegistryFreshness } = await import('../models/registry.js');
-  const freshness = checkRegistryFreshness({ now, ...(maxAgeDays === undefined ? {} : { maxAgeDays }) });
+  const freshness = checkRegistryFreshness({
+    now,
+    ...(maxAgeDays === undefined ? {} : { maxAgeDays }),
+    ...(models ? { config: { models } } : {}),
+  });
+  const which = models?.verifiedAt ? 'supplied' : 'bundled';
   return freshness.stale
     ? {
         status: 'warn',
-        detail: `The bundled registry was verified ${freshness.ageDays} days ago (${freshness.verifiedAt}), past its ${freshness.maxAgeDays}-day window.`,
-        hint: 'Upgrade nexus-ai-pro, or override stale entries with models.registry.',
+        detail: `The ${which} registry was verified ${freshness.ageDays} days ago (${freshness.verifiedAt}), past its ${freshness.maxAgeDays}-day window.`,
+        hint: 'Supply newer registry data with withRegistryData(), checked by nexus models check, or upgrade nexus-ai-pro.',
       }
     : { status: 'ok', detail: `Verified ${freshness.ageDays} days ago (${freshness.verifiedAt}).` };
 }

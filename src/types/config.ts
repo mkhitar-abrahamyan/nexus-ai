@@ -265,6 +265,11 @@ export interface ModelRegistryConfig {
    * Used by `assertRegistryFreshness()`; it never affects a running request.
    */
   maxAgeDays?: number;
+  /**
+   * When supplied registry data was last checked, as an ISO date: freshness is measured from it
+   * instead of the bundled data's. `withRegistryData()` sets it from the file.
+   */
+  verifiedAt?: string;
 }
 
 export interface CacheConfig {

@@ -106,9 +106,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/mistral` | 88 KB | 26% | none |
 | `nexus-ai-pro/providers/azure-openai` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/llamacpp` | 87 KB | 25% | none |
+| `nexus-ai-pro/providers/lmstudio` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/openrouter` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
-| `nexus-ai-pro/providers/lmstudio` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
 | `nexus-ai-pro/postgres` | 84 KB | 24% | none |
 | `nexus-ai-pro/graph` | 81 KB | 24% | none |
@@ -124,6 +124,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/server/deployments` | 54 KB | 16% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
+| `nexus-ai-pro/models/data` | 51 KB | 15% | none |
 | `nexus-ai-pro/evaluate` | 46 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
@@ -185,10 +186,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
 | `nexus-ai-pro/protocols/ag-ui` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
+| `nexus-ai-pro/doctor` | 14 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
-| `nexus-ai-pro/doctor` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/rag/redis` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 3% | none |

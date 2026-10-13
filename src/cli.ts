@@ -51,9 +51,17 @@ async function main(): Promise<void> {
     case 'scan':
       await runScan(parsed);
       return;
-    case 'models':
+    case 'models': {
+      const [subcommand, ...args] = parsed.positionals;
+      if (subcommand) {
+        // Loaded on demand, so listing models never loads the registry data tools.
+        const { runModelsCommand } = await import('./cli/models.js');
+        await runModelsCommand(subcommand, { ...parsed, positionals: args });
+        return;
+      }
       runModels(parsed);
       return;
+    }
     case 'eval': {
       const [subcommand, ...args] = parsed.positionals;
       if (subcommand === 'run' || subcommand === 'compare' || subcommand === 'gate') {
@@ -450,6 +458,9 @@ function printHelp(): void {
 Usage:
   nexus scan [paths...] [--json] [--max-bytes 1000000] [--no-fail] [--reveal-values]
   nexus models [--provider openai] [--json]
+  nexus models export [--out registry.json]
+  nexus models check <registry.json> [--json]
+  nexus models refresh [--file registry.json] [--providers openai,anthropic] [--strict] [--json]
   nexus eval <eval.json|eval.mjs> [--json]
   nexus eval run <eval.mjs> [--out experiment.json] [--experiments dir] [--baseline baseline.json] [--fail-on-regression]
                  [--name n] [--concurrency 4] [--repetitions 1] [--timeout-ms n] [--json]
