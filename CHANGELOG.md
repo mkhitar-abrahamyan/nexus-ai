@@ -4,6 +4,21 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- `RedisVectorStore` failed on every command with an ioredis client, which also has a
+  `sendCommand()` that takes its own command object; it now uses `call()` whenever a client has it.
+  It also reads a search reply in RESP3, which ioredis 6 speaks by default, as well as RESP2.
+- `WeaviateVectorStore` failed a search whose filter value had another type than its property, such
+  as `'3'` on a number. It now chooses the operand from the collection's schema, read once, so such a
+  filter matches nothing, as in every other store, and an `int` property gets `valueInt`.
+
+### Proof
+
+- The live vector store contract passes against Qdrant, Weaviate, Chroma, and Redis Stack, with
+  ioredis 6 in RESP3 and RESP2. The stand-ins now fail as those servers do, so the unit tests reproduce
+  both failures above.
+
 ## [2.7.0] - 2026-10-12
 
 Agents that do more, and evaluation that runs on its own.

@@ -152,6 +152,27 @@ async function stores(): Promise<Array<[string, VectorStore]>> {
   });
   await redis.migrate();
   await redis.migrate();
+  // Each client shape and each way a search reply arrives: RESP2, and RESP3 as an object or a Map.
+  const redisShapes = await Promise.all(
+    (
+      [
+        ['redis (node-redis, RESP2)', { client: 'node-redis' }],
+        ['redis (ioredis, RESP2)', { reply: 'resp2' }],
+        ['redis (RESP3 objects)', { client: 'node-redis', reply: 'resp3-object' }],
+        ['redis (RESP3 Map)', { client: 'node-redis', reply: 'resp3-map' }],
+      ] as const
+    ).map(async ([name, shape]) => {
+      const store = new RedisVectorStore(redisStub(shape).client, {
+        dimensions: DIMENSIONS,
+        embed,
+        index: `idx-${++tables}`,
+        prefix: `chunk:${tables}:`,
+        filterFields: ['tenant', 'page'],
+      });
+      await store.migrate();
+      return [name, store] as [string, VectorStore];
+    }),
+  );
   const pinecone = new PineconeVectorStore({
     host: 'docs-abc.svc.pinecone.test',
     apiKey: 'pc-key',
@@ -183,6 +204,7 @@ async function stores(): Promise<Array<[string, VectorStore]>> {
     ['sqlite (scan)', scan],
     ['sqlite (sqlite-vec)', sqliteVec],
     ['redis', redis],
+    ...redisShapes,
     ['pinecone', pinecone],
     ['weaviate', weaviate],
     ['chroma', chroma],
@@ -277,6 +299,56 @@ test('the SQLite migration is idempotent and the Redis store refuses a filter it
     () => new RedisVectorStore(redisStub().client, { dimensions: 4, filterFields: ['bad field'] }),
     /filter field/,
   );
+});
+
+test('a Weaviate filter is typed by the schema, which is read once and again only for a new property', async () => {
+  const stub = weaviateStub();
+  const requests: string[] = [];
+  const fetch: typeof globalThis.fetch = (input, init) => {
+    requests.push(`${init?.method ?? 'GET'} ${new URL(String(input)).pathname}`);
+    return stub.fetch(input, init);
+  };
+  const store = new WeaviateVectorStore({
+    url: 'http://w.test',
+    collection: 'Typed',
+    dimensions: DIMENSIONS,
+    embed,
+    fetch,
+  });
+  // A collection made elsewhere: `page` is an int, which takes `valueInt` rather than `valueNumber`.
+  stub.classes.set('Typed', {
+    properties: [
+      { name: 'chunkId', dataType: ['text'] },
+      { name: 'meta_page', dataType: ['int'] },
+    ],
+    objects: new Map(),
+  });
+  await store.add([
+    { id: 'a', content: 'refunds on page three', metadata: { page: 3 } },
+    { id: 'b', content: 'refunds on page four', metadata: { page: 4 } },
+  ]);
+  const schemaReads = () => requests.filter((request) => request === 'GET /v1/schema/Typed').length;
+
+  await store.search('refunds');
+  assert.equal(schemaReads(), 0, 'an unfiltered search never reads the schema');
+  assert.deepEqual(
+    (await store.search('refunds', { filter: { page: 3 } })).map((result) => result.id),
+    ['a'],
+  );
+  const searches = requests.length;
+  assert.deepEqual(await store.search('refunds', { filter: { page: 3.5 } }), []);
+  assert.deepEqual(await store.search('refunds', { filter: { page: '3' } }), []);
+  assert.equal(requests.length, searches, 'a value that cannot match its property is answered without a request');
+  assert.equal(schemaReads(), 1, 'the schema is read once');
+
+  stub.classes.get('Typed')?.properties.push({ name: 'meta_tenant', dataType: ['text'] });
+  await store.add([{ id: 'c', content: 'refunds for acme', metadata: { tenant: 'acme', page: 5 } }]);
+  assert.deepEqual(
+    (await store.search('refunds', { filter: { tenant: 'acme' } })).map((result) => result.id),
+    ['c'],
+    'a property added after the schema was read is found',
+  );
+  assert.equal(schemaReads(), 2);
 });
 
 test('the REST stores authenticate and report errors with their status', async () => {

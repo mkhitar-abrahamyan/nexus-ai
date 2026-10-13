@@ -224,7 +224,8 @@ await store.migrate();
 ### Redis
 
 `RedisVectorStore` keeps each chunk as a hash and searches a RediSearch vector index. The client is a
-`RedisVectorLikeClient`: ioredis, with `call()`, or node-redis, with `sendCommand()`.
+`RedisVectorLikeClient`: ioredis, with `call()`, or node-redis, with `sendCommand()`. Either protocol
+works: RESP2, or RESP3, which ioredis 6 speaks by default.
 
 `RedisVectorStoreOptions` sets the `dimensions`, the `index` and key `prefix`, the `algorithm` (`HNSW`,
 or exact `FLAT`), and the `filterFields`. RediSearch can only filter on fields declared in the index.
@@ -243,6 +244,11 @@ a `namespace`, the `apiVersion` header, and the upsert `batchSize` (100). A fail
 `WeaviateVectorStore` brings its own vectors to a collection with no vectorizer and cosine distance.
 `migrate()` creates the collection and adds a property for each field you filter on. Each field's type
 is a `WeaviateFieldType`: `text`, `number`, or `boolean`.
+
+A filter follows the collection's schema, which the store reads the first time a filter needs it. A
+value of another type than its property matches nothing, as in every other store, and costs no
+request. A property added later, by `migrate()` or by Weaviate's auto-schema, is picked up when a
+filter first names it. A collection made elsewhere with `int` properties works too.
 
 `WeaviateVectorStoreOptions` takes the `url`, the `collection` (`NexusChunk`), an `apiKey` sent as a
 bearer token, and the usual `fetch`, `headers`, and `timeoutMs`. Errors raise a `WeaviateError`,

@@ -137,34 +137,43 @@ if (env.NEXUS_LIVE_CHROMA_URL) {
 
 if (env.NEXUS_LIVE_REDIS_URL) {
   const url = env.NEXUS_LIVE_REDIS_URL;
-  stores.push({
-    name: 'redis',
-    create: async () => {
-      const specifier = 'ioredis';
-      const { default: Redis } = (await import(specifier)) as {
-        default: new (url: string) => { call(...args: unknown[]): Promise<unknown>; quit(): Promise<unknown> };
-      };
-      const client = new Redis(url);
-      const index = `${run}:idx`;
-      const store = new RedisVectorStore(client as never, {
-        dimensions: DIMENSIONS,
-        embed,
-        index,
-        prefix: `${run}:`,
-        filterFields: ['tenant', 'page'],
-      });
-      await store.migrate();
-      return {
-        store,
-        typedFilters: true,
-        settle: wait(settleMs(0)),
-        cleanup: async () => {
-          await client.call('FT.DROPINDEX', index, 'DD');
-          await client.quit();
-        },
-      };
-    },
-  });
+  // ioredis 6 speaks RESP3 by default, where a search replies with a map; RESP2 replies with an array.
+  for (const [name, protocol] of [
+    ['redis', undefined],
+    ['redis (RESP2)', 2],
+  ] as const) {
+    stores.push({
+      name,
+      create: async () => {
+        const specifier = 'ioredis';
+        const { default: Redis } = (await import(specifier)) as {
+          default: new (
+            url: string,
+            options: { protocol?: number },
+          ) => { call(...args: unknown[]): Promise<unknown>; quit(): Promise<unknown> };
+        };
+        const client = new Redis(url, protocol ? { protocol } : {});
+        const index = `${run}:${protocol ?? 'default'}:idx`;
+        const store = new RedisVectorStore(client as never, {
+          dimensions: DIMENSIONS,
+          embed,
+          index,
+          prefix: `${run}:${protocol ?? 'default'}:`,
+          filterFields: ['tenant', 'page'],
+        });
+        await store.migrate();
+        return {
+          store,
+          typedFilters: true,
+          settle: wait(settleMs(0)),
+          cleanup: async () => {
+            await client.call('FT.DROPINDEX', index, 'DD');
+            await client.quit();
+          },
+        };
+      },
+    });
+  }
 }
 
 if (stores.length === 0) {

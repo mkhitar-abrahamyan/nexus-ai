@@ -9,8 +9,19 @@ type Json = Record<string, unknown>;
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 const cosine = (a: number[], b: number[]) => cosineSimilarity(normalizeVector(a), normalizeVector(b));
 
-/** Redis with RediSearch: FT.CREATE, HSET, DEL, and KNN FT.SEARCH with tag filters. */
-export function redisStub() {
+/**
+ * Redis with RediSearch: FT.CREATE, HSET, DEL, and KNN FT.SEARCH with tag filters.
+ *
+ * The client is shaped as ioredis's by default: `call()`, plus a `sendCommand()` that takes an ioredis
+ * command object and fails on an array, as ioredis does. `'node-redis'` gives only `sendCommand()`,
+ * taking an array. A search answers as the protocol does: RESP2's `[total, key, fields, ...]`, or
+ * RESP3's map as a flat array (ioredis 6's default, and this stub's for ioredis), an object, or a `Map`.
+ */
+export function redisStub(
+  options: { client?: 'ioredis' | 'node-redis'; reply?: 'resp2' | 'resp3' | 'resp3-object' | 'resp3-map' } = {},
+) {
+  const shape = options.client ?? 'ioredis';
+  const protocol = options.reply ?? (shape === 'ioredis' ? 'resp3' : 'resp2');
   const hashes = new Map<string, Map<string, string | Buffer>>();
   const indexes = new Map<string, { prefix: string }>();
   const commands: string[] = [];
@@ -52,29 +63,52 @@ export function redisStub() {
           return { key, hash, distance: 1 - cosine(query, vector) };
         })
         .sort((a, b) => a.distance - b.distance)
-        .slice(0, Number(k));
-      return [
-        hits.length,
-        ...hits.flatMap(({ key, hash, distance }) => [
+        .slice(0, Number(k))
+        .map(({ key, hash, distance }) => ({
           key,
-          [
-            'id',
-            hash.get('id'),
-            'content',
-            hash.get('content'),
-            'source',
-            hash.get('source'),
-            'metadata',
-            hash.get('metadata'),
+          fields: [
+            ...['id', 'content', 'source', 'metadata'].flatMap((field) => [field, hash.get(field)]),
             'distance',
             String(distance),
           ],
-        ]),
-      ];
+        }));
+      if (protocol === 'resp2') return [hits.length, ...hits.flatMap(({ key, fields }) => [key, fields])];
+      // RESP3: a map, which a client hands over as a flat array, a plain object, or a Map.
+      const map = (pairs: unknown[]): unknown => {
+        if (protocol === 'resp3') return pairs;
+        const entries: Array<[string, unknown]> = [];
+        for (let index = 0; index + 1 < pairs.length; index += 2)
+          entries.push([String(pairs[index]), pairs[index + 1]]);
+        return protocol === 'resp3-map' ? new Map(entries) : Object.fromEntries(entries);
+      };
+      return map([
+        'attributes',
+        [],
+        'format',
+        'STRING',
+        'results',
+        hits.map(({ key, fields }) => map(['id', key, 'extra_attributes', map(fields), 'values', []])),
+        'total_results',
+        hits.length,
+        'warning',
+        [],
+      ]);
     }
     throw new Error(`unknown command ${command}`);
   };
-  return { client: { call }, hashes, commands };
+  const client =
+    shape === 'node-redis'
+      ? { sendCommand: (args: Array<string | Buffer>) => call(args[0] as string, ...args.slice(1)) }
+      : {
+          call,
+          sendCommand: async (command: { setReplyContext?: unknown }) => {
+            if (typeof command.setReplyContext !== 'function') {
+              throw new TypeError('command.setReplyContext is not a function');
+            }
+            throw new Error('the stub does not take ioredis command objects');
+          },
+        };
+  return { client, hashes, commands };
 }
 
 /** Pinecone's data plane: upsert, query with `$eq` and `$and` filters, and delete. */
@@ -177,12 +211,16 @@ export function chromaStub() {
 
 /**
  * Weaviate's REST schema and batch APIs, and the GraphQL `Get` with `nearVector` and typed `Equal`
- * filters the store sends. Filters are typed as Weaviate's are: `valueText` matches only text.
+ * filters the store sends. Filters are checked as Weaviate checks them: an operand of another type than
+ * the property's, or a property the class lacks, fails the whole query.
  */
 export function weaviateStub() {
   const classes = new Map<
     string,
-    { properties: Array<{ name: string }>; objects: Map<string, { vector: number[]; properties: Json }> }
+    {
+      properties: Array<{ name: string; dataType?: string[] }>;
+      objects: Map<string, { vector: number[]; properties: Json }>;
+    }
   >();
   const fetch = async (input: string | URL | Request, init: RequestInit = {}) => {
     const path = new URL(String(input)).pathname;
@@ -229,16 +267,28 @@ export function weaviateStub() {
       const vector = JSON.parse(/nearVector: \{vector: (\[[^\]]*\])\}/.exec(query)?.[1] ?? '[]') as number[];
       const limit = Number(/limit: (\d+)/.exec(query)?.[1]);
       const conditions = [
-        ...query.matchAll(/\{path: \["(\w+)"\], operator: Equal, (valueText|valueNumber|valueBoolean): ([^}]+)\}/g),
+        ...query.matchAll(
+          /\{path: \["(\w+)"\], operator: Equal, (valueText|valueNumber|valueInt|valueBoolean): ([^}]+)\}/g,
+        ),
       ].map(([, field, kind, raw]) => ({ field, kind, value: JSON.parse(raw) as unknown }));
-      const typeOf = { valueText: 'string', valueNumber: 'number', valueBoolean: 'boolean' } as Record<string, string>;
+      const operands: Record<string, string> = {
+        text: 'valueText',
+        number: 'valueNumber',
+        int: 'valueInt',
+        boolean: 'valueBoolean',
+      };
+      for (const { field, kind } of conditions) {
+        const dataType = target.properties.find((property) => property.name === field)?.dataType?.[0];
+        if (!dataType) {
+          return json(200, { errors: [{ message: `no such prop with name '${field}' found in class '${name}'` }] });
+        }
+        if (operands[dataType] !== kind) {
+          const message = `invalid 'where' filter: data type filter cannot use "${kind}" on type "${dataType}", use "${operands[dataType]}" instead`;
+          return json(200, { errors: [{ message }] });
+        }
+      }
       const hits = [...target.objects.values()]
-        .filter((object) =>
-          conditions.every(
-            ({ field, kind, value }) =>
-              typeof object.properties[field] === typeOf[kind] && object.properties[field] === value,
-          ),
-        )
+        .filter((object) => conditions.every(({ field, value }) => object.properties[field] === value))
         .map((object) => ({ object, distance: 1 - cosine(vector, object.vector) }))
         .sort((a, b) => a.distance - b.distance)
         .slice(0, limit)

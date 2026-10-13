@@ -182,6 +182,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/google` | 14 KB | 4% | none |
 | `nexus-ai-pro/protocols/ag-ui` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
+| `nexus-ai-pro/rag/weaviate` | 14 KB | 4% | none |
 | `nexus-ai-pro/rag/pipeline` | 14 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
@@ -191,7 +192,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 3% | none |
 | `nexus-ai-pro/rag/files` | 12 KB | 3% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 3% | none |
-| `nexus-ai-pro/rag/weaviate` | 12 KB | 3% | none |
+| `nexus-ai-pro/rag/redis` | 12 KB | 3% | none |
 | `nexus-ai-pro/evals/judge` | 12 KB | 3% | none |
 | `nexus-ai-pro/providers` | 11 KB | 3% | none |
 | `nexus-ai-pro/providers/base` | 11 KB | 3% | none |
@@ -200,7 +201,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
-| `nexus-ai-pro/rag/redis` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/migrations` | 10 KB | 3% | none |
 | `nexus-ai-pro/prompts` | 10 KB | 3% | none |

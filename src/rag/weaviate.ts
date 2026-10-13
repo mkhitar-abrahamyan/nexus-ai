@@ -63,6 +63,10 @@ interface WeaviateHit {
   _additional?: { distance?: number };
 }
 
+interface WeaviateSchema {
+  properties?: Array<{ name: string; dataType?: string[] }>;
+}
+
 /**
  * Retrieval chunks in a Weaviate collection, through its REST and GraphQL APIs.
  *
@@ -70,12 +74,16 @@ interface WeaviateHit {
  * cosine distance; a result's score is one minus that distance. Object ids are stable UUIDs derived
  * from chunk ids, and the chunk id travels as the `chunkId` property. Top-level string, number, and
  * boolean metadata fields are copied under `meta_` properties for filtering; declare the ones you
- * filter on in `migrate()` so they are indexed with the right type.
+ * filter on in `migrate()` so they are indexed with the right type. A filter is typed by the
+ * collection's schema, read once when a filter first needs it: a value of another type than its
+ * property matches nothing, as in every other store.
  */
 export class WeaviateVectorStore implements VectorStore {
   private readonly base: string;
   private readonly collection: string;
   private readonly embed: EmbeddingProvider;
+  /** Each property's data type, read from the schema the first time a filter needs it. */
+  private dataTypes?: Promise<Map<string, string>>;
 
   constructor(private readonly options: WeaviateVectorStoreOptions) {
     assertDimensions(options.dimensions);
@@ -106,9 +114,12 @@ export class WeaviateVectorStore implements VectorStore {
         ...(type === 'text' ? { tokenization: 'field' } : {}),
       };
     };
-    const existing = (await this.request('GET', `/schema/${this.collection}`, undefined, true)) as {
-      properties?: Array<{ name: string }>;
-    } | null;
+    const existing = (await this.request(
+      'GET',
+      `/schema/${this.collection}`,
+      undefined,
+      true,
+    )) as WeaviateSchema | null;
     if (!existing) {
       await this.request('POST', '/schema', {
         class: this.collection,
@@ -169,15 +180,8 @@ export class WeaviateVectorStore implements VectorStore {
   /** The chunks most similar to a vector, best first. */
   async searchVector(vector: number[], options: VectorSearchOptions = {}): Promise<VectorSearchResult[]> {
     assertWidth(vector, this.options.dimensions);
-    const conditions = filterEntries(options.filter).map(([key, value]) => {
-      const operand =
-        typeof value === 'string' ? 'valueText' : typeof value === 'number' ? 'valueNumber' : 'valueBoolean';
-      return `{path: [${JSON.stringify(`${META_PREFIX}${key}`)}], operator: Equal, ${operand}: ${JSON.stringify(value)}}`;
-    });
-    const where =
-      conditions.length === 0
-        ? ''
-        : `, where: ${conditions.length === 1 ? conditions[0] : `{operator: And, operands: [${conditions.join(', ')}]}`}`;
+    const where = await this.where(options.filter);
+    if (where === undefined) return [];
     const query = `{ Get { ${this.collection}(nearVector: {vector: ${JSON.stringify(vector)}}, limit: ${options.topK || 5}${where}) { chunkId content source metadata _additional { distance } } } }`;
     const response = (await this.request('POST', '/graphql', { query })) as {
       data?: { Get?: Record<string, WeaviateHit[] | null> };
@@ -215,6 +219,47 @@ export class WeaviateVectorStore implements VectorStore {
     });
   }
 
+  /**
+   * The GraphQL `where` argument for a filter, or `undefined` when a value can never match. Weaviate
+   * refuses an operand of another type than the property's, where every other store finds nothing.
+   */
+  private async where(filter: VectorSearchOptions['filter']): Promise<string | undefined> {
+    const entries = filterEntries(filter);
+    if (entries.length === 0) return '';
+    const types = await this.dataTypesOf(entries.map(([key]) => `${META_PREFIX}${key}`));
+    const conditions: string[] = [];
+    for (const [key, value] of entries) {
+      const path = `${META_PREFIX}${key}`;
+      const operand = operandFor(types.get(path), value);
+      if (operand === null) return undefined;
+      conditions.push(`{path: [${JSON.stringify(path)}], operator: Equal, ${operand}: ${JSON.stringify(value)}}`);
+    }
+    return `, where: ${conditions.length === 1 ? conditions[0] : `{operator: And, operands: [${conditions.join(', ')}]}`}`;
+  }
+
+  /** The data types of these properties, reading the schema again when one is not in the copy held. */
+  private async dataTypesOf(names: readonly string[]): Promise<Map<string, string>> {
+    this.dataTypes ??= this.readDataTypes();
+    const held = await this.dataTypes;
+    // A property added since the schema was read: by migrate(), another process, or auto-schema.
+    if (names.every((name) => held.has(name))) return held;
+    this.dataTypes = this.readDataTypes();
+    return this.dataTypes;
+  }
+
+  private readDataTypes(): Promise<Map<string, string>> {
+    const read = (
+      this.request('GET', `/schema/${this.collection}`, undefined, true) as Promise<WeaviateSchema | null>
+    ).then(
+      (schema) => new Map((schema?.properties ?? []).map((property) => [property.name, property.dataType?.[0] ?? ''])),
+    );
+    // A failed read is not kept, so the next search tries again.
+    read.catch(() => {
+      if (this.dataTypes === read) this.dataTypes = undefined;
+    });
+    return read;
+  }
+
   private request(method: string, path: string, body?: unknown, allowNotFound = false): Promise<unknown> {
     return requestJson({
       fetch: this.options.fetch ?? globalThis.fetch,
@@ -229,5 +274,25 @@ export class WeaviateVectorStore implements VectorStore {
       ...(allowNotFound ? { notFound: null } : {}),
       error: (message, status, text) => new WeaviateError(`Weaviate ${message}`, status, text),
     });
+  }
+}
+
+/**
+ * The operand a filter value is compared with, chosen by its property's data type, or `null` when the
+ * value cannot equal any value of that type. A type this store does not know, or a property the
+ * schema lacks, is left for Weaviate to judge.
+ */
+function operandFor(dataType: string | undefined, value: string | number | boolean): string | null {
+  switch (dataType?.replace(/\[\]$/, '')) {
+    case 'text':
+      return typeof value === 'string' ? 'valueText' : null;
+    case 'number':
+      return typeof value === 'number' ? 'valueNumber' : null;
+    case 'int':
+      return Number.isInteger(value) ? 'valueInt' : null;
+    case 'boolean':
+      return typeof value === 'boolean' ? 'valueBoolean' : null;
+    default:
+      return typeof value === 'string' ? 'valueText' : typeof value === 'number' ? 'valueNumber' : 'valueBoolean';
   }
 }

@@ -10,7 +10,8 @@ import { assertDimensions, assertWidth, filterEntries, parseMetadata, vectorsFor
 
 /**
  * A Redis client that sends raw commands — what RediSearch's `FT.*` commands need. ioredis provides
- * `call()`; node-redis provides `sendCommand()`. Either works.
+ * `call()`; node-redis provides `sendCommand()`. Either works, and `call()` is used when a client has
+ * both: ioredis has a `sendCommand()` too, which takes its own command object rather than an array.
  */
 export type RedisVectorLikeClient =
   | {
@@ -62,10 +63,11 @@ export class RedisVectorStore implements VectorStore {
     private readonly options: RedisVectorStoreOptions,
   ) {
     assertDimensions(options.dimensions);
+    // `call` first: ioredis also has a `sendCommand`, but it takes an ioredis Command, not an array.
     this.send =
-      'sendCommand' in client
-        ? (args) => client.sendCommand(args)
-        : (args) => client.call(args[0] as string, ...args.slice(1));
+      'call' in client
+        ? (args) => client.call(args[0] as string, ...args.slice(1))
+        : (args) => client.sendCommand(args);
     this.index = options.index ?? 'nexus:vectors';
     this.prefix = options.prefix ?? 'nexus:vector:';
     this.fields = new Set(options.filterFields ?? []);
@@ -152,7 +154,7 @@ export class RedisVectorStore implements VectorStore {
       }
       return `@f_${field}:{${escapeTag(tagValue(value))}}`;
     });
-    const reply = (await this.send([
+    const reply = await this.send([
       'FT.SEARCH',
       this.index,
       `${clauses.length ? `(${clauses.join(' ')})` : '*'}=>[KNN ${topK} @embedding $vector AS distance]`,
@@ -175,20 +177,16 @@ export class RedisVectorStore implements VectorStore {
       String(topK),
       'DIALECT',
       '2',
-    ])) as unknown[];
+    ]);
 
     const minScore = options.minScore ?? 0;
     const results: VectorSearchResult[] = [];
-    for (let index = 1; index + 1 < reply.length; index += 2) {
-      const values = reply[index + 1] as unknown[];
-      const hash: Record<string, string> = {};
-      for (let field = 0; field + 1 < values.length; field += 2)
-        hash[String(values[field])] = String(values[field + 1]);
+    for (const { key, hash } of searchHits(reply)) {
       const score = 1 - Number(hash.distance);
       if (score < minScore) continue;
       const metadata = parseMetadata(hash.metadata);
       results.push({
-        id: hash.id ?? String(reply[index]).slice(this.prefix.length),
+        id: hash.id ?? key.slice(this.prefix.length),
         content: hash.content ?? '',
         ...(hash.source ? { source: hash.source } : {}),
         ...(metadata ? { metadata } : {}),
@@ -207,6 +205,53 @@ export class RedisVectorStore implements VectorStore {
 
 function toBytes(vector: readonly number[]): Buffer {
   return Buffer.from(new Float32Array(vector).buffer);
+}
+
+/**
+ * A search reply's hits, best first, in either protocol's shape: RESP2's `[total, key, fields, ...]`,
+ * or RESP3's map holding a `results` list, which a client hands over as a flat `[name, value, ...]`
+ * array (ioredis 6 by default), a plain object, or a `Map`.
+ */
+function searchHits(reply: unknown): Array<{ key: string; hash: Record<string, string> }> {
+  const results = mapValue(reply, 'results');
+  if (Array.isArray(results)) {
+    return results.map((result) => ({
+      key: String(mapValue(result, 'id') ?? ''),
+      hash: fieldsOf(mapValue(result, 'extra_attributes')),
+    }));
+  }
+  const rows = reply as unknown[];
+  const hits: Array<{ key: string; hash: Record<string, string> }> = [];
+  for (let index = 1; index + 1 < rows.length; index += 2) {
+    hits.push({ key: String(rows[index]), hash: fieldsOf(rows[index + 1]) });
+  }
+  return hits;
+}
+
+/** A map reply's value for a name, whether the map arrives as a flat array, a `Map`, or an object. */
+function mapValue(map: unknown, name: string): unknown {
+  if (Array.isArray(map)) {
+    // In a RESP2 reply the even places hold the total and each hit's field list, never a bare name.
+    for (let index = 0; index + 1 < map.length; index += 2) {
+      if (!Array.isArray(map[index]) && String(map[index]) === name) return map[index + 1];
+    }
+    return undefined;
+  }
+  if (map instanceof Map) return map.get(name);
+  return map && typeof map === 'object' ? (map as Record<string, unknown>)[name] : undefined;
+}
+
+/** A hit's fields as text, from a flat `[name, value, ...]` array, a `Map`, or an object. */
+function fieldsOf(fields: unknown): Record<string, string> {
+  const hash: Record<string, string> = {};
+  if (Array.isArray(fields)) {
+    for (let index = 0; index + 1 < fields.length; index += 2) hash[String(fields[index])] = String(fields[index + 1]);
+  } else if (fields instanceof Map) {
+    for (const [name, value] of fields) hash[String(name)] = String(value);
+  } else if (fields && typeof fields === 'object') {
+    for (const [name, value] of Object.entries(fields)) hash[name] = String(value);
+  }
+  return hash;
 }
 
 function isFilterValue(value: unknown): value is string | number | boolean {
