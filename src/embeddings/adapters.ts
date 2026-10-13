@@ -7,9 +7,10 @@ import type {
   EmbeddingProviderRequest,
   EmbeddingProviderResult,
   EmbeddingsProvider,
+  EmbeddingProviderPart,
 } from '../types/embeddings.js';
 import { createProviderHttpError, toNexusProviderError } from '../providers/errors.js';
-import { EmbeddingProviderResponseError } from './errors.js';
+import { EmbeddingProviderResponseError, EmbeddingValidationError } from './errors.js';
 
 /**
  * Hosted embedding adapters.
@@ -181,9 +182,10 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
       name: 'google',
       defaultModel: options.model || 'gemini-embedding-001',
       capabilities: {
-        models: ['gemini-embedding-001', 'text-embedding-004'],
+        models: ['gemini-embedding-001', 'gemini-embedding-2', 'text-embedding-004'],
         maxBatchSize: 100,
-        maxInputTokens: 2048,
+        maxInputTokens: 8192,
+        inputModalities: ['text', 'image', 'audio', 'document'],
         dimensions: true,
         inputTypes: ['document', 'query', 'classification', 'clustering'],
         encodingFormats: ['float'],
@@ -196,20 +198,23 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
     return this.options.apiKey ? { 'x-goog-api-key': this.options.apiKey } : {};
   }
 
-  /** Embeds a batch of texts. */
+  /** Embeds a batch of inputs: texts, or parts with images, audio, and documents. */
   async embed(
     request: EmbeddingProviderRequest,
     context: EmbeddingProviderCallContext,
   ): Promise<EmbeddingProviderResult> {
     const model = request.model;
     const qualified = model.startsWith('models/') ? model : `models/${model}`;
+    // gemini-embedding-2 refuses a task type; it reads the task from a prefix on the text instead.
+    const prefixed = /^(models\/)?gemini-embedding-2/.test(model);
+    const contents = request.contents ?? request.input.map((text) => [{ type: 'text' as const, text }]);
     const payload = (await this.post(
       `${this.baseUrl('https://generativelanguage.googleapis.com/v1beta')}/${qualified}:batchEmbedContents`,
       {
-        requests: request.input.map((text) => ({
+        requests: contents.map((parts) => ({
           model: qualified,
-          content: { parts: [{ text }] },
-          taskType: request.inputType ? GOOGLE_TASK_TYPES[request.inputType] : undefined,
+          content: { parts: googleParts(parts, prefixed ? request.inputType : undefined) },
+          taskType: request.inputType && !prefixed ? GOOGLE_TASK_TYPES[request.inputType] : undefined,
           outputDimensionality: request.dimensions,
           ...request.providerOptions,
         })),
@@ -230,6 +235,36 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
       raw: payload,
     };
   }
+}
+
+/** The text prefix gemini-embedding-2 reads its task from, by input type. */
+const GOOGLE_TASK_PREFIXES: Record<EmbeddingInputType, (text: string) => string> = {
+  query: (text) => `task: search result | query: ${text}`,
+  document: (text) => `title: none | text: ${text}`,
+  classification: (text) => `task: classification | query: ${text}`,
+  clustering: (text) => `task: clustering | query: ${text}`,
+};
+
+/**
+ * An input's parts as Google's: text as text, the first carrying the task prefix when one is given,
+ * and media inline, or by a Files API URI. Google does not fetch any other URL.
+ */
+function googleParts(parts: readonly EmbeddingProviderPart[], prefixFor: EmbeddingInputType | undefined) {
+  let prefixed = prefixFor === undefined;
+  return parts.map((part) => {
+    if (part.type === 'text') {
+      if (prefixed) return { text: part.text };
+      prefixed = true;
+      return { text: GOOGLE_TASK_PREFIXES[prefixFor as EmbeddingInputType](part.text) };
+    }
+    if (part.data !== undefined) return { inlineData: { mimeType: part.mimeType, data: part.data } };
+    if (part.url?.startsWith('https://generativelanguage.googleapis.com/')) {
+      return { fileData: { mimeType: part.mimeType, fileUri: part.url } };
+    }
+    throw new EmbeddingValidationError(
+      `Google embeds media from its bytes or a Files API URI, not from ${part.url}; pass the ${part.type} as bytes`,
+    );
+  });
 }
 
 const COHERE_INPUT_TYPES: Record<EmbeddingInputType, string> = {
@@ -257,6 +292,7 @@ export class CohereEmbeddingProvider extends HttpEmbeddingProvider {
       capabilities: {
         models: ['embed-v4.0', 'embed-english-v3.0', 'embed-multilingual-v3.0'],
         maxBatchSize: 96,
+        inputModalities: ['text', 'image'],
         dimensions: [256, 512, 1024, 1536],
         inputTypes: ['document', 'query', 'classification', 'clustering'],
         encodingFormats: ['float'],
@@ -266,7 +302,7 @@ export class CohereEmbeddingProvider extends HttpEmbeddingProvider {
     };
   }
 
-  /** Embeds a batch of texts. */
+  /** Embeds a batch of inputs: texts, or parts with images. */
   async embed(
     request: EmbeddingProviderRequest,
     context: EmbeddingProviderCallContext,
@@ -275,7 +311,10 @@ export class CohereEmbeddingProvider extends HttpEmbeddingProvider {
       `${this.baseUrl('https://api.cohere.com/v2')}/embed`,
       {
         model: request.model,
-        texts: request.input,
+        // Media goes as `inputs`, each a list of text and image parts embedded as one vector.
+        ...(request.contents
+          ? { inputs: request.contents.map((parts) => ({ content: parts.map(cohereContent) })) }
+          : { texts: request.input }),
         input_type: COHERE_INPUT_TYPES[request.inputType ?? 'document'],
         embedding_types: ['float'],
         output_dimension: request.dimensions,
@@ -298,6 +337,19 @@ export class CohereEmbeddingProvider extends HttpEmbeddingProvider {
       raw: payload,
     };
   }
+}
+
+/** A part as Cohere's: text, or an image as a data URI, which is the only image form Cohere takes. */
+function cohereContent(part: EmbeddingProviderPart) {
+  if (part.type === 'text') return { type: 'text', text: part.text };
+  if (part.type === 'image' && part.data !== undefined) {
+    return { type: 'image_url', image_url: { url: `data:${part.mimeType};base64,${part.data}` } };
+  }
+  throw new EmbeddingValidationError(
+    part.type === 'image'
+      ? 'Cohere embeds an image from its bytes, sent as a data URI, not from a URL; pass the image as bytes'
+      : `Cohere embeds text and images, not ${part.type}`,
+  );
 }
 
 /** Mistral `/v1/embeddings`, which follows the OpenAI request and response shape. */

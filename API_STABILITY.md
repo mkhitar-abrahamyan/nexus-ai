@@ -52,6 +52,11 @@ New and stable:
   and `unpackVector()`, `MemoryEmbeddingCache` and its options, `RedisEmbeddingCache` with its client
   and options, and `tieredEmbeddingCache()`. A key's derivation and a vector's packed layout are part
   of the promise, so a cache one release wrote is read by the next;
+- `EmbeddingModality`, `EmbeddingPart`, and `EmbeddingParts` as `EmbeddingInput`;
+  `EmbeddingProviderRequest.contents` with `EmbeddingProviderPart`, `EmbeddingProviderTextPart`, and
+  `EmbeddingProviderMediaPart`; `inputModalities` on `EmbeddingProviderCapabilities` and
+  `EmbeddingModelCapabilities`, and `costPerImage`; `MockEmbeddingProviderOptions.describeMedia`. An
+  adapter that declares no `inputModalities` is sent text only, as before;
 - `nexus-ai-pro/postgres/embedding-cache`: `PostgresEmbeddingCache`, its options, and
   `embeddingCacheMigrations()`; `nexus-ai-pro/sqlite/embedding-cache`: `SqliteEmbeddingCache`, its
   options, and `sqliteEmbeddingCacheMigrations()`.

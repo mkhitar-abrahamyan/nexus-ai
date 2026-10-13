@@ -20,6 +20,16 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   `packVector()` with `unpackVector()`. `PostgresEmbeddingCache` is on
   `nexus-ai-pro/postgres/embedding-cache`, and `SqliteEmbeddingCache` on
   `nexus-ai-pro/sqlite/embedding-cache`, each with its versioned migrations and `purgeExpired()`.
+- **Images, audio, and documents as embedding input.** An `EmbeddingInput` may hold `EmbeddingParts`:
+  the text, image, audio, and document parts a message takes, embedded as one vector in the same
+  space as text. A model takes the `EmbeddingModality` kinds its registry entry or adapter declares in
+  `inputModalities`, and anything else is refused before any call; a fallback that cannot take the
+  media is skipped. An adapter receives each input's parts in `EmbeddingProviderRequest.contents`,
+  media already resolved to base64 or a URL. Google sends media inline or by a Files API URI, and
+  writes `gemini-embedding-2`'s task as the text prefix that model reads instead of a task type; Cohere
+  sends text and data-URI images as `inputs`. `gemini-embedding-2` joins the registry, with
+  `costPerImage`, and `embed-v4.0` takes images. `MockEmbeddingProviderOptions.describeMedia` puts a
+  medium and its caption in one space for tests.
 - `ChromaVectorStoreOptions.filterFields`: the fields a search can filter on. Every write then sets
   each declared field, or removes it, so a replacement needs no read and stays whole under any race;
   a filter on another field is refused.
@@ -60,6 +70,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   interleaves racing writers. Each failure above reproduces against them on the previous code.
 - `tests/upgrade-remote-stores.test.ts` reads, with this release, what the published 2.7.0 wrote into
   each store.
+- `tests/embeddings-media.test.ts`: a text query finds the image it describes through one vector
+  space, and media never reaches a model that takes text only.
 - `tests/embedding-cache.test.ts`: a second process embeds a 2,000-text batch with no provider call
   and one cache read, and every store keeps one contract, which the live suite also runs against
   Redis over RESP3 and RESP2.

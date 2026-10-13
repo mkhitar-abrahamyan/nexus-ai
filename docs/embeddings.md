@@ -2,10 +2,10 @@
 
 <!-- covers: ./embeddings ./embeddings/adapters ./embeddings/mock ./embeddings/models ./embeddings/cache -->
 
-Turning text into vectors, from `nexus-ai-pro/embeddings`. An embedding call gets what a completion
-gets: routing across providers, batching, caching, budgets, and retries. It also refuses an option a
-model cannot honour, such as a dimension it does not produce, so a store never mixes incompatible
-vectors. Adapters for OpenAI, Google, Cohere, Mistral, Ollama, and compatible servers are on
+Turning text, images, audio, and documents into vectors, from `nexus-ai-pro/embeddings`. An
+embedding call gets what a completion gets: routing across providers, batching, caching, budgets, and
+retries. It also refuses an option a model cannot honour, such as a dimension it does not produce, so
+a store never mixes incompatible vectors. Adapters for OpenAI, Google, Cohere, Mistral, Ollama, and compatible servers are on
 `nexus-ai-pro/embeddings/adapters`.
 
 Searching the vectors, grounding answers in them, and checking those answers are in the
@@ -104,6 +104,47 @@ ai.registerEmbeddingProvider('mock', new MockEmbeddingProvider());
 Bundled embedding dimensions and prices are defaults, not financial truth. Override them through
 `embeddings.models.registry` when exact numbers matter.
 
+## Images, audio, and documents
+
+An input can be media as well as text: an image, audio, a PDF, or text with them. A multimodal model
+embeds each in the same space as text, so a text query finds the image it describes. Give the input
+as `EmbeddingParts`: the same text, image, audio, and document parts a message takes.
+
+```ts
+const photos = await ai.embed({
+  model: 'gemini-embedding-2',
+  inputType: 'document',
+  input: images.map((bytes) => ({ parts: [{ type: 'image', source: { buffer: bytes, mimeType: 'image/jpeg' } }] })),
+});
+await store.add(images.map((_, index) => ({ id: `photo-${index}`, content: '', embedding: photos.vectors[index] })));
+
+const [query] = (await ai.embed({ model: 'gemini-embedding-2', inputType: 'query', input: 'a red bicycle' })).vectors;
+const found = await store.searchVector(query, { topK: 5 });
+```
+
+An `EmbeddingPart` is a `TextContent`, `ImageContent`, `AudioContent`, or `DocumentContent`. Every part
+of one input becomes one vector, such as a product photo with its caption. A part must hold its
+content, as bytes, base64, or a URL. A path or a transcript is refused, since an embedding never reads
+a file.
+
+Media is sent only to a model that takes it. An `EmbeddingModality` is `text`, `image`, `audio`, or
+`document`, and `inputModalities` on a model's registry entry says which it takes. A model without an
+entry is judged by its adapter's capabilities. Anything else is refused with an
+`EmbeddingCapabilityError` before any call, and a fallback that cannot take the media is skipped.
+
+| Model | Takes | Notes |
+| --- | --- | --- |
+| `gemini-embedding-2` | text, image, audio, document | Up to 6 images, 180 seconds of audio, or a 6-page PDF an input. The task is a prefix on the text, which the adapter writes from `inputType`. |
+| `embed-v4.0` | text, image | Images as JPEG, PNG, WebP, or GIF, 20 MB a request. |
+| Every other bundled model | text | |
+
+Google takes media inline, or by a Files API URI; Cohere takes images inline. Any other URL is refused
+with the reason, since neither provider fetches it.
+
+An image is priced at its model's `costPerImage`, beside the text's tokens. Audio and video are
+billed by the second and the frame, which is not priced. A repeated medium is embedded once, and is
+cached under a hash of its content.
+
 ## Sharing the cache
 
 A shared cache lets every process reuse what any of them embedded. Re-indexing a corpus, or several
@@ -163,8 +204,8 @@ every input at once rather than one after another.
 
 ## Requests and responses
 
-`EmbeddingRequest` needs only the `input`: an `EmbeddingInput`, which is one string or a list. The
-rest is optional.
+`EmbeddingRequest` needs only the `input`: an `EmbeddingInput`, which is one text or a list, where
+media is `EmbeddingParts`. The rest is optional.
 
 | Field | What it does |
 | --- | --- |
@@ -217,14 +258,16 @@ An adapter implements `EmbeddingsProvider`: an `info` description and an `embed(
 
 `info` is an `EmbeddingProviderInfo`: a name, locality, version, default model, and
 `EmbeddingProviderCapabilities`. Capabilities declare models, batch size, input length, dimensions,
-input types, encodings, truncation, and whether vectors come back normalized. A field you leave out
-means unknown, not unsupported.
+input types, encodings, truncation, whether vectors come back normalized, and the `inputModalities` it
+takes. A field you leave out means unknown, not unsupported, except `inputModalities`: an adapter that
+does not declare media is sent text only.
 
 `embed()` is called once per batch:
 
 | Type | Contents |
 | --- | --- |
-| `EmbeddingProviderRequest` | One batch, already split to fit and resolved to a concrete model. |
+| `EmbeddingProviderRequest` | One batch, already split to fit and resolved to a concrete model. Its `contents` holds each input's parts when any holds media. |
+| `EmbeddingProviderPart` | A part as an adapter receives it: an `EmbeddingProviderTextPart`, or an `EmbeddingProviderMediaPart` with its MIME type and base64 `data` or `url`. |
 | `EmbeddingProviderCallContext` | The `ProviderCallContext` every provider receives — request id, signal, deadline, idempotency key, and trace headers — with the attempt and the batch index. |
 | `EmbeddingProviderResult` | What you return: one vector per input in order, the model actually used, whether it truncated, and the raw payload. |
 | `EmbeddingProviderUsage` | Token counts, when the provider reports them. |
@@ -244,7 +287,9 @@ URL, a model, headers, and a `fetch`.
 
 `MockEmbeddingProvider`, on `nexus-ai-pro/embeddings/mock`, is deterministic, for tests.
 `MockEmbeddingProviderOptions` sets its name, model, dimensions (16), capabilities, and reported
-usage. It can also fail on a chosen call, for retry and failover tests, and add latency.
+usage. It can also fail on a chosen call, for retry and failover tests, and add latency. It takes
+every modality, and `describeMedia` turns a media part into the text its vector is hashed from, so a
+test can put an image and its caption in one space.
 
 A vector store that needs no routing or retries can use a bare function instead:
 `createOpenAIEmbeddingProvider()`, `createGeminiEmbeddingProvider()`, or
@@ -255,7 +300,8 @@ A vector store that needs no routing or retries can use a bare function instead:
 
 `KNOWN_EMBEDDING_MODELS` maps each model to its `EmbeddingModelCapabilities`: provider and family,
 native dimensions and the sizes it can shorten to, input and batch limits, the price per 1,000 input
-tokens, whether it normalizes, the input types it distinguishes, and its status. Each entry also
+tokens and per image, whether it normalizes, the input types and `inputModalities` it takes, and its
+status. Each entry also
 records when and where it was verified.
 
 `EMBEDDING_MODEL_ALIASES` holds stable names such as `embed-quality`. `EMBEDDING_REGISTRY_PROVENANCE`
@@ -292,6 +338,8 @@ Every embedding error extends `EmbeddingError` and has a stable code.
 - Bundled dimensions and prices are defaults, verified on the date the registry records.
 - Cost is estimated from tokens when a provider reports none.
 - Two processes that miss the same text at once both embed it; the shared cache keeps one vector.
+- Video is not an embedding input yet, since a video part names a file; and audio and video are not
+  priced, since their price depends on a duration this runtime does not measure.
 
 <!-- reference:start -->
 ## Reference
@@ -309,26 +357,33 @@ specific entry point that provides it.
 | `createGeminiEmbeddingProvider` | function | A minimal Gemini embedding function, for a vector store that needs no routing or retries. |
 | `createOpenAIEmbeddingProvider` | function | A minimal OpenAI embedding function, for a vector store that needs no routing or retries. |
 | `Embedding` | interface | One vector. |
+| `EmbeddingCacheConfig` | interface | How embeddings are cached: the options every cache takes, and a shared store. |
 | `EmbeddingCapabilityError` | class | A requested option the target model or adapter cannot honor. |
 | `EmbeddingConfig` | interface | Configuration for `ai.embed()`. |
 | `EmbeddingCostBudgetConfig` | interface | Refuses or flags an embedding request whose estimated cost exceeds a limit. |
 | `EmbeddingEncodingFormat` | type | Wire encoding requested from the provider. |
 | `EmbeddingError` | class | Base class for embeddings errors, each with a stable `code`. |
-| `EmbeddingInput` | type | One or many texts. |
+| `EmbeddingInput` | type | One input or many. |
 | `EmbeddingInputType` | type | What the vector will be used for. |
 | `EmbeddingManager` | class | Provider-neutral embeddings with routing, caching, batching, budget, retry, audit, and metrics. |
 | `EmbeddingMeta` | interface | How an embedding request ran. |
+| `EmbeddingModality` | type | What an embedding input can hold besides text. |
 | `EmbeddingModelCapabilities` | interface | What the registry knows about an embedding model. |
 | `EmbeddingModelNotFoundError` | class | Raised when a model is not in the embeddings registry and no provider was named. |
 | `EmbeddingModelRegistryConfig` | interface | Embedding models and aliases that extend or replace the bundled registry. |
+| `EmbeddingPart` | type | A part of an embedding input: the same text, image, audio, and document parts a message takes. |
+| `EmbeddingParts` | interface | One input made of parts, such as an image with its caption, embedded as one vector in the same space as text. |
 | `EmbeddingProviderCallContext` | interface | What an adapter receives with every batch besides the request: the context every family's provider receives, and where this batch sits in the request. |
 | `EmbeddingProviderCapabilities` | interface | What an adapter can do. |
 | `EmbeddingProviderError` | class | Raised when an embeddings provider fails. |
 | `EmbeddingProviderInfo` | interface | Identifies an embeddings adapter and what it supports. |
+| `EmbeddingProviderMediaPart` | interface | A media part, as an adapter receives it: its content as base64 data, or the URL that holds it. |
 | `EmbeddingProviderNotFoundError` | class | Raised when no provider, or no provider by the requested name, is registered. |
+| `EmbeddingProviderPart` | type | A part of an embedding input, as an adapter receives it. |
 | `EmbeddingProviderRequest` | interface | Request handed to an adapter. |
 | `EmbeddingProviderResponseError` | class | Raised when a provider's response does not have the shape the adapter expects, such as the wrong number of vectors. |
 | `EmbeddingProviderResult` | interface | What an adapter returns for one batch. |
+| `EmbeddingProviderTextPart` | interface | A text part, as an adapter receives it. |
 | `EmbeddingProviderUsage` | interface | Token usage an adapter reports. |
 | `EmbeddingRequest` | interface | A request to `ai.embed()`: texts in, vectors out, with routing, batching, caching, and budgets handled for you. |
 | `EmbeddingResponse` | interface | The result of `ai.embed()`. |

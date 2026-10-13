@@ -2,6 +2,7 @@ import type {
   EmbeddingProviderCallContext,
   EmbeddingProviderCapabilities,
   EmbeddingProviderInfo,
+  EmbeddingProviderMediaPart,
   EmbeddingProviderRequest,
   EmbeddingProviderResult,
   EmbeddingsProvider,
@@ -24,6 +25,12 @@ export interface MockEmbeddingProviderOptions {
   failOn?: { attempt: number; error: unknown };
   /** Milliseconds to wait before answering, for timeout and cancellation tests. */
   latencyMs?: number;
+  /**
+   * The text a media part's vector is hashed from, standing in for a model that embeds media and
+   * text in one space: describe an image as its caption, and a text query finds it. Defaults to the
+   * part's type and the start of its content.
+   */
+  describeMedia?: (part: EmbeddingProviderMediaPart) => string;
 }
 
 /**
@@ -50,6 +57,7 @@ export class MockEmbeddingProvider implements EmbeddingsProvider {
         dimensions: true,
         encodingFormats: ['float'],
         inputTypes: ['document', 'query', 'classification', 'clustering'],
+        inputModalities: ['text', 'image', 'audio', 'document'],
         truncate: true,
         ...options.capabilities,
       },
@@ -92,8 +100,16 @@ export class MockEmbeddingProvider implements EmbeddingsProvider {
     }
 
     const dimensions = request.dimensions ?? this.options.dimensions ?? 16;
-    const vectors = createHashEmbeddings([...request.input], dimensions);
-    const words = request.input.reduce((total, text) => total + text.split(/\s+/).length, 0);
+    const describe =
+      this.options.describeMedia ??
+      ((part: EmbeddingProviderMediaPart) => `${part.type} ${(part.data ?? part.url)?.slice(0, 64)}`);
+    const texts = request.contents
+      ? request.contents.map((parts) =>
+          parts.map((part) => (part.type === 'text' ? part.text : describe(part))).join(' '),
+        )
+      : request.input;
+    const vectors = createHashEmbeddings([...texts], dimensions);
+    const words = texts.reduce((total, text) => total + text.split(/\s+/).length, 0);
 
     return {
       vectors,

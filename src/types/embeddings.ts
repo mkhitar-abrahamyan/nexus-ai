@@ -2,6 +2,7 @@ import type { ProviderCallContext } from './lifecycle.js';
 import type { CacheConfig, RateLimitConfig, RetryConfig } from './config.js';
 import type { ModelStatus } from './providers.js';
 import type { ResponseCost, TokenUsage } from './response.js';
+import type { AudioContent, DocumentContent, ImageContent, TextContent } from './messages.js';
 
 /**
  * What the vector will be used for.
@@ -18,8 +19,29 @@ export type EmbeddingEncodingFormat = 'float' | 'base64';
 /** How an input longer than the model's limit is handled. */
 export type EmbeddingTruncateMode = 'none' | 'start' | 'end';
 
-/** One or many texts. The single-string form exists so the smallest call stays a one-liner. */
-export type EmbeddingInput = string | readonly string[];
+/** What an embedding input can hold besides text. */
+export type EmbeddingModality = 'text' | 'image' | 'audio' | 'document';
+
+/**
+ * A part of an embedding input: the same text, image, audio, and document parts a message takes.
+ * Media must hold its content, as bytes, base64, or a URL; a path or a transcript is refused.
+ */
+export type EmbeddingPart = TextContent | ImageContent | AudioContent | DocumentContent;
+
+/**
+ * One input made of parts, such as an image with its caption, embedded as one vector in the same
+ * space as text. Only a model that takes each part's kind is sent it; any other is refused.
+ */
+export interface EmbeddingParts {
+  /** The parts, in order. */
+  parts: readonly EmbeddingPart[];
+}
+
+/**
+ * One input or many. An input is a text, or `EmbeddingParts` for media. The single-string form exists
+ * so the smallest call stays a one-liner.
+ */
+export type EmbeddingInput = string | EmbeddingParts | ReadonlyArray<string | EmbeddingParts>;
 
 /**
  * A request to `ai.embed()`: texts in, vectors out, with routing, batching, caching, and budgets
@@ -144,6 +166,29 @@ export interface EmbeddingResponse {
 
 // ── Provider contract ──────────────────────────────────────────────
 
+/** A text part, as an adapter receives it. */
+export interface EmbeddingProviderTextPart {
+  /** Discriminates this part. */
+  type: 'text';
+  /** The text. */
+  text: string;
+}
+
+/** A media part, as an adapter receives it: its content as base64 data, or the URL that holds it. */
+export interface EmbeddingProviderMediaPart {
+  /** What the part is. */
+  type: Exclude<EmbeddingModality, 'text'>;
+  /** Its MIME type, such as `image/png` or `audio/mpeg`. */
+  mimeType: string;
+  /** The content, base64, when the part holds it. */
+  data?: string;
+  /** The URL that holds the content, when the part names one instead. */
+  url?: string;
+}
+
+/** A part of an embedding input, as an adapter receives it. */
+export type EmbeddingProviderPart = EmbeddingProviderTextPart | EmbeddingProviderMediaPart;
+
 /**
  * Request handed to an adapter.
  *
@@ -151,8 +196,13 @@ export interface EmbeddingResponse {
  * within the model's limits and `model` is a concrete provider model name.
  */
 export interface EmbeddingProviderRequest {
-  /** A concrete batch of texts, already within the model's limits. */
+  /** A concrete batch, already within the model's limits: each input's text, its text parts joined. */
   input: string[];
+  /**
+   * Each input's parts, in the order of `input`, when any input in the request holds media. A text
+   * input is one text part. Present only for a model whose capabilities take every kind it holds.
+   */
+  contents?: EmbeddingProviderPart[][];
   /** The provider's own model name. */
   model: string;
   /** What the vectors will be used for. */
@@ -214,6 +264,11 @@ export interface EmbeddingProviderCapabilities {
   truncate?: boolean;
   /** True when the provider already returns unit-length vectors. */
   normalized?: boolean;
+  /**
+   * What its inputs can hold. Text only when absent. A model's registry entry, when it has one,
+   * decides for that model.
+   */
+  inputModalities?: readonly EmbeddingModality[];
 }
 
 /** Identifies an embeddings adapter and what it supports. */
@@ -272,6 +327,10 @@ export interface EmbeddingModelCapabilities {
   maxBatchSize?: number;
   /** Price per 1,000 input tokens, in US dollars. */
   costPer1kInput: number;
+  /** Price per image embedded, in US dollars, for a model that takes images. */
+  costPerImage?: number;
+  /** What its inputs can hold. Text only when absent. */
+  inputModalities?: readonly EmbeddingModality[];
   /** True when the model already returns unit-length vectors. */
   normalized?: boolean;
   /** Input types the model distinguishes. */

@@ -74,6 +74,24 @@ export const KNOWN_EMBEDDING_MODELS: Record<string, EmbeddingModelCapabilities> 
     inputTypes: ['document', 'query', 'classification', 'clustering'],
     status: 'stable',
   }),
+  'gemini-embedding-2': embeddingModel({
+    provider: 'google',
+    family: 'gemini-embedding',
+    dimensions: 3072,
+    supportedDimensions: true,
+    maxInputTokens: 8192,
+    maxBatchSize: 100,
+    costPer1kInput: 0.0002,
+    costPerImage: 0.00012,
+    normalized: true,
+    inputTypes: ['document', 'query', 'classification', 'clustering'],
+    inputModalities: ['text', 'image', 'audio', 'document'],
+    status: 'stable',
+    verifiedAt: '2026-10-13',
+    source: 'https://ai.google.dev/gemini-api/docs/embeddings',
+    notes:
+      'One vector for text, images (up to 6), audio (up to 180 s), and a PDF (up to 6 pages) together. Reads its task from a text prefix, not a task type. Audio and video are billed per second and frame, which is not priced here.',
+  }),
   'text-embedding-004': embeddingModel({
     provider: 'google',
     family: 'text-embedding',
@@ -95,7 +113,9 @@ export const KNOWN_EMBEDDING_MODELS: Record<string, EmbeddingModelCapabilities> 
     costPer1kInput: 0.00012,
     normalized: true,
     inputTypes: ['document', 'query', 'classification', 'clustering'],
+    inputModalities: ['text', 'image'],
     status: 'stable',
+    notes: 'Takes images, and text with images, as data URIs: JPEG, PNG, WebP, or GIF, 20 MB a request in total.',
   }),
   'embed-english-v3.0': embeddingModel({
     provider: 'cohere',
@@ -107,6 +127,7 @@ export const KNOWN_EMBEDDING_MODELS: Record<string, EmbeddingModelCapabilities> 
     normalized: true,
     inputTypes: ['document', 'query', 'classification', 'clustering'],
     status: 'stable',
+    notes: 'Takes one image a call, so it is registered for text; embed-v4.0 takes any number.',
   }),
   'embed-multilingual-v3.0': embeddingModel({
     provider: 'cohere',
@@ -118,6 +139,7 @@ export const KNOWN_EMBEDDING_MODELS: Record<string, EmbeddingModelCapabilities> 
     normalized: true,
     inputTypes: ['document', 'query', 'classification', 'clustering'],
     status: 'stable',
+    notes: 'Takes one image a call, so it is registered for text; embed-v4.0 takes any number.',
   }),
   'mistral-embed': embeddingModel({
     provider: 'mistral',

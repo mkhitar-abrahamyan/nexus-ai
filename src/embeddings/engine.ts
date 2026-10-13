@@ -4,6 +4,8 @@ import type {
   Embedding,
   EmbeddingConfig,
   EmbeddingMeta,
+  EmbeddingModelCapabilities,
+  EmbeddingProviderPart,
   EmbeddingProviderCallContext,
   EmbeddingProviderRequest,
   EmbeddingProviderResult,
@@ -11,15 +13,16 @@ import type {
   EmbeddingResponse,
   EmbeddingsProvider,
 } from '../types/embeddings.js';
-import type { TokenUsage } from '../types/response.js';
+import type { ResponseCost, TokenUsage } from '../types/response.js';
 import { MemoryCache, createCacheKey } from '../cache/memory-cache.js';
 import { RateLimiter } from '../ops/rate-limiter.js';
 import { OperationLifecycle } from '../core/lifecycle.js';
 import type { EmbeddingManagerRuntime } from './manager.js';
 import type { EmbeddingCacheContext } from './cache.js';
+import { acceptedModalities, type EmbeddingInputs, inputIdentities, normalizeInputs } from './inputs.js';
 import type { ProviderCallContext } from '../types/lifecycle.js';
 import { NexusProviderError, createTimeoutProviderError, isAbortError } from '../providers/errors.js';
-import { assertWithinCostBudget } from '../optimizer/cost-budget.js';
+import { assertWithinCostBudget, formatCost } from '../optimizer/cost-budget.js';
 import { Tokenizer } from '../utils/tokenizer.js';
 import {
   EmbeddingCapabilityError,
@@ -85,7 +88,7 @@ export class EmbeddingEngine {
    * regardless of how many provider calls the split required.
    */
   async embed(request: EmbeddingRequest): Promise<EmbeddingResponse> {
-    const inputs = normalizeInput(request.input);
+    const inputs = normalizeInputs(request.input);
     const startedAt = Date.now();
     let route: EmbeddingRoute | undefined;
     let estimate: number | undefined;
@@ -107,6 +110,13 @@ export class EmbeddingEngine {
         route: () => {
           route = this.resolveRoute(request);
           assertRequestedOptions(route, request);
+          assertModalities(
+            route.providerName,
+            route.resolved.model,
+            route.resolved.capabilities,
+            route.provider,
+            inputs,
+          );
           estimate = this.enforceCostBudget(inputs, route.resolved.model);
           return { provider: route.providerName, model: route.resolved.model };
         },
@@ -123,14 +133,14 @@ export class EmbeddingEngine {
       {
         ...(request.signal ? { signal: request.signal } : {}),
         ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
-        audit: { inputs: inputs.length },
+        audit: { inputs: inputs.texts.length },
       },
     );
   }
 
   /** Answers an admitted request: the cache first, then the provider for whatever is left. */
   private async runEmbed(
-    inputs: string[],
+    inputs: EmbeddingInputs,
     route: EmbeddingRoute,
     request: EmbeddingRequest,
     callContext: ProviderCallContext,
@@ -138,42 +148,44 @@ export class EmbeddingEngine {
   ): Promise<EmbeddingResponse> {
     const requestId = callContext.requestId;
     const model = route.resolved.model;
+    const count = inputs.texts.length;
+    const identities = await inputIdentities(inputs);
     const cache = this.config.cache;
     const cacheEnabled = request.cache ?? cache?.enabled ?? cache?.store !== undefined;
     const cacheContext = cacheEnabled ? this.cacheContext(route, request) : undefined;
-    let vectors = new Array<number[] | undefined>(inputs.length);
+    let vectors = new Array<number[] | undefined>(count);
     let cachedInputs = 0;
 
     if (cacheContext) {
-      vectors = await this.readCache(cacheContext, inputs);
+      vectors = await this.readCache(cacheContext, identities);
       for (const vector of vectors) if (vector) cachedInputs += 1;
     }
 
     const pending: number[] = [];
-    for (let index = 0; index < inputs.length; index += 1) {
+    for (let index = 0; index < count; index += 1) {
       if (!vectors[index]) pending.push(index);
     }
 
-    // Identical texts in one request are answered by a single provider call. Repeated inputs are
+    // Identical inputs in one request are answered by a single provider call. Repeated inputs are
     // common in RAG ingestion, and every duplicate avoided is a token not billed.
     const deduplicate = this.config.deduplicate !== false;
-    const uniqueTexts: string[] = [];
+    const unique: number[] = [];
     const uniqueIndex = new Map<string, number>();
     const pendingToUnique: number[] = [];
     for (const index of pending) {
-      const text = inputs[index] as string;
+      const identity = identities[index] as string;
       if (deduplicate) {
-        const existing = uniqueIndex.get(text);
+        const existing = uniqueIndex.get(identity);
         if (existing !== undefined) {
           pendingToUnique.push(existing);
           continue;
         }
-        uniqueIndex.set(text, uniqueTexts.length);
+        uniqueIndex.set(identity, unique.length);
       }
-      pendingToUnique.push(uniqueTexts.length);
-      uniqueTexts.push(text);
+      pendingToUnique.push(unique.length);
+      unique.push(index);
     }
-    const deduplicatedInputs = pending.length - uniqueTexts.length;
+    const deduplicatedInputs = pending.length - unique.length;
 
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     let batches = 0;
@@ -182,13 +194,14 @@ export class EmbeddingEngine {
     let truncated = false;
     let providerUsed = route.providerName;
     let modelUsed = model;
+    let images = 0;
 
-    if (uniqueTexts.length > 0) {
+    if (unique.length > 0) {
       const batchSize = resolveMaxBatchSize(route.resolved.capabilities, route.provider);
-      const chunks = chunkInputs(uniqueTexts, batchSize);
+      const chunks = chunkInputs(unique, batchSize);
       batches = chunks.length;
 
-      const results = await this.runBatches(chunks, route, request, callContext, (used) => {
+      const results = await this.runBatches(chunks, inputs, route, request, callContext, (used) => {
         retries += used;
       });
 
@@ -211,8 +224,12 @@ export class EmbeddingEngine {
       // Providers that report no usage still have to be priced, so tokens are estimated locally
       // rather than reported as zero.
       if (usage.inputTokens === 0) {
-        usage = estimateUsage(uniqueTexts, this.tokenizer);
+        usage = estimateUsage(
+          unique.map((index) => inputs.texts[index] as string),
+          this.tokenizer,
+        );
       }
+      for (const index of unique) images += inputs.images[index] ?? 0;
 
       const finished = flatVectors.map((values) => this.postProcess(values, route, request));
       for (let position = 0; position < pending.length; position += 1) {
@@ -227,7 +244,13 @@ export class EmbeddingEngine {
         vectors[index] = vector;
       }
 
-      if (cacheContext) await this.writeCache(cacheContext, uniqueTexts, finished);
+      if (cacheContext) {
+        await this.writeCache(
+          cacheContext,
+          unique.map((index) => identities[index] as string),
+          finished,
+        );
+      }
 
       providerUsed = route.provider.info.name?.trim() || route.providerName;
     }
@@ -253,8 +276,8 @@ export class EmbeddingEngine {
       latencyMs: Date.now() - startedAt,
       batches,
       usage,
-      cost: priceEmbeddingUsage(model, usage, this.config.models),
-      cacheHit: cachedInputs === inputs.length && inputs.length > 0,
+      cost: withImageCost(priceEmbeddingUsage(model, usage, this.config.models), images, route.resolved.capabilities),
+      cacheHit: cachedInputs === count && count > 0,
       cachedInputs: cachedInputs || undefined,
       deduplicatedInputs: deduplicatedInputs || undefined,
       retries: retries || undefined,
@@ -358,7 +381,8 @@ export class EmbeddingEngine {
   // ── Provider calls ───────────────────────────────────────────────
 
   private async runBatches(
-    chunks: string[][],
+    chunks: number[][],
+    inputs: EmbeddingInputs,
     route: EmbeddingRoute,
     request: EmbeddingRequest,
     callContext: ProviderCallContext,
@@ -374,7 +398,8 @@ export class EmbeddingEngine {
         next += 1;
         if (index >= chunks.length) return;
         results[index] = await this.callWithRetry(
-          chunks[index] as string[],
+          chunks[index] as number[],
+          inputs,
           index,
           route,
           request,
@@ -386,7 +411,7 @@ export class EmbeddingEngine {
 
     // One chunk is the common case; spawning a worker pool for it would only add scheduling work.
     if (chunks.length === 1) {
-      results[0] = await this.callWithRetry(chunks[0] as string[], 0, route, request, callContext, onRetries);
+      results[0] = await this.callWithRetry(chunks[0] as number[], inputs, 0, route, request, callContext, onRetries);
       return results;
     }
 
@@ -395,7 +420,8 @@ export class EmbeddingEngine {
   }
 
   private async callWithRetry(
-    input: string[],
+    batch: number[],
+    inputs: EmbeddingInputs,
     batchIndex: number,
     route: EmbeddingRoute,
     request: EmbeddingRequest,
@@ -409,8 +435,10 @@ export class EmbeddingEngine {
     for (const fallback of this.config.fallback ?? []) {
       const providerName = fallback.provider || route.providerName;
       const provider = this.providers.get(providerName);
-      if (provider) {
-        attempts.push({ providerName, provider, model: fallback.model || route.resolved.model });
+      const model = fallback.model || route.resolved.model;
+      // A fallback that cannot take the media is no fallback for this request.
+      if (provider && takesMedia(resolveEmbeddingModel(model, this.config.models).capabilities, provider, inputs)) {
+        attempts.push({ providerName, provider, model });
       }
     }
 
@@ -420,7 +448,15 @@ export class EmbeddingEngine {
     for (const attempt of attempts) {
       for (let retryIndex = 0; retryIndex <= (retry.enabled ? retry.maxRetries : 0); retryIndex += 1) {
         try {
-          const result = await this.callProvider(input, batchIndex, attempt, request, callContext, retryIndex + 1);
+          const result = await this.callProvider(
+            batch,
+            inputs,
+            batchIndex,
+            attempt,
+            request,
+            callContext,
+            retryIndex + 1,
+          );
           if (used) onRetries(used);
           return result;
         } catch (error) {
@@ -442,7 +478,8 @@ export class EmbeddingEngine {
   }
 
   private async callProvider(
-    input: string[],
+    batch: number[],
+    inputs: EmbeddingInputs,
     batchIndex: number,
     attempt: { providerName: string; provider: EmbeddingsProvider; model: string },
     request: EmbeddingRequest,
@@ -462,8 +499,10 @@ export class EmbeddingEngine {
             controller.abort(createTimeoutProviderError(attempt.providerName, attempt.model, timeoutMs));
           }, timeoutMs);
 
+    const parts = inputs.parts;
     const providerRequest: EmbeddingProviderRequest = {
-      input,
+      input: batch.map((index) => inputs.texts[index] as string),
+      ...(parts ? { contents: batch.map((index) => parts[index] as EmbeddingProviderPart[]) } : {}),
       model: attempt.model,
       inputType: request.inputType,
       dimensions: request.dimensions,
@@ -528,7 +567,7 @@ export class EmbeddingEngine {
   // ── Guards ───────────────────────────────────────────────────────
 
   /** Applies the per-request cost limit, when one is set, and returns the estimate it priced. */
-  private enforceCostBudget(inputs: string[], model: string): number | undefined {
+  private enforceCostBudget(inputs: EmbeddingInputs, model: string): number | undefined {
     const budget = this.config.costBudget;
     if (!budget?.enabled || budget.maxEstimatedCost === undefined) return undefined;
 
@@ -548,14 +587,19 @@ export class EmbeddingEngine {
   }
 
   /** What the inputs would cost on a model, in US dollars, for the shared budget. */
-  private estimateCost(inputs: string[], model: string): number {
+  private estimateCost(inputs: EmbeddingInputs, model: string): number {
     return this.estimate(inputs, model).totalCost;
   }
 
-  private estimate(inputs: string[], model: string) {
+  private estimate(inputs: EmbeddingInputs, model: string) {
     let inputTokens = 0;
-    for (const text of inputs) inputTokens += this.tokenizer.estimateTextTokens(text);
-    return estimateEmbeddingCost({ model, inputTokens, config: this.config.models });
+    for (const text of inputs.texts) inputTokens += this.tokenizer.estimateTextTokens(text);
+    const estimate = estimateEmbeddingCost({ model, inputTokens, config: this.config.models });
+    const images = inputs.images.reduce((total, count) => total + count, 0);
+    const perImage = images ? resolveEmbeddingModel(model, this.config.models).capabilities?.costPerImage : undefined;
+    if (!perImage) return estimate;
+    const totalCost = estimate.totalCost + images * perImage;
+    return { ...estimate, totalCost, formatted: formatCost(totalCost) };
   }
 
   // ── Cache ────────────────────────────────────────────────────────
@@ -632,22 +676,6 @@ export class EmbeddingEngine {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-function normalizeInput(input: EmbeddingRequest['input']): string[] {
-  if (typeof input === 'string') {
-    if (!input) throw new EmbeddingValidationError('Embedding input must not be empty');
-    return [input];
-  }
-  if (!Array.isArray(input) || input.length === 0) {
-    throw new EmbeddingValidationError('Embedding input must be a string or a non-empty array of strings');
-  }
-  for (const text of input) {
-    if (typeof text !== 'string' || !text) {
-      throw new EmbeddingValidationError('Every embedding input must be a non-empty string');
-    }
-  }
-  return [...input];
-}
-
 /**
  * Refuses a requested option the route cannot honor.
  *
@@ -714,13 +742,58 @@ function assertRequestedOptions(route: EmbeddingRoute, request: EmbeddingRequest
   }
 }
 
-function chunkInputs(inputs: string[], size: number): string[][] {
+function chunkInputs<T>(inputs: T[], size: number): T[][] {
   if (!Number.isFinite(size) || inputs.length <= size) return [inputs];
-  const chunks: string[][] = [];
+  const chunks: T[][] = [];
   for (let index = 0; index < inputs.length; index += size) {
     chunks.push(inputs.slice(index, index + size));
   }
   return chunks;
+}
+
+/** Whether a model takes every media kind the inputs hold. */
+function takesMedia(
+  model: EmbeddingModelCapabilities | undefined,
+  provider: EmbeddingsProvider,
+  inputs: EmbeddingInputs,
+): boolean {
+  if (inputs.media.size === 0) return true;
+  const accepted = acceptedModalities(model, provider.info.capabilities);
+  return [...inputs.media].every((kind) => accepted.includes(kind));
+}
+
+/**
+ * Refuses media a model cannot embed, before any call. A model that does not take an image would
+ * otherwise fail at the provider, or worse, embed only the text beside it.
+ */
+function assertModalities(
+  providerName: string,
+  modelName: string,
+  model: EmbeddingModelCapabilities | undefined,
+  provider: EmbeddingsProvider,
+  inputs: EmbeddingInputs,
+): void {
+  if (takesMedia(model, provider, inputs)) return;
+  const accepted = acceptedModalities(model, provider.info.capabilities);
+  const refused = [...inputs.media].filter((kind) => !accepted.includes(kind));
+  throw new EmbeddingCapabilityError(
+    providerName,
+    'input',
+    refused.join(', '),
+    `Embedding model "${modelName}" takes ${accepted.join(', ')} input, not ${refused.join(' or ')}; use a model whose inputModalities include it, such as gemini-embedding-2`,
+  );
+}
+
+/** A cost with its images priced, at the model's price per image. */
+function withImageCost(
+  cost: ResponseCost,
+  images: number,
+  model: EmbeddingModelCapabilities | undefined,
+): ResponseCost {
+  const perImage = model?.costPerImage;
+  if (!images || !perImage) return cost;
+  const imageCost = images * perImage;
+  return { ...cost, amount: cost.amount + imageCost, input: (cost.input ?? 0) + imageCost };
 }
 
 function addUsage(usage: TokenUsage, inputTokens?: number, totalTokens?: number): TokenUsage {
