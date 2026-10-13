@@ -10,7 +10,21 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const cosine = (a: number[], b: number[]) => cosineSimilarity(normalizeVector(a), normalizeVector(b));
 
 /**
- * Redis with RediSearch: FT.CREATE, HSET, DEL, and KNN FT.SEARCH with tag filters.
+ * Network latency for a race: each request waits up to `maxMs` before the server acts on it, from a
+ * seeded sequence, so writers interleave the way they do over a network and the same way every run.
+ */
+function jitter(maxMs = 0): () => Promise<void> {
+  let seed = 7;
+  return async () => {
+    if (!maxMs) return;
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    await new Promise((resolve) => setTimeout(resolve, (seed >>> 16) % (maxMs + 1)));
+  };
+}
+
+/**
+ * Redis with RediSearch: FT.CREATE, HSET, EVAL of the store's replace script, DEL, and KNN FT.SEARCH with tag
+ * filters.
  *
  * The client is shaped as ioredis's by default: `call()`, plus a `sendCommand()` that takes an ioredis
  * command object and fails on an array, as ioredis does. `'node-redis'` gives only `sendCommand()`,
@@ -18,14 +32,20 @@ const cosine = (a: number[], b: number[]) => cosineSimilarity(normalizeVector(a)
  * RESP3's map as a flat array (ioredis 6's default, and this stub's for ioredis), an object, or a `Map`.
  */
 export function redisStub(
-  options: { client?: 'ioredis' | 'node-redis'; reply?: 'resp2' | 'resp3' | 'resp3-object' | 'resp3-map' } = {},
+  options: {
+    client?: 'ioredis' | 'node-redis';
+    reply?: 'resp2' | 'resp3' | 'resp3-object' | 'resp3-map';
+    jitterMs?: number;
+  } = {},
 ) {
+  const latency = jitter(options.jitterMs);
   const shape = options.client ?? 'ioredis';
   const protocol = options.reply ?? (shape === 'ioredis' ? 'resp3' : 'resp2');
   const hashes = new Map<string, Map<string, string | Buffer>>();
   const indexes = new Map<string, { prefix: string }>();
   const commands: string[] = [];
   const call = async (command: string, ...args: Array<string | Buffer>): Promise<unknown> => {
+    await latency();
     commands.push(command);
     const text = args.map((arg) => (typeof arg === 'string' ? arg : ''));
     if (command === 'FT.CREATE') {
@@ -38,10 +58,20 @@ export function redisStub(
       return text.length;
     }
     if (command === 'HSET') {
-      const hash = new Map<string, string | Buffer>();
+      const hash = hashes.get(text[0]) ?? new Map<string, string | Buffer>();
       for (let index = 1; index + 1 < args.length; index += 2) hash.set(text[index], args[index + 1]);
       hashes.set(text[0], hash);
       return 1;
+    }
+    if (command === 'EVAL') {
+      // The store's one script: delete the hash and write the new one, in a single step as Redis runs it.
+      if (!/^redis\.call\('DEL', KEYS\[1\]\) return redis\.call\('HSET', KEYS\[1\], unpack\(ARGV\)\)$/.test(text[0])) {
+        throw new Error(`the stub runs only the store's replace script, not: ${text[0]}`);
+      }
+      const hash = new Map<string, string | Buffer>();
+      for (let index = 3; index + 1 < args.length; index += 2) hash.set(text[index], args[index + 1]);
+      hashes.set(text[2], hash);
+      return hash.size;
     }
     if (command === 'FT.SEARCH') {
       const index = indexes.get(text[0]);
@@ -151,8 +181,12 @@ export function pineconeStub() {
   return { fetch: fetch as typeof globalThis.fetch, vectors, headers };
 }
 
-/** Chroma's v2 API: collections, upsert, query with typed `$eq` and `$and`, and delete. */
-export function chromaStub() {
+/**
+ * Chroma's v2 API: collections, an upsert that merges metadata as Chroma's does, get, query with typed
+ * `$eq` and `$and`, and delete.
+ */
+export function chromaStub(options: { jitterMs?: number } = {}) {
+  const latency = jitter(options.jitterMs);
   const collections = new Map<
     string,
     { id: string; records: Map<string, { embedding: number[]; document: string; metadata: Json }> }
@@ -163,6 +197,7 @@ export function chromaStub() {
     return Object.entries(where).every(([key, condition]) => metadata[key] === (condition as { $eq: unknown }).$eq);
   };
   const fetch = async (input: string | URL | Request, init: RequestInit = {}) => {
+    await latency();
     const path = decodeURIComponent(new URL(String(input)).pathname);
     const body = init.body ? (JSON.parse(String(init.body)) as Json) : {};
     const base = '/api/v2/tenants/default_tenant/databases/default_database/collections';
@@ -177,14 +212,24 @@ export function chromaStub() {
     const collection = [...collections.values()].find((item) => item.id === id);
     if (!collection) return json(404, { error: 'NotFoundError' });
     if (action === 'upsert') {
+      // As Chroma does: metadata merges into the stored record's, and a null removes a field.
       for (const [index, recordId] of (body.ids as string[]).entries()) {
+        const metadata: Json = { ...collection.records.get(recordId)?.metadata };
+        for (const [key, value] of Object.entries((body.metadatas as Json[])[index] ?? {})) {
+          if (value === null) delete metadata[key];
+          else metadata[key] = value;
+        }
         collection.records.set(recordId, {
           embedding: (body.embeddings as number[][])[index],
           document: (body.documents as string[])[index],
-          metadata: (body.metadatas as Json[])[index],
+          metadata,
         });
       }
       return json(200, {});
+    }
+    if (action === 'get') {
+      const found = (body.ids as string[]).filter((recordId) => collection.records.has(recordId));
+      return json(200, { ids: found, metadatas: found.map((recordId) => collection.records.get(recordId)?.metadata) });
     }
     if (action === 'query') {
       const query = (body.query_embeddings as number[][])[0];
@@ -212,14 +257,15 @@ export function chromaStub() {
 /**
  * Weaviate's REST schema and batch APIs, and the GraphQL `Get` with `nearVector` and typed `Equal`
  * filters the store sends. Filters are checked as Weaviate checks them: an operand of another type than
- * the property's, or a property the class lacks, fails the whole query.
+ * the property's, or a property the class lacks, fails the whole query. `stalePostings` makes a filter
+ * also match a value an object had before it was replaced, as Weaviate's index can after a race.
  */
-export function weaviateStub() {
+export function weaviateStub(options: { stalePostings?: boolean } = {}) {
   const classes = new Map<
     string,
     {
       properties: Array<{ name: string; dataType?: string[] }>;
-      objects: Map<string, { vector: number[]; properties: Json }>;
+      objects: Map<string, { vector: number[]; properties: Json; replaced?: Json[] }>;
     }
   >();
   const fetch = async (input: string | URL | Request, init: RequestInit = {}) => {
@@ -246,7 +292,12 @@ export function weaviateStub() {
         objects.map((object) => {
           const target = classes.get(object.class);
           if (!target) return { result: { errors: { error: [{ message: `class ${object.class} not found` }] } } };
-          target.objects.set(object.id, { vector: object.vector, properties: object.properties });
+          // `stalePostings` keeps what Weaviate's filter index can keep after concurrent replacements:
+          // an entry for a value the object no longer has.
+          const before = target.objects.get(object.id);
+          const replaced =
+            options.stalePostings && before ? [...(before.replaced ?? []), before.properties] : undefined;
+          target.objects.set(object.id, { vector: object.vector, properties: object.properties, replaced });
           return { id: object.id, result: {} };
         }),
       );
@@ -266,6 +317,7 @@ export function weaviateStub() {
       if (!target) return json(200, { errors: [{ message: `Cannot query field "${name}"` }] });
       const vector = JSON.parse(/nearVector: \{vector: (\[[^\]]*\])\}/.exec(query)?.[1] ?? '[]') as number[];
       const limit = Number(/limit: (\d+)/.exec(query)?.[1]);
+      const selected = (/\) \{ ([\w ]+) _additional/.exec(query)?.[1] ?? '').split(' ').filter(Boolean);
       const conditions = [
         ...query.matchAll(
           /\{path: \["(\w+)"\], operator: Equal, (valueText|valueNumber|valueInt|valueBoolean): ([^}]+)\}/g,
@@ -288,15 +340,17 @@ export function weaviateStub() {
         }
       }
       const hits = [...target.objects.values()]
-        .filter((object) => conditions.every(({ field, value }) => object.properties[field] === value))
+        .filter((object) =>
+          conditions.every(({ field, value }) =>
+            [object.properties, ...(object.replaced ?? [])].some((version) => version[field] === value),
+          ),
+        )
         .map((object) => ({ object, distance: 1 - cosine(vector, object.vector) }))
         .sort((a, b) => a.distance - b.distance)
         .slice(0, limit)
         .map(({ object, distance }) => ({
-          chunkId: object.properties.chunkId,
-          content: object.properties.content,
-          source: object.properties.source,
-          metadata: object.properties.metadata,
+          // The properties the query selects, as GraphQL answers.
+          ...Object.fromEntries(selected.map((property) => [property, object.properties[property] ?? null])),
           _additional: { distance },
         }));
       return json(200, { data: { Get: { [name]: hits } } });
@@ -304,4 +358,73 @@ export function weaviateStub() {
     return json(404, {});
   };
   return { fetch: fetch as typeof globalThis.fetch, classes };
+}
+
+/**
+ * An in-memory stand-in for the parts of Qdrant's REST API the store uses: collections, upserts,
+ * cosine search with a score threshold and `must` match filters, deletes, and payload indexes.
+ */
+export function qdrantStub() {
+  const collections = new Map<
+    string,
+    { size: number; points: Map<string, { vector: number[]; payload: Record<string, unknown> }> }
+  >();
+  const requests: Array<{ method: string; url: string; headers: Record<string, string> }> = [];
+  const json = (status: number, result: unknown) =>
+    new Response(JSON.stringify({ status: status < 300 ? 'ok' : 'error', result }), { status });
+
+  const fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
+    const url = new URL(String(input));
+    const method = init.method ?? 'GET';
+    requests.push({ method, url: url.pathname, headers: (init.headers ?? {}) as Record<string, string> });
+    const [, , name, ...rest] = url.pathname.split('/');
+    const action = rest.join('/');
+    const body = init.body ? JSON.parse(String(init.body)) : undefined;
+    const collection = collections.get(decodeURIComponent(name ?? ''));
+
+    if (action === '' && method === 'GET') return collection ? json(200, { status: 'green' }) : json(404, null);
+    if (action === '' && method === 'PUT') {
+      collections.set(decodeURIComponent(name ?? ''), { size: body.vectors.size, points: new Map() });
+      return json(200, true);
+    }
+    if (!collection) return json(404, null);
+    if (action === 'index') return json(200, { status: 'acknowledged' });
+    if (action === 'points' && method === 'PUT') {
+      for (const point of body.points) {
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(point.id)) {
+          return json(400, { error: `bad point id ${point.id}` });
+        }
+        if (point.vector.length !== collection.size) return json(400, { error: 'wrong vector size' });
+        collection.points.set(point.id, { vector: point.vector, payload: point.payload });
+      }
+      return json(200, { status: 'completed' });
+    }
+    if (action === 'points/search') {
+      const query = normalizeVector(body.vector);
+      const must: Array<{ key: string; match: { value: unknown } }> = body.filter?.must ?? [];
+      const hits = [...collection.points.entries()]
+        .filter(([, point]) =>
+          must.every(
+            ({ key, match }) =>
+              (point.payload.metadata as Record<string, unknown> | null)?.[key.replace(/^metadata\./, '')] ===
+              match.value,
+          ),
+        )
+        .map(([id, point]) => ({
+          id,
+          score: cosineSimilarity(query, normalizeVector(point.vector)),
+          payload: point.payload,
+        }))
+        .filter((hit) => hit.score >= (body.score_threshold ?? -1))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, body.limit);
+      return json(200, hits);
+    }
+    if (action === 'points/delete') {
+      for (const id of body.points) collection.points.delete(id);
+      return json(200, { status: 'completed' });
+    }
+    return json(404, null);
+  };
+  return { fetch: fetch as typeof globalThis.fetch, requests, collections };
 }

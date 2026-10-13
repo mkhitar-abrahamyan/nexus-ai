@@ -14,6 +14,7 @@ import {
   META_PREFIX,
   parseMetadata,
   requestJson,
+  searchLimit,
   vectorsFor,
 } from './vector-helpers.js';
 
@@ -39,6 +40,14 @@ export interface ChromaVectorStoreOptions {
   headers?: Record<string, string>;
   /** Aborts a request that takes longer, in milliseconds. Defaults to 30 seconds. */
   timeoutMs?: number;
+  /**
+   * The metadata fields a search can filter on. Chroma merges metadata when it replaces a record, so
+   * a field the new version lacks has to be removed by name. With this list, every write sets each
+   * declared field, or removes it, and a filter on any other field is refused: a replacement needs no
+   * read and stays whole however many writers race. Without it, every top-level field is filterable,
+   * and a replacement first reads which fields the stored version has.
+   */
+  filterFields?: readonly string[];
 }
 
 /** Raised when Chroma answers with an error. */
@@ -68,15 +77,18 @@ interface ChromaQueryResult {
  * No Chroma client is a dependency. The collection uses cosine distance, and a result's score is one
  * minus that distance, so scores mean the same as in every other store. Top-level string, number, and
  * boolean metadata fields are copied under `meta_` names for filtering; the whole metadata travels as
- * JSON, so nested values come back too.
+ * JSON, so nested values come back too. A replacement is whole: a field the new version lacks is
+ * removed rather than merged, as `filterFields` explains.
  */
 export class ChromaVectorStore implements VectorStore {
   private readonly base: string;
   private readonly embed: EmbeddingProvider;
+  private readonly declared?: ReadonlySet<string>;
   private collectionId: Promise<string> | undefined;
 
   constructor(private readonly options: ChromaVectorStoreOptions) {
     assertDimensions(options.dimensions);
+    if (options.filterFields) this.declared = new Set(options.filterFields);
     const tenant = encodeURIComponent(options.tenant ?? 'default_tenant');
     const database = encodeURIComponent(options.database ?? 'default_database');
     this.base = `${(options.url ?? 'http://localhost:8000').replace(/\/+$/, '')}/api/v2/tenants/${tenant}/databases/${database}`;
@@ -97,16 +109,23 @@ export class ChromaVectorStore implements VectorStore {
   async add(documents: VectorDocument[]): Promise<void> {
     if (documents.length === 0) return;
     const embeddings = await vectorsFor(documents, this.embed, this.options.dimensions);
-    await this.records('/upsert', {
-      ids: documents.map((doc) => doc.id),
-      embeddings,
-      documents: documents.map((doc) => doc.content),
-      metadatas: documents.map((doc) => ({
-        ...filterFields(doc.metadata),
-        ...(doc.source ? { source: doc.source } : {}),
-        metadata: JSON.stringify(doc.metadata ?? null),
-      })),
-    });
+    const ids = documents.map((doc) => doc.id);
+    // Chroma merges metadata on upsert, and a null removes a field, so every field the new version
+    // lacks is sent as null.
+    const metadatas = documents.map((doc) => this.recordMetadata(doc));
+    if (!this.declared) {
+      const stored = (await this.records('/get', { ids, include: ['metadatas'] })) as {
+        ids: string[];
+        metadatas?: Array<Record<string, unknown> | null>;
+      };
+      const before = new Map(stored.ids.map((id, index) => [id, stored.metadatas?.[index] ?? {}]));
+      for (const [index, doc] of documents.entries()) {
+        for (const key of Object.keys(before.get(doc.id) ?? {})) {
+          if (!(key in metadatas[index])) metadatas[index][key] = null;
+        }
+      }
+    }
+    await this.records('/upsert', { ids, embeddings, documents: documents.map((doc) => doc.content), metadatas });
   }
 
   /** The chunks most similar to a query, best first. */
@@ -118,10 +137,15 @@ export class ChromaVectorStore implements VectorStore {
   /** The chunks most similar to a vector, best first. */
   async searchVector(vector: number[], options: VectorSearchOptions = {}): Promise<VectorSearchResult[]> {
     assertWidth(vector, this.options.dimensions);
-    const filters = filterEntries(options.filter).map(([key, value]) => ({ [`${META_PREFIX}${key}`]: { $eq: value } }));
+    const filters = filterEntries(options.filter).map(([key, value]) => {
+      if (this.declared && !this.declared.has(key)) {
+        throw new RangeError(`"${key}" is not a filter field of this store; add it to filterFields`);
+      }
+      return { [`${META_PREFIX}${key}`]: { $eq: value } };
+    });
     const result = (await this.records('/query', {
       query_embeddings: [vector],
-      n_results: options.topK || 5,
+      n_results: searchLimit(options.topK),
       include: ['documents', 'metadatas', 'distances'],
       ...(filters.length === 1 ? { where: filters[0] } : filters.length > 1 ? { where: { $and: filters } } : {}),
     })) as ChromaQueryResult;
@@ -147,6 +171,18 @@ export class ChromaVectorStore implements VectorStore {
   async delete(ids: readonly string[]): Promise<void> {
     if (ids.length === 0) return;
     await this.records('/delete', { ids });
+  }
+
+  /** A record's Chroma metadata: its filter fields, its source, and the whole metadata as JSON. */
+  private recordMetadata(doc: VectorDocument): Record<string, string | number | boolean | null> {
+    const fields: Record<string, string | number | boolean | null> = filterFields(doc.metadata);
+    if (this.declared) {
+      for (const key of Object.keys(fields)) {
+        if (!this.declared.has(key.slice(META_PREFIX.length))) delete fields[key];
+      }
+      for (const field of this.declared) fields[`${META_PREFIX}${field}`] ??= null;
+    }
+    return { ...fields, source: doc.source || null, metadata: JSON.stringify(doc.metadata ?? null) };
   }
 
   private async records(path: string, body: unknown): Promise<unknown> {

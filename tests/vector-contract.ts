@@ -70,6 +70,22 @@ export async function vectorStoreContract(
   );
   assert.match(replaced.find((result) => result.id === 'careers#0')?.content ?? '', /event tickets/);
 
+  // A replacement is whole: metadata the new version lacks is gone, from results and from filters.
+  await store.add([{ id: 'shipping#0', content: passages[1].content }]);
+  await settle();
+  const shipping = (await store.search('orders ship from the warehouse', { topK: 10 })).find(
+    (result) => result.id === 'shipping#0',
+  );
+  assert.ok(shipping, `${name}: the replacement is found`);
+  assert.equal(shipping.metadata?.tenant, undefined, `${name}: replaced metadata does not come back`);
+  assert.equal(shipping.source, undefined, `${name}: a replaced source does not come back`);
+  const acme = await store.search('orders ship from the warehouse', { filter: { tenant: 'acme' }, topK: 10 });
+  assert.equal(
+    acme.some((result) => result.id === 'shipping#0'),
+    false,
+    `${name}: a filter field the new version lacks does not survive the replacement`,
+  );
+
   await store.delete(['refunds#0', 'not-stored']);
   await settle();
   const afterDelete = await store.search('how long do refunds take', { topK: 10 });

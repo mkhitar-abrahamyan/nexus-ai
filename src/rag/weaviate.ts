@@ -14,9 +14,13 @@ import {
   META_PREFIX,
   parseMetadata,
   requestJson,
+  searchLimit,
   stableUuid,
   vectorsFor,
 } from './vector-helpers.js';
+
+/** What a Weaviate property name, and so a filtered metadata field, may be. */
+const PROPERTY = /^[_A-Za-z][_0-9A-Za-z]*$/;
 
 /** The type of a metadata field a Weaviate collection filters on. */
 export type WeaviateFieldType = 'text' | 'number' | 'boolean';
@@ -61,6 +65,14 @@ interface WeaviateHit {
   source?: string | null;
   metadata?: string | null;
   _additional?: { distance?: number };
+  /** The filtered `meta_` properties, selected so each hit is checked against its own fields. */
+  [property: string]: unknown;
+}
+
+/** A filter as a GraphQL `where` argument, and the property values every hit must have. */
+interface WeaviateWhere {
+  argument: string;
+  checks: Array<[string, string | number | boolean]>;
 }
 
 interface WeaviateSchema {
@@ -107,7 +119,7 @@ export class WeaviateVectorStore implements VectorStore {
       ? options.filterFields.map((field) => [field, 'text'] as const)
       : Object.entries((options.filterFields ?? {}) as Record<string, WeaviateFieldType>);
     const property = ([field, type]: readonly [string, WeaviateFieldType]) => {
-      if (!/^[_A-Za-z][_0-9A-Za-z]*$/.test(field)) throw new RangeError(`"${field}" cannot be a Weaviate property`);
+      if (!PROPERTY.test(field)) throw new RangeError(`"${field}" cannot be a Weaviate property`);
       return {
         name: `${META_PREFIX}${field}`,
         dataType: [type],
@@ -180,9 +192,24 @@ export class WeaviateVectorStore implements VectorStore {
   /** The chunks most similar to a vector, best first. */
   async searchVector(vector: number[], options: VectorSearchOptions = {}): Promise<VectorSearchResult[]> {
     assertWidth(vector, this.options.dimensions);
+    const topK = searchLimit(options.topK);
     const where = await this.where(options.filter);
     if (where === undefined) return [];
-    const query = `{ Get { ${this.collection}(nearVector: {vector: ${JSON.stringify(vector)}}, limit: ${options.topK || 5}${where}) { chunkId content source metadata _additional { distance } } } }`;
+    // Each filtered hit is checked against its own fields: when two writers replace one object at
+    // once, Weaviate can keep a stale filter entry for it. A stale entry that took a place is made up
+    // by asking for more, so a result always matches its filter and the page stays full.
+    for (let limit = topK; ; limit *= 2) {
+      const hits = await this.nearVector(vector, limit, where);
+      const kept = hits.filter((hit) => where.checks.every(([property, value]) => hit[property] === value));
+      if (kept.length >= topK || hits.length < limit || limit >= topK * 8) {
+        return this.results(kept.slice(0, topK), options.minScore ?? 0);
+      }
+    }
+  }
+
+  private async nearVector(vector: number[], limit: number, where: WeaviateWhere): Promise<WeaviateHit[]> {
+    const checked = where.checks.map(([property]) => ` ${property}`).join('');
+    const query = `{ Get { ${this.collection}(nearVector: {vector: ${JSON.stringify(vector)}}, limit: ${limit}${where.argument}) { chunkId content source metadata${checked} _additional { distance } } } }`;
     const response = (await this.request('POST', '/graphql', { query })) as {
       data?: { Get?: Record<string, WeaviateHit[] | null> };
       errors?: Array<{ message?: string }>;
@@ -191,9 +218,12 @@ export class WeaviateVectorStore implements VectorStore {
       const detail = response.errors.map((error) => error.message).join('; ');
       throw new WeaviateError(`Weaviate search failed: ${detail}`, 200, detail);
     }
-    const minScore = options.minScore ?? 0;
+    return response.data?.Get?.[this.collection] ?? [];
+  }
+
+  private results(hits: WeaviateHit[], minScore: number): VectorSearchResult[] {
     const results: VectorSearchResult[] = [];
-    for (const hit of response.data?.Get?.[this.collection] ?? []) {
+    for (const hit of hits) {
       const score = 1 - (hit._additional?.distance ?? 1);
       if (score < minScore) continue;
       const metadata = parseMetadata(hit.metadata);
@@ -220,21 +250,27 @@ export class WeaviateVectorStore implements VectorStore {
   }
 
   /**
-   * The GraphQL `where` argument for a filter, or `undefined` when a value can never match. Weaviate
+   * A filter as a GraphQL `where` argument, or `undefined` when a value can never match. Weaviate
    * refuses an operand of another type than the property's, where every other store finds nothing.
    */
-  private async where(filter: VectorSearchOptions['filter']): Promise<string | undefined> {
+  private async where(filter: VectorSearchOptions['filter']): Promise<WeaviateWhere | undefined> {
     const entries = filterEntries(filter);
-    if (entries.length === 0) return '';
+    if (entries.length === 0) return { argument: '', checks: [] };
+    for (const [key] of entries) {
+      if (!PROPERTY.test(key)) throw new RangeError(`"${key}" cannot be a Weaviate property, so it cannot filter`);
+    }
     const types = await this.dataTypesOf(entries.map(([key]) => `${META_PREFIX}${key}`));
     const conditions: string[] = [];
+    const checks: WeaviateWhere['checks'] = [];
     for (const [key, value] of entries) {
-      const path = `${META_PREFIX}${key}`;
-      const operand = operandFor(types.get(path), value);
+      const property = `${META_PREFIX}${key}`;
+      const operand = operandFor(types.get(property), value);
       if (operand === null) return undefined;
-      conditions.push(`{path: [${JSON.stringify(path)}], operator: Equal, ${operand}: ${JSON.stringify(value)}}`);
+      conditions.push(`{path: [${JSON.stringify(property)}], operator: Equal, ${operand}: ${JSON.stringify(value)}}`);
+      checks.push([property, value]);
     }
-    return `, where: ${conditions.length === 1 ? conditions[0] : `{operator: And, operands: [${conditions.join(', ')}]}`}`;
+    const argument = `, where: ${conditions.length === 1 ? conditions[0] : `{operator: And, operands: [${conditions.join(', ')}]}`}`;
+    return { argument, checks };
   }
 
   /** The data types of these properties, reading the schema again when one is not in the copy held. */

@@ -6,7 +6,17 @@ import {
   type VectorSearchResult,
   type VectorStore,
 } from '../hallucination/retrieval.js';
-import { assertDimensions, assertWidth, filterEntries, parseMetadata, vectorsFor } from './vector-helpers.js';
+import {
+  assertDimensions,
+  assertWidth,
+  filterEntries,
+  parseMetadata,
+  searchLimit,
+  vectorsFor,
+} from './vector-helpers.js';
+
+/** Deletes a chunk's hash and writes its new fields as one atomic step. */
+const REPLACE_HASH = "redis.call('DEL', KEYS[1]) return redis.call('HSET', KEYS[1], unpack(ARGV))";
 
 /**
  * A Redis client that sends raw commands — what RediSearch's `FT.*` commands need. ioredis provides
@@ -113,12 +123,13 @@ export class RedisVectorStore implements VectorStore {
     const vectors = await vectorsFor(documents, this.embed, this.options.dimensions);
     await Promise.all(
       documents.map(async (doc, index) => {
-        const key = this.prefix + doc.id;
-        // Replacing, not merging: a tag field the new version lacks must not survive from the old one.
-        await this.send(['DEL', key]);
+        // Replacing, not merging, in one step: a tag field the new version lacks must not survive from
+        // the old one, even when two writers replace the same chunk at once.
         await this.send([
-          'HSET',
-          key,
+          'EVAL',
+          REPLACE_HASH,
+          '1',
+          this.prefix + doc.id,
           'id',
           doc.id,
           'content',
@@ -147,7 +158,7 @@ export class RedisVectorStore implements VectorStore {
   /** The chunks most similar to a vector, best first. */
   async searchVector(vector: number[], options: VectorSearchOptions = {}): Promise<VectorSearchResult[]> {
     assertWidth(vector, this.options.dimensions);
-    const topK = options.topK || 5;
+    const topK = searchLimit(options.topK);
     const clauses = filterEntries(options.filter).map(([field, value]) => {
       if (!this.fields.has(field)) {
         throw new RangeError(`"${field}" is not a filter field of this store; add it to filterFields and migrate`);

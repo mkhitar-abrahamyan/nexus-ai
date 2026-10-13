@@ -68,16 +68,52 @@ Each gap is written down in a guide's limitations today, and each is closed by o
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.8 |
-| Images have not recorded live conformance on all three backends | API stability | 2.8 |
+| The Qdrant, Redis, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.8 |
+| The Pinecone store has passed its contract only against a stub | API stability | when the live credential is set |
+| Images have not recorded live conformance on all three backends | API stability | when the live credentials are set |
+| Embeddings take text only, one call at a time, and their cache makes one round trip per input | Embeddings guide | 2.8 |
+| Asset stores read and write whole byte arrays | Images guide | 2.8 |
+| Prices and models move only with a runtime release | Providers guide | 2.8 |
+| Reading a document, describing an image, and searching media are left to the application | Retrieval guide | 2.8 |
 
 ---
 
-## 2.8.0: live graduation
+## 2.8.0: retrieval at production scale, and media that is understood
 
-**Carried: live graduation.** The remote vector stores and images graduate when the scheduled live
-workflow passes against each, published with their checklists. It needs the repository's live
-credentials. The rest of 2.8 is chosen from the list below.
+Four themes, each with a proof. Nothing here adds a required dependency or grows the root import.
+
+**Live graduation.** The Qdrant, Redis, Weaviate, and Chroma stores leave experimental status with
+the full checklist run against the real servers in the scheduled live workflow: the contract,
+ten writers on the same ids, a soak, a load budget, tenant isolation, and an upgrade from 2.7. A
+replacement in Redis becomes one atomic write, and every store refuses a `topK` that is not a
+positive integer before it reaches a query. Pinecone and images graduate the same way once their
+live credentials are set; nothing else stands in their way.
+
+**Embeddings beyond text.**
+- A shared embedding cache: an `EmbeddingCacheStore` that reads and writes a whole batch in one round
+  trip, keys on a hash rather than the text, and keeps vectors as packed floats, on memory, Redis,
+  Postgres, and SQLite. Proof: a second process embeds a 2,000-text batch with no provider call and
+  one cache read.
+- Images, audio, video, and documents as embedding input, on the models that take them, and refused
+  on the ones that do not. Proof: a text query finds the image it describes through one vector space.
+- A provider batch tier for embeddings at half price, on its own entry point, and an ingestion
+  pipeline that submits, survives a crash, and collects. Proof: a 100,000-chunk ingestion through a
+  batch tier, crashed between submit and collect, resumes without submitting twice.
+
+**Streaming asset stores.** `putStream()` and `getStream()`, with byte ranges, on the filesystem, S3,
+and memory stores, and a fallback for any store that has neither. The checksum and size limit are
+enforced while the bytes flow. Proof: a gigabyte through each streaming store with flat memory.
+
+**Registry data on its own.** The model and embedding registries as a versioned data file, which an
+application supplies, layers over the bundled data, and checks with `nexus models check`. `nexus
+models refresh` compares it with the providers the application has keys for. Nothing is fetched
+from a central server. Proof: a price changed in a supplied file reaches the cost of the next call.
+
+**Media understanding.** On a new entry point, reading a document's text page by page, describing an
+image, and answering a question about either, through any vision model or a dedicated OCR service,
+with one contract and a conformance suite. Media search and RAG index those pages, captions, and
+image vectors, retrieve the asset behind each hit, and hand the model the image itself. Proof: an
+experiment where answers grounded in the retrieved media beat answers from their text alone.
 
 ---
 
@@ -85,21 +121,15 @@ credentials. The rest of 2.8 is chosen from the list below.
 
 Not yet scheduled, roughly in order of what applications ask for:
 
-1. Embeddings beyond text: a provider batch tier for large ingestion jobs, image and multimodal
-   embeddings, and a distributed vector cache shared across processes.
-2. Model registry data released on its own, as a versioned package or a file the application
-   supplies, refreshed from provider sources, so prices can move faster than the runtime. Never
-   fetched from a central server.
-3. Realtime follow-ons: a second provider, SIP and video transports, durable session recovery,
+1. Realtime follow-ons: a second provider, SIP and video transports, durable session recovery,
    browser compatibility automation, and a published method for latency and load benchmarks.
-4. Telephony follow-ons: a second provider, outbound SMS and messaging as an operation family, call
+2. Telephony follow-ons: a second provider, outbound SMS and messaging as an operation family, call
    recording with a retention policy, and conference and transfer control.
-5. Video generation through the same asynchronous operation, job, and asset contracts.
-6. OCR, captioning, visual question answering, image embeddings, and media search and RAG.
-7. Multi-region deployment.
-8. Policy-as-code presets versioned independently from the runtime, multi-tenant credential-vault
+3. Video generation through the same asynchronous operation, job, and asset contracts.
+4. Multi-region deployment.
+5. Policy-as-code presets versioned independently from the runtime, multi-tenant credential-vault
    adapters, and routing by provider residency.
-9. Streaming reads and writes for the filesystem and S3 asset stores, and OTLP export over gRPC.
+6. OTLP export over gRPC.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:

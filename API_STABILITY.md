@@ -41,6 +41,51 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.8 stage (Unreleased)
+
+Everything 2.8 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- `ChromaVectorStoreOptions.filterFields`.
+
+Changed, each to keep a promise the store already made:
+- The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores refuse a `topK` that is not a positive
+  integer with a `RangeError`. An absent `topK`, or 0, still means 5.
+- A replacement in Chroma removes the metadata fields the new version lacks; before, Chroma merged
+  them. A Weaviate filter is typed by the collection's schema, so a value of another type than its
+  property matches nothing instead of failing the search.
+
+### Graduation
+
+The Qdrant, Redis, Weaviate, and Chroma vector stores leave experimental status, by the same
+checklist as in 2.4. The live evidence comes from the scheduled live workflow, which runs every
+check against each server; the stand-in evidence runs in CI on every change.
+
+**The remote vector stores** (`QdrantVectorStore`, `RedisVectorStore`, `WeaviateVectorStore`,
+`ChromaVectorStore`):
+
+| Requirement | Evidence |
+| --- | --- |
+| API stability | Covered by the 2.x compatibility rules, with no planned breaking change |
+| Conformance | The vector store contract and typed filters, against each real server, Redis over RESP3 and RESP2: `tests/vector-stores.live.ts`; against stand-ins that fail as the servers do: `tests/vector-stores.test.ts` |
+| Crash recovery | n/a: a store keeps no run state, and a reload upserts the same ids |
+| Concurrency | Ten writers replacing the same twenty ids at once leave each id as one writer's version, found only by that writer's filters, live and against stand-ins that interleave as a network does |
+| Load | 2,000 chunks written, then 200 searches within a p95 budget of 200 ms on each server: `tests/vector-stores.live.ts` |
+| Tenant isolation | Each store under `tenantVectorStore()`, live and in `tests/tenant-isolation.test.ts` |
+| Security | [Review](./SECURITY.md#the-qdrant-redis-weaviate-and-chroma-vector-stores): four findings fixed, two documented limitations |
+| Upgrade | What the published 2.7.0 wrote is read, filtered, replaced, and deleted by this release, live and in `tests/upgrade-remote-stores.test.ts` |
+| Soak | 1,000 write, search, and delete cycles on each server, with the heap within 8 MB |
+
+Chroma graduates in both modes. Without `filterFields`, two writers replacing one id at once can
+leave a stale filter field, which its guide states; with `filterFields`, a replacement stays whole
+under any race.
+
+**Still experimental**, each with what remains:
+- **The Pinecone store.** It passes every check against a stand-in, and the live workflow runs the
+  same checks against Pinecone once the repository's Pinecone secret is set.
+- **Images.** Recorded live conformance must pass on all three backends. The live workflow records it
+  for each backend whose credential is set.
+
 ## 2.7 stage (2.7.0)
 
 Everything 2.7 adds is stable from the start and additive.
@@ -996,7 +1041,8 @@ accounts are experimental in production readiness. Their contracts follow the 1.
 ## Retrieval breadth stage (1.22.0)
 
 The loaders, the SQLite vector store, the retrievers, and the MCP registry graduated in 2.4; see the
-2.4 stage for their evidence. The Redis, Pinecone, Weaviate, and Chroma stores remain experimental.
+2.4 stage for their evidence. The Redis, Weaviate, and Chroma stores graduated in 2.8; see the 2.8
+stage. The Pinecone store remains experimental.
 
 The loaders (`nexus-ai-pro/loaders/*`), the Redis, Pinecone, Weaviate, Chroma, and SQLite vector
 stores, the retrievers (`nexus-ai-pro/rag/retrievers`), and the MCP registry
@@ -1028,8 +1074,8 @@ are experimental in production readiness. Their contracts follow the 1.x rules.
 
 ## Retrieval stores stage (1.20.0)
 
-`PostgresVectorStore` graduated in 2.4; see the 2.4 stage for its evidence. `QdrantVectorStore`
-remains experimental.
+`PostgresVectorStore` graduated in 2.4, and `QdrantVectorStore` in 2.8; see those stages for their
+evidence.
 
 `PostgresVectorStore` (`nexus-ai-pro/postgres/vectors`) and `QdrantVectorStore` (`nexus-ai-pro/rag/qdrant`)
 are experimental in production readiness. The `VectorStore` contract they share with

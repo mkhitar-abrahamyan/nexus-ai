@@ -201,6 +201,18 @@ ranking, typed metadata filters, replacement by id, and deletes. None adds a dep
 stores speak HTTP through `fetch`, and the Redis store sends commands through the client you pass.
 Call `migrate()` once where a store has one; it never runs on its own.
 
+The Qdrant, Redis, Weaviate, and Chroma stores are stable. Each runs its contract, ten racing writers,
+an upgrade, tenant isolation, a load budget, and a soak against the real server in a scheduled
+workflow. Pinecone runs the same checks against a stand-in, and is experimental until it runs them
+live.
+
+What every store promises:
+- **A replacement is whole.** Adding a chunk whose id exists replaces it. Metadata, filter fields, and
+  the source that the new version lacks are gone, even when writers race on one id.
+- **A filter is exact.** A result always matches its filter, by type as well as value.
+- **`topK` is a positive integer.** Anything else is refused before a request is sent. An absent
+  `topK` means 5.
+
 | Store | Entry point | Where the vectors live |
 | --- | --- | --- |
 | `RedisVectorStore` | `nexus-ai-pro/rag/redis` | Redis with RediSearch: Redis Stack, Redis 8, or Redis Cloud. |
@@ -230,7 +242,8 @@ works: RESP2, or RESP3, which ioredis 6 speaks by default.
 `RedisVectorStoreOptions` sets the `dimensions`, the `index` and key `prefix`, the `algorithm` (`HNSW`,
 or exact `FLAT`), and the `filterFields`. RediSearch can only filter on fields declared in the index.
 So declared fields are indexed as tags with their type, and a filter on any other field is refused
-instead of being silently ignored.
+instead of being silently ignored. A chunk is replaced by one atomic script, so a field the new
+version lacks never survives. Under `tenantVectorStore()`, declare `tenantId` too.
 
 ### Pinecone
 
@@ -250,6 +263,10 @@ value of another type than its property matches nothing, as in every other store
 request. A property added later, by `migrate()` or by Weaviate's auto-schema, is picked up when a
 filter first names it. A collection made elsewhere with `int` properties works too.
 
+Every filtered hit is checked against the object's own fields before it is returned. Weaviate's
+filter index can keep an entry for a value an object no longer has, after two writers replace it at
+once. When such an entry took a place, the store asks for more, so the page stays full.
+
 `WeaviateVectorStoreOptions` takes the `url`, the `collection` (`NexusChunk`), an `apiKey` sent as a
 bearer token, and the usual `fetch`, `headers`, and `timeoutMs`. Errors raise a `WeaviateError`,
 including errors Weaviate reports inside a successful batch.
@@ -259,6 +276,23 @@ including errors Weaviate reports inside a successful batch.
 `ChromaVectorStore` uses a collection with cosine distance, which `migrate()` creates.
 `ChromaVectorStoreOptions` takes the `url`, the `collection`, the `tenant` and `database`, and an
 `apiKey` sent as `x-chroma-token`. A failed request raises a `ChromaError`.
+
+Chroma merges metadata when it replaces a record, so the store removes each field the new version
+lacks. How it knows which fields to remove depends on `filterFields`:
+
+| `filterFields` | Filterable | A replacement |
+| --- | --- | --- |
+| Not set | Every top-level field | Reads which fields the stored version has, then removes the rest: one more request per batch. |
+| A list | Only the listed fields; a filter on another is refused | Sets every listed field, or removes it, in the same request. Whole under any race. |
+
+```ts
+const store = new ChromaVectorStore({
+  collection: 'docs',
+  dimensions: 1536,
+  embed,
+  filterFields: ['tenantId', 'lang'],
+});
+```
 
 ### How the REST stores keep metadata
 
@@ -276,6 +310,10 @@ the vectors live.
   hosted rerank API is faster and cheaper where you have one.
 - The Pinecone store does not create the index, which is a control-plane operation; create it in the
   console or with Pinecone's client.
+- The Pinecone store is experimental until it passes the live checks the other remote stores pass.
+- A Chroma store without `filterFields` reads before it replaces, so two writers replacing one id at
+  once can leave a stale filter field. Declare `filterFields` when writers can race.
+- The Redis store has no timeout of its own: the client's command timeout applies.
 
 <!-- reference:start -->
 ## Reference

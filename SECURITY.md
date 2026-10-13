@@ -52,7 +52,7 @@ what it could do with that input. Each review is published here with its finding
 before the surface graduates. A finding is closed in one of two ways: by a fix with a test that
 names the attack, or by a documented limitation that the surface's guide states.
 
-These reviews were done for 2.4, and for 2.5 where a review says so.
+These reviews were done for 2.4, and for 2.5 and 2.8 where a review says so.
 
 ### SQLite adapters
 
@@ -76,6 +76,46 @@ Trust boundary: metadata filters, which applications often build from a request.
   its value, so `"1"` never matches `1`.
 
 Findings: none.
+
+### The Qdrant, Redis, Weaviate, and Chroma vector stores
+
+Reviewed for 2.8, when they graduated. Pinecone's adapter was reviewed with them.
+
+Trust boundary: a search's `topK` and metadata filter, which applications often build from a
+request; and the server, which the store trusts as it trusts its own database. Credentials travel
+only in headers, never in a URL or an error message.
+- Qdrant, Pinecone, and Chroma receive a filter as JSON. Qdrant's keys are placed under `metadata.`,
+  so a filter cannot reach a chunk's content or vector.
+- Redis filters only on the fields the index declares. A filter value is tagged with its type, and
+  every character that is not a letter or a digit is escaped.
+- Weaviate's query is GraphQL. The collection and every filtered property must be a valid name, and
+  each value is a quoted literal.
+
+Findings:
+- **Fixed in 2.8: a `topK` from a request could change a Weaviate or Redis query.** Both stores
+  placed it in the query text, so `5) { … }` became part of the query. Every remote store now refuses
+  a `topK` that is not a positive integer before anything is sent. Proof: that value, a fraction, a
+  negative number, and `NaN` are refused by all five stores.
+- **Fixed in 2.8: a replacement could keep a filter field the new version lacks.** A filter could
+  then still find the chunk by its old value, and that includes the `tenantId` that
+  `tenantVectorStore()` filters on.
+  - Chroma merges metadata on upsert, so it happened on every replacement.
+  - Redis deleted and rewrote a chunk in two commands, so it happened when two writers raced.
+
+  Chroma now removes each field the new version lacks, and Redis replaces a chunk in one atomic
+  script. Proof: ten writers race on the same twenty ids, live and against stand-ins that interleave
+  as a network does, and each id ends as exactly one writer's version.
+- **Fixed in 2.8: Weaviate's filter index can keep an entry for a value an object no longer has**,
+  after two writers replace it at once (seen on Weaviate 1.40.1). The store now checks every filtered
+  hit against the object's own fields, and asks for more when a stale entry took a place. A result
+  always matches its filter.
+- **Documented limitation: Chroma without `filterFields` reads before it replaces**, so two writers
+  replacing one id at once can leave a stale field. With `filterFields`, every write sets each
+  declared field, and a replacement stays whole under any race.
+- **Documented limitation: the Redis store has no timeout of its own.** It sends through the client
+  you pass, so the client's command timeout applies.
+- `tenantVectorStore()` checks each result's id and tenant stamp as well as filtering, so a stale
+  filter entry in any server cannot hand one tenant another's chunk.
 
 ### Loaders
 

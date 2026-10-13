@@ -21,7 +21,8 @@ import { WeaviateError, WeaviateVectorStore } from '../src/rag/weaviate.js';
 import { fromSqliteDatabase } from '../src/sqlite/client.js';
 import { SqliteVectorStore, sqliteVectorStoreMigration } from '../src/sqlite/vectors.js';
 import { typedFilterContract, vectorStoreContract } from './vector-contract.js';
-import { chromaStub, pineconeStub, redisStub, weaviateStub } from './vector-stubs.js';
+import { concurrentWriters } from './vector-graduation.js';
+import { chromaStub, pineconeStub, qdrantStub, redisStub, weaviateStub } from './vector-stubs.js';
 
 const DIMENSIONS = 64;
 const embed = (texts: string[]) => createHashEmbeddings(texts, DIMENSIONS);
@@ -38,75 +39,6 @@ before(async () => {
 after(async () => {
   await db.close();
 });
-
-/**
- * An in-memory stand-in for the parts of Qdrant's REST API the store uses: collections, upserts,
- * cosine search with a score threshold and `must` match filters, deletes, and payload indexes.
- */
-function qdrantStub() {
-  const collections = new Map<
-    string,
-    { size: number; points: Map<string, { vector: number[]; payload: Record<string, unknown> }> }
-  >();
-  const requests: Array<{ method: string; url: string; headers: Record<string, string> }> = [];
-  const json = (status: number, result: unknown) =>
-    new Response(JSON.stringify({ status: status < 300 ? 'ok' : 'error', result }), { status });
-
-  const fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
-    const url = new URL(String(input));
-    const method = init.method ?? 'GET';
-    requests.push({ method, url: url.pathname, headers: (init.headers ?? {}) as Record<string, string> });
-    const [, , name, ...rest] = url.pathname.split('/');
-    const action = rest.join('/');
-    const body = init.body ? JSON.parse(String(init.body)) : undefined;
-    const collection = collections.get(decodeURIComponent(name ?? ''));
-
-    if (action === '' && method === 'GET') return collection ? json(200, { status: 'green' }) : json(404, null);
-    if (action === '' && method === 'PUT') {
-      collections.set(decodeURIComponent(name ?? ''), { size: body.vectors.size, points: new Map() });
-      return json(200, true);
-    }
-    if (!collection) return json(404, null);
-    if (action === 'index') return json(200, { status: 'acknowledged' });
-    if (action === 'points' && method === 'PUT') {
-      for (const point of body.points) {
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(point.id)) {
-          return json(400, { error: `bad point id ${point.id}` });
-        }
-        if (point.vector.length !== collection.size) return json(400, { error: 'wrong vector size' });
-        collection.points.set(point.id, { vector: point.vector, payload: point.payload });
-      }
-      return json(200, { status: 'completed' });
-    }
-    if (action === 'points/search') {
-      const query = normalizeVector(body.vector);
-      const must: Array<{ key: string; match: { value: unknown } }> = body.filter?.must ?? [];
-      const hits = [...collection.points.entries()]
-        .filter(([, point]) =>
-          must.every(
-            ({ key, match }) =>
-              (point.payload.metadata as Record<string, unknown> | null)?.[key.replace(/^metadata\./, '')] ===
-              match.value,
-          ),
-        )
-        .map(([id, point]) => ({
-          id,
-          score: cosineSimilarity(query, normalizeVector(point.vector)),
-          payload: point.payload,
-        }))
-        .filter((hit) => hit.score >= (body.score_threshold ?? -1))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, body.limit);
-      return json(200, hits);
-    }
-    if (action === 'points/delete') {
-      for (const id of body.points) collection.points.delete(id);
-      return json(200, { status: 'completed' });
-    }
-    return json(404, null);
-  };
-  return { fetch: fetch as typeof globalThis.fetch, requests, collections };
-}
 
 async function stores(): Promise<Array<[string, VectorStore]>> {
   const postgres = new PostgresVectorStore(client, { dimensions: DIMENSIONS, embed, table: `vectors_${++tables}` });
@@ -196,6 +128,15 @@ async function stores(): Promise<Array<[string, VectorStore]>> {
     fetch: chromaStub().fetch,
   });
   await chroma.migrate();
+  const chromaDeclared = new ChromaVectorStore({
+    url: 'http://chroma.test:8000',
+    collection: `chunks-${++tables}`,
+    dimensions: DIMENSIONS,
+    embed,
+    fetch: chromaStub().fetch,
+    filterFields: ['tenant', 'page'],
+  });
+  await chromaDeclared.migrate();
   return [
     ['memory', new MemoryVectorStore(embed)],
     ['pgvector (hnsw)', postgres],
@@ -208,6 +149,7 @@ async function stores(): Promise<Array<[string, VectorStore]>> {
     ['pinecone', pinecone],
     ['weaviate', weaviate],
     ['chroma', chroma],
+    ['chroma (declared fields)', chromaDeclared],
   ];
 }
 
@@ -220,6 +162,108 @@ test('a filter matches type as well as value, in every store that filters native
     if (name === 'qdrant' || name.startsWith('pgvector')) continue;
     await typedFilterContract(name, store);
   }
+});
+
+test('ten writers racing on the same ids leave each id whole, in every store', async () => {
+  const fields = ['writer', 'page'];
+  const weaviate = new WeaviateVectorStore({
+    url: 'http://weaviate.test:8080',
+    collection: `Race${++tables}`,
+    dimensions: DIMENSIONS,
+    embed,
+    fetch: weaviateStub().fetch,
+  });
+  await weaviate.migrate({ filterFields: { writer: 'number', page: 'number' } });
+  const postgres = new PostgresVectorStore(client, { dimensions: DIMENSIONS, embed, table: `race_${++tables}` });
+  const qdrant = new QdrantVectorStore({
+    url: 'http://qdrant.test:6333',
+    collection: `race-${++tables}`,
+    dimensions: DIMENSIONS,
+    embed,
+    fetch: qdrantStub().fetch,
+  });
+  const redis = (shape: Parameters<typeof redisStub>[0]) =>
+    new RedisVectorStore(redisStub(shape).client, {
+      dimensions: DIMENSIONS,
+      embed,
+      index: `race-${++tables}`,
+      prefix: `race:${tables}:`,
+      filterFields: fields,
+    });
+  const stores: Array<[string, VectorStore & { migrate?: () => Promise<unknown> }]> = [
+    ['memory', new MemoryVectorStore(embed)],
+    ['pgvector', postgres],
+    ['sqlite', new SqliteVectorStore(new DatabaseSync(':memory:'), { dimensions: DIMENSIONS, embed })],
+    ['qdrant', qdrant],
+    // Redis and Chroma replace in more than one request unless the store makes it one step, so their
+    // stand-ins answer after a seeded network delay, and writers interleave as they would for real.
+    ['redis', redis({ jitterMs: 3 })],
+    ['redis (node-redis)', redis({ client: 'node-redis', jitterMs: 3 })],
+    [
+      'pinecone',
+      new PineconeVectorStore({
+        host: 'race.pinecone.test',
+        apiKey: 'k',
+        dimensions: DIMENSIONS,
+        embed,
+        fetch: pineconeStub().fetch,
+      }),
+    ],
+    ['weaviate', weaviate],
+    // Without declared fields, Chroma reads before it writes, so racing writers can leave a stale
+    // field: the guide says so, and declared fields are the race-free mode.
+    [
+      'chroma (declared fields)',
+      new ChromaVectorStore({
+        url: 'http://chroma.test:8000',
+        collection: `race-${++tables}`,
+        dimensions: DIMENSIONS,
+        embed,
+        fetch: chromaStub({ jitterMs: 3 }).fetch,
+        filterFields: fields,
+      }),
+    ],
+  ];
+  for (const [name, store] of stores) {
+    await store.migrate?.();
+    await concurrentWriters(name, store);
+  }
+});
+
+test('a topK that is not a positive integer is refused before it reaches a remote store', async () => {
+  const stores: VectorStore[] = [
+    new RedisVectorStore(redisStub().client, { dimensions: DIMENSIONS, embed }),
+    new WeaviateVectorStore({ url: 'http://w.test', dimensions: DIMENSIONS, embed, fetch: weaviateStub().fetch }),
+    new QdrantVectorStore({
+      url: 'http://q.test',
+      collection: 'c',
+      dimensions: DIMENSIONS,
+      embed,
+      fetch: qdrantStub().fetch,
+    }),
+    new ChromaVectorStore({ collection: 'c', dimensions: DIMENSIONS, embed, fetch: chromaStub().fetch }),
+    new PineconeVectorStore({
+      host: 'p.test',
+      apiKey: 'k',
+      dimensions: DIMENSIONS,
+      embed,
+      fetch: pineconeStub().fetch,
+    }),
+  ];
+  for (const store of stores) {
+    for (const topK of [2.5, -1, Number.NaN, '5) { injected }' as unknown as number]) {
+      await assert.rejects(store.search('x', { topK }), /topK must be a positive integer/);
+    }
+  }
+  const chroma = new ChromaVectorStore({
+    collection: 'declared',
+    dimensions: DIMENSIONS,
+    embed,
+    fetch: chromaStub().fetch,
+    filterFields: ['tenant'],
+  });
+  await chroma.migrate();
+  await assert.rejects(chroma.search('x', { filter: { region: 'eu' } }), /not a filter field/);
 });
 
 test('a vector of the wrong width is refused before it reaches the store', async () => {
@@ -349,6 +393,31 @@ test('a Weaviate filter is typed by the schema, which is read once and again onl
     'a property added after the schema was read is found',
   );
   assert.equal(schemaReads(), 2);
+});
+
+test('a Weaviate result always matches its filter, even when the index keeps a stale entry', async () => {
+  const store = new WeaviateVectorStore({
+    url: 'http://w.test',
+    collection: 'Stale',
+    dimensions: DIMENSIONS,
+    embed,
+    fetch: weaviateStub({ stalePostings: true }).fetch,
+  });
+  await store.migrate({ filterFields: { page: 'number' } });
+  await store.add([
+    { id: 'moved', content: 'refunds on page three', metadata: { page: 3 } },
+    { id: 'stays', content: 'more about refunds and returns', metadata: { page: 3 } },
+  ]);
+  await store.add([{ id: 'moved', content: 'refunds on page three', metadata: { page: 4 } }]);
+  // The stale entry ranks first and takes the only place; the store drops it and asks for more.
+  assert.deepEqual(
+    (await store.search('refunds on page three', { filter: { page: 3 }, topK: 1 })).map((result) => result.id),
+    ['stays'],
+  );
+  assert.deepEqual(
+    (await store.search('refunds on page three', { filter: { page: 4 }, topK: 5 })).map((result) => result.id),
+    ['moved'],
+  );
 });
 
 test('the REST stores authenticate and report errors with their status', async () => {

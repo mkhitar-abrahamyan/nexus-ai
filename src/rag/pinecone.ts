@@ -14,6 +14,7 @@ import {
   META_PREFIX,
   parseMetadata,
   requestJson,
+  searchLimit,
   vectorsFor,
 } from './vector-helpers.js';
 
@@ -112,7 +113,7 @@ export class PineconeVectorStore implements VectorStore {
     const filters = filterEntries(options.filter).map(([key, value]) => ({ [`${META_PREFIX}${key}`]: { $eq: value } }));
     const result = (await this.request('/query', {
       vector,
-      topK: options.topK || 5,
+      topK: searchLimit(options.topK),
       includeMetadata: true,
       ...this.namespace(),
       ...(filters.length === 1 ? { filter: filters[0] } : filters.length > 1 ? { filter: { $and: filters } } : {}),

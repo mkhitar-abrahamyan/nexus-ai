@@ -23,6 +23,16 @@ export function assertWidth(vector: readonly number[] | undefined, dimensions: n
   }
 }
 
+/**
+ * A search's `topK`, or 5 when it has none. Anything but a positive integer is refused here, because
+ * some stores place the limit in a query string, where a crafted value could change the query.
+ */
+export function searchLimit(topK: number | undefined): number {
+  if (topK == null || topK === 0) return 5;
+  if (!Number.isSafeInteger(topK) || topK < 0) throw new RangeError(`topK must be a positive integer, not ${topK}`);
+  return topK;
+}
+
 /** Checks a store's `dimensions` option. */
 export function assertDimensions(dimensions: number): void {
   if (!(Number.isInteger(dimensions) && dimensions > 0)) throw new RangeError('dimensions must be a positive integer');

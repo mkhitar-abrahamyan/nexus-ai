@@ -6,7 +6,7 @@ import {
   type VectorSearchResult,
   type VectorStore,
 } from '../hallucination/retrieval.js';
-import { stableUuid as pointId } from './vector-helpers.js';
+import { searchLimit, stableUuid as pointId } from './vector-helpers.js';
 
 /** Options for the Qdrant store. */
 export interface QdrantVectorStoreOptions {
@@ -123,7 +123,7 @@ export class QdrantVectorStore implements VectorStore {
     const filter = options.filter && Object.keys(options.filter).length > 0 ? options.filter : undefined;
     const result = (await this.request('POST', '/points/search', {
       vector,
-      limit: options.topK || 5,
+      limit: searchLimit(options.topK),
       with_payload: true,
       score_threshold: options.minScore ?? 0,
       ...(filter

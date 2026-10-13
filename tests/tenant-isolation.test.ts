@@ -75,7 +75,13 @@ import type { NexusResponse } from '../src/types/response.js';
 import type { Store } from '../src/types/store.js';
 import type { Run, TraceStore } from '../src/types/tracing.js';
 import { END } from '../src/types/graph.js';
+import { ChromaVectorStore } from '../src/rag/chroma.js';
+import { PineconeVectorStore } from '../src/rag/pinecone.js';
+import { QdrantVectorStore } from '../src/rag/qdrant.js';
+import { RedisVectorStore } from '../src/rag/redis.js';
+import { WeaviateVectorStore } from '../src/rag/weaviate.js';
 import { FakeRedis } from './redis-fake.js';
+import { chromaStub, pineconeStub, qdrantStub, redisStub, weaviateStub } from './vector-stubs.js';
 
 const A = 'acme';
 const B = 'globex';
@@ -297,6 +303,49 @@ test("vector search: another tenant's chunks are never ranked, and delete reache
       ),
     ],
     ['sqlite', await migrated(new SqliteVectorStore(new DatabaseSync(':memory:'), { dimensions: 8, embed }))],
+    [
+      'qdrant',
+      await migrated(
+        new QdrantVectorStore({
+          url: 'http://q.test',
+          collection: 'iso',
+          dimensions: 8,
+          embed,
+          fetch: qdrantStub().fetch,
+        }),
+      ),
+    ],
+    [
+      'redis',
+      await migrated(new RedisVectorStore(redisStub().client, { dimensions: 8, embed, filterFields: ['tenantId'] })),
+    ],
+    [
+      'pinecone',
+      new PineconeVectorStore({
+        host: 'iso.pinecone.test',
+        apiKey: 'k',
+        dimensions: 8,
+        embed,
+        fetch: pineconeStub().fetch,
+      }),
+    ],
+    [
+      'weaviate',
+      await (async () => {
+        const store = new WeaviateVectorStore({
+          url: 'http://w.test',
+          dimensions: 8,
+          embed,
+          fetch: weaviateStub().fetch,
+        });
+        await store.migrate({ filterFields: ['tenantId'] });
+        return store;
+      })(),
+    ],
+    [
+      'chroma',
+      await migrated(new ChromaVectorStore({ collection: 'iso', dimensions: 8, embed, fetch: chromaStub().fetch })),
+    ],
   ];
   for (const [name, store] of stores) {
     const a = tenantVectorStore(store, A);

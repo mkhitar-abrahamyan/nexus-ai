@@ -98,11 +98,12 @@ jobs:
           if-no-files-found: ignore
 
   vector-stores:
-    # The vector store contract against real servers: each self-hostable store as a service
-    # container, and Pinecone when its secret is set.
+    # The vector stores against real servers, each self-hostable one as a service container and
+    # Pinecone when its secret is set: the contract and the graduation checklist (ten racing writers,
+    # an upgrade from 2.7.0, tenant isolation, a load budget, and a soak). The measurements are kept.
     name: Vector store conformance
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       qdrant:
         image: qdrant/qdrant:latest
@@ -140,12 +141,21 @@ jobs:
             for attempt in $(seq 1 30); do curl -fsS "$url" > /dev/null && break; sleep 2; done
           done
 
-      - name: Run the vector store contract live
+      - name: Run the vector stores live
         run: npm run test:vectors:live
         env:
+          NEXUS_LIVE_REPORT: vector-stores-live.json
           NEXUS_LIVE_QDRANT_URL: http://localhost:6333
           NEXUS_LIVE_CHROMA_URL: http://localhost:8000
           NEXUS_LIVE_WEAVIATE_URL: http://localhost:8080
           NEXUS_LIVE_REDIS_URL: redis://localhost:6379
           NEXUS_LIVE_PINECONE_HOST: ${{ secrets.NEXUS_LIVE_PINECONE_HOST }}
           NEXUS_LIVE_PINECONE_API_KEY: ${{ secrets.NEXUS_LIVE_PINECONE_API_KEY }}
+
+      - name: Keep the measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vector-stores-live
+          path: vector-stores-live.json
+          if-no-files-found: ignore

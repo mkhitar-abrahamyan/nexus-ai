@@ -4,6 +4,24 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Graduation.** The Qdrant, Redis, Weaviate, and Chroma vector stores leave experimental status.
+  Each passes its contract and the graduation checklist against the real server in the scheduled
+  live workflow: ten writers racing on the same ids, what 2.7.0 wrote read by this release, tenant
+  isolation, a load budget, and a soak. The evidence is in `API_STABILITY.md`, and the threat review
+  in `SECURITY.md`. The Pinecone store passes the same checks against a stand-in, and graduates once
+  the live workflow runs them against Pinecone.
+- `ChromaVectorStoreOptions.filterFields`: the fields a search can filter on. Every write then sets
+  each declared field, or removes it, so a replacement needs no read and stays whole under any race;
+  a filter on another field is refused.
+
+### Changed
+
+- The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores refuse a `topK` that is not a positive
+  integer, before any request. An absent `topK`, or 0, still means 5.
+- `RedisVectorStore` replaces a chunk with one atomic script instead of a delete and a write.
+
 ### Fixed
 
 - `RedisVectorStore` failed on every command with an ioredis client, which also has a
@@ -12,12 +30,25 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - `WeaviateVectorStore` failed a search whose filter value had another type than its property, such
   as `'3'` on a number. It now chooses the operand from the collection's schema, read once, so such a
   filter matches nothing, as in every other store, and an `int` property gets `valueInt`.
+- A `topK` from a request could change a Weaviate or Redis query, since both placed it in the query
+  text.
+- A replacement could keep a filter field the new version lacks, so a filter, such as a tenant's,
+  still found the chunk by its old value. In Chroma, which merges metadata, it happened on every
+  replacement, and kept a replaced `source` too; in Redis, when two writers raced.
+- After two writers replaced one object, Weaviate's filter index could return it for a value it no
+  longer had. Every filtered hit is now checked against the object's own fields, and the store asks
+  for more when a stale entry took a place.
 
 ### Proof
 
-- The live vector store contract passes against Qdrant, Weaviate, Chroma, and Redis Stack, with
-  ioredis 6 in RESP3 and RESP2. The stand-ins now fail as those servers do, so the unit tests reproduce
-  both failures above.
+- `npm run test:vectors:live` runs the contract and the graduation checklist against each server,
+  Redis over RESP3 and RESP2, and passes 35 of 35 checks locally against Qdrant, Weaviate 1.40.1,
+  Chroma 1.0, and Redis Stack with ioredis 6.0.0. The scheduled workflow keeps its measurements.
+- The stand-ins now fail as the servers do: an ioredis-shaped client, RESP3 replies, Weaviate's typed
+  filter errors and stale filter entries, Chroma's merged metadata, and a seeded network delay that
+  interleaves racing writers. Each failure above reproduces against them on the previous code.
+- `tests/upgrade-remote-stores.test.ts` reads, with this release, what the published 2.7.0 wrote into
+  each store.
 
 ## [2.7.0] - 2026-10-12
 
