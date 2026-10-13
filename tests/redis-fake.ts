@@ -32,6 +32,8 @@ export class FakeRedis {
   reads = 0;
   /** Commands run, including those inside scripts. */
   commands = 0;
+  /** Commands sent through `call()`, each one round trip. */
+  roundTrips = 0;
   now: () => number = () => Date.now();
 
   private constructor(private readonly lua: LuaEngine) {}
@@ -171,6 +173,19 @@ export class FakeRedis {
   get(key: string): string | null {
     this.commands += 1;
     return this.live(key)?.value ?? null;
+  }
+
+  mget(...keys: string[]): Array<string | null> {
+    this.commands += 1;
+    return keys.map((key) => this.live(key)?.value ?? null);
+  }
+
+  mset(...pairs: string[]): 'OK' {
+    this.commands += 1;
+    for (let index = 0; index + 1 < pairs.length; index += 2) {
+      this.strings.set(pairs[index] as string, { value: String(pairs[index + 1]) });
+    }
+    return 'OK';
   }
 
   set(key: string, value: string, ...options: Array<string | number>): 'OK' | null {
@@ -318,6 +333,18 @@ ARGV = {} for i = 1, #__argv do ARGV[i] = __argv[i] end
 return (function()\n${script}\nend)()`,
     );
     return toReply(result);
+  }
+
+  /**
+   * One raw command, as ioredis's `call()` sends it: `call('MGET', ...keys)`. Each command is one round
+   * trip, which `roundTrips` counts.
+   */
+  async call(name: string, ...args: Array<string | number>): Promise<unknown> {
+    this.roundTrips += 1;
+    const command = name.toLowerCase();
+    const method = (this as unknown as Record<string, (...input: unknown[]) => unknown>)[command];
+    if (command === 'call' || typeof method !== 'function') throw new Error(`FakeRedis has no ${name} command`);
+    return method.apply(this, args);
   }
 
   /** Runs one `redis.call` from a script, converting the reply as Redis converts it for Lua. */

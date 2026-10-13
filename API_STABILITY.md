@@ -46,7 +46,15 @@ one of its explicit subpaths.
 Everything 2.8 adds is stable from the start and additive, unless this section says otherwise.
 
 New and stable:
-- `ChromaVectorStoreOptions.filterFields`.
+- `ChromaVectorStoreOptions.filterFields`;
+- `EmbeddingCacheStore`, `EmbeddingCacheEntry`, and `EmbeddingCacheConfig` with its `store`;
+  `nexus-ai-pro/embeddings/cache`: `embeddingCacheKey()` and `EmbeddingCacheContext`, `packVector()`
+  and `unpackVector()`, `MemoryEmbeddingCache` and its options, `RedisEmbeddingCache` with its client
+  and options, and `tieredEmbeddingCache()`. A key's derivation and a vector's packed layout are part
+  of the promise, so a cache one release wrote is read by the next;
+- `nexus-ai-pro/postgres/embedding-cache`: `PostgresEmbeddingCache`, its options, and
+  `embeddingCacheMigrations()`; `nexus-ai-pro/sqlite/embedding-cache`: `SqliteEmbeddingCache`, its
+  options, and `sqliteEmbeddingCacheMigrations()`.
 
 Changed, each to keep a promise the store already made:
 - The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores refuse a `topK` that is not a positive

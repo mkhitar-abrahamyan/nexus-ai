@@ -285,6 +285,14 @@ import { EmbeddingManager as SubpathEmbeddingManager } from 'nexus-ai-pro/embedd
 import { MockEmbeddingProvider } from 'nexus-ai-pro/embeddings/mock';
 import { OpenAIEmbeddingProvider } from 'nexus-ai-pro/embeddings/adapters';
 import { resolveEmbeddingModel } from 'nexus-ai-pro/embeddings/models';
+import {
+  MemoryEmbeddingCache,
+  RedisEmbeddingCache,
+  tieredEmbeddingCache,
+  type EmbeddingCacheStore,
+} from 'nexus-ai-pro/embeddings/cache';
+import { PostgresEmbeddingCache } from 'nexus-ai-pro/postgres/embedding-cache';
+import { SqliteEmbeddingCache } from 'nexus-ai-pro/sqlite/embedding-cache';
 import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/telephony';
 import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
@@ -794,6 +802,14 @@ const embeddingRequest: EmbeddingRequest = { input: ['one', 'two'], inputType: '
 const embeddingResponse: Promise<EmbeddingResponse> = ai.embed(embeddingRequest);
 const embeddingVector: Promise<number[]> = ai.embedOne('one');
 const resolvedEmbeddingModel = resolveEmbeddingModel('embed-quality');
+const sharedEmbeddingCaches: EmbeddingCacheStore[] = [
+  tieredEmbeddingCache(new MemoryEmbeddingCache({ maxEntries: 5_000 }), new RedisEmbeddingCache({ call: async () => [] })),
+  new PostgresEmbeddingCache({ query: async () => ({ rows: [], rowCount: 0 }) }, { table: 'app.embedding_cache' }),
+  new SqliteEmbeddingCache({ run: () => ({ changes: 0 }), all: () => [], exec: () => undefined }),
+];
+const embeddingsWithSharedCache = new SubpathEmbeddingManager({
+  cache: { store: sharedEmbeddingCaches[0], ttlSeconds: 86_400 },
+});
 const imageManager = new ImageManager(imageConfig);
 const subpathImageManager = new SubpathImageManager(imageConfig);
 const openAiImages = new OpenAIImageProvider({ apiKey: 'test' });
@@ -950,6 +966,7 @@ void openAiEmbeddings;
 void embeddingResponse;
 void embeddingVector;
 void resolvedEmbeddingModel;
+void embeddingsWithSharedCache;
 void doneChunk;
 void directRealtimeSession;
 void realtimeAgent;

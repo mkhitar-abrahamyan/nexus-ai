@@ -5897,6 +5897,25 @@ await chunks.add(ingestDocuments(docs).chunks);
 const context = await chunks.search(question, { topK: 5, filter: { tenant: 'acme' } });
 ```
 
+## A shared embedding cache
+
+`PostgresEmbeddingCache`, on `nexus-ai-pro/postgres/embedding-cache`, keeps embedding vectors for
+every process that reaches the database. Give it to `embeddings.cache.store`, as the
+[embeddings guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/embeddings.md#sharing-the-cache) shows. A batch is one `SELECT` and one
+upsert, and a vector is packed float32 in a `bytea`: 6 KB for 1,536 dimensions.
+
+```ts
+import { PostgresEmbeddingCache } from 'nexus-ai-pro/postgres/embedding-cache';
+
+const cache = new PostgresEmbeddingCache(pool, { table: 'app.embedding_cache' });
+await cache.migrate();
+const ai = new NexusAI({ providers, embeddings: { cache: { store: cache, ttlSeconds: 30 * 86_400 } } });
+```
+
+`PostgresEmbeddingCacheOptions` sets the `table` (`nexus_embedding_cache`).
+`embeddingCacheMigrations()` returns its versioned schema, which `migrate()` applies. `purgeExpired()`
+deletes what has lapsed; an expired vector is never returned before that.
+
 ## Keyword search
 
 `PostgresKeywordIndex`, on `nexus-ai-pro/postgres/fulltext`, is keyword search with Postgres's own
@@ -6047,6 +6066,25 @@ sqliteVec.load(db);
 const vectors = new SqliteVectorStore(db, { dimensions: 1536, embed, search: 'sqlite-vec' });
 await vectors.migrate();
 ```
+
+## A shared embedding cache
+
+`SqliteEmbeddingCache`, on `nexus-ai-pro/sqlite/embedding-cache`, keeps embedding vectors in a table,
+for every process on one machine, or a team's through libSQL. Give it to `embeddings.cache.store`, as
+the [embeddings guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/embeddings.md#sharing-the-cache) shows. Vectors are packed float32 blobs, and
+a batch of keys is read in statements of 500.
+
+```ts
+import Database from 'better-sqlite3';
+import { SqliteEmbeddingCache } from 'nexus-ai-pro/sqlite/embedding-cache';
+
+const cache = new SqliteEmbeddingCache(new Database('embeddings.db'));
+await cache.migrate();
+```
+
+`SqliteEmbeddingCacheOptions` sets the `table` (`nexus_embedding_cache`) and a clock for tests.
+`sqliteEmbeddingCacheMigrations()` returns its versioned schema, and `purgeExpired()` deletes what has
+lapsed.
 
 ## Versioned migrations
 
@@ -7964,6 +8002,63 @@ ai.registerEmbeddingProvider('mock', new MockEmbeddingProvider());
 Bundled embedding dimensions and prices are defaults, not financial truth. Override them through
 `embeddings.models.registry` when exact numbers matter.
 
+## Sharing the cache
+
+A shared cache lets every process reuse what any of them embedded. Re-indexing a corpus, or several
+workers ingesting overlapping documents, then pays the provider only for what is new. Give
+`cache.store` an `EmbeddingCacheStore`, from `nexus-ai-pro/embeddings/cache` or a database entry
+point:
+
+```ts
+import Redis from 'ioredis';
+import { NexusAI } from 'nexus-ai-pro';
+import { MemoryEmbeddingCache, RedisEmbeddingCache, tieredEmbeddingCache } from 'nexus-ai-pro/embeddings/cache';
+
+const ai = new NexusAI({
+  providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } },
+  embeddings: {
+    cache: {
+      store: tieredEmbeddingCache(new MemoryEmbeddingCache(), new RedisEmbeddingCache(new Redis(process.env.REDIS_URL!))),
+      ttlSeconds: 30 * 86_400,
+    },
+  },
+});
+```
+
+A store differs from a `CacheAdapter` in three ways:
+
+- **One round trip a request.** It reads every input in one `getMany()` and writes what it embedded
+  in one `setMany()`, so 2,000 cached texts cost one call, not 2,000.
+- **Keys are hashes.** `embeddingCacheKey()` is a SHA-256 of the text and its
+  `EmbeddingCacheContext`: the provider, model, input type, size, normalization, and truncation. No
+  text is ever a key in a shared store, and the same text under another model is another entry.
+- **Vectors are packed.** `packVector()` and `unpackVector()` store four bytes a dimension, against
+  about twenty as JSON. Providers send float32 precision, so nothing they sent is lost.
+
+`EmbeddingCacheConfig` is the `CacheConfig` every cache takes, plus `store`. A store turns the cache
+on unless `enabled` is `false`, and takes the place of `adapter`. A store that fails fails the
+request, as an adapter does. Wrap it to treat a failure as a miss.
+
+| Store | Entry point | Where the vectors live |
+| --- | --- | --- |
+| `MemoryEmbeddingCache` | `nexus-ai-pro/embeddings/cache` | This process, least recently used first out. `MemoryEmbeddingCacheOptions` sets `maxEntries` (10,000). |
+| `RedisEmbeddingCache` | `nexus-ai-pro/embeddings/cache` | Redis: one `MGET` and one script a batch. |
+| `PostgresEmbeddingCache` | `nexus-ai-pro/postgres/embedding-cache` | A Postgres table. See the [Postgres guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.md). |
+| `SqliteEmbeddingCache` | `nexus-ai-pro/sqlite/embedding-cache` | A SQLite table. See the [SQLite guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/sqlite.md). |
+
+`tieredEmbeddingCache()` puts two stores in front of each other. The near one answers first, and
+the far one answers the rest in one call. A far hit is copied near, and a write goes to both.
+
+`RedisEmbeddingCache` takes a `RedisEmbeddingCacheClient`: ioredis, with `call()`, or node-redis,
+with `sendCommand()`. `RedisEmbeddingCacheOptions` sets the key `prefix` (`nexus:embedding:`) and
+`multiKey`. On Redis Cluster, set `multiKey: false`: each key then travels as its own command, all
+sent at once, since a multi-key command needs every key in one slot.
+
+An `EmbeddingCacheEntry` is a key and its vector. A store of your own implements the two methods.
+
+A `cache.adapter`, without a store, keeps working with the keys it always had. It is now asked for
+every input at once rather than one after another.
+
 ## Requests and responses
 
 `EmbeddingRequest` needs only the `input`: an `EmbeddingInput`, which is one string or a list. The
@@ -8094,6 +8189,7 @@ Every embedding error extends `EmbeddingError` and has a stable code.
 
 - Bundled dimensions and prices are defaults, verified on the date the registry records.
 - Cost is estimated from tokens when a provider reports none.
+- Two processes that miss the same text at once both embed it; the shared cache keeps one vector.
 
 ---
 
@@ -11683,6 +11779,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/base` | 11 KB | 3% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
+| `nexus-ai-pro/embeddings/cache` | 11 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
@@ -11716,7 +11813,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 2% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 1% | none |
 | `nexus-ai-pro/embeddings/mock` | 5 KB | 1% | none |
+| `nexus-ai-pro/sqlite/embedding-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/tracing/rollups` | 5 KB | 1% | none |
+| `nexus-ai-pro/postgres/embedding-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/prompts/file` | 5 KB | 1% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/rag` | 5 KB | 1% | none |
@@ -11918,7 +12017,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 164 entry points, 128 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 167 entry points, 131 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

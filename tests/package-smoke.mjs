@@ -79,6 +79,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/embeddings/mock', exports: ['MockEmbeddingProvider'] },
   { specifier: 'nexus-ai-pro/embeddings/models', exports: ['KNOWN_EMBEDDING_MODELS', 'resolveEmbeddingModel'] },
   {
+    specifier: 'nexus-ai-pro/embeddings/cache',
+    exports: ['MemoryEmbeddingCache', 'RedisEmbeddingCache', 'tieredEmbeddingCache', 'embeddingCacheKey'],
+  },
+  {
     specifier: 'nexus-ai-pro/operations',
     exports: ['OperationRunner', 'MemoryOperationStore', 'LocalOperationHandle', 'OperationCancelledError'],
   },
@@ -110,6 +114,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/sqlite/operations', exports: ['SqliteOperationStore', 'sqliteOperationStoreMigration'] },
   { specifier: 'nexus-ai-pro/sqlite/store', exports: ['SqliteStore', 'sqliteStoreMigration'] },
   { specifier: 'nexus-ai-pro/sqlite/vectors', exports: ['SqliteVectorStore', 'sqliteVectorStoreMigration'] },
+  {
+    specifier: 'nexus-ai-pro/sqlite/embedding-cache',
+    exports: ['SqliteEmbeddingCache', 'sqliteEmbeddingCacheMigrations'],
+  },
   { specifier: 'nexus-ai-pro/sqlite/migrations', exports: ['applySqliteMigrations', 'sqliteMigrationStatus'] },
   { specifier: 'nexus-ai-pro/agent', exports: ['createAgent', 'agentInput', 'AgentLoop', 'tool', 'ToolExecutor'] },
   { specifier: 'nexus-ai-pro/agent/permissions', exports: ['permissionPolicy', 'parseCapability', 'normalizePath'] },
@@ -373,6 +381,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/loaders/web', exports: ['loadWebPages', 'loadSitemap', 'sitemapUrls'] },
   { specifier: 'nexus-ai-pro/loaders/git', exports: ['loadGitRepository', 'GitLoaderError'] },
   { specifier: 'nexus-ai-pro/postgres/vectors', exports: ['PostgresVectorStore', 'vectorStoreMigration'] },
+  {
+    specifier: 'nexus-ai-pro/postgres/embedding-cache',
+    exports: ['PostgresEmbeddingCache', 'embeddingCacheMigrations'],
+  },
   { specifier: 'nexus-ai-pro/postgres/fulltext', exports: ['PostgresKeywordIndex', 'keywordIndexMigrations'] },
   { specifier: 'nexus-ai-pro/evals', exports: ['EvalRunner', 'LLMJudge'] },
   { specifier: 'nexus-ai-pro/evals/judge', exports: ['LLMJudge', 'createLLMJudgeEval'] },

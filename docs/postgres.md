@@ -1,6 +1,6 @@
 # Postgres
 
-<!-- covers: ./postgres ./postgres/operations ./postgres/store ./postgres/traces ./postgres/evaluate ./postgres/circuits ./postgres/prompts ./postgres/vectors ./postgres/fulltext ./postgres/migrations ./postgres/rollups ./postgres/tenancy -->
+<!-- covers: ./postgres ./postgres/operations ./postgres/store ./postgres/traces ./postgres/evaluate ./postgres/circuits ./postgres/prompts ./postgres/vectors ./postgres/fulltext ./postgres/migrations ./postgres/rollups ./postgres/tenancy ./postgres/embedding-cache -->
 
 Postgres storage for everything that has to outlive a process or be shared between workers: durable
 operations and graph checkpoints, long-term memory, traces and their hourly rollups, datasets and
@@ -264,6 +264,25 @@ await chunks.add(ingestDocuments(docs).chunks);
 const context = await chunks.search(question, { topK: 5, filter: { tenant: 'acme' } });
 ```
 
+## A shared embedding cache
+
+`PostgresEmbeddingCache`, on `nexus-ai-pro/postgres/embedding-cache`, keeps embedding vectors for
+every process that reaches the database. Give it to `embeddings.cache.store`, as the
+[embeddings guide](./embeddings.md#sharing-the-cache) shows. A batch is one `SELECT` and one
+upsert, and a vector is packed float32 in a `bytea`: 6 KB for 1,536 dimensions.
+
+```ts
+import { PostgresEmbeddingCache } from 'nexus-ai-pro/postgres/embedding-cache';
+
+const cache = new PostgresEmbeddingCache(pool, { table: 'app.embedding_cache' });
+await cache.migrate();
+const ai = new NexusAI({ providers, embeddings: { cache: { store: cache, ttlSeconds: 30 * 86_400 } } });
+```
+
+`PostgresEmbeddingCacheOptions` sets the `table` (`nexus_embedding_cache`).
+`embeddingCacheMigrations()` returns its versioned schema, which `migrate()` applies. `purgeExpired()`
+deletes what has lapsed; an expired vector is never returned before that.
+
 ## Keyword search
 
 `PostgresKeywordIndex`, on `nexus-ai-pro/postgres/fulltext`, is keyword search with Postgres's own
@@ -335,6 +354,14 @@ specific entry point that provides it.
 | `circuitStoreMigrations` | function | The versioned schema, which `migrate()` and `nexus db migrate` apply. |
 | `PostgresCircuitStateStore` | class | Shared circuit state in Postgres. |
 | `PostgresCircuitStateStoreOptions` | interface | Options for the Postgres circuit store. |
+
+### `nexus-ai-pro/postgres/embedding-cache`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `embeddingCacheMigrations` | function | The versioned schema, which `migrate()` and `nexus db migrate` apply. |
+| `PostgresEmbeddingCache` | class | Vectors in a Postgres table, shared by every process that reaches the database. |
+| `PostgresEmbeddingCacheOptions` | interface | Options for the Postgres embedding cache. |
 
 ### `nexus-ai-pro/postgres/evaluate`
 

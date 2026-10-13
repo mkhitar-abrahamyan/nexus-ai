@@ -23,6 +23,7 @@ import * as v27pinecone from 'nexus-ai-pro-2-7/rag/pinecone';
 import * as v27qdrant from 'nexus-ai-pro-2-7/rag/qdrant';
 import * as v27redis from 'nexus-ai-pro-2-7/rag/redis';
 import * as v27weaviate from 'nexus-ai-pro-2-7/rag/weaviate';
+import { RedisEmbeddingCache } from '../src/embeddings/cache.js';
 import { createHashEmbeddings, type VectorStore } from '../src/hallucination/retrieval.js';
 import { ChromaVectorStore } from '../src/rag/chroma.js';
 import { PineconeVectorStore } from '../src/rag/pinecone.js';
@@ -31,6 +32,7 @@ import { RedisVectorStore } from '../src/rag/redis.js';
 import { WeaviateVectorStore } from '../src/rag/weaviate.js';
 import { tenantVectorStore } from '../src/tenancy/index.js';
 import { type Settle, typedFilterContract, vectorStoreContract } from './vector-contract.js';
+import { cacheContract } from './embedding-cache-contract.js';
 import { concurrentWriters, load, soak, upgradeFrom } from './vector-graduation.js';
 
 const DIMENSIONS = 64;
@@ -301,6 +303,9 @@ const checks: Array<[string, (live: LiveStore, opened: Opened) => Promise<string
 ];
 
 const report: Record<string, unknown> = {};
+/** Deletes every key matching `ARGV[1]`, in slices `unpack` can take. */
+const DROP_PREFIX =
+  "local keys = redis.call('KEYS', ARGV[1]) for i = 1, #keys, 5000 do redis.call('DEL', unpack(keys, i, math.min(i + 4999, #keys))) end return #keys";
 let failed = 0;
 let passed = 0;
 for (const live of stores) {
@@ -326,6 +331,39 @@ for (const live of stores) {
     }
   }
 }
+// The shared embedding cache against the same Redis: one MGET and one script per batch, both protocols.
+if (env.NEXUS_LIVE_REDIS_URL) {
+  for (const protocol of [undefined, 2] as const) {
+    const name = `redis embedding cache${protocol ? ' (RESP2)' : ''}`;
+    const specifier = 'ioredis';
+    const { default: Redis } = (await import(specifier)) as {
+      default: new (
+        url: string,
+        options: { protocol?: number },
+      ) => { call(...args: unknown[]): Promise<unknown>; quit(): Promise<unknown> };
+    };
+    const client = new Redis(env.NEXUS_LIVE_REDIS_URL, protocol ? { protocol } : {});
+    const prefix = `${run}:embedding:${protocol ?? 3}:`;
+    try {
+      await cacheContract(name, new RedisEmbeddingCache(client as never, { prefix }));
+      await cacheContract(
+        `${name}, one key per command`,
+        new RedisEmbeddingCache(client as never, { prefix: `${prefix}single:`, multiKey: false }),
+      );
+      passed++;
+      console.log(`ok - ${name}`);
+    } catch (error) {
+      failed++;
+      console.error(`not ok - ${name}: ${(error as Error)?.message ?? error}`);
+    } finally {
+      await client.call('EVAL', DROP_PREFIX, '0', `${prefix}*`).catch(() => undefined);
+      await client.quit();
+    }
+  }
+}
+
 if (env.NEXUS_LIVE_REPORT) writeFileSync(env.NEXUS_LIVE_REPORT, `${JSON.stringify(report, null, 2)}\n`);
-console.log(`${passed} of ${passed + failed} live checks passed, on ${stores.length} vector stores.`);
+console.log(
+  `${passed} of ${passed + failed} live checks passed, on ${stores.length} vector stores and the Redis embedding cache.`,
+);
 process.exit(failed ? 1 : 0);

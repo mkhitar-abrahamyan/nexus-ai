@@ -420,6 +420,16 @@
         "default": "./dist-cjs/embeddings/models.js"
       }
     },
+    "./embeddings/cache": {
+      "import": {
+        "types": "./dist/embeddings/cache.d.ts",
+        "default": "./dist/embeddings/cache.js"
+      },
+      "require": {
+        "types": "./dist-cjs/embeddings/cache.d.ts",
+        "default": "./dist-cjs/embeddings/cache.js"
+      }
+    },
     "./operations": {
       "import": {
         "types": "./dist/operations/index.d.ts",
@@ -508,6 +518,16 @@
       "require": {
         "types": "./dist-cjs/sqlite/vectors.d.ts",
         "default": "./dist-cjs/sqlite/vectors.js"
+      }
+    },
+    "./sqlite/embedding-cache": {
+      "import": {
+        "types": "./dist/sqlite/embedding-cache.d.ts",
+        "default": "./dist/sqlite/embedding-cache.js"
+      },
+      "require": {
+        "types": "./dist-cjs/sqlite/embedding-cache.d.ts",
+        "default": "./dist-cjs/sqlite/embedding-cache.js"
       }
     },
     "./sqlite/migrations": {
@@ -808,6 +828,16 @@
       "require": {
         "types": "./dist-cjs/postgres/vectors.d.ts",
         "default": "./dist-cjs/postgres/vectors.js"
+      }
+    },
+    "./postgres/embedding-cache": {
+      "import": {
+        "types": "./dist/postgres/embedding-cache.d.ts",
+        "default": "./dist/postgres/embedding-cache.js"
+      },
+      "require": {
+        "types": "./dist-cjs/postgres/embedding-cache.d.ts",
+        "default": "./dist-cjs/postgres/embedding-cache.js"
       }
     },
     "./postgres/fulltext": {
@@ -2000,6 +2030,9 @@
       "embeddings/models": [
         "dist-cjs/embeddings/models.d.ts"
       ],
+      "embeddings/cache": [
+        "dist-cjs/embeddings/cache.d.ts"
+      ],
       "operations": [
         "dist-cjs/operations/index.d.ts"
       ],
@@ -2092,6 +2125,9 @@
       ],
       "postgres/vectors": [
         "dist-cjs/postgres/vectors.d.ts"
+      ],
+      "postgres/embedding-cache": [
+        "dist-cjs/postgres/embedding-cache.d.ts"
       ],
       "postgres/fulltext": [
         "dist-cjs/postgres/fulltext.d.ts"
@@ -2344,6 +2380,9 @@
       ],
       "sqlite/vectors": [
         "dist-cjs/sqlite/vectors.d.ts"
+      ],
+      "sqlite/embedding-cache": [
+        "dist-cjs/sqlite/embedding-cache.d.ts"
       ],
       "sqlite/migrations": [
         "dist-cjs/sqlite/migrations.d.ts"

@@ -198,6 +198,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/base` | 11 KB | 3% | none |
 | `nexus-ai-pro/optimizer` | 11 KB | 3% | none |
 | `nexus-ai-pro/images/mock` | 11 KB | 3% | none |
+| `nexus-ai-pro/embeddings/cache` | 11 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
@@ -231,7 +232,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/telephony/realtime-bridge` | 6 KB | 2% | none |
 | `nexus-ai-pro/providers/errors` | 5 KB | 1% | none |
 | `nexus-ai-pro/embeddings/mock` | 5 KB | 1% | none |
+| `nexus-ai-pro/sqlite/embedding-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/tracing/rollups` | 5 KB | 1% | none |
+| `nexus-ai-pro/postgres/embedding-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/prompts/file` | 5 KB | 1% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/rag` | 5 KB | 1% | none |

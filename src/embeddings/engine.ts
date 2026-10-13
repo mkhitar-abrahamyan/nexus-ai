@@ -16,6 +16,7 @@ import { MemoryCache, createCacheKey } from '../cache/memory-cache.js';
 import { RateLimiter } from '../ops/rate-limiter.js';
 import { OperationLifecycle } from '../core/lifecycle.js';
 import type { EmbeddingManagerRuntime } from './manager.js';
+import type { EmbeddingCacheContext } from './cache.js';
 import type { ProviderCallContext } from '../types/lifecycle.js';
 import { NexusProviderError, createTimeoutProviderError, isAbortError } from '../providers/errors.js';
 import { assertWithinCostBudget } from '../optimizer/cost-budget.js';
@@ -72,7 +73,7 @@ export class EmbeddingEngine {
     });
 
     // Only the exact-match cache is built here; a disabled cache costs nothing.
-    if (config.cache?.enabled && !config.cache.adapter) {
+    if (config.cache?.enabled && !config.cache.adapter && !config.cache.store) {
       this.localCache = new MemoryCache<number[]>(config.cache.maxEntries || 2000);
     }
   }
@@ -137,19 +138,15 @@ export class EmbeddingEngine {
   ): Promise<EmbeddingResponse> {
     const requestId = callContext.requestId;
     const model = route.resolved.model;
-    const cacheEnabled = request.cache ?? this.config.cache?.enabled ?? false;
+    const cache = this.config.cache;
+    const cacheEnabled = request.cache ?? cache?.enabled ?? cache?.store !== undefined;
     const cacheContext = cacheEnabled ? this.cacheContext(route, request) : undefined;
-    const vectors = new Array<number[] | undefined>(inputs.length);
+    let vectors = new Array<number[] | undefined>(inputs.length);
     let cachedInputs = 0;
 
     if (cacheContext) {
-      for (let index = 0; index < inputs.length; index += 1) {
-        const hit = await this.readCache(cacheContext, inputs[index] as string);
-        if (hit) {
-          vectors[index] = hit;
-          cachedInputs += 1;
-        }
-      }
+      vectors = await this.readCache(cacheContext, inputs);
+      for (const vector of vectors) if (vector) cachedInputs += 1;
     }
 
     const pending: number[] = [];
@@ -230,12 +227,7 @@ export class EmbeddingEngine {
         vectors[index] = vector;
       }
 
-      if (cacheContext) {
-        for (let position = 0; position < uniqueTexts.length; position += 1) {
-          const vector = finished[position];
-          if (vector) await this.writeCache(cacheContext, uniqueTexts[position] as string, vector);
-        }
-      }
+      if (cacheContext) await this.writeCache(cacheContext, uniqueTexts, finished);
 
       providerUsed = route.provider.info.name?.trim() || route.providerName;
     }
@@ -580,22 +572,61 @@ export class EmbeddingEngine {
     };
   }
 
-  private async readCache(context: Record<string, unknown>, text: string): Promise<number[] | undefined> {
-    const key = createCacheKey({ ...context, text });
-    const adapter = this.config.cache?.adapter as CacheAdapter<number[]> | undefined;
-    if (adapter) return (await adapter.get(key)) ?? undefined;
-    return this.localCache?.get(key);
-  }
-
-  private async writeCache(context: Record<string, unknown>, text: string, vector: number[]): Promise<void> {
-    const key = createCacheKey({ ...context, text });
-    const ttlSeconds = this.config.cache?.ttlSeconds ?? 3600;
+  /**
+   * Every input's cached vector, or `undefined`. A shared store answers the whole request in one
+   * call, keyed by hash; an adapter is asked for each input at once, under the keys it always had,
+   * so a fleet mid-rollout still shares entries.
+   */
+  private async readCache(context: Record<string, unknown>, inputs: string[]): Promise<Array<number[] | undefined>> {
+    const store = this.config.cache?.store;
+    if (store) {
+      const keys = await this.storeKeys(context, inputs);
+      const unique = [...new Set(keys)];
+      const found = await store.getMany(unique);
+      const byKey = new Map(unique.map((key, index) => [key, found[index]]));
+      return keys.map((key) => byKey.get(key));
+    }
     const adapter = this.config.cache?.adapter as CacheAdapter<number[]> | undefined;
     if (adapter) {
-      await adapter.set(key, vector, ttlSeconds);
+      const found = await Promise.all(inputs.map((text) => adapter.get(createCacheKey({ ...context, text }))));
+      return found.map((vector) => vector ?? undefined);
+    }
+    return inputs.map((text) => this.localCache?.get(createCacheKey({ ...context, text })));
+  }
+
+  private async writeCache(
+    context: Record<string, unknown>,
+    texts: string[],
+    vectors: Array<number[] | undefined>,
+  ): Promise<void> {
+    const ttlSeconds = this.config.cache?.ttlSeconds ?? 3600;
+    const store = this.config.cache?.store;
+    if (store) {
+      const keys = await this.storeKeys(context, texts);
+      const entries = keys.flatMap((key, index) => {
+        const vector = vectors[index];
+        return vector ? [{ key, vector }] : [];
+      });
+      await store.setMany(entries, ttlSeconds);
       return;
     }
-    this.localCache?.set(key, vector, ttlSeconds);
+    const adapter = this.config.cache?.adapter as CacheAdapter<number[]> | undefined;
+    await Promise.all(
+      texts.map(async (text, index) => {
+        const vector = vectors[index];
+        if (!vector) return;
+        const key = createCacheKey({ ...context, text });
+        if (adapter) await adapter.set(key, vector, ttlSeconds);
+        else this.localCache?.set(key, vector, ttlSeconds);
+      }),
+    );
+  }
+
+  /** Keys for a shared store. Loaded with the store, so an engine without one never hashes. */
+  private async storeKeys(context: Record<string, unknown>, texts: string[]): Promise<string[]> {
+    const { embeddingCacheKey } = await import('./cache.js');
+    const { encodingFormat: _format, ...vector } = context;
+    return texts.map((text) => embeddingCacheKey(vector as unknown as EmbeddingCacheContext, text));
   }
 }
 

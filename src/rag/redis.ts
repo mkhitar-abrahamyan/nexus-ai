@@ -14,6 +14,7 @@ import {
   searchLimit,
   vectorsFor,
 } from './vector-helpers.js';
+import { redisSender } from '../utils/redis-command.js';
 
 /** Deletes a chunk's hash and writes its new fields as one atomic step. */
 const REPLACE_HASH = "redis.call('DEL', KEYS[1]) return redis.call('HSET', KEYS[1], unpack(ARGV))";
@@ -73,11 +74,7 @@ export class RedisVectorStore implements VectorStore {
     private readonly options: RedisVectorStoreOptions,
   ) {
     assertDimensions(options.dimensions);
-    // `call` first: ioredis also has a `sendCommand`, but it takes an ioredis Command, not an array.
-    this.send =
-      'call' in client
-        ? (args) => client.call(args[0] as string, ...args.slice(1))
-        : (args) => client.sendCommand(args);
+    this.send = redisSender<string | Buffer>(client);
     this.index = options.index ?? 'nexus:vectors';
     this.prefix = options.prefix ?? 'nexus:vector:';
     this.fields = new Set(options.filterFields ?? []);

@@ -1,6 +1,6 @@
 # SQLite
 
-<!-- covers: ./sqlite ./sqlite/operations ./sqlite/store ./sqlite/vectors ./sqlite/migrations -->
+<!-- covers: ./sqlite ./sqlite/operations ./sqlite/store ./sqlite/vectors ./sqlite/migrations ./sqlite/embedding-cache -->
 
 Durable persistence on one machine with no server to run: operation records — and through them graph
 and workflow checkpoints — long-term memory, and retrieval vectors, in a SQLite file. Each adapter takes the database
@@ -102,6 +102,25 @@ sqliteVec.load(db);
 const vectors = new SqliteVectorStore(db, { dimensions: 1536, embed, search: 'sqlite-vec' });
 await vectors.migrate();
 ```
+
+## A shared embedding cache
+
+`SqliteEmbeddingCache`, on `nexus-ai-pro/sqlite/embedding-cache`, keeps embedding vectors in a table,
+for every process on one machine, or a team's through libSQL. Give it to `embeddings.cache.store`, as
+the [embeddings guide](./embeddings.md#sharing-the-cache) shows. Vectors are packed float32 blobs, and
+a batch of keys is read in statements of 500.
+
+```ts
+import Database from 'better-sqlite3';
+import { SqliteEmbeddingCache } from 'nexus-ai-pro/sqlite/embedding-cache';
+
+const cache = new SqliteEmbeddingCache(new Database('embeddings.db'));
+await cache.migrate();
+```
+
+`SqliteEmbeddingCacheOptions` sets the `table` (`nexus_embedding_cache`) and a clock for tests.
+`sqliteEmbeddingCacheMigrations()` returns its versioned schema, and `purgeExpired()` deletes what has
+lapsed.
 
 ## Versioned migrations
 

@@ -152,7 +152,7 @@ compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, 
 
 <!-- runtimes:start -->
 
-Of 164 entry points, 128 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 167 entry points, 131 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

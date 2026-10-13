@@ -306,6 +306,38 @@ export interface EmbeddingCostBudgetConfig {
   onExceeded?: 'error' | 'warn';
 }
 
+/** A vector to cache, under its key. */
+export interface EmbeddingCacheEntry {
+  /** The entry's key, from `embeddingCacheKey()`. */
+  key: string;
+  /** The vector. */
+  vector: readonly number[];
+}
+
+/**
+ * Where embedding vectors are cached, shared by every process that uses the same store.
+ *
+ * A store reads and writes a whole batch at once, so answering 2,000 texts costs one round trip, not
+ * 2,000. Keys are SHA-256 hashes from `embeddingCacheKey()`, so a text never becomes a key.
+ */
+export interface EmbeddingCacheStore {
+  /** The vectors under these keys, in the same order, with `undefined` for each miss. */
+  getMany(keys: readonly string[]): Promise<Array<number[] | undefined>>;
+  /** Stores vectors, each for `ttlSeconds` when given. */
+  setMany(entries: readonly EmbeddingCacheEntry[], ttlSeconds?: number): Promise<void>;
+}
+
+/** How embeddings are cached: the options every cache takes, and a shared store. */
+export interface EmbeddingCacheConfig extends CacheConfig {
+  /**
+   * A shared vector cache, such as `RedisEmbeddingCache` or `PostgresEmbeddingCache`. It reads and
+   * writes each request's vectors in one round trip, and turns the cache on unless `enabled` is
+   * `false`. It takes the place of `adapter`. A failure of the store fails the request, as an
+   * adapter's does; wrap the store to treat a failure as a miss instead.
+   */
+  store?: EmbeddingCacheStore;
+}
+
 /** Configuration for `ai.embed()`. */
 export interface EmbeddingConfig {
   /** Adapters registered at construction, keyed by the name requests refer to. */
@@ -318,8 +350,8 @@ export interface EmbeddingConfig {
   fallback?: Array<{ provider?: string; model?: string }>;
   /** Embedding models and aliases beyond the bundled ones. */
   models?: EmbeddingModelRegistryConfig;
-  /** Per-input result caching. Off unless enabled. */
-  cache?: CacheConfig;
+  /** Per-input result caching. Off unless enabled, or given a shared `store`. */
+  cache?: EmbeddingCacheConfig;
   /** Rate limiting for embedding calls. */
   rateLimit?: RateLimitConfig;
   /** Retries for failed embedding calls. */

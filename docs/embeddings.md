@@ -1,6 +1,6 @@
 # Embeddings and retrieval
 
-<!-- covers: ./embeddings ./embeddings/adapters ./embeddings/mock ./embeddings/models -->
+<!-- covers: ./embeddings ./embeddings/adapters ./embeddings/mock ./embeddings/models ./embeddings/cache -->
 
 Turning text into vectors, from `nexus-ai-pro/embeddings`. An embedding call gets what a completion
 gets: routing across providers, batching, caching, budgets, and retries. It also refuses an option a
@@ -103,6 +103,63 @@ ai.registerEmbeddingProvider('mock', new MockEmbeddingProvider());
 
 Bundled embedding dimensions and prices are defaults, not financial truth. Override them through
 `embeddings.models.registry` when exact numbers matter.
+
+## Sharing the cache
+
+A shared cache lets every process reuse what any of them embedded. Re-indexing a corpus, or several
+workers ingesting overlapping documents, then pays the provider only for what is new. Give
+`cache.store` an `EmbeddingCacheStore`, from `nexus-ai-pro/embeddings/cache` or a database entry
+point:
+
+```ts
+import Redis from 'ioredis';
+import { NexusAI } from 'nexus-ai-pro';
+import { MemoryEmbeddingCache, RedisEmbeddingCache, tieredEmbeddingCache } from 'nexus-ai-pro/embeddings/cache';
+
+const ai = new NexusAI({
+  providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } },
+  embeddings: {
+    cache: {
+      store: tieredEmbeddingCache(new MemoryEmbeddingCache(), new RedisEmbeddingCache(new Redis(process.env.REDIS_URL!))),
+      ttlSeconds: 30 * 86_400,
+    },
+  },
+});
+```
+
+A store differs from a `CacheAdapter` in three ways:
+
+- **One round trip a request.** It reads every input in one `getMany()` and writes what it embedded
+  in one `setMany()`, so 2,000 cached texts cost one call, not 2,000.
+- **Keys are hashes.** `embeddingCacheKey()` is a SHA-256 of the text and its
+  `EmbeddingCacheContext`: the provider, model, input type, size, normalization, and truncation. No
+  text is ever a key in a shared store, and the same text under another model is another entry.
+- **Vectors are packed.** `packVector()` and `unpackVector()` store four bytes a dimension, against
+  about twenty as JSON. Providers send float32 precision, so nothing they sent is lost.
+
+`EmbeddingCacheConfig` is the `CacheConfig` every cache takes, plus `store`. A store turns the cache
+on unless `enabled` is `false`, and takes the place of `adapter`. A store that fails fails the
+request, as an adapter does. Wrap it to treat a failure as a miss.
+
+| Store | Entry point | Where the vectors live |
+| --- | --- | --- |
+| `MemoryEmbeddingCache` | `nexus-ai-pro/embeddings/cache` | This process, least recently used first out. `MemoryEmbeddingCacheOptions` sets `maxEntries` (10,000). |
+| `RedisEmbeddingCache` | `nexus-ai-pro/embeddings/cache` | Redis: one `MGET` and one script a batch. |
+| `PostgresEmbeddingCache` | `nexus-ai-pro/postgres/embedding-cache` | A Postgres table. See the [Postgres guide](./postgres.md). |
+| `SqliteEmbeddingCache` | `nexus-ai-pro/sqlite/embedding-cache` | A SQLite table. See the [SQLite guide](./sqlite.md). |
+
+`tieredEmbeddingCache()` puts two stores in front of each other. The near one answers first, and
+the far one answers the rest in one call. A far hit is copied near, and a write goes to both.
+
+`RedisEmbeddingCache` takes a `RedisEmbeddingCacheClient`: ioredis, with `call()`, or node-redis,
+with `sendCommand()`. `RedisEmbeddingCacheOptions` sets the key `prefix` (`nexus:embedding:`) and
+`multiKey`. On Redis Cluster, set `multiKey: false`: each key then travels as its own command, all
+sent at once, since a multi-key command needs every key in one slot.
+
+An `EmbeddingCacheEntry` is a key and its vector. A store of your own implements the two methods.
+
+A `cache.adapter`, without a store, keeps working with the keys it always had. It is now asked for
+every input at once rather than one after another.
 
 ## Requests and responses
 
@@ -234,6 +291,7 @@ Every embedding error extends `EmbeddingError` and has a stable code.
 
 - Bundled dimensions and prices are defaults, verified on the date the registry records.
 - Cost is estimated from tokens when a provider reports none.
+- Two processes that miss the same text at once both embed it; the shared cache keeps one vector.
 
 <!-- reference:start -->
 ## Reference
@@ -293,6 +351,23 @@ specific entry point that provides it.
 | `OllamaEmbeddingProvider` | class | Local Ollama `/api/embed`. |
 | `OpenAICompatibleEmbeddingOptions` | interface | Options for any server that speaks the OpenAI `/embeddings` protocol. |
 | `OpenAIEmbeddingProvider` | class | OpenAI and any OpenAI-compatible `/embeddings` endpoint. |
+
+### `nexus-ai-pro/embeddings/cache`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `EmbeddingCacheContext` | interface | What a cached vector depends on besides its input: the same text under another model is another vector. |
+| `EmbeddingCacheEntry` | interface | A vector to cache, under its key. |
+| `embeddingCacheKey` | function | The cache key for an input embedded under a context: a SHA-256 in hex, so the text itself never becomes a key in a shared store. |
+| `EmbeddingCacheStore` | interface | Where embedding vectors are cached, shared by every process that uses the same store. |
+| `MemoryEmbeddingCache` | class | Vectors in process memory, packed as float32, the least recently used evicted first. |
+| `MemoryEmbeddingCacheOptions` | interface | Limits for the in-process embedding cache. |
+| `packVector` | function | A vector as packed little-endian float32: four bytes a dimension, against about twenty as JSON. |
+| `RedisEmbeddingCache` | class | Vectors in Redis, shared by every process that reaches it. |
+| `RedisEmbeddingCacheClient` | type | A Redis client that sends raw commands: ioredis, with `call()`, or node-redis, with `sendCommand()`. |
+| `RedisEmbeddingCacheOptions` | interface | Options for the Redis embedding cache. |
+| `tieredEmbeddingCache` | function | Two caches as one: the near one, usually `MemoryEmbeddingCache`, answers first, and the far one, usually shared, answers the rest in one call. |
+| `unpackVector` | function | A vector from the bytes `packVector()` wrote. |
 
 ### `nexus-ai-pro/embeddings/mock`
 

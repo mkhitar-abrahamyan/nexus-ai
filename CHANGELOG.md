@@ -12,6 +12,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   isolation, a load budget, and a soak. The evidence is in `API_STABILITY.md`, and the threat review
   in `SECURITY.md`. The Pinecone store passes the same checks against a stand-in, and graduates once
   the live workflow runs them against Pinecone.
+- **A shared embedding cache.** `embeddings.cache.store` takes an `EmbeddingCacheStore`, which
+  reads every input of a request in one `getMany()` and writes what was embedded in one `setMany()`.
+  Keys are SHA-256 hashes from `embeddingCacheKey()`, so no text is a key, and vectors are packed
+  float32. On `nexus-ai-pro/embeddings/cache`: `MemoryEmbeddingCache`, `RedisEmbeddingCache` (one
+  `MGET` and one script a batch, or a command a key on Redis Cluster), `tieredEmbeddingCache()`, and
+  `packVector()` with `unpackVector()`. `PostgresEmbeddingCache` is on
+  `nexus-ai-pro/postgres/embedding-cache`, and `SqliteEmbeddingCache` on
+  `nexus-ai-pro/sqlite/embedding-cache`, each with its versioned migrations and `purgeExpired()`.
 - `ChromaVectorStoreOptions.filterFields`: the fields a search can filter on. Every write then sets
   each declared field, or removes it, so a replacement needs no read and stays whole under any race;
   a filter on another field is refused.
@@ -21,6 +29,9 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - The Qdrant, Redis, Pinecone, Weaviate, and Chroma stores refuse a `topK` that is not a positive
   integer, before any request. An absent `topK`, or 0, still means 5.
 - `RedisVectorStore` replaces a chunk with one atomic script instead of a delete and a write.
+- An embedding `cache.adapter` is asked for every input at once, where it was asked for one input
+  after another: a 2,000-text request made 2,000 sequential reads. Its keys are unchanged, so
+  processes of this release and the last share entries during a rollout.
 
 ### Fixed
 
@@ -49,6 +60,9 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   interleaves racing writers. Each failure above reproduces against them on the previous code.
 - `tests/upgrade-remote-stores.test.ts` reads, with this release, what the published 2.7.0 wrote into
   each store.
+- `tests/embedding-cache.test.ts`: a second process embeds a 2,000-text batch with no provider call
+  and one cache read, and every store keeps one contract, which the live suite also runs against
+  Redis over RESP3 and RESP2.
 
 ## [2.7.0] - 2026-10-12
 
