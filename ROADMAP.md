@@ -76,15 +76,52 @@ Each gap is written down in a guide's limitations today, and each is closed by o
 | Images have not recorded live conformance on all three backends | API stability | 2.9 |
 | The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.9 |
 | Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.9 |
+| Video is not generated | Images guide | 2.9 |
+| OpenAI is the only realtime provider, and a realtime session dies with its process | Realtime guide | 2.9 |
+| Realtime reports through its own hooks, not the client's lifecycle | Realtime guide | 2.9 |
+| Twilio is the only telephony provider, SMS is not sent, and calls are neither recorded, conferenced, nor transferred | Telephony guide | 2.9 |
+| Guardrail and routing policy ships only with the runtime, credentials come from configuration alone, and routing knows nothing of residency | Security and providers guides | 2.9 |
 
 ---
 
-## 2.9.0: live graduation, finished
+## 2.9.0: media in motion, calls in full, and policy you version
+
+Five themes, each with a proof. Nothing here adds a required dependency or grows the root import.
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, and media
 understanding graduate when the scheduled live workflow passes against each, published with their
 checklists. Each check is built and passes against stand-ins; what stands in the way is the
-repository's live credentials. The rest of 2.9 is chosen from the list below.
+repository's live credentials.
+
+**Video generation.** Video through the same asynchronous operation, asset, and budget contracts as
+images, on OpenAI and Google, with a mock and a conformance suite. A video is collected as a stream
+into an asset store. Proof: a job submitted, its process killed, and the video collected by another
+worker, streamed into an asset store, and priced.
+
+**Realtime follow-ons.**
+- A second provider on its own wire protocol, Gemini Live, behind the same session, tools, and
+  conversation record. Proof: one agent definition runs on both providers in the conformance suite.
+- Sessions that survive their process: the conversation and its configuration checkpointed, and a
+  session resumed elsewhere. Proof: a session's process killed mid-conversation, resumed by another,
+  and the model answers with what was said before.
+- Realtime runs through the client's lifecycle: authorized, budgeted, audited, and metered.
+- Video frames into a session, and SIP calls answered by a realtime agent.
+- Browser automation of a WebRTC session in headless Chromium, and a published method and budget for
+  turn latency and session load.
+
+**Telephony follow-ons.** A second provider on its own call-control protocol, Telnyx; messaging (SMS)
+as an operation family, sent and received on both providers; call recording kept in an asset store
+under a retention policy, and deleted from the provider; and conference and transfer control. Proof:
+one phone agent runs on both providers, and a recording expires on schedule from every store.
+
+**Policy and residency.**
+- Policy as code: guardrail, routing, and budget presets as a versioned file the application
+  supplies, checked by `nexus policy check`, as registry data is.
+- Credential vaults: a provider's key resolved per tenant at call time, from the environment, a file,
+  HashiCorp Vault, or a cloud secret manager, through a structural client, and cached briefly.
+- Routing by residency: each provider and model says where it processes data, and a request that
+  requires a region is never routed outside it. Proof: an EU-only request fails over within the EU,
+  and refuses rather than leave it.
 
 ---
 
@@ -92,15 +129,8 @@ repository's live credentials. The rest of 2.9 is chosen from the list below.
 
 Not yet scheduled, roughly in order of what applications ask for:
 
-1. Realtime follow-ons: a second provider, SIP and video transports, durable session recovery,
-   browser compatibility automation, and a published method for latency and load benchmarks.
-2. Telephony follow-ons: a second provider, outbound SMS and messaging as an operation family, call
-   recording with a retention policy, and conference and transfer control.
-3. Video generation through the same asynchronous operation, job, and asset contracts.
-4. Multi-region deployment.
-5. Policy-as-code presets versioned independently from the runtime, multi-tenant credential-vault
-   adapters, and routing by provider residency.
-6. OTLP export over gRPC.
+1. Multi-region deployment.
+2. OTLP export over gRPC.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:
