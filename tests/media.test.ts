@@ -133,11 +133,9 @@ test('a vision model reads, describes, and answers through the client, asking fo
   assert.equal(first.model, 'gpt-5.4');
   assert.equal(first.responseFormat?.type, 'json_schema');
   assert.equal(first.temperature, 0);
-  assert.equal(
-    (first.messages[0]?.content as Array<{ type: string }>)[0]?.type,
-    'document',
-    'the medium itself is sent',
-  );
+  const sent = first.messages[0]?.content;
+  assert.ok(Array.isArray(sent));
+  assert.equal((sent as Array<{ type: string }>)[0]?.type, 'document', 'the medium itself is sent');
 
   const described = await media.describe({ media: png('a red bicycle'), detail: 'detailed' });
   assert.equal(described.caption, 'a picture of a red bicycle');
