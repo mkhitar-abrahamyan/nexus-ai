@@ -120,8 +120,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   suite, and the wire shapes each sends are asserted.
 - `tests/registry-data.test.ts`: a price raised tenfold in a supplied file makes the next call cost
   ten times as much, for completions and embeddings alike.
-- `tests/asset-streams.test.ts`: a gigabyte goes through the filesystem and S3 stores and back while
-  memory grows by less than 128 MB.
+- `npm run bench:streams`, a step of the release gate: a gigabyte goes through the filesystem and S3
+  stores and back while memory grows by less than 128 MB.
 - `tests/embedding-batch.test.ts`: an ingestion of 100,000 chunks through a batch tier dies while it
   collects its third window, and across both attempts each of its ten windows is submitted once;
   without the recorded batches, two are submitted twice.

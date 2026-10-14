@@ -224,8 +224,8 @@ return new Response(part?.stream, { status: 206 });
 The filesystem and S3 stores write a stream a chunk at a time and never hold the whole asset. Its
 size limit and SHA-256 checksum are checked as the bytes flow, and an asset that fails either leaves
 no file or object behind. They read back a stream, whole or by an `AssetByteRange`, as a
-`StreamAssetDescriptor`: the descriptor, the stream, and the bytes it holds. In the test suite, a
-gigabyte goes through each and back while memory grows by less than 128 MB.
+`StreamAssetDescriptor`: the descriptor, the stream, and the bytes it holds. In the release gate,
+`npm run bench:streams` moves a gigabyte through each and back while memory grows by less than 128 MB.
 
 | Store | `putStream()` | `getStream()` |
 | --- | --- | --- |
