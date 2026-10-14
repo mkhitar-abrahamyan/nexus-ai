@@ -14,7 +14,7 @@
     "routing.1000-models": 0.0005,
     "agent.middleware-20": 0.1133,
     "tracing.10k-runs": 3.9124,
-    "events.10k-chunks": 0.1226,
+    "events.10k-chunks": 0.3006,
     "server.sse-fanout": 0.021,
     "operations.claim-10k-queued": 0.0116,
     "cache.lookup": 0.895
