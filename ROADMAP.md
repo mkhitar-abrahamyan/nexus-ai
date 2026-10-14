@@ -43,8 +43,9 @@ durable, and what a side effect must do.
 
 **The 2.x line hardens before it widens.** The package is broad already; what remains is how it
 behaves under a crash, a slow database, a rolling deploy, a thousand workers, or a hostile tool call.
-Most of each release goes to correctness, crash recovery, races, and proving what has shipped; a new
-operation family is the exception, not the theme.
+Most of each release goes to correctness, crash recovery, races, and proving what has shipped, and
+every release also delivers one capability an application did not have before: gaps are never shipped
+alone.
 
 **Families share one model.** Agent protocols, realtime, media, and online evaluation are clients of
 the same lifecycle, execution context, tenancy, operation store, and lease vocabulary. A family that
@@ -92,23 +93,32 @@ the theme after it that owns it.
 | Images have not recorded live conformance on all three backends | API stability | 2.9 |
 | The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.9 |
 | Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.9 |
+| Video is not generated | Images guide | 2.9 |
 | An A2A task working when its process stops is never taken over | Protocols guide | Durable conversations |
 | An ACP turn in progress is lost with its process | Protocols guide | Durable conversations |
 | Realtime reports through its own hooks, not the client's lifecycle | Realtime guide | Durable conversations |
 | A realtime session dies with its process | Realtime guide | Durable conversations |
-| An agent's files live in the sandbox that runs its code | Deep agents guide | Workspaces |
+| OpenAI is the only realtime provider | Realtime guide | Durable conversations |
+| An agent's files live in the sandbox that runs its code | Deep agents guide | Workspaces and telephony |
+| Twilio is the only telephony provider, SMS is not sent, and calls are neither recorded, conferenced, nor transferred | Telephony guide | Workspaces and telephony |
 | A batch of spans the collector does not accept is dropped | Tracing guide | Observability that loses nothing |
 | A deployment's quality evaluation sees a run's output, not its input | Deployments guide | Observability that loses nothing |
-| OpenAI is the only realtime provider | Realtime guide | Realtime breadth |
-| Twilio is the only telephony provider, SMS is not sent, and calls are neither recorded, conferenced, nor transferred | Telephony guide | Telephony breadth |
-| Video is not generated | Images guide | Media in motion |
 
 ---
 
-## 2.9.0: everything shipped, proven
+## 2.9.0: video, and everything shipped, proven
 
-A release that adds almost nothing: it proves the surfaces 2.x has shipped, and closes the places
-where one of them can count wrong after a crash or under load.
+One new family, video generation, built on the durability every other family already has; the rest
+of the release proves the surfaces 2.x has shipped, and closes the places where one of them can count
+wrong after a crash or under load.
+
+**Video generation.** Video through a provider's asynchronous job: a prompt, a first or last frame,
+or reference images, on Google Veo through the Gemini API or Vertex AI, and on Runway, with a mock
+and a conformance suite. A generation is a durable operation that records its job the moment it
+exists and each video as it is stored, so a worker that dies is replaced by one that collects that
+job and stores nothing twice; the video streams into an asset store and is priced per second. Proof:
+a job submitted, its process killed, and the video collected by another worker, streamed into an
+asset store, and priced, with one submission to the provider.
 
 **Live graduation.** The Pinecone store, images on all three backends, the Gemini embedding batch
 tier, and media understanding against a vision model and the OCR service graduate when the scheduled
@@ -138,42 +148,40 @@ against stand-ins; what stands in the way is the repository's live credentials.
 
 ## After 2.9
 
-In the order they are planned. Each is a release's theme, with its proof; none has a version yet.
+In the order they are planned, each a release's theme with its proof; none has a version yet. Each
+closes a group of gaps and delivers something new beside it.
 
-**1. Durable conversations.** One lease-and-takeover model for every conversation that runs on a
-worker. An A2A task records its thread, run, owner, and lease, and when the lease lapses another
-replica continues its run; an ACP turn does the same, from its last committed step. Realtime runs
-through the client's lifecycle: tenant, principal, trace, budget, rate limits, provider health, and
-audit. A realtime session keeps a durable conversation record (its configuration, turns, tool calls
-and results, usage, and last committed turn), and a reconnect wraps a new transport around it; the
-socket and the audio in flight are not recovered. A remote helper's ownership is leased the same way.
-Proof: a crash-injection suite that kills the worker under each, and shows another take it over.
+**1. Durable conversations, and a second realtime provider.** One lease-and-takeover model for every
+conversation that runs on a worker. An A2A task records its thread, run, owner, and lease, and when
+the lease lapses another replica continues its run; an ACP turn does the same, from its last committed
+step. Realtime runs through the client's lifecycle: tenant, principal, trace, budget, rate limits,
+provider health, and audit. A realtime session keeps a durable conversation record (its
+configuration, turns, tool calls and results, usage, and last committed turn), and a reconnect wraps
+a new transport around it; the socket and the audio in flight are not recovered. A remote helper's
+ownership is leased the same way. New beside it: Gemini Live behind the same session, tools, and
+conversation record; video frames into a session; SIP calls answered by a realtime agent; browser
+automation of a WebRTC session; and a published method and budget for turn latency and session load.
+Proof: a crash-injection suite that kills the worker under each conversation and shows another take
+it over, and one agent definition passing the realtime conformance suite on both providers.
 
-**2. Workspaces.** Where an agent's files live, separate from where untrusted code runs. A
-`Workspace` contract (read, write, list, and optionally glob, grep, and delete) over memory, the
-filesystem, the store, a sandbox, and a composite that routes paths among them. A sandbox is a
-workspace that can also execute, and says how it is isolated; a deep agent takes each on its own.
-
-**3. Observability that loses nothing.** An exporter wrapper that spools to the operation store a
-batch the collector does not accept, retries it, and dead-letters what cannot be sent, under a bound,
-reporting what it exported, retried, spooled, and dropped, and the age of the oldest pending batch.
-Deployment evaluation reads a run's trace (its input, tool calls, retrieved documents, and media)
-and runs through the online-evaluation worker rather than beside it. Evaluation subjects that are
-media. Automation rules: when a score falls below a threshold over enough samples, open a review
-item, send a webhook, or mark a deployment unhealthy. OTLP over gRPC.
-
-**4. Realtime breadth.** A second provider on its own wire protocol, Gemini Live, behind the same
-session, tools, and conversation record; video frames into a session; SIP calls answered by a
-realtime agent; browser automation of a WebRTC session; and a published method and budget for turn
-latency and session load.
-
-**5. Telephony breadth.** A second provider on its own call-control protocol, Telnyx; messaging
+**2. Workspaces, and telephony in full.** Where an agent's files live, separate from where untrusted
+code runs: a `Workspace` contract (read, write, list, and optionally glob, grep, and delete) over
+memory, the filesystem, the store, a sandbox, and a composite that routes paths among them. A sandbox
+is a workspace that can also execute, and says how it is isolated; a deep agent takes each on its
+own. New beside it: a second telephony provider on its own call-control protocol, Telnyx; messaging
 (SMS) as an operation family on both providers; call recording kept in an asset store under a
-retention policy; and conference and transfer.
+retention policy; and conference and transfer. Proof: one deep agent run over each workspace, and one
+phone agent on both providers whose recording expires on schedule from every store.
 
-**6. Media in motion.** Video generation through durable provider jobs, collected as a stream into an
-asset store and priced per second, on Google Veo and on Runway; a media catalog; and media in the
-evaluation suites.
+**3. Observability that loses nothing, and media you can evaluate.** An exporter wrapper that spools
+to the operation store a batch the collector does not accept, retries it, and dead-letters what
+cannot be sent, under a bound, reporting what it exported, retried, spooled, and dropped, and the age
+of the oldest pending batch. Deployment evaluation reads a run's trace (its input, tool calls,
+retrieved documents, and media) and runs through the online-evaluation worker rather than beside it.
+OTLP over gRPC. New beside it: evaluation subjects that are images, documents, audio, and video; a
+media catalog over every stored asset; and automation rules that open a review item, send a webhook,
+or mark a deployment unhealthy when a score falls below a threshold over enough samples. Proof: a
+collector stopped for an hour loses no span, and a canary is rolled back on a media evaluator's score.
 
 ---
 
