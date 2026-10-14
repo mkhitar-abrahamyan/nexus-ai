@@ -155,6 +155,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Loaders](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/loaders.md) | Files, Markdown, HTML, CSV, JSON, PDF, web pages, sitemaps, and Git repositories into retrieval |
 | [Retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/retrieval.md) | Hybrid search, reranking, MMR, parent documents, and Redis, Pinecone, Weaviate, and Chroma stores |
 | [Embeddings and retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/embeddings.md) | Embeddings as a routed operation family, and RAG helpers |
+| [Media understanding](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/media.md) | Reading documents and images page by page, describing images, and answering questions about them, through any vision model or OCR |
 | [Images (experimental)](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/images.md) | Generation and masked edits over three backends, input safety, moderation, asset stores |
 | [Voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/voice.md) | Transcription, speech, voice turns, and voice sessions |
 | [Realtime voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/realtime.md) | Browser and server realtime sessions with barge-in, tools, and exports |

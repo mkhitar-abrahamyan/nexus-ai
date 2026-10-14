@@ -1280,6 +1280,36 @@
         "default": "./dist-cjs/images/asset-stores.js"
       }
     },
+    "./media": {
+      "import": {
+        "types": "./dist/media/index.d.ts",
+        "default": "./dist/media/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/media/index.d.ts",
+        "default": "./dist-cjs/media/index.js"
+      }
+    },
+    "./media/mistral": {
+      "import": {
+        "types": "./dist/media/mistral.d.ts",
+        "default": "./dist/media/mistral.js"
+      },
+      "require": {
+        "types": "./dist-cjs/media/mistral.d.ts",
+        "default": "./dist-cjs/media/mistral.js"
+      }
+    },
+    "./media/mock": {
+      "import": {
+        "types": "./dist/media/mock.d.ts",
+        "default": "./dist/media/mock.js"
+      },
+      "require": {
+        "types": "./dist-cjs/media/mock.d.ts",
+        "default": "./dist-cjs/media/mock.js"
+      }
+    },
     "./realtime": {
       "import": {
         "types": "./dist/realtime/index.d.ts",
@@ -2307,6 +2337,15 @@
       ],
       "images/stores": [
         "dist-cjs/images/asset-stores.d.ts"
+      ],
+      "media": [
+        "dist-cjs/media/index.d.ts"
+      ],
+      "media/mistral": [
+        "dist-cjs/media/mistral.d.ts"
+      ],
+      "media/mock": [
+        "dist-cjs/media/mock.d.ts"
       ],
       "realtime": [
         "dist-cjs/realtime/index.d.ts"

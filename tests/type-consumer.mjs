@@ -296,6 +296,9 @@ import { batchEmbedder, EmbeddingBatchManager, type EmbeddingBatchResult } from 
 import { OpenAIEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/openai';
 import { createIngestionPipeline } from 'nexus-ai-pro/rag/pipeline';
 import { parseRegistryData, withRegistryData, type RegistryData } from 'nexus-ai-pro/models/data';
+import { MediaManager, modelMediaProvider, type MediaText } from 'nexus-ai-pro/media';
+import { MistralOcrProvider } from 'nexus-ai-pro/media/mistral';
+import { MockMediaProvider } from 'nexus-ai-pro/media/mock';
 import { GoogleEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/google';
 import { MockEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/mock';
 import { SqliteEmbeddingCache } from 'nexus-ai-pro/sqlite/embedding-cache';
@@ -814,6 +817,17 @@ const sharedEmbeddingCaches: EmbeddingCacheStore[] = [
   new SqliteEmbeddingCache({ run: () => ({ changes: 0 }), all: () => [], exec: () => undefined }),
 ];
 const suppliedRegistry: RegistryData = parseRegistryData('{}');
+const mediaManager = new MediaManager({
+  providers: {
+    ocr: new MistralOcrProvider({ apiKey: 'key', pricePerPage: 0.001 }),
+    vision: modelMediaProvider({ complete: async () => ({}) as never }, { model: 'gpt-5.4' }),
+    mock: new MockMediaProvider(),
+  },
+  defaults: { read: 'ocr' },
+});
+const readPages: Promise<number> = mediaManager
+  .read({ media: { type: 'document', source: { url: 'https://example.com/a.pdf' } } })
+  .then((text: MediaText) => text.pages.length);
 const configuredWithData = withRegistryData({ providers: {} }, suppliedRegistry);
 const embeddingBatches = new EmbeddingBatchManager({
   providers: {
@@ -996,6 +1010,7 @@ void resolvedEmbeddingModel;
 void embeddingsWithSharedCache;
 void batchedIngestion;
 void configuredWithData;
+void readPages;
 void batchCost;
 void doneChunk;
 void directRealtimeSession;

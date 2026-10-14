@@ -72,6 +72,9 @@ New and stable:
   `diffRegistryData()` with `RegistryDiff` and `RegistryFieldChange`, and `registryDataAgeDays()`;
   `ModelRegistryConfig.verifiedAt` and `DoctorOptions.models`; the commands `nexus models export`,
   `check`, and `refresh`. The `nexus-registry/1` format is read by every 2.x release;
+- `nexus-ai-pro/media`, `/media/mistral`, and `/media/mock` are new and experimental: media
+  understanding graduates by the checklist, once a vision model and the OCR service pass its
+  conformance suite live. `OperationFamily` gains `media`, which is stable;
 - `IngestionPipelineOptions.batchEmbed` and `batchesInFlight`, and `IngestionReport.batches` and
   `batchesRecovered`. `IngestionPipelineOptions.embed` is optional when `batchEmbed` is given;
 - `nexus-ai-pro/postgres/embedding-cache`: `PostgresEmbeddingCache`, its options, and

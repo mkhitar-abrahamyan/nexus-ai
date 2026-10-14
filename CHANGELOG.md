@@ -54,6 +54,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   `models.verifiedAt` measures freshness from the file, in `checkRegistryFreshness()` and `nexus
   doctor`, which takes the configuration as `models`. `nexus models export`, `check`, and `refresh`
   work with the file; `refresh` compares it with each provider's own model list.
+- **Media understanding**, on the new `nexus-ai-pro/media`: `MediaManager` reads a document's or an
+  image's text page by page, describes an image, and answers a question about media, routing each
+  task to the provider named, its default, or the first that can, and running each call as one
+  `media` operation of the client's lifecycle. `modelMediaProvider()` does all three through any
+  vision model and the client's own `complete()`; `MistralOcrProvider`, on `/mistral`, reads PDFs,
+  slides, and images into Markdown pages with their sizes and picture boxes; `MockMediaProvider`, on
+  `/mock`, stands in for tests. `runMediaConformance()` checks any provider. `OperationFamily` gains
+  `media`.
 - `ChromaVectorStoreOptions.filterFields`: the fields a search can filter on. Every write then sets
   each declared field, or removes it, so a replacement needs no read and stays whole under any race;
   a filter on another field is refused.
@@ -100,6 +108,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   interleaves racing writers. Each failure above reproduces against them on the previous code.
 - `tests/upgrade-remote-stores.test.ts` reads, with this release, what the published 2.7.0 wrote into
   each store.
+- `tests/media.test.ts`: the vision-model, Mistral OCR, and mock providers pass the media conformance
+  suite, and the wire shapes each sends are asserted.
 - `tests/registry-data.test.ts`: a price raised tenfold in a supplied file makes the next call cost
   ten times as much, for completions and embeddings alike.
 - `tests/asset-streams.test.ts`: a gigabyte goes through the filesystem and S3 stores and back while
