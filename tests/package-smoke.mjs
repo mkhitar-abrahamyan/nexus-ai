@@ -87,6 +87,7 @@ const imports = [
   { specifier: 'nexus-ai-pro/media', exports: ['MediaManager', 'modelMediaProvider', 'runMediaConformance'] },
   { specifier: 'nexus-ai-pro/media/mistral', exports: ['MistralOcrProvider'] },
   { specifier: 'nexus-ai-pro/media/mock', exports: ['MockMediaProvider'] },
+  { specifier: 'nexus-ai-pro/media/rag', exports: ['createMediaIndex', 'answerFromMedia'] },
   { specifier: 'nexus-ai-pro/embeddings/batch/openai', exports: ['OpenAIEmbeddingBatchProvider'] },
   { specifier: 'nexus-ai-pro/embeddings/batch/google', exports: ['GoogleEmbeddingBatchProvider'] },
   { specifier: 'nexus-ai-pro/embeddings/batch/mock', exports: ['MockEmbeddingBatchProvider'] },

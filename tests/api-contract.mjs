@@ -91,6 +91,7 @@ const expectedSubpaths = [
   './media',
   './media/mistral',
   './media/mock',
+  './media/rag',
   './embeddings/batch',
   './embeddings/batch/openai',
   './embeddings/batch/google',

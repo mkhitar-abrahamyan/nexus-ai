@@ -147,6 +147,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 31 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 30 KB | 9% | none |
+| `nexus-ai-pro/media/rag` | 28 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 8% | none |

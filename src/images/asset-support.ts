@@ -303,8 +303,8 @@ export function cloneAndValidateProvenance(provenance: AssetProvenance): AssetPr
   }
   const provider = nonEmptyString(provenance.provider, 'provenance.provider');
   const requestId = nonEmptyString(provenance.requestId, 'provenance.requestId');
-  if (provenance.operation !== 'generate' && provenance.operation !== 'edit') {
-    throw new AssetStoreValidationError('provenance.operation must be "generate" or "edit"');
+  if (provenance.operation !== 'generate' && provenance.operation !== 'edit' && provenance.operation !== 'upload') {
+    throw new AssetStoreValidationError('provenance.operation must be "generate", "edit", or "upload"');
   }
   if (provenance.model !== undefined) nonEmptyString(provenance.model, 'provenance.model');
   if (provenance.parentAssetIds) {

@@ -1310,6 +1310,16 @@
         "default": "./dist-cjs/media/mock.js"
       }
     },
+    "./media/rag": {
+      "import": {
+        "types": "./dist/media/rag.d.ts",
+        "default": "./dist/media/rag.js"
+      },
+      "require": {
+        "types": "./dist-cjs/media/rag.d.ts",
+        "default": "./dist-cjs/media/rag.js"
+      }
+    },
     "./realtime": {
       "import": {
         "types": "./dist/realtime/index.d.ts",
@@ -2346,6 +2356,9 @@
       ],
       "media/mock": [
         "dist-cjs/media/mock.d.ts"
+      ],
+      "media/rag": [
+        "dist-cjs/media/rag.d.ts"
       ],
       "realtime": [
         "dist-cjs/realtime/index.d.ts"

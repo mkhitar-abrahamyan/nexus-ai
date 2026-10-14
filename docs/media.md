@@ -1,10 +1,12 @@
 # Media understanding
 
-<!-- covers: ./media ./media/mistral ./media/mock -->
+<!-- covers: ./media ./media/mistral ./media/mock ./media/rag -->
 
 Reading what a document or an image says, describing an image, and answering a question about
 either, from `nexus-ai-pro/media`. One contract covers any vision model, reached through the client,
-and Mistral's dedicated OCR service. A conformance suite checks any provider against it.
+and Mistral's dedicated OCR service. A conformance suite checks any provider against it. Media search
+and RAG, on `nexus-ai-pro/media/rag`, find the media a question is about and hand the model the media
+themselves.
 
 ```ts
 import { NexusAI } from 'nexus-ai-pro';
@@ -89,10 +91,62 @@ Every task it declares must be implemented and return the right shape. It never 
 `MediaConformanceReport` lists what passed and what failed. All three bundled providers pass it in the
 test suite.
 
+## Media search and RAG
+
+`createMediaIndex()` keeps media in any vector store, and `answerFromMedia()` answers from them:
+
+```ts
+import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
+import { answerFromMedia, createMediaIndex } from 'nexus-ai-pro/media/rag';
+
+const index = createMediaIndex({
+  vectors,
+  media,
+  embeddings: ai.embeddings,
+  assets: { store: new MemoryAssetStore(), tenantId: 'acme' },
+});
+await index.add([
+  { id: 'invoice-17', media: invoice, source: 'mail/invoice-17.pdf', metadata: { customer: 'globex' } },
+  { id: 'q3-chart', media: { type: 'image', source: { buffer: chartPng, mimeType: 'image/png' } } },
+]);
+
+const { answer, hits } = await answerFromMedia(media, index, 'Which quarter had the most revenue?');
+```
+
+`createMediaIndex()` returns a `MediaIndex`, with three methods: `add()`, `search()`, and `resolve()`.
+Each `MediaDocument` is an id, a medium, and optionally a source and metadata. `add()` turns it into
+chunks:
+
+| Chunk | From | When |
+| --- | --- | --- |
+| Each page's text, cut at paragraphs past `maxChunkChars` (4,000) | `read()` | By default. |
+| A caption | `describe()` | By default, for an image. |
+| The medium's own vector | The embedding model, given the medium as parts | With `index: { vectors: true }`, on a model that takes the medium, such as gemini-embedding-2. |
+
+`MediaIndexOptions` takes the vector store, the media manager, a `MediaEmbeddingSource` such as a
+client's `embeddings`, the embedding model, what to index, and an asset store. A medium held as bytes
+or base64 is kept in the asset store, and one at a URL is kept by its URL, so every hit can hand its
+medium back. A medium held as bytes without an asset store is refused. Adding an id again replaces
+its chunks. The `MediaIndexReport` counts the chunks, and lists each medium's chunk ids, for removing
+it from the store.
+
+`search()` returns `MediaHit` values, each medium once at its best chunk, the best first, as
+`MediaSearchOptions` asks: `topK` (5) and a metadata `filter`. A hit says what matched (a page, the
+caption, or the medium's vector), the page and text, the source, the medium's own metadata, and its
+`MediaReference`: where the medium is kept. `resolve()` hands back the medium behind a hit, as the
+model takes it.
+
+`answerFromMedia()` searches (`topK` 3), resolves each hit, and asks the media manager with the media
+themselves, so the model sees what a page or a chart shows, not only what was written about it. Its
+`MediaRagAnswer` carries the hits it was given. In the test suite, with stand-in models, answers given
+the retrieved charts are right on every question, and answers from the same hits' text on none: the
+text says what each chart is, and only the chart shows which bar is tallest.
+
 ## Limitations
 
 - A vision model's reading is only as faithful as the model; an OCR service keeps layout better.
 - Mistral's price per page is not bundled, since it differs by account and model; set `pricePerPage`.
 - Video and audio are not media here; transcribe audio with the voice family.
+- A media index does not remember which media it holds: keep the report's chunk ids to remove one.
 
 <!-- reference:start -->

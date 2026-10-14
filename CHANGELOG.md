@@ -62,6 +62,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   slides, and images into Markdown pages with their sizes and picture boxes; `MockMediaProvider`, on
   `/mock`, stands in for tests. `runMediaConformance()` checks any provider. `OperationFamily` gains
   `media`.
+- **Media search and RAG**, on the new `nexus-ai-pro/media/rag`: `createMediaIndex()` keeps media in
+  any vector store as their pages' text, captions, and, on a model that takes them, their own
+  vectors, and keeps each medium in an asset store, or by its URL, so a hit can hand it back.
+  `search()` returns each medium once at its best chunk, `resolve()` returns the medium, and
+  `answerFromMedia()` hands the model the retrieved media themselves. `AssetProvenance.operation`
+  takes `upload`, for media an application brings in.
 - `ChromaVectorStoreOptions.filterFields`: the fields a search can filter on. Every write then sets
   each declared field, or removes it, so a replacement needs no read and stays whole under any race;
   a filter on another field is refused.
@@ -108,6 +114,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   interleaves racing writers. Each failure above reproduces against them on the previous code.
 - `tests/upgrade-remote-stores.test.ts` reads, with this release, what the published 2.7.0 wrote into
   each store.
+- `tests/media-rag.test.ts`: with stand-in models, answers given the retrieved charts are right on
+  every question, and answers from the same hits' text on none.
 - `tests/media.test.ts`: the vision-model, Mistral OCR, and mock providers pass the media conformance
   suite, and the wire shapes each sends are asserted.
 - `tests/registry-data.test.ts`: a price raised tenfold in a supplied file makes the next call cost

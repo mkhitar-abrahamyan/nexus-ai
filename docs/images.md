@@ -457,7 +457,7 @@ synchronously or with a promise, as `AssetStoreResult` says.
 
 | Method | What it does |
 | --- | --- |
-| `put()` | Stores a `ByteAssetInput` — bytes only, not a URL — with `AssetPutOptions`: tenant, provenance, dimensions, and a `ttlSeconds` or `expiresAt`. Returns an `AssetStat`: the id, tenant, a descriptor pointing back at the store, and its times. |
+| `put()` | Stores a `ByteAssetInput` — bytes only, not a URL — with `AssetPutOptions`: tenant, provenance (`generate`, `edit`, or `upload` for media an application brings in), dimensions, and a `ttlSeconds` or `expiresAt`. Returns an `AssetStat`: the id, tenant, a descriptor pointing back at the store, and its times. |
 | `get()` | Returns a `ByteAssetDescriptor`, with the bytes. |
 | `stat()` | The `AssetStat`, without the bytes. |
 | `delete()` | Removes an asset. |

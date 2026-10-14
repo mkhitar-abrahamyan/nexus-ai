@@ -67,8 +67,8 @@ export interface AssetProvenance {
   provider: string;
   /** The model that produced it. */
   model?: string;
-  /** Whether it was generated or edited. */
-  operation: ImageOperation;
+  /** Whether it was generated, edited, or brought in by the application, as an indexed medium is. */
+  operation: ImageOperation | 'upload';
   /** The request that produced it. */
   requestId: string;
   /** Assets it was derived from, for an edit. */
