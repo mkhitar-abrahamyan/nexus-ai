@@ -94,8 +94,8 @@ live credentials are set; nothing else stands in their way.
   trip, keys on a hash rather than the text, and keeps vectors as packed floats, on memory, Redis,
   Postgres, and SQLite. Proof: a second process embeds a 2,000-text batch with no provider call and
   one cache read.
-- Images, audio, video, and documents as embedding input, on the models that take them, and refused
-  on the ones that do not. Proof: a text query finds the image it describes through one vector space.
+- Images, audio, and documents as embedding input, on the models that take them, and refused on the
+  ones that do not. Proof: a text query finds the image it describes through one vector space.
 - A provider batch tier for embeddings at half price, on its own entry point, and an ingestion
   pipeline that submits, survives a crash, and collects. Proof: a 100,000-chunk ingestion through a
   batch tier, crashed between submit and collect, resumes without submitting twice.
