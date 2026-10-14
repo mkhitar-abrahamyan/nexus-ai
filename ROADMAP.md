@@ -43,6 +43,15 @@ durable, and what a side effect must do.
 
 **The 2.x line hardens before it widens.** The package is broad already; what remains is how it
 behaves under a crash, a slow database, a rolling deploy, a thousand workers, or a hostile tool call.
+Most of each release goes to correctness, crash recovery, races, and proving what has shipped; a new
+operation family is the exception, not the theme.
+
+**Families share one model.** Agent protocols, realtime, media, and online evaluation are clients of
+the same lifecycle, execution context, tenancy, operation store, and lease vocabulary. A family that
+needs durability takes it from there, rather than becoming a runtime of its own.
+
+**Only the next release is numbered.** The themes after it are listed in the order they are planned;
+the grouping holds, the version each lands in does not.
 
 **What every release protects:**
 
@@ -57,80 +66,132 @@ behaves under a crash, a slow database, a rolling deploy, a thousand workers, or
 - Structural adapter contracts. A vector store, database client, Redis client, or transport is an
   interface the application fills, never a bundled SDK.
 - TypeScript first, and self-hosted by default. Nothing phones home, model data included.
-- One lifecycle and one execution context. New work plugs into them instead of adding a parallel path.
+- One lifecycle, one execution context, and one durability vocabulary of leases, heartbeats, and
+  takeover. New work plugs into them instead of adding a parallel path.
 - No breaking change before 3.0. New behaviour is opt-in, and defaults keep their meaning.
 
 **What the 2.x line does not prioritize:** more completion providers, more vector databases, more
 image providers, a second language runtime, a hosted service, more domain workflow templates, or
-another orchestration abstraction.
+another orchestration abstraction. Provider count is not a measure: a provider is worth carrying when
+it passes its conformance suite against the live service every week.
 
 ---
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release.
+Each gap is written down in a guide's limitations today, and each is closed by one release: 2.9, or
+the theme after it that owns it.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
+| An online-evaluation worker reads one page of the runs that started in the same millisecond | Evaluation guide | 2.9 |
+| A budget reservation held by a worker that dies stays charged for the period | Evaluation guide | 2.9 |
+| A deep agent's count of the helpers it created is kept by its process | Deep agents guide | 2.9 |
+| A media index does not remember which media it holds | Media guide | 2.9 |
 | The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.9 |
 | Images have not recorded live conformance on all three backends | API stability | 2.9 |
 | The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.9 |
 | Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.9 |
-| Video is not generated | Images guide | 2.9 |
-| OpenAI is the only realtime provider, and a realtime session dies with its process | Realtime guide | 2.9 |
-| Realtime reports through its own hooks, not the client's lifecycle | Realtime guide | 2.9 |
-| Twilio is the only telephony provider, SMS is not sent, and calls are neither recorded, conferenced, nor transferred | Telephony guide | 2.9 |
-| Guardrail and routing policy ships only with the runtime, credentials come from configuration alone, and routing knows nothing of residency | Security and providers guides | 2.9 |
+| An A2A task working when its process stops is never taken over | Protocols guide | Durable conversations |
+| An ACP turn in progress is lost with its process | Protocols guide | Durable conversations |
+| Realtime reports through its own hooks, not the client's lifecycle | Realtime guide | Durable conversations |
+| A realtime session dies with its process | Realtime guide | Durable conversations |
+| An agent's files live in the sandbox that runs its code | Deep agents guide | Workspaces |
+| A batch of spans the collector does not accept is dropped | Tracing guide | Observability that loses nothing |
+| A deployment's quality evaluation sees a run's output, not its input | Deployments guide | Observability that loses nothing |
+| OpenAI is the only realtime provider | Realtime guide | Realtime breadth |
+| Twilio is the only telephony provider, SMS is not sent, and calls are neither recorded, conferenced, nor transferred | Telephony guide | Telephony breadth |
+| Video is not generated | Images guide | Media in motion |
 
 ---
 
-## 2.9.0: media in motion, calls in full, and policy you version
+## 2.9.0: everything shipped, proven
 
-Five themes, each with a proof. Nothing here adds a required dependency or grows the root import.
+A release that adds almost nothing: it proves the surfaces 2.x has shipped, and closes the places
+where one of them can count wrong after a crash or under load.
 
-**Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, and media
-understanding graduate when the scheduled live workflow passes against each, published with their
-checklists. Each check is built and passes against stand-ins; what stands in the way is the
-repository's live credentials.
+**Live graduation.** The Pinecone store, images on all three backends, the Gemini embedding batch
+tier, and media understanding against a vision model and the OCR service graduate when the scheduled
+live workflow passes against each, published with their checklists. Each check is built and passes
+against stand-ins; what stands in the way is the repository's live credentials.
 
-**Video generation.** Video through the same asynchronous operation, asset, and budget contracts as
-images, on OpenAI and Google, with a mock and a conformance suite. A video is collected as a stream
-into an asset store. Proof: a job submitted, its process killed, and the video collected by another
-worker, streamed into an asset store, and priced.
+**Online evaluation that counts every run.**
+- Run pagination by a compound cursor, start time then id, part of the trace store's pagination
+  contract so every backend orders and resumes identically: a page ends after a run, never after a
+  timestamp. Proof: 4,000 runs started in one millisecond, read 1,000 a page by ten workers, are
+  each scheduled exactly once, on every trace store.
+- Budget reservations that outlive their worker. A reservation is reserved, settled, uncertain, or
+  expired, and carries its operation and a lease. When a lease lapses, the reservation is settled
+  from the operation's recorded cost if it finished, released if it never started, and otherwise
+  marked uncertain, where a policy decides whether it stays charged. Proof: a worker killed holding a
+  reservation, at each of those three points, leaves the budget where the provider's bill would.
 
-**Realtime follow-ons.**
-- A second provider on its own wire protocol, Gemini Live, behind the same session, tools, and
-  conversation record. Proof: one agent definition runs on both providers in the conformance suite.
-- Sessions that survive their process: the conversation and its configuration checkpointed, and a
-  session resumed elsewhere. Proof: a session's process killed mid-conversation, resumed by another,
-  and the model answers with what was said before.
-- Realtime runs through the client's lifecycle: authorized, budgeted, audited, and metered.
-- Video frames into a session, and SIP calls answered by a realtime agent.
-- Browser automation of a WebRTC session in headless Chromium, and a published method and budget for
-  turn latency and session load.
-
-**Telephony follow-ons.** A second provider on its own call-control protocol, Telnyx; messaging (SMS)
-as an operation family, sent and received on both providers; call recording kept in an asset store
-under a retention policy, and deleted from the provider; and conference and transfer control. Proof:
-one phone agent runs on both providers, and a recording expires on schedule from every store.
-
-**Policy and residency.**
-- Policy as code: guardrail, routing, and budget presets as a versioned file the application
-  supplies, checked by `nexus policy check`, as registry data is.
-- Credential vaults: a provider's key resolved per tenant at call time, from the environment, a file,
-  HashiCorp Vault, or a cloud secret manager, through a structural client, and cached briefly.
-- Routing by residency: each provider and model says where it processes data, and a request that
-  requires a region is never routed outside it. Proof: an EU-only request fails over within the EU,
-  and refuses rather than leave it.
+**Durable counts in shipped features.**
+- A deep agent's created helpers are recorded with its thread, not in its process. Proof: an agent
+  that created its last allowed helper, killed and resumed elsewhere, cannot create another.
+- A media index keeps a manifest: each medium's content hash, source, asset, pages, chunk ids,
+  embedding model, and reader, so a medium is upserted, reindexed, deleted, and described by its id.
+  Proof: indexing an unchanged medium writes nothing, a changed one replaces exactly its chunks, and a
+  deleted one leaves none, crashed halfway through each.
 
 ---
 
-## Beyond 2.9
+## After 2.9
 
-Not yet scheduled, roughly in order of what applications ask for:
+In the order they are planned. Each is a release's theme, with its proof; none has a version yet.
 
-1. Multi-region deployment.
-2. OTLP export over gRPC.
+**1. Durable conversations.** One lease-and-takeover model for every conversation that runs on a
+worker. An A2A task records its thread, run, owner, and lease, and when the lease lapses another
+replica continues its run; an ACP turn does the same, from its last committed step. Realtime runs
+through the client's lifecycle: tenant, principal, trace, budget, rate limits, provider health, and
+audit. A realtime session keeps a durable conversation record (its configuration, turns, tool calls
+and results, usage, and last committed turn), and a reconnect wraps a new transport around it; the
+socket and the audio in flight are not recovered. A remote helper's ownership is leased the same way.
+Proof: a crash-injection suite that kills the worker under each, and shows another take it over.
+
+**2. Workspaces.** Where an agent's files live, separate from where untrusted code runs. A
+`Workspace` contract (read, write, list, and optionally glob, grep, and delete) over memory, the
+filesystem, the store, a sandbox, and a composite that routes paths among them. A sandbox is a
+workspace that can also execute, and says how it is isolated; a deep agent takes each on its own.
+
+**3. Observability that loses nothing.** An exporter wrapper that spools to the operation store a
+batch the collector does not accept, retries it, and dead-letters what cannot be sent, under a bound,
+reporting what it exported, retried, spooled, and dropped, and the age of the oldest pending batch.
+Deployment evaluation reads a run's trace (its input, tool calls, retrieved documents, and media)
+and runs through the online-evaluation worker rather than beside it. Evaluation subjects that are
+media. Automation rules: when a score falls below a threshold over enough samples, open a review
+item, send a webhook, or mark a deployment unhealthy. OTLP over gRPC.
+
+**4. Realtime breadth.** A second provider on its own wire protocol, Gemini Live, behind the same
+session, tools, and conversation record; video frames into a session; SIP calls answered by a
+realtime agent; browser automation of a WebRTC session; and a published method and budget for turn
+latency and session load.
+
+**5. Telephony breadth.** A second provider on its own call-control protocol, Telnyx; messaging
+(SMS) as an operation family on both providers; call recording kept in an asset store under a
+retention policy; and conference and transfer.
+
+**6. Media in motion.** Video generation through durable provider jobs, collected as a stream into an
+asset store and priced per second, on Google Veo and on Runway; a media catalog; and media in the
+evaluation suites.
+
+---
+
+## Unscheduled
+
+Not yet placed, roughly in order of what applications ask for:
+
+1. Multi-region execution.
+2. Routing by residency: a request that requires a region is never routed outside it.
+3. Credential vaults: a provider's key resolved per tenant at call time, from a secret manager.
+4. Guardrail, routing, and budget policy as a versioned file the application supplies, checked by the
+   command line.
+5. A compatibility record for community adapters: the contract suite an adapter passed, against which
+   version, with its benchmark, listed on one page.
+6. Tools emulated by a model, for evaluation suites that should not call a payment provider or a
+   production database.
+7. A2A over its other bindings, and a webhook that receives each piece of streamed text.
+8. ACP's editor MCP servers over SSE, with their tools' capabilities declared.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:
