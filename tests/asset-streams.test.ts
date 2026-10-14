@@ -214,9 +214,11 @@ test('a store that cannot stream buffers within its limit, and no further', asyn
 });
 
 // The gigabyte is `npm run bench:streams`, a step of its own in the release gate, so moving it never
-// slows a timing-sensitive test running beside this one; here 128 MiB shows the same flat memory.
+// slows a timing-sensitive test running beside this one; here 256 MiB shows the same flat memory. The
+// budget is half the stream: V8 leaves freed buffers uncollected until about 64 MB of them pile up, so
+// growth near that is garbage, while a store that buffered the asset would grow by all of it.
 test('a stream through each streaming store keeps memory flat', async () => {
-  const size = Number(process.env.NEXUS_ASSET_STREAM_BYTES ?? 128 * 1024 * 1024);
+  const size = Number(process.env.NEXUS_ASSET_STREAM_BYTES ?? 256 * 1024 * 1024);
   const stores: Array<[string, AssetStore]> = [
     ['filesystem', new FilesystemAssetStore({ directory: temporary() })],
     ['s3', new S3AssetStore({ client: directoryS3(temporary()), bucket: 'b' })],
@@ -254,6 +256,9 @@ test('a stream through each streaming store keeps memory flat', async () => {
       clearInterval(sampler);
     }
     const grewMb = (peak - before) / 1024 / 1024;
-    assert.ok(grewMb < 48, `${name}: memory grew ${grewMb.toFixed(0)} MB to move ${size / 1024 / 1024} MB`);
+    assert.ok(
+      grewMb < size / 2 / 1024 / 1024,
+      `${name}: memory grew ${grewMb.toFixed(0)} MB to move ${size / 1024 / 1024} MB`,
+    );
   }
 });
