@@ -21,10 +21,12 @@ export {
   assembleTree,
   closeAbandonedRuns,
   type CloseAbandonedRunsOptions,
+  isAfterCursor,
   JsonlTraceStore,
   type JsonlTraceStoreOptions,
   MemoryTraceStore,
   type MemoryTraceStoreOptions,
+  runCursor,
 } from './stores.js';
 export {
   type FinishRunOptions,
@@ -39,6 +41,7 @@ export {
 export type {
   RedactionPolicy,
   Run,
+  RunCursor,
   RunFeedback,
   RunKind,
   RunQuery,

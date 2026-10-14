@@ -125,6 +125,22 @@ export interface RunQuery {
   limit?: number;
   /** Runs skipped before the first returned, for paging. */
   offset?: number;
+  /**
+   * Only runs after this one in the order results come: older, or as old with a smaller id. A page
+   * resumed from its last run neither repeats nor skips one, however many runs share a start time.
+   */
+  after?: RunCursor;
+}
+
+/**
+ * A run's place in query order, newest first and then by id from last to first: what a page resumes
+ * after. `runCursor()` takes it from a run.
+ */
+export interface RunCursor {
+  /** The run's `startedAt`. */
+  startedAt: string;
+  /** The run's id. */
+  id: string;
 }
 
 /** Where runs are kept, for querying, trees, and feedback. */
@@ -133,7 +149,11 @@ export interface TraceStore {
   save(run: Run): Promise<void> | void;
   /** Reads one run. */
   get(runId: string): Promise<Run | undefined> | Run | undefined;
-  /** Runs matching a query, newest first. */
+  /**
+   * Runs matching a query, newest first, and among runs that started together by id from last to
+   * first, compared as code units, so every store pages the same way. A store that honours `after`
+   * pages by cursor; `applyQuery()` does both for a store that filters in memory.
+   */
   query(query?: RunQuery): Promise<Run[]> | Run[];
   /** Every run of one trace, assembled into a tree. */
   tree(traceId: string): Promise<RunTree | undefined> | RunTree | undefined;

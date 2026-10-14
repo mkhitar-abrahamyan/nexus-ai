@@ -1,4 +1,4 @@
-import type { Run, RunQuery, RunTree } from '../types/tracing.js';
+import type { Run, RunCursor, RunQuery, RunTree } from '../types/tracing.js';
 
 /** Filters and orders runs. Shared by every store, so a query means the same thing everywhere. */
 export function applyQuery(runs: Run[], query: RunQuery = {}): Run[] {
@@ -16,6 +16,7 @@ export function applyQuery(runs: Run[], query: RunQuery = {}): Run[] {
     if (query.since && run.startedAt < query.since) return false;
     if (query.until && run.startedAt > query.until) return false;
     if (query.feedbackKey && !run.feedback?.some((item) => item.key === query.feedbackKey)) return false;
+    if (query.after && !isAfterCursor(run, query.after)) return false;
     if (query.metadata) {
       for (const [field, expected] of Object.entries(query.metadata)) {
         if (readPath(run.metadata, field) !== expected) return false;
@@ -24,9 +25,25 @@ export function applyQuery(runs: Run[], query: RunQuery = {}): Run[] {
     return true;
   });
 
-  const ordered = matched.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const ordered = matched.sort(compareRunOrder);
   const offset = query.offset ?? 0;
   return ordered.slice(offset, offset + (query.limit ?? 50));
+}
+
+/** A run's place in query order, for `RunQuery.after`: the next page starts after it. */
+export function runCursor(run: Pick<Run, 'startedAt' | 'id'>): RunCursor {
+  return { startedAt: run.startedAt, id: run.id };
+}
+
+/** Whether a run comes after a cursor in query order: older, or as old with a smaller id. */
+export function isAfterCursor(run: Pick<Run, 'startedAt' | 'id'>, cursor: RunCursor): boolean {
+  return run.startedAt < cursor.startedAt || (run.startedAt === cursor.startedAt && run.id < cursor.id);
+}
+
+/** Query order: newest first, then by id from last to first, as code units, as Postgres orders `COLLATE "C"`. */
+function compareRunOrder(a: Run, b: Run): number {
+  if (a.startedAt !== b.startedAt) return a.startedAt < b.startedAt ? 1 : -1;
+  return a.id === b.id ? 0 : a.id < b.id ? 1 : -1;
 }
 
 /** Assembles runs into a tree under their root, children ordered by start time. */

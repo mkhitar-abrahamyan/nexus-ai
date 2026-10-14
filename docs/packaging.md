@@ -110,13 +110,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/openrouter` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
-| `nexus-ai-pro/postgres` | 84 KB | 24% | none |
+| `nexus-ai-pro/postgres` | 85 KB | 25% | none |
 | `nexus-ai-pro/graph` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
 | `nexus-ai-pro/images` | 72 KB | 21% | none |
-| `nexus-ai-pro/evaluate/online` | 68 KB | 20% | none |
+| `nexus-ai-pro/evaluate/online` | 71 KB | 21% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
@@ -144,9 +144,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 10% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
+| `nexus-ai-pro/tracing` | 31 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 31 KB | 9% | none |
-| `nexus-ai-pro/tracing` | 30 KB | 9% | none |
 | `nexus-ai-pro/media/rag` | 28 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
@@ -195,6 +195,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/media` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/rag/redis` | 13 KB | 4% | none |
+| `nexus-ai-pro/postgres/traces` | 12 KB | 3% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 3% | none |
 | `nexus-ai-pro/rag/files` | 12 KB | 3% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 3% | none |
@@ -206,7 +207,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/cache` | 11 KB | 3% | none |
 | `nexus-ai-pro/embeddings/batch/google` | 11 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
-| `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/chroma` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |

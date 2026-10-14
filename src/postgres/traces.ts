@@ -20,7 +20,8 @@ export function traceStoreMigration(options: PostgresTraceStoreOptions = {}): st
 
 /**
  * The versioned schema, which `migrate()` and `nexus db migrate` apply. Version 1 is the 2.0 table;
- * version 2 indexes runs by `metadata.tenantId`, which a tenant-scoped trace store filters on.
+ * version 2 indexes runs by `metadata.tenantId`, which a tenant-scoped trace store filters on; version
+ * 3 indexes them in query order, start time then id, which a page resumed by cursor seeks to.
  */
 export function traceStoreMigrations(options: PostgresTraceStoreOptions = {}): SchemaMigration[] {
   const name = options.table ?? DEFAULT_TABLE;
@@ -34,6 +35,14 @@ export function traceStoreMigrations(options: PostgresTraceStoreOptions = {}): S
       name: 'index runs by tenant',
       statements: [
         `CREATE INDEX IF NOT EXISTS ${quoteDerived(name, 'tenant_started')} ON ${table} ((doc #>> '{metadata,tenantId}'), started_at DESC)`,
+      ],
+    },
+    {
+      component,
+      version: 3,
+      name: 'index runs in query order',
+      statements: [
+        `CREATE INDEX IF NOT EXISTS ${quoteDerived(name, 'started_id')} ON ${table} (started_at DESC, id COLLATE "C" DESC)`,
       ],
     },
   ];
@@ -140,6 +149,12 @@ export class PostgresTraceStore implements TraceStore {
     if (query.minCost !== undefined) where.push(`coalesce(cost, 0) >= ${params.add(query.minCost)}`);
     if (query.since) where.push(`started_at >= ${params.add(query.since)}`);
     if (query.until) where.push(`started_at <= ${params.add(query.until)}`);
+    if (query.after) {
+      const startedAt = params.add(query.after.startedAt);
+      where.push(
+        `(started_at < ${startedAt} OR (started_at = ${startedAt} AND id COLLATE "C" < ${params.add(query.after.id)}))`,
+      );
+    }
     if (query.feedbackKey) {
       where.push(
         `EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(doc -> 'feedback', '[]'::jsonb)) AS item WHERE item ->> 'key' = ${params.add(query.feedbackKey)})`,
@@ -160,7 +175,7 @@ export class PostgresTraceStore implements TraceStore {
     const { rows } = await this.client.query(
       `SELECT doc::text AS doc FROM ${this.table}
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-       ORDER BY started_at DESC, id
+       ORDER BY started_at DESC, id COLLATE "C" DESC
        LIMIT ${params.add(query.limit ?? 50)} OFFSET ${params.add(query.offset ?? 0)}`,
       params.values,
     );

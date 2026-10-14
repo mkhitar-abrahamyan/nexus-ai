@@ -41,6 +41,20 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.9 stage (Unreleased)
+
+Everything 2.9 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- `RunQuery.after` with `RunCursor`, and `runCursor()` and `isAfterCursor()` on
+  `nexus-ai-pro/tracing`. A store of your own that does not honour `after` still works with the
+  online-evaluation worker, which falls back to offsets;
+- `OnlineSchedulePass.paging`.
+
+Changed, each to keep a promise the surface already made:
+- `TraceStore.query()` orders runs that share a start time by id, from last to first, as code units,
+  so a page means the same on every store. Before, that order was not defined.
+
 ## 2.8 stage (2.8.0)
 
 Everything 2.8 adds is stable from the start and additive, unless this section says otherwise.

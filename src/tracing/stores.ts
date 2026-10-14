@@ -2,9 +2,9 @@ import { utf8Length } from '../utils/ids.js';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Run, RunFeedback, RunQuery, RunTree, TraceStore } from '../types/tracing.js';
-import { applyQuery, assembleTree } from './query.js';
+import { applyQuery, assembleTree, isAfterCursor, runCursor } from './query.js';
 
-export { applyQuery, assembleTree };
+export { applyQuery, assembleTree, isAfterCursor, runCursor };
 
 /** Options for the in-memory trace store. */
 export interface MemoryTraceStoreOptions {

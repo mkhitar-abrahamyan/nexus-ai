@@ -4381,7 +4381,8 @@ A `TraceStore` has `save()`, `get()`, `query()`, and `tree()`, and optionally `a
 | `JsonlTraceStore` | Durable without a database: one JSON object per line in `JsonlTraceStoreOptions.file`, trimmed to its newer half past `maxBytes` (64 MB). A read loads the file, so it suits a service that writes far more than it queries. |
 | `PostgresTraceStore` | Production queries, with every filter in SQL. See the [Postgres guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.md). |
 
-A `RunQuery` filters runs. Results come newest first.
+A `RunQuery` filters runs. Results come newest first, and runs that started in the same millisecond
+come by id, from last to first, compared as code units: every store orders them the same way.
 
 | Filter | Matches |
 | --- | --- |
@@ -4392,9 +4393,27 @@ A `RunQuery` filters runs. Results come newest first.
 | `since`, `until` | A window on the start time. |
 | feedback key | Runs with feedback under that key. |
 | `limit`, `offset` | Paging. `limit` defaults to 50. |
+| `after` | Runs after a `RunCursor`, the start time and id of the last run of the page before. |
+
+Page by `after` rather than `offset` when runs keep arriving: an offset shifts as new runs push
+older ones down, and `until` cannot split runs that share a start time, so a page that ends among
+them would end the same way again. `runCursor()` takes the cursor from a page's last run.
+
+```ts
+import { type Run, type RunCursor, runCursor } from 'nexus-ai-pro/tracing';
+
+let after: RunCursor | undefined;
+for (;;) {
+  const page = await store.query({ kind: 'model', limit: 500, ...(after ? { after } : {}) });
+  for (const run of page) handle(run);
+  if (page.length < 500) break;
+  after = runCursor(page[page.length - 1] as Run);
+}
+```
 
 `applyQuery()` and `assembleTree()` are the filtering and tree-building every store shares. They are
-exported for a store of your own, so a query means the same everywhere.
+exported for a store of your own, so a query means the same everywhere; `isAfterCursor()` is the
+cursor test on its own, for a store that filters elsewhere.
 
 ## Comparing traces
 
@@ -4873,6 +4892,10 @@ score.
 `evaluateOnline()` is one pass, called by whoever calls it. For production traffic, run
 `onlineEvaluationWorker()` from `nexus-ai-pro/evaluate/online` instead, on as many processes as you
 like over one operation store, such as Redis or Postgres. Each `OnlineEvaluationWorker`:
+- **reads** runs newest first, `scanLimit` (1,000) a page, each page resumed after the last run of
+  the one before, so a backlog of runs that started in the same millisecond is read through. On a
+  trace store of your own that does not honour `RunQuery.after`, it pages by offset instead, and its
+  `OnlineSchedulePass` says `paging: 'offset'`;
 - **samples** by a hash of the run's id and the `source`, so every worker, and every pass after a
   restart, picks the same runs;
 - **queues** one operation per run and source, under an idempotency key, so a run is queued once
@@ -5036,8 +5059,6 @@ regression in a test, not to judging content in production; use a model judge fo
   something, not that the question is a good one: read a sample before trusting a verdict.
 - An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
   or `rephrase`.
-- An online-evaluation worker reads runs newest first, a page at a time. A backlog of runs that all
-  started in the same millisecond, more than a page of them, is read one page only.
 - A budget counts reservations as spent until they are reconciled, so a worker that dies holding one
   leaves its estimate charged for the period.
 
@@ -12095,13 +12116,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/openrouter` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
-| `nexus-ai-pro/postgres` | 84 KB | 24% | none |
+| `nexus-ai-pro/postgres` | 85 KB | 25% | none |
 | `nexus-ai-pro/graph` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
 | `nexus-ai-pro/images` | 72 KB | 21% | none |
-| `nexus-ai-pro/evaluate/online` | 68 KB | 20% | none |
+| `nexus-ai-pro/evaluate/online` | 71 KB | 21% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
@@ -12129,9 +12150,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 10% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
+| `nexus-ai-pro/tracing` | 31 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 31 KB | 9% | none |
-| `nexus-ai-pro/tracing` | 30 KB | 9% | none |
 | `nexus-ai-pro/media/rag` | 28 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
@@ -12180,6 +12201,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/media` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/rag/redis` | 13 KB | 4% | none |
+| `nexus-ai-pro/postgres/traces` | 12 KB | 3% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 3% | none |
 | `nexus-ai-pro/rag/files` | 12 KB | 3% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 3% | none |
@@ -12191,7 +12213,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/cache` | 11 KB | 3% | none |
 | `nexus-ai-pro/embeddings/batch/google` | 11 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
-| `nexus-ai-pro/postgres/traces` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/chroma` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |

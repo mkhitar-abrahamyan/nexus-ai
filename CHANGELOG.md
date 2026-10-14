@@ -4,6 +4,35 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Paging by cursor.** `RunQuery.after` takes a `RunCursor`, the start time and id of a page's last
+  run, and returns only the runs after it; `runCursor()` takes the cursor from a run, and
+  `isAfterCursor()` is the test on its own, for a trace store of your own. Every bundled store
+  honours it, and `applyQuery()` does for a store that filters in memory. A new Postgres trace store
+  migration, version 3, indexes runs in query order.
+
+### Changed
+
+- Runs that started in the same millisecond come by id, from last to first, compared as code units,
+  on every trace store. The order of such runs was not defined before, and the memory and Postgres
+  stores disagreed on it.
+
+### Fixed
+
+- An online-evaluation worker reads a backlog of runs that started in the same millisecond through,
+  however many pages it spans. Before, it resumed each page at the last run's start time, so a page
+  that ended among such runs was read again on every pass, and `drain()` never finished. On a trace
+  store of your own that does not honour `RunQuery.after`, the worker pages by offset instead, and
+  its `OnlineSchedulePass` says `paging: 'offset'`.
+
+### Proof
+
+- `tests/online-evaluation-paging.test.ts`: the memory, JSONL, and Postgres trace stores order 5,000
+  runs, 4,000 of them in one millisecond, identically, and page through them by cursor without a
+  repeat or a gap. Ten workers reading 1,000 a page schedule each of them exactly once on every
+  store, and on a store that ignores the cursor. The previous worker never reads past the burst.
+
 ## [2.8.0] - 2026-10-14
 
 Retrieval at production scale, and media that is understood.

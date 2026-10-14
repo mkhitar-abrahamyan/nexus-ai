@@ -282,7 +282,8 @@ A `TraceStore` has `save()`, `get()`, `query()`, and `tree()`, and optionally `a
 | `JsonlTraceStore` | Durable without a database: one JSON object per line in `JsonlTraceStoreOptions.file`, trimmed to its newer half past `maxBytes` (64 MB). A read loads the file, so it suits a service that writes far more than it queries. |
 | `PostgresTraceStore` | Production queries, with every filter in SQL. See the [Postgres guide](./postgres.md). |
 
-A `RunQuery` filters runs. Results come newest first.
+A `RunQuery` filters runs. Results come newest first, and runs that started in the same millisecond
+come by id, from last to first, compared as code units: every store orders them the same way.
 
 | Filter | Matches |
 | --- | --- |
@@ -293,9 +294,27 @@ A `RunQuery` filters runs. Results come newest first.
 | `since`, `until` | A window on the start time. |
 | feedback key | Runs with feedback under that key. |
 | `limit`, `offset` | Paging. `limit` defaults to 50. |
+| `after` | Runs after a `RunCursor`, the start time and id of the last run of the page before. |
+
+Page by `after` rather than `offset` when runs keep arriving: an offset shifts as new runs push
+older ones down, and `until` cannot split runs that share a start time, so a page that ends among
+them would end the same way again. `runCursor()` takes the cursor from a page's last run.
+
+```ts
+import { type Run, type RunCursor, runCursor } from 'nexus-ai-pro/tracing';
+
+let after: RunCursor | undefined;
+for (;;) {
+  const page = await store.query({ kind: 'model', limit: 500, ...(after ? { after } : {}) });
+  for (const run of page) handle(run);
+  if (page.length < 500) break;
+  after = runCursor(page[page.length - 1] as Run);
+}
+```
 
 `applyQuery()` and `assembleTree()` are the filtering and tree-building every store shares. They are
-exported for a store of your own, so a query means the same everywhere.
+exported for a store of your own, so a query means the same everywhere; `isAfterCursor()` is the
+cursor test on its own, for a store that filters elsewhere.
 
 ## Comparing traces
 
@@ -372,6 +391,7 @@ specific entry point that provides it.
 | `formatTree` | function | A run tree as indented text, for a terminal or a log. |
 | `GraphTracing` | interface | Tracing for one graph run: a root run with one child per task. |
 | `GraphTracingOptions` | interface | Options for `traceGraph()`. |
+| `isAfterCursor` | function | Whether a run comes after a cursor in query order: older, or as old with a smaller id. |
 | `JsonlTraceStore` | class | Traces appended to a JSONL file. |
 | `JsonlTraceStoreOptions` | interface | Options for the JSONL trace store. |
 | `measure` | function | Computes a metric over a set of runs. |
@@ -380,6 +400,8 @@ specific entry point that provides it.
 | `ModelClientLike` | interface | Any client with a `complete()` method. |
 | `RedactionPolicy` | interface | What is removed from runs before they are stored, so a hidden field is never written anywhere. |
 | `Run` | interface | One unit of work in a trace: a model call, a tool call, a graph node, or anything else worth timing. |
+| `runCursor` | function | A run's place in query order, for `RunQuery.after`: the next page starts after it. |
+| `RunCursor` | interface | A run's place in query order, newest first and then by id from last to first: what a page resumes after. |
 | `RunDifference` | interface | One field that differs between two matched runs. |
 | `RunFeedback` | interface | A judgement attached to a run, by a person or an evaluator. |
 | `RunHandle` | interface | A run in progress. |

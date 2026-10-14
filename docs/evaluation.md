@@ -422,6 +422,10 @@ score.
 `evaluateOnline()` is one pass, called by whoever calls it. For production traffic, run
 `onlineEvaluationWorker()` from `nexus-ai-pro/evaluate/online` instead, on as many processes as you
 like over one operation store, such as Redis or Postgres. Each `OnlineEvaluationWorker`:
+- **reads** runs newest first, `scanLimit` (1,000) a page, each page resumed after the last run of
+  the one before, so a backlog of runs that started in the same millisecond is read through. On a
+  trace store of your own that does not honour `RunQuery.after`, it pages by offset instead, and its
+  `OnlineSchedulePass` says `paging: 'offset'`;
 - **samples** by a hash of the run's id and the `source`, so every worker, and every pass after a
   restart, picks the same runs;
 - **queues** one operation per run and source, under an idempotency key, so a run is queued once
@@ -585,8 +589,6 @@ regression in a test, not to judging content in production; use a model judge fo
   something, not that the question is a good one: read a sample before trusting a verdict.
 - An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
   or `rephrase`.
-- An online-evaluation worker reads runs newest first, a page at a time. A backlog of runs that all
-  started in the same millisecond, more than a page of them, is read one page only.
 - A budget counts reservations as spent until they are reconciled, so a worker that dies holding one
   leaves its estimate charged for the period.
 

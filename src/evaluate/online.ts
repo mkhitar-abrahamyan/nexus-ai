@@ -15,7 +15,8 @@ import type { AnnotationQueue } from './review.js';
 import type { EvaluationContext, EvaluationScore, Evaluator } from '../types/evaluate.js';
 import type { BudgetLedger, BudgetReservation, OperationDescriptor } from '../types/lifecycle.js';
 import type { OperationContext, OperationStore } from '../types/operations.js';
-import type { Run, RunQuery, TraceStore } from '../types/tracing.js';
+import { isAfterCursor, runCursor } from '../tracing/query.js';
+import type { Run, RunCursor, RunQuery, TraceStore } from '../types/tracing.js';
 
 /** Options for `onlineEvaluationWorker()`. */
 export interface OnlineEvaluationWorkerOptions {
@@ -77,6 +78,11 @@ export interface OnlineSchedulePass {
   throttled: boolean;
   /** True when the pass read back to the oldest matching run, so the next one starts at the newest. */
   exhausted: boolean;
+  /**
+   * How the pass paged: by cursor, or by offset on a trace store that does not honour
+   * `RunQuery.after`, where runs that start in the same millisecond may be read twice but never skipped.
+   */
+  paging: 'cursor' | 'offset';
 }
 
 /** What a worker has done since it was created. */
@@ -245,18 +251,40 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
     },
 
     async schedule() {
-      const pass: OnlineSchedulePass = { scanned: 0, sampled: 0, queued: 0, throttled: false, exhausted: false };
+      const pass: OnlineSchedulePass = {
+        scanned: 0,
+        sampled: 0,
+        queued: 0,
+        throttled: false,
+        exhausted: false,
+        paging: byOffset ? 'offset' : 'cursor',
+      };
       if (budgetSpent) return pass;
       const limit = options.scanLimit ?? 1_000;
       // Runs come newest first. Once a page has nothing left to queue, the next pass reads the page
-      // before it, back to the oldest run, then starts again at the newest.
-      const runs = await options.traces.query({
-        kind: 'model',
-        status: 'ok',
-        ...options.query,
-        ...(cursor ? { until: cursor } : {}),
-        limit,
-      });
+      // after its last run, back to the oldest, then starts again at the newest. A page resumes after
+      // a run, not a timestamp: a thousand runs in one millisecond span pages without one skipped.
+      const read = () =>
+        options.traces.query({
+          kind: 'model',
+          status: 'ok',
+          ...options.query,
+          ...(byOffset ? { offset } : cursor ? { after: cursor } : {}),
+          limit,
+        });
+      let runs = await read();
+      // A store that predates the cursor answers from the newest run again. It is paged by offset
+      // from here, starting over: a run read twice is skipped by its operation, and none is missed.
+      if (!byOffset && cursor) {
+        const from = cursor;
+        if (runs.some((run) => !isAfterCursor(run, from))) {
+          byOffset = true;
+          pass.paging = 'offset';
+          cursor = undefined;
+          offset = 0;
+          runs = await read();
+        }
+      }
       pass.scanned = runs.length;
       const maxQueued = options.maxQueued ?? 1_000;
       let open = await busy();
@@ -293,8 +321,11 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
         if (runs.length < limit) {
           pass.exhausted = true;
           cursor = undefined;
+          offset = 0;
         } else if (pass.queued === 0) {
-          cursor = runs.at(-1)?.startedAt;
+          const last = runs.at(-1);
+          cursor = last ? runCursor(last) : undefined;
+          offset += runs.length;
         }
       }
       return pass;
@@ -366,7 +397,9 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
   };
   let running: Promise<void> | undefined;
   let stopping: AbortController | undefined;
-  let cursor: string | undefined;
+  let cursor: RunCursor | undefined;
+  let offset = 0;
+  let byOffset = false;
   return worker;
 }
 
