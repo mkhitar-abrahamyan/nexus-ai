@@ -4,6 +4,10 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-14
+
+Retrieval at production scale, and media that is understood.
+
 ### Added
 
 - **Graduation.** The Qdrant, Redis, Weaviate, and Chroma vector stores leave experimental status.
@@ -2448,7 +2452,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.4.0...v2.5.0

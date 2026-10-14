@@ -4,26 +4,30 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.7.0**. 164 export subpaths, each held to a size budget in CI, 12 completion
-providers, 5 embedding providers, 2 batch providers, 3 image providers plus a mock, and 98 completion
-registry models plus 60 aliases, verified against each provider's documentation on 2026-10-02. 1,055
-unit tests and 30 studio tests pass; coverage sits at **95.7% lines / 82.1% branches / 91.8%
-functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry
-drift, `llms.txt` drift, per-subpath size, documentation and guide coverage, the root import, a graph
-benchmark with a durability budget, runtime and memory-retention budgets, load and soak budgets for
-every graduated surface, crash injection on five checkpointers, an upgrade from the published 2.0.0,
-2.1.0, and 2.3.0 packages, ten-worker races and tenant isolation on every shared store, ten replicas
-changing one deployment at once on every state store, sandbox conformance on the reference sandbox
-and on a real container runtime, a permission policy in a real tool loop, retrieval and
-tool-selection experiments, 500 deferred tools on three providers, a crash halfway through a
-100,000-document ingestion, crashes between a deep agent and its background helper, ten
+Status baseline: **2.8.0**. 176 export subpaths, each held to a size budget in CI, 12 completion
+providers, 5 embedding providers, 2 completion batch providers and 2 embedding batch tiers, 3 image
+providers plus a mock, 2 media providers plus a mock, and 98 completion registry models plus 60
+aliases, verified against each provider's documentation on 2026-10-02. 1,109 unit tests and 30 studio
+tests pass; coverage sits at **95.8% lines / 82.3% branches / 91.8% functions** against gates of
+82/67/73. CI verifies lint, format, build, tests, coverage, registry drift, `llms.txt` drift,
+per-subpath size, documentation and guide coverage, the root import, a graph benchmark with a
+durability budget, runtime and memory-retention budgets, load and soak budgets for every graduated
+surface, a gigabyte through each streaming asset store with flat memory, crash injection on five
+checkpointers, an upgrade from the published 2.0.0, 2.1.0, 2.3.0, and 2.7.0 packages, ten-worker
+races and tenant isolation on every shared store, ten writers racing on the same ids in every vector
+store, ten replicas changing one deployment at once on every state store, sandbox conformance on the
+reference sandbox and on a real container runtime, a permission policy in a real tool loop,
+retrieval, tool-selection, and media-grounding experiments, 500 deferred tools on three providers, a
+crash halfway through a 100,000-document ingestion and between submitting and collecting a
+100,000-chunk embedding batch, crashes between a deep agent and its background helper, ten
 online-evaluation workers through a crash, an adversarial dataset against an unguarded and a guarded
 agent, the agent protocols driven from the other side of the wire and against the published 2.5.0 in
 both directions, a tool's progress on every stream, every studio route called by every role and with
 hostile input, the imports of every entry point for anything Node-only, the portable kernel on Node,
 Deno, Bun, an edge runtime, and headless Chromium, mock conformance, packed-package smoke, API
 contract, consumer type resolution, and clean install on Node 22 and 24. Every night, each agent
-protocol is driven by the reference client of its own project.
+protocol is driven by the reference client of its own project. Every week, the vector stores run
+their contract and graduation checklist against the real servers.
 
 ---
 
@@ -68,56 +72,23 @@ Each gap is written down in a guide's limitations today, and each is closed by o
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Qdrant, Redis, Weaviate, and Chroma stores have passed their contract only against stubs in CI | API stability | 2.8 |
-| The Pinecone store has passed its contract only against a stub | API stability | when the live credential is set |
-| Images have not recorded live conformance on all three backends | API stability | when the live credentials are set |
-| Embeddings take text only, one call at a time, and their cache makes one round trip per input | Embeddings guide | 2.8 |
-| Asset stores read and write whole byte arrays | Images guide | 2.8 |
-| Prices and models move only with a runtime release | Providers guide | 2.8 |
-| Reading a document, describing an image, and searching media are left to the application | Retrieval guide | 2.8 |
+| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.9 |
+| Images have not recorded live conformance on all three backends | API stability | 2.9 |
+| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.9 |
+| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.9 |
 
 ---
 
-## 2.8.0: retrieval at production scale, and media that is understood
+## 2.9.0: live graduation, finished
 
-Four themes, each with a proof. Nothing here adds a required dependency or grows the root import.
-
-**Live graduation.** The Qdrant, Redis, Weaviate, and Chroma stores leave experimental status with
-the full checklist run against the real servers in the scheduled live workflow: the contract,
-ten writers on the same ids, a soak, a load budget, tenant isolation, and an upgrade from 2.7. A
-replacement in Redis becomes one atomic write, and every store refuses a `topK` that is not a
-positive integer before it reaches a query. Pinecone and images graduate the same way once their
-live credentials are set; nothing else stands in their way.
-
-**Embeddings beyond text.**
-- A shared embedding cache: an `EmbeddingCacheStore` that reads and writes a whole batch in one round
-  trip, keys on a hash rather than the text, and keeps vectors as packed floats, on memory, Redis,
-  Postgres, and SQLite. Proof: a second process embeds a 2,000-text batch with no provider call and
-  one cache read.
-- Images, audio, and documents as embedding input, on the models that take them, and refused on the
-  ones that do not. Proof: a text query finds the image it describes through one vector space.
-- A provider batch tier for embeddings at half price, on its own entry point, and an ingestion
-  pipeline that submits, survives a crash, and collects. Proof: a 100,000-chunk ingestion through a
-  batch tier, crashed between submit and collect, resumes without submitting twice.
-
-**Streaming asset stores.** `putStream()` and `getStream()`, with byte ranges, on the filesystem, S3,
-and memory stores, and a fallback for any store that has neither. The checksum and size limit are
-enforced while the bytes flow. Proof: a gigabyte through each streaming store with flat memory.
-
-**Registry data on its own.** The model and embedding registries as a versioned data file, which an
-application supplies, layers over the bundled data, and checks with `nexus models check`. `nexus
-models refresh` compares it with the providers the application has keys for. Nothing is fetched
-from a central server. Proof: a price changed in a supplied file reaches the cost of the next call.
-
-**Media understanding.** On a new entry point, reading a document's text page by page, describing an
-image, and answering a question about either, through any vision model or a dedicated OCR service,
-with one contract and a conformance suite. Media search and RAG index those pages, captions, and
-image vectors, retrieve the asset behind each hit, and hand the model the image itself. Proof: an
-experiment where answers grounded in the retrieved media beat answers from their text alone.
+**Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, and media
+understanding graduate when the scheduled live workflow passes against each, published with their
+checklists. Each check is built and passes against stand-ins; what stands in the way is the
+repository's live credentials. The rest of 2.9 is chosen from the list below.
 
 ---
 
-## Beyond 2.8
+## Beyond 2.9
 
 Not yet scheduled, roughly in order of what applications ask for:
 

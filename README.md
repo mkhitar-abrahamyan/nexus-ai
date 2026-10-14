@@ -280,11 +280,17 @@ Shipped so far:
 - 2.7 agents that do more, and evaluation that runs on its own: workspace search and a multimodal
   workspace, a container sandbox, an interpreter, helpers that run in the background and survive a
   crash, and tool search on every provider; datasets generated from documents and from the
-  guardrails' attacks; and online evaluation on workers, within a budget.
+  guardrails' attacks; and online evaluation on workers, within a budget;
+- 2.8 retrieval at production scale, and media that is understood: the Qdrant, Redis, Weaviate, and
+  Chroma stores out of experimental after their checklist ran against the real servers; a shared
+  embedding cache; images, audio, and documents as embedding input; a half-price embedding batch tier
+  that ingestion survives a crash through; streaming asset stores; registry data you supply and
+  refresh; and reading, describing, and searching media, with answers given the media themselves.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, the remote vector stores and images graduate once the live workflow passes against each. The
+Next, Pinecone, images, the Gemini embedding batch tier, and media understanding graduate once the
+live workflow passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order
 applications ask for it.
 
