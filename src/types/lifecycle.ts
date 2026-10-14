@@ -108,6 +108,83 @@ export interface BudgetReservation {
   key: string;
   /** The amount held, in US dollars. */
   amount: number;
+  /**
+   * Its id, when the ledger's store records reservations: any process can then settle it, and one a
+   * dead process held is found when its lease lapses.
+   */
+  id?: string;
+}
+
+/**
+ * Where a recorded reservation stands. `reserved` is held under a lease; `settled` is charged at what
+ * its operation cost; `released` was given back by its operation; `expired` was given back after its
+ * lease lapsed, its operation never having started; `uncertain` lapsed with its operation's outcome
+ * unknown, and is charged or given back by the ledger's policy until its operation says.
+ */
+export type BudgetReservationStatus = 'reserved' | 'settled' | 'released' | 'expired' | 'uncertain';
+
+/** A reservation as a ledger's store records it. Times are epoch milliseconds. */
+export interface BudgetReservationRecord {
+  /** Its id. */
+  id: string;
+  /** The budget it counts against. */
+  key: string;
+  /** The total of the period it counts in. */
+  storeKey: string;
+  /** When that period's total resets. */
+  resetAt: number;
+  /** What was reserved. */
+  amount: number;
+  /** What it adds to the total now: the amount while reserved, the cost once settled, 0 once given back. */
+  charged: number;
+  /** The request id of the operation it was reserved for. */
+  operationId: string;
+  /** That operation's family. */
+  family?: OperationFamily;
+  /** What that operation does, such as `online-evaluation.quality`. */
+  operation?: string;
+  /** Where it stands. */
+  status: BudgetReservationStatus;
+  /** When its lease lapses, unless renewed. */
+  leasedUntil: number;
+  /** When it was reserved. */
+  createdAt: number;
+  /** What its operation cost, once settled. */
+  actual?: number;
+  /** When it left `reserved`. */
+  settledAt?: number;
+}
+
+/**
+ * What became of a reservation's operation, as whoever settles it knows: it finished at a cost, it
+ * never started, its outcome is unknown, or it is still running, which renews the lease.
+ */
+export type BudgetReservationOutcome =
+  | { kind: 'finished'; cost: number }
+  | { kind: 'never-started' }
+  | { kind: 'unknown' }
+  | { kind: 'running' };
+
+/** What one recovery pass did with reservations whose lease had lapsed. */
+export interface BudgetRecoveryReport {
+  /** Charged at what their operation cost. */
+  settled: number;
+  /** Given back, their operation never having started. */
+  expired: number;
+  /** Marked uncertain, charged or given back by the ledger's policy. */
+  uncertain: number;
+  /** Still running, their leases renewed. */
+  renewed: number;
+  /** Left for another resolver, which knows their operation. */
+  skipped: number;
+}
+
+/** How `recover()` reads lapsed reservations. */
+export interface BudgetRecoverOptions {
+  /** Only reservations for operations that do this, such as `online-evaluation.quality`. */
+  operation?: string;
+  /** Most reservations settled in one pass. Defaults to 100. */
+  limit?: number;
 }
 
 /**
@@ -127,6 +204,25 @@ export interface BudgetLedger {
   reconcile(reservation: BudgetReservation, actual: number): void | Promise<void>;
   /** Gives the held amount back, for an operation that failed or was cancelled. */
   release(reservation: BudgetReservation): void | Promise<void>;
+  /** Extends a recorded reservation's lease, for an operation that runs longer than it. */
+  renew?(reservation: BudgetReservation): Promise<void>;
+  /**
+   * Settles a recorded reservation by its id, from any process: charged at a finished operation's
+   * cost, given back for one that never started, or by policy when its outcome is unknown. A late
+   * report from the operation itself corrects what recovery decided. Resolves whether it changed.
+   */
+  settle?(id: string, outcome: BudgetReservationOutcome): Promise<boolean>;
+  /**
+   * Settles reservations whose lease lapsed, typically because the process holding them died, by
+   * what `resolve` says became of each operation. `resolve` returns `undefined` for an operation it
+   * does not know, which leaves the reservation for another resolver.
+   */
+  recover?(
+    resolve: (
+      reservation: BudgetReservationRecord,
+    ) => BudgetReservationOutcome | undefined | Promise<BudgetReservationOutcome | undefined>,
+    options?: BudgetRecoverOptions,
+  ): Promise<BudgetRecoveryReport>;
 }
 
 /** What every operation of a client shares. Set it as `lifecycle` in the client's config. */

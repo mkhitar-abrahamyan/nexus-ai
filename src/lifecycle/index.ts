@@ -14,6 +14,7 @@ export {
 export {
   type BudgetLedgerOptions,
   type BudgetLedgerWithReport,
+  type BudgetReservationChange,
   type BudgetUsageStore,
   budgetLedger,
   MemoryBudgetUsage,
@@ -21,7 +22,12 @@ export {
 export type {
   BudgetLedger,
   BudgetPeriod,
+  BudgetRecoverOptions,
+  BudgetRecoveryReport,
   BudgetReservation,
+  BudgetReservationOutcome,
+  BudgetReservationRecord,
+  BudgetReservationStatus,
   LifecycleConfig,
   LifecycleHooks,
   LifecycleStage,

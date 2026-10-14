@@ -11,6 +11,17 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   `isAfterCursor()` is the test on its own, for a trace store of your own. Every bundled store
   honours it, and `applyQuery()` does for a store that filters in memory. A new Postgres trace store
   migration, version 3, indexes runs in query order.
+- **Budget reservations that outlive their process.** Over a store that records reservations, a
+  `budgetLedger()` holds each one as a `BudgetReservationRecord` under a lease (`leaseMs`, 10
+  minutes), and moves it with its total in one step: `reserved`, then `settled`, `released`,
+  `expired`, or `uncertain`. `recover(resolve)` settles reservations whose lease lapsed by what
+  became of each operation, a `BudgetReservationOutcome`; `settle(id, outcome)` does it for one from
+  any process; `renew()` extends a lease; and `uncertain: 'charge' | 'release'` says what an unknown
+  outcome costs. `MemoryBudgetUsage`, `MemoryTenantUsage`, `RedisTenantUsage`, and
+  `PostgresTenantUsage` all record them: Redis keeps a reservation in its total's Cluster slot, so one
+  script moves both, and Postgres does it in one statement, in the reservations table of a new
+  tenancy migration, version 2. A store of your own records them through five optional methods on
+  `BudgetUsageStore`.
 
 ### Changed
 
@@ -25,6 +36,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   that ended among such runs was read again on every pass, and `drain()` never finished. On a trace
   store of your own that does not honour `RunQuery.after`, the worker pages by offset instead, and
   its `OnlineSchedulePass` says `paging: 'offset'`.
+- A budget reservation held by an online-evaluation worker that dies no longer stays charged for the
+  period. The worker records the reservation just before it calls its evaluators, and whoever takes
+  over settles it: charged at what the scores cost if they were written, given back if the
+  evaluators never ran, and by the ledger's `uncertain` policy if they ran and wrote nothing.
+- An evaluation run again after a crash is reserved and charged. Its evaluators run again to find
+  the scores still missing, and before, only a first run drew on the budget.
 
 ### Proof
 
@@ -32,6 +49,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   runs, 4,000 of them in one millisecond, identically, and page through them by cursor without a
   repeat or a gap. Ten workers reading 1,000 a page schedule each of them exactly once on every
   store, and on a store that ignores the cursor. The previous worker never reads past the burst.
+- `tests/budget-reservations.test.ts`: on the memory, tenant memory, Redis, and Postgres stores a
+  reservation moves with its total, is settled from another process by its operation's outcome, and
+  of two processes settling it, one changes the total. An online-evaluation worker killed while
+  holding a reservation, before its evaluator, during it, or after its scores, leaves the budget at
+  what the judge billed once another worker takes over. With recovery switched off, the same test
+  finds the dead worker's estimate still charged.
 
 ## [2.8.0] - 2026-10-14
 

@@ -1,7 +1,8 @@
 import { MemoryRateLimitStore, type RateLimitStore } from '../ops/rate-limit-adapters.js';
 import type { Principal, TenantGate } from '../types/server.js';
 import { TenantLimitError } from './errors.js';
-import type { BudgetPeriod } from '../types/lifecycle.js';
+import type { BudgetPeriod, BudgetReservationRecord } from '../types/lifecycle.js';
+import { type BudgetReservationChange, MemoryReservationBook } from '../lifecycle/reservations.js';
 import { describePeriod, periodEnd, periodStart } from '../utils/periods.js';
 
 export { type TenantLimit, TenantLimitError } from './errors.js';
@@ -198,12 +199,18 @@ export function tenantLimits(options: TenantLimitsOptions): TenantLimiter {
   };
 }
 
-/** Tenant usage in process memory. The default, and enough for one replica. */
+/**
+ * Tenant usage in process memory, and the budget reservations against its totals. The default, and
+ * enough for one replica.
+ */
 export class MemoryTenantUsage implements TenantUsageStore {
   private readonly slots = new Map<string, Map<string, number>>();
   private readonly totals = new Map<string, { value: number; resetAt: number }>();
+  private readonly book: MemoryReservationBook;
 
-  constructor(private readonly now: () => number = () => Date.now()) {}
+  constructor(private readonly now: () => number = () => Date.now()) {
+    this.book = new MemoryReservationBook((key, amount, resetAt) => this.add(key, amount, resetAt), now);
+  }
 
   /** Takes a slot unless `max` are held. */
   acquire(key: string, member: string, max: number, ttlMs: number): boolean {
@@ -237,6 +244,31 @@ export class MemoryTenantUsage implements TenantUsageStore {
   total(key: string): number {
     const current = this.totals.get(key);
     return current && current.resetAt > this.now() ? current.value : 0;
+  }
+
+  /** Records a budget reservation and adds it to its total. */
+  hold(record: BudgetReservationRecord): number {
+    return this.book.hold(record);
+  }
+
+  /** Moves a budget reservation and its total together. */
+  settle(id: string, change: BudgetReservationChange): boolean {
+    return this.book.settle(id, change);
+  }
+
+  /** Extends a reserved budget reservation's lease. */
+  renew(id: string, leasedUntil: number): boolean {
+    return this.book.renew(id, leasedUntil);
+  }
+
+  /** Reserved budget reservations whose lease lapsed. */
+  lapsed(now: number, limit: number, operation?: string): BudgetReservationRecord[] {
+    return this.book.lapsed(now, limit, operation);
+  }
+
+  /** One budget reservation. */
+  reservation(id: string): BudgetReservationRecord | undefined {
+    return this.book.get(id);
   }
 
   private live(key: string): Map<string, number> {
@@ -280,6 +312,68 @@ redis.call('PEXPIREAT', KEYS[1], ARGV[2])
 return total`;
 const TOTAL = `-- nexus:total
 return redis.call('GET', KEYS[1]) or '0'`;
+
+// A reservation's record shares its total's Cluster slot, so one script moves both. An index of
+// reservations by when their lease lapses sits in a slot of its own, beside a pointer from each
+// reservation to its total; it is only ever a hint, checked against the record before it is used.
+const HOLD = `-- nexus:reservation-hold
+redis.call('HSET', KEYS[2], 'record', ARGV[1])
+redis.call('HSET', KEYS[2], 'status', 'reserved')
+redis.call('HSET', KEYS[2], 'charged', ARGV[2])
+redis.call('HSET', KEYS[2], 'resetAt', ARGV[3])
+redis.call('HSET', KEYS[2], 'leasedUntil', ARGV[5])
+redis.call('HSET', KEYS[2], 'operation', ARGV[6])
+redis.call('PEXPIREAT', KEYS[2], ARGV[4])
+local total = redis.call('INCRBYFLOAT', KEYS[1], ARGV[2])
+redis.call('PEXPIREAT', KEYS[1], ARGV[3])
+return total`;
+const SETTLE = `-- nexus:reservation-settle
+local current = redis.call('HGET', KEYS[2], 'status')
+if not current then return {0, ''} end
+local operation = redis.call('HGET', KEYS[2], 'operation') or ''
+local allowed = false
+for status in string.gmatch(ARGV[5], '[^,]+') do
+  if status == current then allowed = true end
+end
+if not allowed then return {0, operation} end
+local delta = tonumber(ARGV[2]) - tonumber(redis.call('HGET', KEYS[2], 'charged'))
+local resetAt = tonumber(redis.call('HGET', KEYS[2], 'resetAt'))
+redis.call('HSET', KEYS[2], 'status', ARGV[1])
+redis.call('HSET', KEYS[2], 'charged', ARGV[2])
+redis.call('HSET', KEYS[2], 'settledAt', ARGV[3])
+if ARGV[4] ~= '' then redis.call('HSET', KEYS[2], 'actual', ARGV[4]) end
+local keep = resetAt + 86400000
+if ARGV[1] ~= 'uncertain' and tonumber(ARGV[6]) < keep then keep = tonumber(ARGV[6]) end
+redis.call('PEXPIREAT', KEYS[2], string.format('%d', keep))
+if delta ~= 0 and resetAt > tonumber(ARGV[3]) then
+  redis.call('INCRBYFLOAT', KEYS[1], string.format('%.17g', delta))
+  redis.call('PEXPIREAT', KEYS[1], string.format('%d', resetAt))
+end
+return {1, operation}`;
+const RENEW = `-- nexus:reservation-renew
+if redis.call('HGET', KEYS[1], 'status') ~= 'reserved' then return 0 end
+redis.call('HSET', KEYS[1], 'leasedUntil', ARGV[1])
+return 1`;
+const READ = `-- nexus:reservation-read
+return redis.call('HGETALL', KEYS[1])`;
+const INDEX = `-- nexus:reservation-index
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('PEXPIREAT', KEYS[1], ARGV[4])
+for i = 2, #KEYS do redis.call('ZADD', KEYS[i], ARGV[2], ARGV[3]) end
+return 1`;
+const UNINDEX = `-- nexus:reservation-unindex
+for i = 1, #KEYS do redis.call('ZREM', KEYS[i], ARGV[1]) end
+return 1`;
+const DUE = `-- nexus:reservation-due
+return redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[2])`;
+const POINTERS = `-- nexus:reservation-pointers
+local totals = {}
+for i = 1, #KEYS do totals[i] = redis.call('GET', KEYS[i]) or '' end
+return totals`;
+/** How long a reservation is kept past its period, for a late report from its operation: a day. */
+const RESERVATION_RETENTION_MS = 86_400_000;
+/** How long a settled reservation is kept, for a late report from its operation: an hour. */
+const SETTLED_RETENTION_MS = 3_600_000;
 
 /**
  * Tenant usage in Redis, shared by every replica: active slots in sorted sets scored by when they
@@ -330,4 +424,146 @@ export class RedisTenantUsage implements TenantUsageStore {
   async total(key: string): Promise<number> {
     return Number(await this.client.eval(TOTAL, 1, this.prefix + key));
   }
+
+  /** Records a budget reservation and adds it to its total, in one script. */
+  async hold(record: BudgetReservationRecord): Promise<number> {
+    const total = this.prefix + record.storeKey;
+    // The index first: a reservation it names but that was never written is dropped when read.
+    await this.index(record, total, record.leasedUntil);
+    return Number(
+      await this.client.eval(
+        HOLD,
+        2,
+        total,
+        recordKey(total, record.id),
+        JSON.stringify(record),
+        String(record.charged),
+        String(record.resetAt),
+        String(record.resetAt + RESERVATION_RETENTION_MS),
+        String(record.leasedUntil),
+        record.operation ?? '',
+      ),
+    );
+  }
+
+  /** Moves a budget reservation and its total together, in one script, if it stands where `change.from` allows. */
+  async settle(id: string, change: BudgetReservationChange): Promise<boolean> {
+    const total = await this.totalOf(id);
+    if (!total) return false;
+    const [moved, operation] = (await this.client.eval(
+      SETTLE,
+      2,
+      total,
+      recordKey(total, id),
+      change.status,
+      String(change.charged),
+      String(change.at),
+      change.actual === undefined ? '' : String(change.actual),
+      change.from.join(','),
+      String(change.at + SETTLED_RETENTION_MS),
+    )) as [unknown, unknown];
+    if (Number(moved) !== 1) return false;
+    await this.unindex(id, String(operation ?? ''));
+    return true;
+  }
+
+  /** Extends a reserved budget reservation's lease. */
+  async renew(id: string, leasedUntil: number): Promise<boolean> {
+    const total = await this.totalOf(id);
+    if (!total) return false;
+    if (Number(await this.client.eval(RENEW, 1, recordKey(total, id), String(leasedUntil))) !== 1) return false;
+    const record = await this.read(total, id);
+    if (record) await this.index(record, total, leasedUntil);
+    return true;
+  }
+
+  /** Reserved budget reservations whose lease lapsed by `now`, soonest lapsed first. */
+  async lapsed(now: number, limit: number, operation?: string): Promise<BudgetReservationRecord[]> {
+    const due = this.registry(operation === undefined ? 'due' : `due:${encodeURIComponent(operation)}`);
+    const ids = ((await this.client.eval(DUE, 1, due, String(now), String(limit))) ?? []) as string[];
+    if (ids.length === 0) return [];
+    const totals = (await this.client.eval(
+      POINTERS,
+      ids.length,
+      ...ids.map((id) => this.registry(`id:${id}`)),
+    )) as string[];
+    const lapsed: BudgetReservationRecord[] = [];
+    for (const [index, id] of ids.entries()) {
+      const total = totals[index];
+      const record = total ? await this.read(total, id) : undefined;
+      // A hint the record no longer bears out: written before a crash, or settled since.
+      if (record?.status !== 'reserved') {
+        await this.unindex(id, record?.operation ?? operation ?? '');
+        continue;
+      }
+      if (record.leasedUntil <= now) lapsed.push(record);
+    }
+    return lapsed;
+  }
+
+  /** One budget reservation, while it is kept. */
+  async reservation(id: string): Promise<BudgetReservationRecord | undefined> {
+    const total = await this.totalOf(id);
+    return total ? this.read(total, id) : undefined;
+  }
+
+  private registry(name: string): string {
+    return `${this.prefix}{reservations}:${name}`;
+  }
+
+  private async index(record: BudgetReservationRecord, total: string, leasedUntil: number): Promise<void> {
+    const byOperation =
+      record.operation === undefined ? [] : [this.registry(`due:${encodeURIComponent(record.operation)}`)];
+    await this.client.eval(
+      INDEX,
+      2 + byOperation.length,
+      this.registry(`id:${record.id}`),
+      this.registry('due'),
+      ...byOperation,
+      total,
+      String(leasedUntil),
+      record.id,
+      String(record.resetAt + RESERVATION_RETENTION_MS),
+    );
+  }
+
+  private async unindex(id: string, operation: string): Promise<void> {
+    const byOperation = operation ? [this.registry(`due:${encodeURIComponent(operation)}`)] : [];
+    await this.client.eval(UNINDEX, 1 + byOperation.length, this.registry('due'), ...byOperation, id);
+  }
+
+  private async totalOf(id: string): Promise<string | undefined> {
+    const [total] = (await this.client.eval(POINTERS, 1, this.registry(`id:${id}`))) as string[];
+    return total || undefined;
+  }
+
+  /** A record as it was held, with what has changed since laid over it. */
+  private async read(total: string, id: string): Promise<BudgetReservationRecord | undefined> {
+    const pairs = ((await this.client.eval(READ, 1, recordKey(total, id))) ?? []) as string[];
+    const fields = new Map<string, string>();
+    for (let index = 0; index + 1 < pairs.length; index += 2)
+      fields.set(String(pairs[index]), String(pairs[index + 1]));
+    const held = fields.get('record');
+    if (!held) return undefined;
+    const record = JSON.parse(held) as BudgetReservationRecord;
+    const number = (field: string) => (fields.has(field) ? Number(fields.get(field)) : undefined);
+    return {
+      ...record,
+      status: (fields.get('status') ?? record.status) as BudgetReservationRecord['status'],
+      charged: number('charged') ?? record.charged,
+      leasedUntil: number('leasedUntil') ?? record.leasedUntil,
+      ...(fields.has('actual') ? { actual: number('actual') as number } : {}),
+      ...(fields.has('settledAt') ? { settledAt: number('settledAt') as number } : {}),
+    };
+  }
+}
+
+/**
+ * A reservation's key, in its total's Cluster slot: a key without a hash tag hashes whole, so the
+ * total wrapped in braces lands where the total does; a total with a tag already lends it.
+ */
+function recordKey(total: string, id: string): string {
+  const open = total.indexOf('{');
+  const tagged = open >= 0 && total.indexOf('}', open + 1) > open + 1;
+  return `${tagged ? total : `{${total}}`}:reservation:${id}`;
 }

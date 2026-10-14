@@ -1026,6 +1026,8 @@ limit together.
 | `period` | `month` | A `BudgetPeriod`: `hour`, `day`, `week`, `month` in UTC, or `{ windowMs }`. |
 | `key` | the tenant, then `default` | Which budget an operation draws on. Return `undefined` to leave it untracked. |
 | `store` | process memory | Where totals live, a `BudgetUsageStore`. |
+| `leaseMs` | 10 minutes | How long a recorded reservation is held without `renew()` before `recover()` may settle it. |
+| `uncertain` | `charge` | What a reservation whose operation's outcome is unknown costs: kept charged, or given back. |
 
 ```ts
 import { budgetLedger } from 'nexus-ai-pro/lifecycle';
@@ -1046,12 +1048,54 @@ estimate can be missing.
 The pieces underneath:
 
 - `BudgetUsageStore` needs two operations, `add()` and `total()`. `MemoryBudgetUsage` is the default.
-  `MemoryTenantUsage` and `RedisTenantUsage` from the server's tenancy module fit as they are, so one
-  Redis counts both tenant runs and model spend.
+  `MemoryTenantUsage`, `RedisTenantUsage`, and `PostgresTenantUsage` fit as they are, so one Redis or
+  one database counts both tenant runs and model spend.
 - `BudgetLedgerWithReport` is what `budgetLedger()` returns: the ledger, plus `spent(key)` for this
-  period's total.
-- A `BudgetReservation` is one hold: the budget's key and the amount. Write your own `BudgetLedger`
-  with `reserve()`, `reconcile()`, and `release()` when your spend lives elsewhere.
+  period's total, and the reservation methods below.
+- A `BudgetReservation` is one hold: the budget's key, the amount, and its `id` when the store
+  records it. Write your own `BudgetLedger` with `reserve()`, `reconcile()`, and `release()` when your
+  spend lives elsewhere.
+
+### Reservations that outlive their process
+
+A process that dies between reserving and reconciling used to leave its estimate charged for the rest
+of the period. Over a store that records reservations, every bundled store, each reservation is a
+`BudgetReservationRecord`, held under a lease of `leaseMs`, and its `BudgetReservationStatus` moves
+with its total in one step, so a crash never applies one without the other:
+
+| Status | Charged | Reached by |
+| --- | --- | --- |
+| `reserved` | the estimate | `reserve()` |
+| `settled` | what the operation cost | `reconcile()`, or recovery of a finished operation |
+| `released` | nothing | `release()`, or a reservation the limit refused |
+| `expired` | nothing | recovery of an operation that never started |
+| `uncertain` | the estimate, or nothing under `uncertain: 'release'` | recovery of an operation whose outcome is unknown |
+
+`recover(resolve)` reads the reservations whose lease lapsed and asks `resolve` what became of each
+operation, as a `BudgetReservationOutcome`: `finished` at a cost, `never-started`, `unknown`, or
+`running`, which renews its lease. `resolve` returns `undefined` for an operation it does not know,
+and `BudgetRecoverOptions.operation` reads only one kind; the `BudgetRecoveryReport` counts what moved
+and what was skipped. `settle(id, outcome)` does the same for one reservation from any process, such
+as the worker that took over its operation, and `renew()` extends the lease of an operation that runs
+longer than it. A late `reconcile()` from the operation itself corrects what recovery decided; a
+second reconcile changes nothing. `reservation(id)` reads one back.
+
+```ts
+const budget = budgetLedger({ limit: 500, store: new RedisTenantUsage(redis), uncertain: 'charge' });
+
+// On a schedule, in any process: settle what dead workers held, by what your records say.
+await budget.recover(async (reservation) => {
+  const job = await jobs.get(reservation.operationId);
+  if (!job) return undefined;
+  if (job.finished) return { kind: 'finished', cost: job.cost };
+  return job.startedProviderCall ? { kind: 'unknown' } : { kind: 'never-started' };
+});
+```
+
+A store of your own records reservations by implementing the five optional methods together:
+`hold()`, `settle()` with a `BudgetReservationChange`, `renew()`, `lapsed()`, and `reservation()`. A
+ledger refuses a store with only some of them; a store with none works as before, its reservations
+held in memory.
 
 The budget is separate from `costBudget`, which caps one request's estimate. Both apply when both are
 set.
@@ -4902,7 +4946,12 @@ like over one operation store, such as Redis or Postgres. Each `OnlineEvaluation
   however many workers see it, and it stops queuing while `maxQueued` (1,000) of the source's
   operations are waiting or running;
 - **scores** what it claims, `concurrency` (4) at a time, each evaluation first reserved from a
-  `budget` ledger at `estimate` and reconciled with `costOf`.
+  `budget` ledger at `estimate` and reconciled with `costOf`. Just before it calls its evaluators, it
+  records the reservation it holds. A reservation held by a worker that died is settled by whoever
+  takes over: charged at what the scores cost if they were written, given back if the evaluators
+  never ran, and kept or given back by the ledger's `uncertain` policy if they ran and wrote nothing,
+  since a judge may have billed the call. A run scored again after a crash is reserved and charged
+  too, since its evaluators run again.
 
 Every score is written to the run with a mark naming its operation. An operation run again, after
 a worker died between writing a run's scores and recording them, writes only what is missing. So
@@ -5059,8 +5108,6 @@ regression in a test, not to judging content in production; use a model judge fo
   something, not that the question is a good one: read a sample before trusting a verdict.
 - An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
   or `rephrase`.
-- A budget counts reservations as spent until they are reconciled, so a worker that dies holding one
-  leaves its estimate charged for the period.
 
 ---
 
@@ -5926,7 +5973,10 @@ Postgres applies concurrent updates of one row one at a time, checking each agai
 version, so two replicas admitting runs for one tenant at once cannot both take its last slot.
 `PostgresTenantUsageOptions` has two fields: `table` (`nexus_tenant_usage`), and `now`, a clock for
 tests. `tenantUsageMigrations()` and `tenantUsageMigration()` give the schema, as every adapter's
-migrations do.
+migrations do. Version 2 adds `<table>_reservations`, where a `budgetLedger()` over this store
+records each budget reservation: a reservation and its total move in one statement, and of two
+processes settling one reservation, the second finds it moved (see the
+[lifecycle guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/lifecycle.md#reservations-that-outlive-their-process)).
 
 ```ts
 import { PostgresTenantUsage } from 'nexus-ai-pro/postgres/tenancy';
@@ -11539,7 +11589,8 @@ total. Two are included:
 - `MemoryTenantUsage` counts in the process. It suits one replica.
 - `RedisTenantUsage` shares the counts across replicas. Each operation is one atomic script, so two
   replicas can never both take a tenant's last slot. It needs only `eval`, the
-  `RedisTenantUsageLikeClient`; `RedisTenantUsageOptions` sets the key prefix.
+  `RedisTenantUsageLikeClient`; `RedisTenantUsageOptions` sets the key prefix. A budget reservation
+  it records sits in the Cluster slot of the total it charges, so one script moves both.
 - `PostgresTenantUsage`, from `nexus-ai-pro/postgres/tenancy`, shares them through Postgres, for a
   deployment that runs Postgres and not Redis. The [Postgres guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/postgres.md#tenant-usage)
   covers it.
@@ -12108,6 +12159,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
 | `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
+| `nexus-ai-pro/postgres` | 90 KB | 26% | none |
 | `nexus-ai-pro/providers/groq` | 88 KB | 26% | none |
 | `nexus-ai-pro/providers/mistral` | 88 KB | 26% | none |
 | `nexus-ai-pro/providers/azure-openai` | 87 KB | 25% | none |
@@ -12116,13 +12168,12 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/openrouter` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
-| `nexus-ai-pro/postgres` | 85 KB | 25% | none |
 | `nexus-ai-pro/graph` | 81 KB | 24% | none |
 | `nexus-ai-pro/router` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
+| `nexus-ai-pro/evaluate/online` | 74 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
 | `nexus-ai-pro/images` | 72 KB | 21% | none |
-| `nexus-ai-pro/evaluate/online` | 71 KB | 21% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
@@ -12157,6 +12208,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 8% | none |
+| `nexus-ai-pro/server/tenancy` | 27 KB | 8% | none |
+| `nexus-ai-pro/lifecycle` | 27 KB | 8% | none |
 | `nexus-ai-pro/runtime` | 25 KB | 7% | none |
 | `nexus-ai-pro/images/assets` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
@@ -12174,11 +12227,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
 | `nexus-ai-pro/mcp` | 19 KB | 6% | none |
 | `nexus-ai-pro/connectors` | 19 KB | 6% | none |
-| `nexus-ai-pro/lifecycle` | 19 KB | 6% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
 | `nexus-ai-pro/agent/interpreter` | 17 KB | 5% | none |
-| `nexus-ai-pro/server/tenancy` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/pipeline` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
@@ -12218,6 +12269,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/migrations` | 10 KB | 3% | none |
 | `nexus-ai-pro/prompts` | 10 KB | 3% | none |
+| `nexus-ai-pro/postgres/tenancy` | 10 KB | 3% | none |
 | `nexus-ai-pro/rag/pinecone` | 10 KB | 3% | none |
 | `nexus-ai-pro/voice/openai` | 9 KB | 3% | none |
 | `nexus-ai-pro/images/moderation` | 9 KB | 3% | none |
@@ -12256,7 +12308,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/rag/rerankers` | 5 KB | 1% | none |
 | `nexus-ai-pro/pipeline` | 4 KB | 1% | none |
 | `nexus-ai-pro/prompts/redis` | 4 KB | 1% | none |
-| `nexus-ai-pro/postgres/tenancy` | 4 KB | 1% | none |
 | `nexus-ai-pro/loaders/csv` | 4 KB | 1% | none |
 | `nexus-ai-pro/loaders/git` | 4 KB | 1% | none |
 | `nexus-ai-pro/operations/webhooks` | 3 KB | 0.9% | none |

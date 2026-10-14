@@ -13,7 +13,12 @@ import { operationStats } from '../operations/store.js';
 import { OperationRunner } from '../operations/runner.js';
 import type { AnnotationQueue } from './review.js';
 import type { EvaluationContext, EvaluationScore, Evaluator } from '../types/evaluate.js';
-import type { BudgetLedger, BudgetReservation, OperationDescriptor } from '../types/lifecycle.js';
+import type {
+  BudgetLedger,
+  BudgetReservation,
+  BudgetReservationOutcome,
+  OperationDescriptor,
+} from '../types/lifecycle.js';
 import type { OperationContext, OperationStore } from '../types/operations.js';
 import { isAfterCursor, runCursor } from '../tracing/query.js';
 import type { Run, RunCursor, RunQuery, TraceStore } from '../types/tracing.js';
@@ -125,6 +130,15 @@ export interface OnlineEvaluationWorker {
   report(): OnlineEvaluationWorkerReport;
 }
 
+/**
+ * What an evaluation's heartbeat records just before it calls its evaluators: the reservation it
+ * holds. Whoever settles that reservation after a crash reads from it whether the evaluators ran.
+ */
+interface EvaluationCheckpoint {
+  reservation?: string;
+  evaluating?: boolean;
+}
+
 /** What an evaluation operation records as its result. */
 interface OnlineResult {
   status: 'scored' | 'already-scored' | 'missing';
@@ -167,6 +181,32 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
     ...(options.tenantId !== undefined ? { tenantId: options.tenantId } : {}),
   });
 
+  // What became of an evaluation that held a reservation: scored, so charged at what the scores
+  // cost; never at its evaluators, so given back; or at them with nothing written, which no one knows.
+  const outcomeOf = (evaluating: boolean, run: Run | undefined, operationId: string): BudgetReservationOutcome => {
+    const scores = run ? scoresWritten(run, options.source, operationId) : [];
+    if (scores.length > 0) {
+      return { kind: 'finished', cost: (run && options.costOf?.(scores, run)) ?? options.estimate ?? 0 };
+    }
+    return evaluating ? { kind: 'unknown' } : { kind: 'never-started' };
+  };
+  // A reservation whose lease lapsed: its evaluation is read back to see how far it got.
+  const resolveReservation = async (reservation: {
+    id: string;
+    operationId: string;
+  }): Promise<BudgetReservationOutcome | undefined> => {
+    const record = await options.operations.read(reservation.operationId);
+    if (record?.kind !== kind) return undefined;
+    const checkpoint = (record.heartbeatDetails ?? {}) as EvaluationCheckpoint;
+    const mine = checkpoint.reservation === reservation.id;
+    const live =
+      record.status === 'running' && record.lease !== undefined && Date.parse(record.lease.expiresAt) > now().getTime();
+    // Still at its evaluators, on a worker that holds its claim: only slower than the lease.
+    if (live && mine) return { kind: 'running' };
+    const run = await options.traces.get(String(record.metadata?.runId ?? ''));
+    return mine ? outcomeOf(checkpoint.evaluating === true, run, reservation.operationId) : { kind: 'never-started' };
+  };
+
   const inSample = (run: Run) => rate >= 1 || hash(`${options.source}:${run.id}`) < rate;
   const operationId = (runId: string) => `${kind}:${runId}`;
   const busy = async () => {
@@ -183,6 +223,15 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
     }
     const runId = String(record.metadata?.runId ?? '');
     const run = await options.traces.get(runId);
+    // An earlier attempt that died holding a reservation: settled by how far it got, before this one
+    // reserves its own.
+    const previous = context.previousHeartbeat as EvaluationCheckpoint | undefined;
+    if (previous?.reservation && options.budget?.settle) {
+      await options.budget.settle(
+        previous.reservation,
+        outcomeOf(previous.evaluating === true, run, context.operationId),
+      );
+    }
     if (!run) {
       tally.missing += 1;
       return { status: 'missing', runId };
@@ -197,8 +246,10 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
         )
         .map((entry) => entry.key),
     );
+    // Every run of the evaluators is reserved, a run after a crash too: it calls them again, and a
+    // judge bills each call.
     let reservation: BudgetReservation | undefined;
-    if (options.budget && written.size === 0) {
+    if (options.budget) {
       try {
         reservation = await options.budget.reserve(descriptor(context.operationId), options.estimate ?? 0);
       } catch (error) {
@@ -209,9 +260,17 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
       }
     }
     try {
+      // Recorded before the evaluators run, so a crash during them is known to have reached them.
+      if (reservation?.id) {
+        await context.heartbeat({ reservation: reservation.id, evaluating: true } satisfies EvaluationCheckpoint);
+      }
       const scores = await scoreRun(run, options.evaluators);
       const missing = scores.filter((score) => !written.has(score.key));
       if (missing.length === 0 && written.size > 0) {
+        if (reservation) {
+          await options.budget?.reconcile(reservation, options.costOf?.(scores, run) ?? options.estimate ?? 0);
+          reservation = undefined;
+        }
         tally.alreadyScored += 1;
         return { status: 'already-scored', runId };
       }
@@ -333,6 +392,13 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
 
     async work() {
       if (budgetSpent) return 0;
+      // Reservations held by evaluations whose worker died, settled by how far each got.
+      if (options.budget?.recover) {
+        await options.budget.recover(resolveReservation, {
+          operation: `online-evaluation.${options.source}`,
+          limit: concurrency * 4,
+        });
+      }
       const handles = [
         ...(await runner.recover(evaluate, concurrency)),
         ...(await runner.claimQueued(evaluate, concurrency, { kindPrefix: kind })),
@@ -401,6 +467,17 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
   let offset = 0;
   let byOffset = false;
   return worker;
+}
+
+/** The scores one evaluation operation wrote to a run, from the marks it left on them. */
+function scoresWritten(run: Run, source: string, operationId: string): EvaluationScore[] {
+  return (run.feedback ?? [])
+    .filter((entry) => entry.source === source && (entry.value as { evaluation?: string })?.evaluation === operationId)
+    .map((entry) => ({
+      key: entry.key,
+      score: entry.score ?? 0,
+      ...(entry.comment ? { comment: entry.comment } : {}),
+    }));
 }
 
 /** A run's scores from every evaluator, as `evaluateOnline()` gives them. */

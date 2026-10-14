@@ -432,7 +432,12 @@ like over one operation store, such as Redis or Postgres. Each `OnlineEvaluation
   however many workers see it, and it stops queuing while `maxQueued` (1,000) of the source's
   operations are waiting or running;
 - **scores** what it claims, `concurrency` (4) at a time, each evaluation first reserved from a
-  `budget` ledger at `estimate` and reconciled with `costOf`.
+  `budget` ledger at `estimate` and reconciled with `costOf`. Just before it calls its evaluators, it
+  records the reservation it holds. A reservation held by a worker that died is settled by whoever
+  takes over: charged at what the scores cost if they were written, given back if the evaluators
+  never ran, and kept or given back by the ledger's `uncertain` policy if they ran and wrote nothing,
+  since a judge may have billed the call. A run scored again after a crash is reserved and charged
+  too, since its evaluators run again.
 
 Every score is written to the run with a mark naming its operation. An operation run again, after
 a worker died between writing a run's scores and recording them, writes only what is missing. So
@@ -589,8 +594,6 @@ regression in a test, not to judging content in production; use a model judge fo
   something, not that the question is a good one: read a sample before trusting a verdict.
 - An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
   or `rephrase`.
-- A budget counts reservations as spent until they are reconciled, so a worker that dies holding one
-  leaves its estimate charged for the period.
 
 <!-- reference:start -->
 ## Reference

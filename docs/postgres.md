@@ -228,7 +228,10 @@ Postgres applies concurrent updates of one row one at a time, checking each agai
 version, so two replicas admitting runs for one tenant at once cannot both take its last slot.
 `PostgresTenantUsageOptions` has two fields: `table` (`nexus_tenant_usage`), and `now`, a clock for
 tests. `tenantUsageMigrations()` and `tenantUsageMigration()` give the schema, as every adapter's
-migrations do.
+migrations do. Version 2 adds `<table>_reservations`, where a `budgetLedger()` over this store
+records each budget reservation: a reservation and its total move in one statement, and of two
+processes settling one reservation, the second finds it moved (see the
+[lifecycle guide](./lifecycle.md#reservations-that-outlive-their-process)).
 
 ```ts
 import { PostgresTenantUsage } from 'nexus-ai-pro/postgres/tenancy';

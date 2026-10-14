@@ -99,6 +99,8 @@ limit together.
 | `period` | `month` | A `BudgetPeriod`: `hour`, `day`, `week`, `month` in UTC, or `{ windowMs }`. |
 | `key` | the tenant, then `default` | Which budget an operation draws on. Return `undefined` to leave it untracked. |
 | `store` | process memory | Where totals live, a `BudgetUsageStore`. |
+| `leaseMs` | 10 minutes | How long a recorded reservation is held without `renew()` before `recover()` may settle it. |
+| `uncertain` | `charge` | What a reservation whose operation's outcome is unknown costs: kept charged, or given back. |
 
 ```ts
 import { budgetLedger } from 'nexus-ai-pro/lifecycle';
@@ -119,12 +121,54 @@ estimate can be missing.
 The pieces underneath:
 
 - `BudgetUsageStore` needs two operations, `add()` and `total()`. `MemoryBudgetUsage` is the default.
-  `MemoryTenantUsage` and `RedisTenantUsage` from the server's tenancy module fit as they are, so one
-  Redis counts both tenant runs and model spend.
+  `MemoryTenantUsage`, `RedisTenantUsage`, and `PostgresTenantUsage` fit as they are, so one Redis or
+  one database counts both tenant runs and model spend.
 - `BudgetLedgerWithReport` is what `budgetLedger()` returns: the ledger, plus `spent(key)` for this
-  period's total.
-- A `BudgetReservation` is one hold: the budget's key and the amount. Write your own `BudgetLedger`
-  with `reserve()`, `reconcile()`, and `release()` when your spend lives elsewhere.
+  period's total, and the reservation methods below.
+- A `BudgetReservation` is one hold: the budget's key, the amount, and its `id` when the store
+  records it. Write your own `BudgetLedger` with `reserve()`, `reconcile()`, and `release()` when your
+  spend lives elsewhere.
+
+### Reservations that outlive their process
+
+A process that dies between reserving and reconciling used to leave its estimate charged for the rest
+of the period. Over a store that records reservations, every bundled store, each reservation is a
+`BudgetReservationRecord`, held under a lease of `leaseMs`, and its `BudgetReservationStatus` moves
+with its total in one step, so a crash never applies one without the other:
+
+| Status | Charged | Reached by |
+| --- | --- | --- |
+| `reserved` | the estimate | `reserve()` |
+| `settled` | what the operation cost | `reconcile()`, or recovery of a finished operation |
+| `released` | nothing | `release()`, or a reservation the limit refused |
+| `expired` | nothing | recovery of an operation that never started |
+| `uncertain` | the estimate, or nothing under `uncertain: 'release'` | recovery of an operation whose outcome is unknown |
+
+`recover(resolve)` reads the reservations whose lease lapsed and asks `resolve` what became of each
+operation, as a `BudgetReservationOutcome`: `finished` at a cost, `never-started`, `unknown`, or
+`running`, which renews its lease. `resolve` returns `undefined` for an operation it does not know,
+and `BudgetRecoverOptions.operation` reads only one kind; the `BudgetRecoveryReport` counts what moved
+and what was skipped. `settle(id, outcome)` does the same for one reservation from any process, such
+as the worker that took over its operation, and `renew()` extends the lease of an operation that runs
+longer than it. A late `reconcile()` from the operation itself corrects what recovery decided; a
+second reconcile changes nothing. `reservation(id)` reads one back.
+
+```ts
+const budget = budgetLedger({ limit: 500, store: new RedisTenantUsage(redis), uncertain: 'charge' });
+
+// On a schedule, in any process: settle what dead workers held, by what your records say.
+await budget.recover(async (reservation) => {
+  const job = await jobs.get(reservation.operationId);
+  if (!job) return undefined;
+  if (job.finished) return { kind: 'finished', cost: job.cost };
+  return job.startedProviderCall ? { kind: 'unknown' } : { kind: 'never-started' };
+});
+```
+
+A store of your own records reservations by implementing the five optional methods together:
+`hold()`, `settle()` with a `BudgetReservationChange`, `renew()`, `lapsed()`, and `reservation()`. A
+ledger refuses a store with only some of them; a store with none works as before, its reservations
+held in memory.
 
 The budget is separate from `costBudget`, which caps one request's estimate. Both apply when both are
 set.
@@ -241,15 +285,21 @@ specific entry point that provides it.
 | `budgetLedger` | function | A spend budget shared by every family of a client. |
 | `BudgetLedger` | interface | Spend shared by every family. |
 | `BudgetLedgerOptions` | interface | Options for `budgetLedger()`. |
-| `BudgetLedgerWithReport` | interface | A ledger that can also say what a budget has spent this period. |
+| `BudgetLedgerWithReport` | interface | A ledger that can also say what a budget has spent this period, and settle what a dead process held. |
+| `BudgetRecoverOptions` | interface | How `recover()` reads lapsed reservations. |
+| `BudgetRecoveryReport` | interface | What one recovery pass did with reservations whose lease had lapsed. |
 | `BudgetReservation` | interface | Spend held for an operation between `reserveBudget` and `reconcileCost`. |
+| `BudgetReservationChange` | interface | A change to one recorded reservation: where it moves, what it charges once there, and the statuses it may move from. |
+| `BudgetReservationOutcome` | type | What became of a reservation's operation, as whoever settles it knows: it finished at a cost, it never started, its outcome is unknown, or it is still running, which renews the lease. |
+| `BudgetReservationRecord` | interface | A reservation as a ledger's store records it. |
+| `BudgetReservationStatus` | type | Where a recorded reservation stands. |
 | `BudgetUsageStore` | interface | Where a ledger keeps its totals: a sum per key that resets at a given time. |
 | `LIFECYCLE_STAGES` | constant | Every lifecycle stage, in the order an operation passes through them. |
 | `LifecycleConfig` | interface | What every operation of a client shares. |
 | `LifecycleHooks` | interface | Code that runs around every operation of every family. |
 | `LifecycleRuntime` | interface | What a lifecycle reports into. |
 | `LifecycleStage` | type | The stages every operation passes through, in this order. |
-| `MemoryBudgetUsage` | class | Budget totals in process memory. |
+| `MemoryBudgetUsage` | class | Budget totals, and the reservations against them, in process memory. |
 | `OperationDeniedError` | class | Raised when `lifecycle.authorize` refuses an operation, before any provider is called. |
 | `OperationDescriptor` | interface | One operation, as authorization, budgets, hooks, audit, and metrics see it. |
 | `OperationFamily` | type | The families an operation can belong to. |

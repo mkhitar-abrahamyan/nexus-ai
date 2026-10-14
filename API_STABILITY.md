@@ -49,11 +49,23 @@ New and stable:
 - `RunQuery.after` with `RunCursor`, and `runCursor()` and `isAfterCursor()` on
   `nexus-ai-pro/tracing`. A store of your own that does not honour `after` still works with the
   online-evaluation worker, which falls back to offsets;
-- `OnlineSchedulePass.paging`.
+- `OnlineSchedulePass.paging`;
+- on `nexus-ai-pro/lifecycle`: `BudgetReservation.id`; `BudgetReservationStatus`,
+  `BudgetReservationRecord`, `BudgetReservationOutcome`, `BudgetRecoveryReport`, and
+  `BudgetRecoverOptions`; `BudgetLedger.renew()`, `settle()`, and `recover()`, all optional;
+  `BudgetLedgerOptions.leaseMs` and `uncertain`; `BudgetLedgerWithReport.reservation()`; and the five
+  optional reservation methods of `BudgetUsageStore` with `BudgetReservationChange`. The statuses,
+  and which outcome moves a reservation from which status, are part of the promise;
+- `hold()`, `settle()`, `renew()`, `lapsed()`, and `reservation()` on `MemoryTenantUsage`,
+  `RedisTenantUsage`, and `PostgresTenantUsage`, and the tenancy migration version 2 with its
+  reservations table.
 
 Changed, each to keep a promise the surface already made:
 - `TraceStore.query()` orders runs that share a start time by id, from last to first, as code units,
   so a page means the same on every store. Before, that order was not defined.
+- `MemoryBudgetUsage`, the ledger's default store, records reservations, so `reserve()` returns one
+  with an `id`. An online-evaluation worker reserves every run of its evaluators, a run after a crash
+  included, where before it reserved only a first.
 
 ## 2.8 stage (2.8.0)
 

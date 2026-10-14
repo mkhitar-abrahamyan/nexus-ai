@@ -429,7 +429,8 @@ total. Two are included:
 - `MemoryTenantUsage` counts in the process. It suits one replica.
 - `RedisTenantUsage` shares the counts across replicas. Each operation is one atomic script, so two
   replicas can never both take a tenant's last slot. It needs only `eval`, the
-  `RedisTenantUsageLikeClient`; `RedisTenantUsageOptions` sets the key prefix.
+  `RedisTenantUsageLikeClient`; `RedisTenantUsageOptions` sets the key prefix. A budget reservation
+  it records sits in the Cluster slot of the total it charges, so one script moves both.
 - `PostgresTenantUsage`, from `nexus-ai-pro/postgres/tenancy`, shares them through Postgres, for a
   deployment that runs Postgres and not Redis. The [Postgres guide](./postgres.md#tenant-usage)
   covers it.
