@@ -4,12 +4,12 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.8.0**. 176 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.9.0**. 180 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 completion batch providers and 2 embedding batch tiers, 3 image
-providers plus a mock, 2 media providers plus a mock, and 98 completion registry models plus 60
-aliases, verified against each provider's documentation on 2026-10-02. 1,109 unit tests and 30 studio
-tests pass; coverage sits at **95.8% lines / 82.3% branches / 91.8% functions** against gates of
-82/67/73. CI verifies lint, format, build, tests, coverage, registry drift, `llms.txt` drift,
+providers plus a mock, 2 media providers plus a mock, 2 video providers plus a mock, and 98
+completion registry models plus 60 aliases, verified against each provider's documentation on
+2026-10-02. 1,135 unit tests and 30 studio tests pass; coverage sits at **95.8% lines / 82.1%
+branches / 92.0% functions** against gates of 82/67/73. CI verifies lint, format, build, tests, coverage, registry drift, `llms.txt` drift,
 per-subpath size, documentation and guide coverage, the root import, a graph benchmark with a
 durability budget, runtime and memory-retention budgets, load and soak budgets for every graduated
 surface, a gigabyte through each streaming asset store with flat memory, crash injection on five
@@ -19,15 +19,19 @@ store, ten replicas changing one deployment at once on every state store, sandbo
 reference sandbox and on a real container runtime, a permission policy in a real tool loop,
 retrieval, tool-selection, and media-grounding experiments, 500 deferred tools on three providers, a
 crash halfway through a 100,000-document ingestion and between submitting and collecting a
-100,000-chunk embedding batch, crashes between a deep agent and its background helper, ten
-online-evaluation workers through a crash, an adversarial dataset against an unguarded and a guarded
+100,000-chunk embedding batch, crashes between a deep agent and its background helper, a deep agent
+resumed past its helper limit, a media index crashed at each of its writes, a video generation
+collected by another worker after its process dies, ten online-evaluation workers through a crash and
+through 4,000 runs started in one millisecond on every trace store, a worker killed holding a budget
+reservation at each point of its call on every usage store, an adversarial dataset against an unguarded and a guarded
 agent, the agent protocols driven from the other side of the wire and against the published 2.5.0 in
 both directions, a tool's progress on every stream, every studio route called by every role and with
 hostile input, the imports of every entry point for anything Node-only, the portable kernel on Node,
 Deno, Bun, an edge runtime, and headless Chromium, mock conformance, packed-package smoke, API
 contract, consumer type resolution, and clean install on Node 22 and 24. Every night, each agent
 protocol is driven by the reference client of its own project. Every week, the vector stores run
-their contract and graduation checklist against the real servers.
+their contract and graduation checklist against the real servers, and media understanding, the
+Gemini embedding batch tier, and video run their conformance suites against the live services.
 
 ---
 
@@ -80,25 +84,21 @@ it passes its conformance suite against the live service every week.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release: 2.9, or
+Each gap is written down in a guide's limitations today, and each is closed by one release: 2.10, or
 the theme after it that owns it.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| An online-evaluation worker reads one page of the runs that started in the same millisecond | Evaluation guide | 2.9 |
-| A budget reservation held by a worker that dies stays charged for the period | Evaluation guide | 2.9 |
-| A deep agent's count of the helpers it created is kept by its process | Deep agents guide | 2.9 |
-| A media index does not remember which media it holds | Media guide | 2.9 |
-| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.9 |
-| Images have not recorded live conformance on all three backends | API stability | 2.9 |
-| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.9 |
-| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.9 |
-| Video is not generated | Images guide | 2.9 |
-| An A2A task working when its process stops is never taken over | Protocols guide | Durable conversations |
-| An ACP turn in progress is lost with its process | Protocols guide | Durable conversations |
-| Realtime reports through its own hooks, not the client's lifecycle | Realtime guide | Durable conversations |
-| A realtime session dies with its process | Realtime guide | Durable conversations |
-| OpenAI is the only realtime provider | Realtime guide | Durable conversations |
+| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.10 |
+| Images have not recorded live conformance on all three backends | API stability | 2.10 |
+| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.10 |
+| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.10 |
+| Video generation has not passed its conformance suite against Veo and Runway | Video guide | 2.10 |
+| An A2A task working when its process stops is never taken over | Protocols guide | 2.10 |
+| An ACP turn in progress is lost with its process | Protocols guide | 2.10 |
+| Realtime reports through its own hooks, not the client's lifecycle | Realtime guide | 2.10 |
+| A realtime session dies with its process | Realtime guide | 2.10 |
+| OpenAI is the only realtime provider | Realtime guide | 2.10 |
 | An agent's files live in the sandbox that runs its code | Deep agents guide | Workspaces and telephony |
 | Twilio is the only telephony provider, SMS is not sent, and calls are neither recorded, conferenced, nor transferred | Telephony guide | Workspaces and telephony |
 | A batch of spans the collector does not accept is dropped | Tracing guide | Observability that loses nothing |
@@ -106,65 +106,36 @@ the theme after it that owns it.
 
 ---
 
-## 2.9.0: video, and everything shipped, proven
+## 2.10.0: durable conversations, and a second realtime provider
 
-One new family, video generation, built on the durability every other family already has; the rest
-of the release proves the surfaces 2.x has shipped, and closes the places where one of them can count
-wrong after a crash or under load.
+**Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
+understanding, and video graduate when the scheduled live workflow passes against each, published
+with their checklists. Every check runs in that workflow now; what stands in the way is the
+repository's live credentials, and for video, the variable that lets it spend seconds of video.
 
-**Video generation.** Video through a provider's asynchronous job: a prompt, a first or last frame,
-or reference images, on Google Veo through the Gemini API or Vertex AI, and on Runway, with a mock
-and a conformance suite. A generation is a durable operation that records its job the moment it
-exists and each video as it is stored, so a worker that dies is replaced by one that collects that
-job and stores nothing twice; the video streams into an asset store and is priced per second. Proof:
-a job submitted, its process killed, and the video collected by another worker, streamed into an
-asset store, and priced, with one submission to the provider.
+**Durable conversations.** One lease-and-takeover model for every conversation that runs on a
+worker. An A2A task records its thread, run, owner, and lease, and when the lease lapses another
+replica continues its run; an ACP turn does the same, from its last committed step. Realtime runs
+through the client's lifecycle: tenant, principal, trace, budget, rate limits, provider health, and
+audit. A realtime session keeps a durable conversation record (its configuration, turns, tool calls
+and results, usage, and last committed turn), and a reconnect wraps a new transport around it; the
+socket and the audio in flight are not recovered. A remote helper's ownership is leased the same
+way. Proof: a crash-injection suite that kills the worker under each conversation and shows another
+take it over.
 
-**Live graduation.** The Pinecone store, images on all three backends, the Gemini embedding batch
-tier, and media understanding against a vision model and the OCR service graduate when the scheduled
-live workflow passes against each, published with their checklists. Each check is built and passes
-against stand-ins; what stands in the way is the repository's live credentials.
-
-**Online evaluation that counts every run.**
-- Run pagination by a compound cursor, start time then id, part of the trace store's pagination
-  contract so every backend orders and resumes identically: a page ends after a run, never after a
-  timestamp. Proof: 4,000 runs started in one millisecond, read 1,000 a page by ten workers, are
-  each scheduled exactly once, on every trace store.
-- Budget reservations that outlive their worker. A reservation is reserved, settled, uncertain, or
-  expired, and carries its operation and a lease. When a lease lapses, the reservation is settled
-  from the operation's recorded cost if it finished, released if it never started, and otherwise
-  marked uncertain, where a policy decides whether it stays charged. Proof: a worker killed holding a
-  reservation, at each of those three points, leaves the budget where the provider's bill would.
-
-**Durable counts in shipped features.**
-- A deep agent's created helpers are recorded with its thread, not in its process. Proof: an agent
-  that created its last allowed helper, killed and resumed elsewhere, cannot create another.
-- A media index keeps a manifest: each medium's content hash, source, asset, pages, chunk ids,
-  embedding model, and reader, so a medium is upserted, reindexed, deleted, and described by its id.
-  Proof: indexing an unchanged medium writes nothing, a changed one replaces exactly its chunks, and a
-  deleted one leaves none, crashed halfway through each.
+**A second realtime provider.** Gemini Live behind the same session, tools, and conversation record;
+video frames into a session; SIP calls answered by a realtime agent; browser automation of a WebRTC
+session; and a published method and budget for turn latency and session load. Proof: one agent
+definition passing the realtime conformance suite on both providers.
 
 ---
 
-## After 2.9
+## After 2.10
 
-In the order they are planned, each a release's theme with its proof; none has a version yet. Each
-closes a group of gaps and delivers something new beside it.
+In the order they are planned, each a release's theme with its proof; neither has a version yet.
+Each closes a group of gaps and delivers something new beside it.
 
-**1. Durable conversations, and a second realtime provider.** One lease-and-takeover model for every
-conversation that runs on a worker. An A2A task records its thread, run, owner, and lease, and when
-the lease lapses another replica continues its run; an ACP turn does the same, from its last committed
-step. Realtime runs through the client's lifecycle: tenant, principal, trace, budget, rate limits,
-provider health, and audit. A realtime session keeps a durable conversation record (its
-configuration, turns, tool calls and results, usage, and last committed turn), and a reconnect wraps
-a new transport around it; the socket and the audio in flight are not recovered. A remote helper's
-ownership is leased the same way. New beside it: Gemini Live behind the same session, tools, and
-conversation record; video frames into a session; SIP calls answered by a realtime agent; browser
-automation of a WebRTC session; and a published method and budget for turn latency and session load.
-Proof: a crash-injection suite that kills the worker under each conversation and shows another take
-it over, and one agent definition passing the realtime conformance suite on both providers.
-
-**2. Workspaces, and telephony in full.** Where an agent's files live, separate from where untrusted
+**1. Workspaces, and telephony in full.** Where an agent's files live, separate from where untrusted
 code runs: a `Workspace` contract (read, write, list, and optionally glob, grep, and delete) over
 memory, the filesystem, the store, a sandbox, and a composite that routes paths among them. A sandbox
 is a workspace that can also execute, and says how it is isolated; a deep agent takes each on its
@@ -173,7 +144,7 @@ own. New beside it: a second telephony provider on its own call-control protocol
 retention policy; and conference and transfer. Proof: one deep agent run over each workspace, and one
 phone agent on both providers whose recording expires on schedule from every store.
 
-**3. Observability that loses nothing, and media you can evaluate.** An exporter wrapper that spools
+**2. Observability that loses nothing, and media you can evaluate.** An exporter wrapper that spools
 to the operation store a batch the collector does not accept, retries it, and dead-letters what
 cannot be sent, under a bound, reporting what it exported, retried, spooled, and dropped, and the age
 of the oldest pending batch. Deployment evaluation reads a run's trace (its input, tool calls,
@@ -200,6 +171,7 @@ Not yet placed, roughly in order of what applications ask for:
    production database.
 7. A2A over its other bindings, and a webhook that receives each piece of streamed text.
 8. ACP's editor MCP servers over SSE, with their tools' capabilities declared.
+9. Video extension and video as an input, and Gemini Omni Flash on Google's own Interactions API.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:

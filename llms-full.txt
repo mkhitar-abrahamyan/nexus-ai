@@ -300,12 +300,20 @@ Shipped so far:
   Chroma stores out of experimental after their checklist ran against the real servers; a shared
   embedding cache; images, audio, and documents as embedding input; a half-price embedding batch tier
   that ingestion survives a crash through; streaming asset stores; registry data you supply and
-  refresh; and reading, describing, and searching media, with answers given the media themselves.
+  refresh; and reading, describing, and searching media, with answers given the media themselves;
+- 2.9 video, and everything shipped, proven: videos from a prompt or a first frame on Google Veo and
+  Runway, as durable jobs another worker collects after a crash, streamed into an asset store and
+  priced per second; online evaluation that reads every run however many share a millisecond, and
+  budget reservations a dead worker leaves settled by what its call did; a deep agent's helper limit
+  across processes; a media index that remembers what it holds; and the experimental families run
+  against their live services every week.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, Pinecone, images, the Gemini embedding batch tier, and media understanding graduate once the
-live workflow passes against each. The
+Next, 2.10 makes every conversation that runs on a worker durable, A2A tasks, ACP turns, and
+realtime sessions, and adds Gemini Live as a second realtime provider; Pinecone, images, the Gemini
+embedding batch tier, media understanding, and video graduate once the live workflow passes against
+each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order
 applications ask for it.
 
