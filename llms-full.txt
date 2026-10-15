@@ -5910,9 +5910,12 @@ What each version adds:
 | | 3 | indexes queued work by tenant |
 | `traces:nexus_runs` | 1 | the 2.0 table |
 | | 2 | indexes runs by `metadata.tenantId`, which a tenant's trace queries read |
+| | 3 | indexes runs in query order, start time then id, which a page resumed by cursor seeks to |
 | `circuits:nexus_circuits` | 1 | the 2.0 table |
 | | 2 | the failure window workers count together, and its streak |
 | `rollups:nexus_rollups` | 1 | the rollups table |
+| `tenancy:nexus_tenant_usage` | 1 | the usage table |
+| | 2 | the budget reservations table beside it, `nexus_tenant_usage_reservations` |
 | `store`, `evaluation`, `prompts`, `vectors` | 1 | the 2.0 tables |
 
 **Schema changes expand, then contract.** A column or index is added in one minor release, written
