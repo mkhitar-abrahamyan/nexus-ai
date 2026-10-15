@@ -6,6 +6,10 @@
  * its checkpoints to the deep agent's checkpointer. A crash leaves the helper's finished steps behind
  * it: collecting the task in a new process carries the helper on from its last checkpoint, and a call
  * the agent repeats after the crash finds the same thread instead of starting the helper again.
+ *
+ * The helpers an agent creates are recorded on a thread of their own beside its own, before the call
+ * that creates one returns, so an agent resumed in another process counts them against its `max` and
+ * delegates to them again by name.
  */
 import {
   type AgentGraph,
@@ -83,6 +87,17 @@ interface LiveTask {
 }
 
 const MARK = 'deepAgentHelper';
+/** Where a thread's created helpers are recorded: in the metadata of a checkpoint on a thread of their own. */
+const CREATED = 'deepAgentCreatedHelpers';
+
+/** A created helper as its record keeps it. */
+interface CreatedRecord {
+  name: string;
+  instructions: string;
+  tools?: readonly string[];
+  model?: string;
+  maxIterations: number;
+}
 
 /** `delegate` and `collect_helper`, sharing the helpers they run. */
 export function helperTools(setup: HelperSetup): ToolDefinition[] {
@@ -90,8 +105,53 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
   const created = new Map<string, Map<string, HelperSpec>>();
   const graphs = new Map<string, AgentGraph>();
   const live = new Map<string, LiveTask>();
+  // Each thread's record is read once per process, before its first created helper is looked up.
+  const recorded = new Map<string, Promise<void>>();
+  const createdThread = (thread: string) => `${thread || 'thread'}/helpers-created`;
 
-  const spec = (name: string, instructions: string | undefined, thread: string): HelperSpec => {
+  const loadCreated = (thread: string): Promise<void> => {
+    const checkpointer = setup.checkpointer;
+    if (!checkpointer || !setup.create) return Promise.resolve();
+    let loading = recorded.get(thread);
+    if (!loading) {
+      loading = (async () => {
+        const stored = await checkpointer.get(createdThread(thread));
+        const records = (stored?.metadata?.[CREATED] ?? []) as CreatedRecord[];
+        const mine = created.get(thread) ?? new Map<string, HelperSpec>();
+        for (const record of records) {
+          if (!mine.has(record.name)) mine.set(record.name, { ...record, created: true });
+        }
+        created.set(thread, mine);
+      })();
+      // A failed read is tried again on the next lookup rather than remembered.
+      loading.catch(() => recorded.delete(thread));
+      recorded.set(thread, loading);
+    }
+    return loading;
+  };
+
+  // Written before the call that created the helper returns: from then on, a resumed agent counts it.
+  const recordCreated = async (thread: string, mine: Map<string, HelperSpec>): Promise<void> => {
+    const checkpointer = setup.checkpointer;
+    if (!checkpointer) return;
+    const threadId = createdThread(thread);
+    const records: CreatedRecord[] = [...mine.values()].map(({ created: _created, ...record }) => record);
+    await checkpointer.put({
+      version: 2,
+      id: `${threadId}:${records.length}`,
+      threadId,
+      step: records.length,
+      state: {},
+      next: [],
+      tasks: [],
+      status: 'completed',
+      interrupts: [],
+      createdAt: new Date().toISOString(),
+      metadata: { [CREATED]: records },
+    });
+  };
+
+  const spec = async (name: string, instructions: string | undefined, thread: string): Promise<HelperSpec> => {
     const helper = declared.get(name);
     if (helper) {
       return {
@@ -103,6 +163,7 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
         created: false,
       };
     }
+    await loadCreated(thread);
     const mine = created.get(thread) ?? new Map<string, HelperSpec>();
     const existing = mine.get(name);
     if (existing) return existing;
@@ -124,6 +185,13 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
     };
     mine.set(name, made);
     created.set(thread, mine);
+    try {
+      await recordCreated(thread, mine);
+    } catch (error) {
+      // Not recorded means not created: a resumed agent could not count it, so it may not be used.
+      mine.delete(name);
+      throw error;
+    }
     return made;
   };
 
@@ -255,7 +323,7 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
     },
     capabilities: [],
     execute: async (args, context = {}) => {
-      const helper = spec(
+      const helper = await spec(
         String(args.agent ?? ''),
         typeof args.instructions === 'string' ? args.instructions : undefined,
         context.threadId ?? '',
@@ -315,8 +383,8 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
         const mark = stored.metadata?.[MARK] as { name?: string; created?: boolean; instructions?: string } | undefined;
         const name = mark?.name ?? task.slice(0, task.lastIndexOf('@'));
         const helper = mark?.created
-          ? spec(name, mark.instructions, context.threadId ?? '')
-          : spec(name, undefined, context.threadId ?? '');
+          ? await spec(name, mark.instructions, context.threadId ?? '')
+          : await spec(name, undefined, context.threadId ?? '');
         await start(helper, undefined, threadId, context);
       }
       const entry = live.get(threadId) as LiveTask;

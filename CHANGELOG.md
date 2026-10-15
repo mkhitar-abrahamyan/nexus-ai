@@ -42,6 +42,11 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   evaluators never ran, and by the ledger's `uncertain` policy if they ran and wrote nothing.
 - An evaluation run again after a crash is reserved and charged. Its evaluators run again to find
   the scores still missing, and before, only a first run drew on the budget.
+- A deep agent resumed after a crash counts the helpers it created before. With a checkpointer, each
+  created helper is recorded, with its instructions, on `<thread>/helpers-created` before the call
+  that created it returns, so the resumed agent cannot pass `createHelpers.max` and delegates to them
+  again by name. Before, the count was kept by the process, and a resumed agent could create `max`
+  more and no longer found the ones it had made.
 
 ### Proof
 
@@ -55,6 +60,9 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   holding a reservation, before its evaluator, during it, or after its scores, leaves the budget at
   what the judge billed once another worker takes over. With recovery switched off, the same test
   finds the dead worker's estimate still charged.
+- `tests/deep-agent-helpers.test.ts`: an agent that created its last allowed helper, killed and
+  continued in another process, is refused a second and delegates to the first again by name. Without
+  the record read back, the second is created.
 
 ## [2.8.0] - 2026-10-14
 

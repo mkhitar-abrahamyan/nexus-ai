@@ -322,3 +322,84 @@ test('a crash before the agent saves the call that started its helper finds the 
   assert.equal(counters.helperStarts, 1);
   assert.equal(counters.notes, 1);
 });
+
+test('proof: an agent that created its last helper, killed and resumed elsewhere, cannot create another', async () => {
+  const store = new MemoryGraphCheckpointer();
+  const systems: string[] = [];
+  let reachedSecond = () => {};
+  const second = new Promise<void>((resolve) => {
+    reachedSecond = resolve;
+  });
+  // Creates a summarizer, then asks for a translator, then delegates to the summarizer again by name.
+  const model = (pauseAtSecond: boolean) => ({
+    complete: async (request: CompletionRequest): Promise<NexusResponse> => {
+      const system = text(request.messages.find((message) => message.role === 'system'));
+      systems.push(system);
+      if (system.startsWith('You summarize')) return reply({ content: 'A summary.' });
+      if (system.startsWith('You translate')) return reply({ content: 'A translation.' });
+      const results = request.messages.filter((message) => message.role === 'tool');
+      if (results.length === 0) {
+        return reply({
+          toolCalls: [
+            call('delegate', {
+              agent: 'summarizer',
+              task: 'Summarize the facts',
+              instructions: 'You summarize facts.',
+            }),
+          ],
+        });
+      }
+      if (results.length === 1) {
+        if (pauseAtSecond) {
+          reachedSecond();
+          return never();
+        }
+        return reply({
+          toolCalls: [call('delegate', { agent: 'translator', task: 'Translate it', instructions: 'You translate.' })],
+        });
+      }
+      if (results.length === 2) {
+        return reply({ toolCalls: [call('delegate', { agent: 'summarizer', task: 'Summarize again' })] });
+      }
+      return reply({ content: results.map((message) => text(message)).join(' | ') });
+    },
+  });
+  const agentIn = (checkpointer: GraphCheckpointer, pauseAtSecond: boolean) =>
+    createDeepAgent({
+      client: model(pauseAtSecond),
+      planning: false,
+      permissions: false,
+      checkpointer,
+      createHelpers: { max: 1, maxIterations: 2 },
+    });
+
+  // The first process creates the summarizer, and dies as its model decides what comes next.
+  const first = processOn(store);
+  void agentIn(first.checkpointer, true)
+    .invoke(agentInput('Summarize, translate, summarize.'), { threadId: 'resumed' })
+    .catch(() => undefined);
+  await second;
+  first.die();
+
+  // Another process carries the thread on: the summarizer it never created still counts.
+  const agent = agentIn(processOn(store).checkpointer, false);
+  for await (const _ of agent.continue('resumed')) {
+    // Runs on from the checkpoint after the summarizer answered.
+  }
+  const final = await agent.state('resumed');
+  assert.equal(final?.status, 'completed');
+  const [created, refused, again] = String(final?.state.answer).split(' | ');
+  assert.equal(created, '"A summary."');
+  assert.match(String(refused), /created its 1 helpers; delegate to one of: summarizer/, 'the second is refused');
+  assert.equal(again, '"A summary."', 'the summarizer is delegated to again by name, its instructions recorded');
+  assert.equal(
+    systems.filter((system) => system.startsWith('You translate')).length,
+    0,
+    'no translator was ever created',
+  );
+  const record = await store.get('resumed/helpers-created');
+  assert.deepEqual(
+    ((record?.metadata?.deepAgentCreatedHelpers ?? []) as Array<{ name: string }>).map((helper) => helper.name),
+    ['summarizer'],
+  );
+});

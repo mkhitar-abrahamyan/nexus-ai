@@ -66,6 +66,8 @@ Changed, each to keep a promise the surface already made:
 - `MemoryBudgetUsage`, the ledger's default store, records reservations, so `reserve()` returns one
   with an `id`. An online-evaluation worker reserves every run of its evaluators, a run after a crash
   included, where before it reserved only a first.
+- A deep agent with a checkpointer writes the helpers it creates to `<thread>/helpers-created`, so
+  `createHelpers.max` holds for a thread across processes, as it says.
 
 ## 2.8 stage (2.8.0)
 

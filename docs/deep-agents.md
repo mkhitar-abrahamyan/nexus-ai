@@ -84,7 +84,10 @@ Without a checkpointer, a background helper lives only as long as its process.
 **Helpers it creates.** With `createHelpers`, the agent can create a helper for work no declared
 helper fits: it gives `delegate` a new name and the helper's instructions. `DeepHelperLimits` bound
 what it creates: the tools a created helper may use, its model, its model calls (10 by default), and
-how many the agent may create in one thread (5 by default).
+how many the agent may create in one thread (5 by default). With a checkpointer, each helper the
+agent creates is recorded, with its instructions, on a thread beside the agent's own,
+`<thread>/helpers-created`, before the call that created it returns. An agent resumed in another
+process counts those helpers against the limit and delegates to them again by name.
 
 **Its events.** Streamed with `subgraphs: true`, a helper's model output, tool calls, and steps reach
 the agent's own event stream under the helper's namespace, such as `tools/researcher@call-7`, in the
@@ -117,7 +120,8 @@ Helpers have proofs of their own:
 - A background researcher answers only after the agent has written a note, and the agent collects
   the answer; the researcher's tool calls reach the agent's stream under its namespace.
 - The agent creates a helper on instructions it wrote, which gets only the tools the limits allow; a
-  second one past `max` is refused.
+  second one past `max` is refused, also after the agent is killed and resumed in another process,
+  where it still delegates to the helper it created by name.
 - A crash while the agent waits for its helper, and a crash before the agent has saved the call that
   started it, both end with one lookup, one note, and one start of the helper.
 
@@ -128,8 +132,6 @@ Helpers have proofs of their own:
   the `Sandbox` interface, in production.
 - Helpers run in the agent's process. A helper that should run elsewhere is an agent on another
   server, called through `createRemoteGraph()`.
-- The count of created helpers is kept by the process, so an agent that resumes after a crash may
-  create up to `max` again.
 - Workspace search is bounded: `glob_files` lists at most 500 paths and `grep_files` 200 lines.
   The reference sandbox skips files over 1 MB, binary files, `.git`, and `node_modules`. A wider
   search is a command the sandbox runs.
