@@ -1320,6 +1320,46 @@
         "default": "./dist-cjs/media/rag.js"
       }
     },
+    "./video": {
+      "import": {
+        "types": "./dist/video/index.d.ts",
+        "default": "./dist/video/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/video/index.d.ts",
+        "default": "./dist-cjs/video/index.js"
+      }
+    },
+    "./video/google": {
+      "import": {
+        "types": "./dist/video/google.d.ts",
+        "default": "./dist/video/google.js"
+      },
+      "require": {
+        "types": "./dist-cjs/video/google.d.ts",
+        "default": "./dist-cjs/video/google.js"
+      }
+    },
+    "./video/mock": {
+      "import": {
+        "types": "./dist/video/mock.d.ts",
+        "default": "./dist/video/mock.js"
+      },
+      "require": {
+        "types": "./dist-cjs/video/mock.d.ts",
+        "default": "./dist-cjs/video/mock.js"
+      }
+    },
+    "./video/runway": {
+      "import": {
+        "types": "./dist/video/runway.d.ts",
+        "default": "./dist/video/runway.js"
+      },
+      "require": {
+        "types": "./dist-cjs/video/runway.d.ts",
+        "default": "./dist-cjs/video/runway.js"
+      }
+    },
     "./realtime": {
       "import": {
         "types": "./dist/realtime/index.d.ts",
@@ -2360,6 +2400,18 @@
       ],
       "media/rag": [
         "dist-cjs/media/rag.d.ts"
+      ],
+      "video": [
+        "dist-cjs/video/index.d.ts"
+      ],
+      "video/google": [
+        "dist-cjs/video/google.d.ts"
+      ],
+      "video/mock": [
+        "dist-cjs/video/mock.d.ts"
+      ],
+      "video/runway": [
+        "dist-cjs/video/runway.d.ts"
       ],
       "realtime": [
         "dist-cjs/realtime/index.d.ts"

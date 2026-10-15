@@ -300,6 +300,10 @@ import { MediaManager, modelMediaProvider, type MediaText } from 'nexus-ai-pro/m
 import { MistralOcrProvider } from 'nexus-ai-pro/media/mistral';
 import { MockMediaProvider } from 'nexus-ai-pro/media/mock';
 import { answerFromMedia, createMediaIndex, type MediaHit } from 'nexus-ai-pro/media/rag';
+import { priceVideo, VideoManager, type VideoJobRef, type VideoResult } from 'nexus-ai-pro/video';
+import { GoogleVideoProvider } from 'nexus-ai-pro/video/google';
+import { MockVideoProvider } from 'nexus-ai-pro/video/mock';
+import { RunwayVideoProvider } from 'nexus-ai-pro/video/runway';
 import { GoogleEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/google';
 import { MockEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/mock';
 import { SqliteEmbeddingCache } from 'nexus-ai-pro/sqlite/embedding-cache';
@@ -836,6 +840,17 @@ const mediaHits: Promise<MediaHit[]> = mediaIndex.search('the total due', { topK
 const groundedAnswer: Promise<string> = answerFromMedia(mediaManager, mediaIndex, 'What is due?').then(
   (answer) => answer.answer,
 );
+const videoManager = new VideoManager({
+  providers: {
+    veo: new GoogleVideoProvider({ apiKey: 'key' }),
+    runway: new RunwayVideoProvider({ apiKey: 'secret' }),
+    mock: new MockVideoProvider(),
+  },
+  defaultProvider: 'veo',
+});
+const videoJob: Promise<VideoJobRef> = videoManager.start({ prompt: 'a lighthouse', durationSeconds: 8 });
+const videoResult: Promise<VideoResult> = videoJob.then((ref) => videoManager.resume(ref, { delivery: 'bytes' }));
+const videoCost: number | undefined = priceVideo('veo-3.1-generate-preview', 8)?.amount;
 const readPages: Promise<number> = mediaManager
   .read({ media: { type: 'document', source: { url: 'https://example.com/a.pdf' } } })
   .then((text: MediaText) => text.pages.length);
@@ -1022,6 +1037,8 @@ void embeddingsWithSharedCache;
 void batchedIngestion;
 void configuredWithData;
 void readPages;
+void videoResult;
+void videoCost;
 void mediaHits;
 void groundedAnswer;
 void batchCost;

@@ -46,6 +46,9 @@ one of its explicit subpaths.
 Everything 2.9 adds is stable from the start and additive, unless this section says otherwise.
 
 New and stable:
+- `OperationFamily` gains `video`;
+- `nexus-ai-pro/video`, `/video/google`, `/video/runway`, and `/video/mock` are new and experimental:
+  video generation graduates by the checklist once Veo and Runway pass its conformance suite live;
 - `RunQuery.after` with `RunCursor`, and `runCursor()` and `isAfterCursor()` on
   `nexus-ai-pro/tracing`. A store of your own that does not honour `after` still works with the
   online-evaluation worker, which falls back to offsets;

@@ -18,7 +18,8 @@ export type OperationFamily =
   | 'job'
   | 'graph'
   | 'agent'
-  | 'media';
+  | 'media'
+  | 'video';
 
 /**
  * The stages every operation passes through, in this order. A family skips a stage it has nothing

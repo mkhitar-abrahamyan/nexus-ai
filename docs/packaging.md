@@ -140,6 +140,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
+| `nexus-ai-pro/video` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 10% | none |
 | `nexus-ai-pro/voice` | 33 KB | 10% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
@@ -199,6 +200,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 3% | none |
 | `nexus-ai-pro/rag/files` | 12 KB | 3% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 3% | none |
+| `nexus-ai-pro/video/google` | 12 KB | 3% | none |
 | `nexus-ai-pro/evals/judge` | 12 KB | 3% | none |
 | `nexus-ai-pro/providers` | 11 KB | 3% | none |
 | `nexus-ai-pro/providers/base` | 11 KB | 3% | none |
@@ -207,6 +209,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/cache` | 11 KB | 3% | none |
 | `nexus-ai-pro/embeddings/batch/google` | 11 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
+| `nexus-ai-pro/video/runway` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/chroma` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |
@@ -245,6 +248,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/tracing/rollups` | 5 KB | 1% | none |
 | `nexus-ai-pro/postgres/embedding-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/prompts/file` | 5 KB | 1% | none |
+| `nexus-ai-pro/video/mock` | 5 KB | 1% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/rag` | 5 KB | 1% | none |
 | `nexus-ai-pro/loaders/html` | 5 KB | 1% | none |

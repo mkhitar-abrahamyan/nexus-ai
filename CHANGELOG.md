@@ -6,6 +6,25 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Video generation.** `nexus-ai-pro/video`: `VideoManager` makes videos from a prompt, a first or
+  last frame, or reference images, through a provider's asynchronous job. `generate()` is a durable
+  operation that records the job the moment it exists and each video as it is stored, so
+  `recover()` in another worker collects a job whose process died, never submitting it twice, and
+  streams each video into an asset store. Each generation runs in the lifecycle's new `video`
+  family, and is priced per second by `priceVideo()` from `VIDEO_PRICES`, the Veo 3.1 list prices,
+  or the account's own. `start()`, `resume()`, `status()`, `download()`, and `cancel()` work from a
+  JSON `VideoJobRef` in any process. A request is checked against the model's capabilities before
+  any job, and a failed job is submitted again only when the provider says that may help.
+  - `GoogleVideoProvider` (`/video/google`): Veo through its long-running predictions, on the
+    Gemini API, the video read from Google's URI with the key, or on Vertex AI, read from Cloud
+    Storage or inline.
+  - `RunwayVideoProvider` (`/video/runway`): Runway's task API, for its own models and the hosted
+    ones it serves, Veo, Gemini Omni Flash, and Seedance among them; each video read from its signed
+    URL without the secret.
+  - `MockVideoProvider` (`/video/mock`), and `runVideoConformance()`, which all three pass.
+
+  New guide `docs/video.md`. The family is experimental until Veo and Runway pass the conformance
+  suite live. OpenAI's Videos API was removed on 2026-09-24, so there is no OpenAI adapter.
 - **Paging by cursor.** `RunQuery.after` takes a `RunCursor`, the start time and id of a page's last
   run, and returns only the runs after it; `runCursor()` takes the cursor from a run, and
   `isAfterCursor()` is the test on its own, for a trace store of your own. Every bundled store
@@ -57,6 +76,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Proof
 
+- `tests/video.test.ts`: the mock, Veo on the Gemini API and Vertex AI, and Runway pass the video
+  conformance suite against stand-ins for their APIs. A request a model cannot make is refused
+  before any job. A generation runs through the lifecycle, streams three megabytes into a
+  filesystem store, and is priced per second. A generation whose process dies after submitting, or
+  after storing its video, is collected by another worker with one submission and one stored video.
+  If the recorded job is ignored, the job is submitted twice.
 - `tests/online-evaluation-paging.test.ts`: the memory, JSONL, and Postgres trace stores order 5,000
   runs, 4,000 of them in one millisecond, identically, and page through them by cursor without a
   repeat or a gap. Ten workers reading 1,000 a page schedule each of them exactly once on every

@@ -1,7 +1,7 @@
 import { type BatchJobState, isTerminalBatchStatus } from '../types/batch.js';
 
-/** How a batch is waited on. */
-export interface BatchPollOptions {
+/** How a batch, or any job with a status, is waited on. */
+export interface BatchPollOptions<State = BatchJobState> {
   /** The first wait between polls, in milliseconds. */
   intervalMs: number;
   /** The longest wait, once backoff has grown it. */
@@ -9,7 +9,9 @@ export interface BatchPollOptions {
   /** Stops waiting. The provider-side batch keeps running. */
   signal: AbortSignal;
   /** Called with each state that is not yet final. */
-  onState?: (state: BatchJobState) => void;
+  onState?: (state: State) => void;
+  /** Whether a state is final. Defaults to a batch's terminal statuses. */
+  settled?: (state: State) => boolean;
 }
 
 /**
@@ -17,13 +19,14 @@ export interface BatchPollOptions {
  * a fixed short interval: the wait grows by half each time up to the maximum, which keeps the poll
  * count sane without delaying a fast batch, which the first few short polls still catch.
  */
-export async function pollUntilSettled(
-  poll: () => Promise<BatchJobState>,
-  options: BatchPollOptions,
-): Promise<BatchJobState> {
+export async function pollUntilSettled<State extends { status: string } = BatchJobState>(
+  poll: () => Promise<State>,
+  options: BatchPollOptions<State>,
+): Promise<State> {
+  const settled = options.settled ?? ((state: State) => isTerminalBatchStatus(state.status as BatchJobState['status']));
   let interval = options.intervalMs;
   let state = await poll();
-  while (!isTerminalBatchStatus(state.status)) {
+  while (!settled(state)) {
     if (options.signal.aborted) throw options.signal.reason ?? new Error('aborted');
     options.onState?.(state);
     await delay(interval, options.signal);

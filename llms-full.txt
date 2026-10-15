@@ -168,6 +168,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/retrieval.md) | Hybrid search, reranking, MMR, parent documents, and Redis, Pinecone, Weaviate, and Chroma stores |
 | [Embeddings and retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/embeddings.md) | Embeddings as a routed operation family, and RAG helpers |
 | [Media understanding](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/media.md) | Reading documents and images page by page, describing images, and answering questions about them, through any vision model or OCR |
+| [Video generation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/video.md) | Videos from a prompt or a first frame, on Google Veo and Runway, as durable jobs streamed into an asset store and priced per second |
 | [Images (experimental)](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/images.md) | Generation and masked edits over three backends, input safety, moderation, asset stores |
 | [Voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/voice.md) | Transcription, speech, voice turns, and voice sessions |
 | [Realtime voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/realtime.md) | Browser and server realtime sessions with barge-in, tools, and exports |
@@ -8643,6 +8644,170 @@ text says what each chart is, and only the chart shows which bar is tallest.
 
 ---
 
+Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/video.md
+
+# Video generation
+
+
+Videos from a prompt, a first or last frame, or reference images, from `nexus-ai-pro/video`. One
+contract covers Google Veo, on the Gemini API or Vertex AI, and Runway, whose task API also serves
+Veo, Gemini Omni Flash, Seedance, and the other models it hosts. A generation is a durable job: it
+survives the process that submitted it, streams its video into an asset store, and is priced per
+second of video.
+
+```ts
+import { NexusAI } from 'nexus-ai-pro';
+import { FilesystemAssetStore } from 'nexus-ai-pro/images/stores';
+import { RedisOperationStore } from 'nexus-ai-pro/operations';
+import { VideoManager } from 'nexus-ai-pro/video';
+import { GoogleVideoProvider } from 'nexus-ai-pro/video/google';
+import { RunwayVideoProvider } from 'nexus-ai-pro/video/runway';
+
+const ai = new NexusAI({ providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } } });
+const video = new VideoManager(
+  {
+    providers: {
+      veo: new GoogleVideoProvider({ apiKey: process.env.GEMINI_API_KEY! }),
+      runway: new RunwayVideoProvider({ apiKey: process.env.RUNWAYML_API_SECRET! }),
+    },
+    store: new FilesystemAssetStore({ directory: './videos' }),
+    tenantId: 'acme',
+  },
+  { operations: { store: new RedisOperationStore(redis) }, lifecycle: ai.lifecycle },
+);
+
+const handle = await video.generate({ prompt: 'A lighthouse at dusk, waves below', durationSeconds: 8 });
+const { videos, cost } = await handle.result(); // minutes later: persist handle.id instead of waiting
+```
+
+## Requests
+
+A `VideoGenerateRequest` holds the prompt and, as the model allows:
+
+| Field | What it asks for |
+| --- | --- |
+| `model`, `provider` | The model and provider. Default to the provider's model and the manager's default provider. |
+| `image`, `lastFrame`, `references` | A first frame, a last frame, and images whose subject or style the video keeps, as an `AssetInput`: bytes, a URL, or an asset in the manager's store. |
+| `durationSeconds`, `aspectRatio`, `resolution` | Its length, shape (`16:9`, `9:16`), and size (`720p`, `1080p`, `4k`). |
+| `audio`, `negativePrompt`, `seed`, `count` | Sound, what it must not show, repeatability, and how many videos. |
+| `providerOptions` | Fields only one provider knows, sent as they are. |
+| `delivery`, `tenantId`, `ttlSeconds`, `metadata` | Where the video goes, who owns it, how long it is kept, and labels for it. |
+| `idempotencyKey`, `pollIntervalMs`, `timeoutMs`, `signal` | Replays, polling, and when to stop waiting. |
+
+Before any job is submitted, the request is checked against the model's capabilities. A
+`VideoProviderCapabilities` declares the provider's models and what they take, a
+`VideoModelCapabilities` for each model where it differs (`byModel`), and `capabilitiesOf()` merges
+the two for one model. A `VideoInputKind` is `image`, `last-frame`, or `references`; a
+`VideoAudioSupport` is `always`, `optional`, or `none`. A length, shape, size, input, seed, or count
+the model does not take is refused with a `VideoError` of code `VIDEO_UNSUPPORTED`, naming what it
+does take. A provider receives a `VideoProviderRequest`: the model chosen, and a stored input read
+into bytes.
+
+## Durable jobs
+
+`VideoManager.generate()` runs a generation as a durable operation, in the operation store the
+`VideoRuntime` names. It records the provider's job, a `VideoJobRef` of plain JSON, the moment the job
+exists, and each video as it is stored. A worker that dies is replaced: `recover()`, run on a
+schedule in every worker that shares the operation store, takes over a generation whose worker
+stopped heartbeating, collects its job instead of submitting another, and skips a video already
+stored. A failed job is submitted again only when its `VideoJobError` says that may help, so a prompt
+a safety filter refused is never billed twice. A generation has three attempts unless
+`VideoRuntime.operations.retry` says otherwise.
+
+In the test suite, a generation whose process dies after submitting, and one whose process dies
+after storing its video, are each collected by another worker with one submission to the provider,
+one video in the store, and a price for eight seconds.
+
+Every generation runs as one operation of the client's lifecycle, in the `video` family, when the
+runtime's `lifecycle` is given: authorized and budgeted before the provider sees it, and its cost
+reconciled when the video is collected.
+
+The rest of the manager works from a ref, which any process can hold:
+
+| Method | What it does |
+| --- | --- |
+| `start(request)` | Submits a job and returns its ref at once, without an operation. |
+| `resume(ref, options)` | Waits for a job and collects its videos, as `VideoCollectOptions` asks. |
+| `status(ref)` | Reads the job's `VideoJobState` now: its `VideoJobStatus`, progress, and outputs. |
+| `download(ref, index)` | One finished video as a stream, a `VideoContent`, to send on without storing it. |
+| `cancel(ref)` | Cancels a running job, on a provider that can. |
+
+`registerVideoProvider()`, `hasVideoProvider()`, and `listVideoProviders()` manage providers by name.
+
+## Where videos go
+
+A `VideoResult` holds each video as a `VideoAsset`: an asset descriptor with its length, provenance
+naming the provider, model, job, and request, and the request's labels. `generate()` streams each
+video into the manager's `store` through `putStream()`, so a large video never sits in memory; a store
+that cannot stream buffers it up to `maxBytes`. An operation keeps no bytes, so `generate()` needs a
+store. `resume()` can also return the bytes themselves, with `delivery: 'bytes'`, up to `maxBytes`
+(512 MiB).
+
+`VideoConfig` sets the providers and default provider, the store, tenant, and `ttlSeconds`, the poll
+interval and its backoff, the timeout (1 hour), prices, and `removeFromProvider`, which deletes the
+provider's copy once a video is collected. A deletion that fails is a `VideoWarning` on the result,
+never a failure. A job that ends without a video raises `VideoJobFailedError`, carrying the ref and
+its final state; every failure is a `VideoError` with a `VideoErrorCode`, and `retryable` says
+whether trying again may help.
+
+## Prices
+
+`priceVideo(model, seconds, options)` prices seconds of video from `VIDEO_PRICES`, the Gemini API's
+list prices for the Veo 3.1 models published on 2026-10-14, or from the account's own prices. A
+`VideoPrice` is a rate per second, one for every size or one per resolution, and optionally a lower
+rate without sound. A model without a price is left unpriced, never recorded as free. A result's
+`cost` is what the provider reported, or this price times the length of each video.
+
+## Providers
+
+`GoogleVideoProvider` speaks Veo's long-running prediction protocol. With an `apiKey` it uses the
+Gemini API: the operation's name is the ref, and each video is read from the URI Google returns,
+with the key, within the two days Google keeps it. With an `accessToken`, a string or a function that
+returns a fresh one, and a Vertex AI `baseUrl`, it polls with `fetchPredictOperation` and reads each
+video from Cloud Storage, under `storageUri`, or from the bytes Vertex returns inline.
+`GoogleVideoProviderConfig` also sets the models (the Veo 3.1 family: standard, Fast, and Lite, which
+makes no 4k video), `byModel`, and `personGeneration`. Veo 3.1 always makes sound.
+
+`RunwayVideoProvider` speaks Runway's task API: a prompt alone is text to video, and a first frame
+makes it image to video. A request's shape and size become Runway's `ratio`, such as `1280:720`, and a
+ratio of Runway's own passes through as `aspectRatio`. Each video is read from the signed URL the
+finished task lists, which is fetched without the API secret. `cancel()` and `remove()` delete the
+task. `RunwayVideoProviderConfig` sets the key, the API version (`2024-11-06`), the models (every
+text-to-video model Runway names; `gen4.5` by default), and `byModel`. Runway's prices are in credits
+that depend on the account, so none are bundled: set `prices`.
+
+`MockVideoProvider`, from `nexus-ai-pro/video/mock`, finishes each job after `pollsToComplete` polls
+and makes each video on the fly, as large as `bytes` asks, streamed a chunk at a time. Its videos
+begin as an MP4 file does, without being playable. `MockVideoProviderOptions` can fail each job, and
+two mocks given one `jobs` map, of `MockVideoJob` entries, stand for two processes in front of one
+provider.
+
+A provider of your own implements `VideoProvider`: `submit()`, `poll()`, and `download()`, and
+optionally `cancel()` and `remove()`, each taking a `VideoCallContext`. Its `VideoProviderInfo` names
+it and declares its capabilities.
+
+## Conformance
+
+`runVideoConformance(provider, options)` checks any provider against the contract and lists what
+fails, as a `VideoConformanceReport`. Its capabilities must be coherent; its ref must survive JSON as
+it would a restart; a job must settle when polled through a ref parsed afresh; and the video must
+stream as non-empty bytes of a video type, an MP4 beginning with its `ftyp` box.
+`VideoConformanceOptions` adds an image-to-video check, and a cancellation check, which costs a job
+and is off by default. In the test suite the mock, Veo on the Gemini API and on Vertex AI, and Runway
+pass it against stand-ins for their APIs.
+
+## Limitations
+
+- The family is experimental until Veo and Runway pass the conformance suite against the live
+  services.
+- OpenAI removed its Videos API, and the Sora 2 models, on 2026-09-24, so there is no OpenAI adapter.
+- Gemini Omni Flash is reached through Runway. Google serves it on its Interactions API, which this
+  release does not speak.
+- Video extension, and a video as input, are not part of the contract; pass a provider's fields in
+  `providerOptions`.
+
+---
+
 Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/images.md
 
 # Image generation and editing (experimental)
@@ -12226,6 +12391,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
+| `nexus-ai-pro/video` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 10% | none |
 | `nexus-ai-pro/voice` | 33 KB | 10% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
@@ -12285,6 +12451,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 3% | none |
 | `nexus-ai-pro/rag/files` | 12 KB | 3% | none |
 | `nexus-ai-pro/tenancy` | 12 KB | 3% | none |
+| `nexus-ai-pro/video/google` | 12 KB | 3% | none |
 | `nexus-ai-pro/evals/judge` | 12 KB | 3% | none |
 | `nexus-ai-pro/providers` | 11 KB | 3% | none |
 | `nexus-ai-pro/providers/base` | 11 KB | 3% | none |
@@ -12293,6 +12460,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/cache` | 11 KB | 3% | none |
 | `nexus-ai-pro/embeddings/batch/google` | 11 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
+| `nexus-ai-pro/video/runway` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/chroma` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |
@@ -12331,6 +12499,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/tracing/rollups` | 5 KB | 1% | none |
 | `nexus-ai-pro/postgres/embedding-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/prompts/file` | 5 KB | 1% | none |
+| `nexus-ai-pro/video/mock` | 5 KB | 1% | none |
 | `nexus-ai-pro/cache/semantic-cache` | 5 KB | 1% | none |
 | `nexus-ai-pro/rag` | 5 KB | 1% | none |
 | `nexus-ai-pro/loaders/html` | 5 KB | 1% | none |
@@ -12531,7 +12700,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 176 entry points, 140 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 180 entry points, 144 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |
@@ -12579,6 +12748,7 @@ These run anywhere, and load a Node module only when a feature that needs it is 
 | `nexus-ai-pro/images/evals` | `node:zlib`; the `Buffer` global |
 | `nexus-ai-pro/embeddings/batch` | `node:crypto`; the `Buffer` global |
 | `nexus-ai-pro/agent/interpreter` | `node:worker_threads` |
+| `nexus-ai-pro/video` | `node:crypto`; the `Buffer` global |
 | `nexus-ai-pro/loaders/text` | `node:fs/promises`, `node:path` |
 | `nexus-ai-pro/loaders/markdown` | `node:fs/promises` |
 | `nexus-ai-pro/loaders/html` | `node:fs/promises` |

@@ -177,3 +177,71 @@ text says what each chart is, and only the chart shows which bar is tallest.
   ids to remove one.
 
 <!-- reference:start -->
+## Reference
+
+Generated from the doc comments by `npm run docs:update`. Each export is listed once, under the most
+specific entry point that provides it.
+
+### `nexus-ai-pro/media`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `CompletionClientLike` | interface | Anything that completes a request, such as a `NexusAI` client. |
+| `MediaAnswer` | interface | An answer about media. |
+| `MediaAnswerRequest` | interface | Asking a question about one medium or several. |
+| `MediaCallContext` | interface | What every media call receives: how to stop, and the request's id. |
+| `MediaConfig` | interface | Configuration for `MediaManager`. |
+| `MediaConformanceFixtures` | interface | Media to check a provider with, and what its text should contain. |
+| `MediaConformanceReport` | interface | How a provider did against the media contract. |
+| `MediaDescribeRequest` | interface | Describing an image, or a document's look. |
+| `MediaDescription` | interface | A description of a medium. |
+| `MediaError` | class | Raised for a media request no provider can serve, or a medium a provider cannot read. |
+| `MediaInput` | type | A medium to understand: an image or a document part, holding bytes, base64, a URL, or an asset. |
+| `MediaKind` | type | The kinds of media there are: `image` or `document`. |
+| `MediaManager` | class | Media understanding behind one handle: each task goes to the provider named, the task's default, or the first provider that performs it on that kind of medium. |
+| `MediaPage` | interface | One page of a medium's text. |
+| `MediaProvider` | interface | A media understanding backend: a vision model, an OCR service, or a stand-in. |
+| `MediaProviderCapabilities` | interface | What a media provider supports. |
+| `MediaProviderInfo` | interface | Identifies a media provider and what it supports. |
+| `MediaReadRequest` | interface | Reading a medium's text. |
+| `MediaResultMeta` | interface | What every media result carries: who produced it, and what it used and cost. |
+| `MediaRuntime` | interface | What the manager runs on. |
+| `MediaTask` | type | What a media provider can be asked to do. |
+| `MediaText` | interface | A medium's text, page by page. |
+| `MediaUsage` | interface | What a call used, where the provider reports it. |
+| `modelMediaProvider` | function | Any vision model as a media provider, through a client's own `complete()`: so the call is routed, authorized, budgeted, traced, and priced as every completion is. |
+| `ModelMediaProviderOptions` | interface | Options for `modelMediaProvider()`. |
+| `runMediaConformance` | function | Checks a provider against the media contract: every task it declares returns the right shape, and the text it reads holds what the fixtures say. |
+
+### `nexus-ai-pro/media/mistral`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `MistralOcrProvider` | class | Mistral's OCR service (`/v1/ocr`): a PDF, slide deck, document, or image read into Markdown page by page, with each page's size and the boxes of the pictures on it. |
+| `MistralOcrProviderOptions` | interface | Options for Mistral's OCR service. |
+
+### `nexus-ai-pro/media/mock`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `MockMediaProvider` | class | A deterministic media provider, for tests: it finds in each medium what the options say, so a test can drive reading, describing, answering, and media retrieval without a model. |
+| `MockMediaProviderOptions` | interface | Options for the mock media provider: what it finds in each medium. |
+
+### `nexus-ai-pro/media/rag`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `answerFromMedia` | function | Answers a question from the media an index finds for it: the media themselves go to the model, so it sees what a page or an image shows, not only what was written about it. |
+| `createMediaIndex` | function | Builds an index of media in a vector store. |
+| `MediaDocument` | interface | A medium to index, under its own id. |
+| `MediaEmbeddingSource` | interface | Anything that embeds, such as an `EmbeddingManager` or a client's `embeddings`. |
+| `MediaHit` | interface | A medium a search found: the best of its chunks, and where to find the medium. |
+| `MediaIndex` | interface | An index of media in a vector store. |
+| `MediaIndexEntry` | interface | What the manifest records for one medium. |
+| `MediaIndexOptions` | interface | What `createMediaIndex()` indexes, and where. |
+| `MediaIndexReader` | interface | Who produced a medium's text or caption. |
+| `MediaIndexReport` | interface | What `add()` indexed. |
+| `MediaRagAnswer` | interface | An answer from media, with the hits it was given. |
+| `MediaReference` | interface | Where a hit's medium is kept, so it can be handed back: by its URL, or as a stored asset. |
+| `MediaSearchOptions` | interface | Options for a search. |
+<!-- reference:end -->
