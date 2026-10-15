@@ -33,6 +33,15 @@ when their variables are set; the variables are listed at the top of `tests/vect
 npm run test:vectors:live
 ```
 
+Media understanding, the Gemini embedding batch tier, and video generation run their conformance
+suites against the live services when their keys are set, `OPENAI_API_KEY`, `GOOGLE_API_KEY`,
+`MISTRAL_API_KEY`, and `RUNWAYML_API_SECRET`. Video costs a few seconds of video a run, so it also
+needs `NEXUS_LIVE_VIDEO=1`:
+
+```bash
+npm run test:families:live
+```
+
 Never commit provider keys, user data, generated tarballs, or local environment files.
 
 ## Generated files

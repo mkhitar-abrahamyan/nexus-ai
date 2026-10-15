@@ -25,6 +25,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
   New guide `docs/video.md`. The family is experimental until Veo and Runway pass the conformance
   suite live. OpenAI's Videos API was removed on 2026-09-24, so there is no OpenAI adapter.
+- **The experimental families, live.** `npm run test:families:live`, and a weekly *Family
+  conformance* job beside the vector stores: media understanding's conformance suite against an
+  OpenAI or Gemini vision model and Mistral's OCR, on a PDF and a PNG the script builds; a two-input
+  batch through the Gemini embedding batch tier, waited on for 20 minutes and cancelled past that;
+  and, when the repository variable `NEXUS_LIVE_VIDEO` is set, the video conformance suite on Veo 3.1
+  Lite and Runway. Each check runs where its key is set, and what it measured is kept. These are the
+  runs media, the Gemini batch tier, and video graduate on.
 - **Paging by cursor.** `RunQuery.after` takes a `RunCursor`, the start time and id of a page's last
   run, and returns only the runs after it; `runCursor()` takes the cursor from a run, and
   `isAfterCursor()` is the test on its own, for a trace store of your own. Every bundled store

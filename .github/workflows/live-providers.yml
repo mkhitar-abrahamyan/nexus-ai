@@ -115,6 +115,54 @@ jobs:
           path: tests/fixtures/images
           if-no-files-found: ignore
 
+  families:
+    # The experimental families against the live services, each where its secret is set: media
+    # understanding through a vision model and Mistral's OCR, and the Gemini embedding batch tier.
+    # Video generation costs a few seconds of video a run, so it runs only when the repository
+    # variable NEXUS_LIVE_VIDEO is set. What each check measured is kept.
+    name: Family conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      # A re-run repeats the commit its run started on, so after a fix it tests the code from before
+      # the fix. Say so, and point at a fresh run of main instead.
+      - name: Say which commit this run tests
+        run: |
+          git fetch --quiet --depth=1 origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "::warning::This run tests ${GITHUB_SHA::7}, not main ($(git rev-parse --short FETCH_HEAD)). A re-run repeats its original commit; start a fresh one with Run workflow to test main."
+          fi
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the families live
+        run: npm run test:families:live
+        env:
+          NEXUS_LIVE_REPORT: families-live.json
+          NEXUS_LIVE_VIDEO: ${{ vars.NEXUS_LIVE_VIDEO }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          RUNWAYML_API_SECRET: ${{ secrets.RUNWAYML_API_SECRET }}
+
+      - name: Keep the measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: families-live
+          path: families-live.json
+          if-no-files-found: ignore
+
   vector-stores:
     # The vector stores against real servers, each self-hostable one as a service container and
     # Pinecone when its secret is set: the contract and the graduation checklist (ten racing writers,

@@ -1857,6 +1857,7 @@
     "test:conformance:mock": "tsx tests/conformance.mock.ts",
     "test:conformance:real": "tsx tests/conformance.real.ts",
     "test:vectors:live": "node --expose-gc --import tsx tests/vector-stores.live.ts",
+    "test:families:live": "node --import tsx tests/families.live.ts",
     "bench:graph": "node scripts/bench-graph.mjs",
     "bench:runtime": "node --expose-gc scripts/bench-runtime.mjs",
     "pack:dry-run": "npm pack --dry-run --cache .tmp-nexus-ai-tests/npm-cache",
