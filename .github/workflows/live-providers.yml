@@ -21,6 +21,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      # A re-run repeats the commit its run started on, so after a fix it tests the code from before
+      # the fix. Say so, and point at a fresh run of main instead.
+      - name: Say which commit this run tests
+        run: |
+          git fetch --quiet --depth=1 origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "::warning::This run tests ${GITHUB_SHA::7}, not main ($(git rev-parse --short FETCH_HEAD)). A re-run repeats its original commit; start a fresh one with Run workflow to test main."
+          fi
+
       - name: Use Node.js 24
         uses: actions/setup-node@v6
         with:
@@ -70,6 +79,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      # A re-run repeats the commit its run started on, so after a fix it tests the code from before
+      # the fix. Say so, and point at a fresh run of main instead.
+      - name: Say which commit this run tests
+        run: |
+          git fetch --quiet --depth=1 origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "::warning::This run tests ${GITHUB_SHA::7}, not main ($(git rev-parse --short FETCH_HEAD)). A re-run repeats its original commit; start a fresh one with Run workflow to test main."
+          fi
 
       - name: Use Node.js 24
         uses: actions/setup-node@v6
@@ -125,6 +143,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      # A re-run repeats the commit its run started on, so after a fix it tests the code from before
+      # the fix. Say so, and point at a fresh run of main instead.
+      - name: Say which commit this run tests
+        run: |
+          git fetch --quiet --depth=1 origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "::warning::This run tests ${GITHUB_SHA::7}, not main ($(git rev-parse --short FETCH_HEAD)). A re-run repeats its original commit; start a fresh one with Run workflow to test main."
+          fi
 
       - name: Use Node.js 24
         uses: actions/setup-node@v6
