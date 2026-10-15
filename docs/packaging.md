@@ -140,6 +140,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
+| `nexus-ai-pro/media/rag` | 34 KB | 10% | none |
 | `nexus-ai-pro/voice` | 33 KB | 10% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 10% | none |
@@ -147,7 +148,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/tracing` | 31 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 31 KB | 9% | none |
-| `nexus-ai-pro/media/rag` | 28 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 8% | none |

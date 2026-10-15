@@ -113,7 +113,8 @@ await index.add([
 const { answer, hits } = await answerFromMedia(media, index, 'Which quarter had the most revenue?');
 ```
 
-`createMediaIndex()` returns a `MediaIndex`, with three methods: `add()`, `search()`, and `resolve()`.
+`createMediaIndex()` returns a `MediaIndex`: `add()`, `search()`, and `resolve()`, and, with a
+manifest, `delete()`, `reindex()`, `describe()`, and `list()`.
 Each `MediaDocument` is an id, a medium, and optionally a source and metadata. `add()` turns it into
 chunks:
 
@@ -127,8 +128,33 @@ chunks:
 client's `embeddings`, the embedding model, what to index, and an asset store. A medium held as bytes
 or base64 is kept in the asset store, and one at a URL is kept by its URL, so every hit can hand its
 medium back. A medium held as bytes without an asset store is refused. Adding an id again replaces
-its chunks. The `MediaIndexReport` counts the chunks, and lists each medium's chunk ids, for removing
-it from the store.
+its chunks. The `MediaIndexReport` counts the media indexed and left `unchanged` and the chunks, and
+lists each medium's chunk ids.
+
+### The manifest
+
+Give the index a `manifest`, any `Store`, and a `name`, and it remembers what it holds: one
+`MediaIndexEntry` per medium, with a hash of its content, source, metadata, and how it was indexed,
+where it is kept, how many pages were read, every chunk's id, the embedding model, and the
+`MediaIndexReader` that read and described it. With it:
+
+- `add()` upserts: a medium at the same version writes nothing, and one that changed replaces exactly
+  its chunks, removing those of pages it no longer has, and the asset of its old content;
+- `delete(ids)` removes media with their chunks and assets;
+- `reindex(ids)` indexes media again from where each is kept, after a new embedding model or reader;
+- `describe(id)` returns a medium's entry, and `list()` the entries, newest first.
+
+```ts
+const index = createMediaIndex({ vectors, media, embeddings, assets, manifest: store, name: 'invoices' });
+await index.add(documents); // run again: only what changed is read and embedded
+await index.delete(['invoice-17']);
+```
+
+A change is recorded as pending before anything is written, and as done only once its chunks are
+written, its stale chunks removed, and its old asset deleted. Chunk ids are fixed by the medium and
+its pages, so a write repeated after a crash replaces rather than adds, and the next `add()`,
+`reindex()`, or `delete()` of a medium a crash left pending finishes it. In the test suite, a medium
+indexed, changed, or deleted with a crash at each write ends with exactly its chunks and its asset.
 
 `search()` returns `MediaHit` values, each medium once at its best chunk, the best first, as
 `MediaSearchOptions` asks: `topK` (5) and a metadata `filter`. A hit says what matched (a page, the
@@ -147,6 +173,7 @@ text says what each chart is, and only the chart shows which bar is tallest.
 - A vision model's reading is only as faithful as the model; an OCR service keeps layout better.
 - Mistral's price per page is not bundled, since it differs by account and model; set `pricePerPage`.
 - Video and audio are not media here; transcribe audio with the voice family.
-- A media index does not remember which media it holds: keep the report's chunk ids to remove one.
+- Without a manifest, a media index does not remember which media it holds: keep the report's chunk
+  ids to remove one.
 
 <!-- reference:start -->

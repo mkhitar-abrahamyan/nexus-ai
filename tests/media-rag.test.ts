@@ -14,8 +14,10 @@ import { MemoryVectorStore } from '../src/hallucination/retrieval.js';
 import { MemoryAssetStore } from '../src/images/assets.js';
 import { MediaError, type MediaInput, MediaManager } from '../src/media/index.js';
 import { MockMediaProvider } from '../src/media/mock.js';
-import { answerFromMedia, createMediaIndex } from '../src/media/rag.js';
+import { answerFromMedia, createMediaIndex, type MediaIndexEntry } from '../src/media/rag.js';
+import { MemoryStore } from '../src/store/memory.js';
 import type { Evaluator } from '../src/types/evaluate.js';
+import type { VectorDocument, VectorStore } from '../src/hallucination/retrieval.js';
 
 const bytesOf = (media: MediaInput) => {
   const source = media.source as { base64?: string; url?: string };
@@ -58,6 +60,7 @@ test('a medium is indexed as its pages, its caption, and where it is kept', asyn
   ]);
   assert.deepEqual(report, {
     media: 3,
+    unchanged: 0,
     pages: 4,
     captions: 2,
     vectors: 0,
@@ -230,4 +233,170 @@ test('proof: answers grounded in the retrieved media beat answers from their tex
     years.map((year) => `revenue-${year}`),
     'the model was handed each question’s own chart',
   );
+});
+
+// ── The manifest ──────────────────────────────────────────────────────
+
+/** A vector store that keeps chunk ids and counts writes, and dies when told to. */
+class TrackedVectors implements VectorStore {
+  readonly chunks = new Map<string, VectorDocument>();
+  writes = 0;
+  crash?: (method: 'add' | 'delete') => boolean;
+
+  async add(documents: VectorDocument[]): Promise<void> {
+    if (this.crash?.('add')) throw new Error('the process died');
+    this.writes += 1;
+    for (const document of documents) this.chunks.set(document.id, document);
+  }
+  async delete(ids: readonly string[]): Promise<void> {
+    if (this.crash?.('delete')) throw new Error('the process died');
+    this.writes += 1;
+    for (const id of ids) this.chunks.delete(id);
+  }
+  async search(): Promise<never[]> {
+    return [];
+  }
+  async searchVector(): Promise<never[]> {
+    return [];
+  }
+}
+
+function manifestSetup(pages: Record<string, string[]>) {
+  const base = setup({ read: (medium) => pages[bytesOf(medium)] ?? [`text of ${bytesOf(medium)}`] });
+  const vectors = new TrackedVectors();
+  const manifest = new MemoryStore();
+  const reads = { count: 0 };
+  const media = {
+    read: (request: Parameters<MediaManager['read']>[0]) => {
+      reads.count += 1;
+      return base.media.read(request);
+    },
+    describe: (request: Parameters<MediaManager['describe']>[0]) => base.media.describe(request),
+  };
+  const make = () => createMediaIndex({ ...base, media, vectors, manifest, name: 'library' });
+  return { ...base, vectors, manifest, reads, make };
+}
+
+const chunkIdsOf = (vectors: TrackedVectors, medium: string) =>
+  [...vectors.chunks.keys()].filter((id) => id.startsWith(`${medium}#`)).sort();
+
+test('with a manifest, an unchanged medium writes nothing, a changed one replaces exactly its chunks, and a deleted one leaves none', async () => {
+  const { vectors, assets, reads, make } = manifestSetup({
+    invoice: ['invoice 17 total 42 EUR', 'thank you'],
+    'invoice v2': ['invoice 17 total 40 EUR'],
+  });
+  const index = make();
+  const first = await index.add([
+    { id: 'invoice-17', media: pdf('invoice'), source: 'mail/invoice.pdf' },
+    { id: 'sign', media: image('stop sign') },
+  ]);
+  assert.equal(first.media, 2);
+  assert.deepEqual(chunkIdsOf(vectors, 'invoice-17'), ['invoice-17#p0', 'invoice-17#p1']);
+  assert.equal(assets.store.snapshot().entries, 2);
+
+  const writes = vectors.writes;
+  const again = await index.add([
+    { id: 'invoice-17', media: pdf('invoice'), source: 'mail/invoice.pdf' },
+    { id: 'sign', media: image('stop sign') },
+  ]);
+  assert.deepEqual([again.media, again.unchanged], [0, 2], 'nothing changed, so nothing was indexed');
+  assert.equal(vectors.writes, writes, 'and nothing was written');
+  assert.equal(reads.count, 2, 'or read');
+  assert.deepEqual(again.ids['invoice-17'], ['invoice-17#p0', 'invoice-17#p1']);
+
+  const before = (await index.describe('invoice-17')) as MediaIndexEntry;
+  await index.add([{ id: 'invoice-17', media: pdf('invoice v2'), source: 'mail/invoice.pdf' }]);
+  assert.deepEqual(chunkIdsOf(vectors, 'invoice-17'), ['invoice-17#p0'], 'the page it lost is gone');
+  assert.match(String(vectors.chunks.get('invoice-17#p0')?.content), /total 40/);
+  const after = (await index.describe('invoice-17')) as MediaIndexEntry;
+  assert.notEqual(after.hash, before.hash);
+  assert.equal(after.pages, 1);
+  assert.deepEqual(after.chunkIds, ['invoice-17#p0']);
+  assert.deepEqual(after.reader, { provider: 'mock-media', model: 'mock' });
+  assert.equal(after.createdAt, before.createdAt);
+  assert.notEqual(after.reference.assetId, before.reference.assetId);
+  assert.equal(await assets.store.get(before.reference.assetId as string, 'acme'), undefined, 'the old asset is gone');
+  assert.equal(assets.store.snapshot().entries, 2);
+  assert.deepEqual((await index.list()).map((entry) => entry.id).sort(), ['invoice-17', 'sign']);
+
+  const readsBefore = reads.count;
+  const reindexed = await index.reindex(['sign']);
+  assert.equal(reindexed.media, 1);
+  assert.equal(reads.count, readsBefore + 1, 'a reindex reads the medium again, from where it is kept');
+  assert.equal(assets.store.snapshot().entries, 2, 'and keeps the asset it has');
+
+  assert.equal(await index.delete(['invoice-17', 'nothing']), 1);
+  assert.deepEqual(chunkIdsOf(vectors, 'invoice-17'), []);
+  assert.equal(await index.describe('invoice-17'), undefined);
+  assert.equal(assets.store.snapshot().entries, 1);
+  await assert.rejects(createMediaIndex({ ...setup(), vectors }).delete(['sign']), /needs a manifest to delete by id/);
+});
+
+test('proof: a medium indexed, changed, or deleted with a crash halfway through each ends exactly as without one', async () => {
+  const expectClean = async (
+    label: string,
+    context: ReturnType<typeof manifestSetup>,
+    medium: string,
+    chunkIds: string[],
+    assetCount: number,
+  ) => {
+    assert.deepEqual(chunkIdsOf(context.vectors, medium), chunkIds, `${label}: exactly its chunks`);
+    assert.equal(context.assets.store.snapshot().entries, assetCount, `${label}: exactly its assets`);
+    const entry = await context.make().describe(medium);
+    assert.equal(entry?.pending, undefined, `${label}: nothing left pending`);
+  };
+  /** The first call that `when` picks dies, as a process would mid-write. */
+  const once = (when: (method: 'add' | 'delete') => boolean) => {
+    let done = false;
+    return (method: 'add' | 'delete') => {
+      if (done || !when(method)) return false;
+      done = true;
+      return true;
+    };
+  };
+  const pages = { invoice: ['one', 'two'], 'invoice v2': ['one again'] };
+
+  // Indexed for the first time, dying as the chunks are written.
+  {
+    const context = manifestSetup(pages);
+    context.vectors.crash = once((method) => method === 'add');
+    await assert.rejects(context.make().add([{ id: 'invoice', media: pdf('invoice') }]), /the process died/);
+    await context.make().add([{ id: 'invoice', media: pdf('invoice') }]);
+    await expectClean('first index', context, 'invoice', ['invoice#p0', 'invoice#p1'], 1);
+  }
+
+  // Changed, dying at each write in turn: the chunks, the stale chunks, and the record of the change.
+  const points = ['chunks', 'stale chunks', 'record'] as const;
+  for (const point of points) {
+    const context = manifestSetup(pages);
+    await context.make().add([{ id: 'invoice', media: pdf('invoice') }]);
+    if (point === 'chunks') context.vectors.crash = once((method) => method === 'add');
+    if (point === 'stale chunks') context.vectors.crash = once((method) => method === 'delete');
+    const put = context.manifest.put.bind(context.manifest);
+    let dying = point === 'record';
+    context.manifest.put = (async (namespace, key, value, options) => {
+      if (dying && !(value as MediaIndexEntry).pending) {
+        dying = false;
+        throw new Error('the process died');
+      }
+      return put(namespace, key, value, options);
+    }) as typeof context.manifest.put;
+    await assert.rejects(context.make().add([{ id: 'invoice', media: pdf('invoice v2') }]), /the process died/);
+    await context.make().add([{ id: 'invoice', media: pdf('invoice v2') }]);
+    await expectClean(`changed, dying at the ${point}`, context, 'invoice', ['invoice#p0'], 1);
+    assert.match(String(context.vectors.chunks.get('invoice#p0')?.content), /one again/);
+  }
+
+  // Deleted, dying as the chunks go: a second delete finishes it.
+  {
+    const context = manifestSetup(pages);
+    await context.make().add([{ id: 'invoice', media: pdf('invoice') }]);
+    context.vectors.crash = once((method) => method === 'delete');
+    await assert.rejects(context.make().delete(['invoice']), /the process died/);
+    assert.ok(await context.make().describe('invoice'), 'the entry outlives the crash');
+    assert.equal(await context.make().delete(['invoice']), 1);
+    assert.deepEqual(chunkIdsOf(context.vectors, 'invoice'), []);
+    assert.equal(context.assets.store.snapshot().entries, 0);
+    assert.equal(await context.make().describe('invoice'), undefined);
+  }
 });

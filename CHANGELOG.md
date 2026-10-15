@@ -22,6 +22,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   script moves both, and Postgres does it in one statement, in the reservations table of a new
   tenancy migration, version 2. A store of your own records them through five optional methods on
   `BudgetUsageStore`.
+- **A media index that remembers what it holds.** `MediaIndexOptions.manifest`, any `Store`, with a
+  `name`, keeps one `MediaIndexEntry` per medium: a hash of its content, source, metadata, and
+  indexing options, where it is kept, its pages, its chunk ids, the embedding model, and the
+  `MediaIndexReader` that read and described it. `add()` then skips a medium at the same version and
+  replaces exactly the chunks and asset of one that changed, and `MediaIndex` gains `delete()`,
+  `reindex()`, `describe()`, and `list()`. `MediaIndexReport.unchanged` counts what was skipped. A
+  change is recorded as pending first, so a crash leaves nothing the next call cannot finish.
 
 ### Changed
 
@@ -60,6 +67,10 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   holding a reservation, before its evaluator, during it, or after its scores, leaves the budget at
   what the judge billed once another worker takes over. With recovery switched off, the same test
   finds the dead worker's estimate still charged.
+- `tests/media-rag.test.ts`: with a manifest, an unchanged medium is neither read nor written, a
+  changed one keeps exactly its chunks and one asset, and a deleted one leaves none, with a crash at
+  each write of a first index, a change, and a delete. Without the pending record, the crash proof
+  fails.
 - `tests/deep-agent-helpers.test.ts`: an agent that created its last allowed helper, killed and
   continued in another process, is refused a second and delegates to the first again by name. Without
   the record read back, the second is created.

@@ -58,7 +58,10 @@ New and stable:
   and which outcome moves a reservation from which status, are part of the promise;
 - `hold()`, `settle()`, `renew()`, `lapsed()`, and `reservation()` on `MemoryTenantUsage`,
   `RedisTenantUsage`, and `PostgresTenantUsage`, and the tenancy migration version 2 with its
-  reservations table.
+  reservations table;
+- on `nexus-ai-pro/media/rag`, experimental with the media family: `MediaIndexOptions.manifest` and
+  `name`, `MediaIndexEntry`, `MediaIndexReader`, `MediaIndexReport.unchanged`, and
+  `MediaIndex.delete()`, `reindex()`, `describe()`, and `list()`.
 
 Changed, each to keep a promise the surface already made:
 - `TraceStore.query()` orders runs that share a start time by id, from last to first, as code units,
