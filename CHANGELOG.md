@@ -4,6 +4,40 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **A2A tasks that outlive their replica.** A working task's record now holds an `A2aTaskLease` and
+  an `A2aTaskRun`. The lease names the replica running the task, which renews it every third of
+  `lease.ms` (30 seconds); the run says what the task was asked to do. `a2aHandler()` returns an
+  `A2aHandler`: the request handler, plus `recover()` and `close()`. `recover()` takes over working
+  tasks whose lease lapsed, and carries each run on in one of three ways:
+  - from the graph's last checkpoint;
+  - by answering its questions again, when a resume never reached the graph;
+  - from the start, when the run left no checkpoint.
+
+  `recoverEveryMs` runs it on a timer. `A2aTaskStore.claim()` takes a lease in one step, so two
+  replicas recovering at once take a task once. `MemoryA2aTaskStore` has it, and `storeA2aTasks()`
+  builds it on `putIfVersion()`. A replica that finds its lease taken stops its run, and never
+  records its result over the other's.
+- **ACP turns that outlive the agent.** While a prompt runs, its session record holds an
+  `AcpTurnRecord`. When the editor reopens the session with `session/load`, the agent carries the
+  turn on, streaming its updates: from the graph's last checkpoint, by answering again, or from the
+  start. A turn stopped while the editor was deciding an approval asks for it again.
+- `continueWith()` on a compiled graph: `continue()`, returning the final result.
+  `ProtocolGraph.continueWith()` and `state()`, both optional, are what A2A and ACP carry a run on
+  with.
+
+### Proof
+
+- `tests/a2a-takeover.test.ts`: a task whose replica dies halfway through a tool is taken over, on
+  the memory, SQLite, Postgres, and Redis stores. The model call the dead replica finished is not
+  made again, and the email it never sent is sent once. Two replicas recovering at the same moment
+  take the task over once, and a lease renewed while a slow task works is never taken. Without the
+  lease check, or carried on from the start instead of the checkpoint, the proof fails.
+- `tests/acp-turns.test.ts`: an agent stopped halfway through a tool is started again and its
+  session reopened; the turn goes on without repeating the finished model call, and sends the email
+  once. A turn stopped during an approval asks again. Without the recovery on load, the proof fails.
+
 ## [2.9.0] - 2026-10-15
 
 Video, and everything shipped, proven.

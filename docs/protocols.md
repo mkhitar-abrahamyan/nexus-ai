@@ -218,8 +218,34 @@ shared checkpointer too.
 import { a2aHandler, storeA2aTasks } from 'nexus-ai-pro/protocols/a2a';
 
 const agent = createAgent({ client: ai, tools, interruptOn: { send_email: true }, checkpointer: postgresCheckpointer });
-export const handler = a2aHandler(agent, { card, store: storeA2aTasks(postgresStore) });
+export const handler = a2aHandler(agent, {
+  card,
+  store: storeA2aTasks(postgresStore),
+  recoverEveryMs: 15_000, // take over what a stopped replica was working on
+});
 ```
+
+A task that is working survives its replica too. `a2aHandler()` returns an `A2aHandler`: the
+request handler, plus `recover()` and `close()`. While a replica runs a task, the record holds its
+`A2aTaskLease`: the replica's `owner` name and when the lease lapses. The replica renews it every
+third of `lease.ms` (30 seconds). The record also holds the `A2aTaskRun`: whether a message started
+the run or answers resumed it, that message, the answers, and the principal.
+
+`recover()` reads the working tasks whose lease has lapsed and takes each over, up to `limit` (10).
+It claims the lease, then carries the run on: from the graph's last checkpoint through the graph's
+`continueWith()`, by answering the questions again when a resume never reached the graph, or from
+the start when the run left no checkpoint. It resolves to an `A2aRecoveryReport` once the tasks are
+claimed. `recoverEveryMs` runs it on a timer, which `close()` stops.
+
+`A2aTaskStore.claim()` takes a lease in one step, so of two replicas recovering at once, one takes
+the task. `MemoryA2aTaskStore` has it, and `storeA2aTasks()` builds it on the store's
+`putIfVersion()`, bumping the record's `version`. A replica that finds another holding its task's
+lease stops the run, and never records its result over the other's. A graph of your own without
+`continueWith()` cannot carry a run on: its task fails with that reason rather than staying working.
+
+In the test suite, a task whose replica dies halfway through a tool is taken over on every store.
+The model call the dead replica finished is not made again, the email it never sent is sent once,
+and two replicas recovering at the same moment take the task over once.
 
 ### Push notifications and the extended card
 
@@ -337,6 +363,20 @@ A store outside the process makes a session survive a restart; give the graph a 
 checkpointer too, so the paused run resumes. Audio is kept in a session as a note that it was
 heard, not as its bytes.
 
+A turn the agent was in the middle of survives too. While a prompt runs, its record holds an
+`AcpTurnRecord`: whether the prompt started a run or answered the last turn's questions, the prompt,
+and the answers. When `session/load` finds one, the agent carries the turn on once the load has
+answered, streaming its updates as a prompt would:
+- from the graph's last checkpoint, so steps that finished are not run again;
+- by answering again a resume that never reached the graph;
+- or from the start, when the run left no checkpoint.
+
+A turn stopped while the editor was deciding an approval asks for it again. A prompt sent meanwhile
+waits for the carried-on turn. A graph without `continueWith()` cannot carry a turn on, so the agent
+says so in the session, and the turn ends. In the test suite, an agent that stops halfway through a
+tool is started again and its session reopened: the model call it finished is not made again, the
+email it never sent is sent once, and the answer reaches the editor.
+
 ### The editor's files, terminal, and MCP servers
 
 `acpEditor()`, on `nexus-ai-pro/protocols/acp/editor`, gives an agent what the editor offers, as an
@@ -437,13 +477,15 @@ Each protocol is also tested across releases and against the reference client of
 - **AG-UI.** A state delta compares JSON: a value JSON cannot carry, such as a `Date` or a `Map`,
   reaches the frontend as JSON makes it. A change inside an array other than appending replaces the
   whole array.
-- **A2A tasks running when their process stops.** A task paused for an answer survives anything,
-  but one that was working stays `TASK_STATE_WORKING` until it is cancelled: nothing resumes a run
-  its process lost.
+- **A2A tasks running when their process stops.** A step that was halfway through when the
+  process stopped runs again on the replica that takes it over, as a graph's steps do after any
+  crash, so a tool with side effects needs an idempotency key. A slow replica that loses its lease
+  stops its run, but a tool already running finishes.
 - **A2A coverage.** Only the JSON-RPC binding is served. A webhook receives state changes, not each
   piece of streamed text.
-- **ACP turns.** A session survives a restart between turns. A turn the agent was in the middle of,
-  such as one waiting on an approval in the editor, is lost with its process.
+- **ACP turns.** A turn goes on when the editor reopens its session, not before. A step that was
+  halfway through when the agent stopped runs again, so a tool with side effects needs an
+  idempotency key.
 - **The editor's MCP servers.** Servers over stdio and HTTP are connected; an SSE server is not. A
   server's tools declare no capabilities, so a permission policy needs a rule for them by name.
 
@@ -466,20 +508,24 @@ specific entry point that provides it.
 | `A2aClientOptions` | interface | Options for `a2aClient()`. |
 | `A2aError` | class | Raised by the client when an agent answers with a JSON-RPC error. |
 | `a2aHandler` | function | An HTTP handler that serves a graph as an A2A agent: `GET` the card, `POST` JSON-RPC. |
+| `A2aHandler` | interface | An A2A agent's HTTP handler, with what keeps its tasks alive across replicas: `recover()` takes over the working tasks whose replica stopped renewing their lease, and `close()` stops the recovery timer. |
 | `A2aListTasksOptions` | interface | Which tasks `A2aClient.listTasks()` asks for. |
 | `A2aMessage` | interface | A message between agents. |
 | `A2aPart` | interface | One part of a message or an artifact: text, structured data, or a file by URL or bytes. |
 | `A2aPushNotificationConfig` | interface | Where a task's updates are pushed: a webhook the calling agent gave. |
 | `A2aPushOptions` | interface | Options for pushing task updates to the webhooks callers give. |
+| `A2aRecoveryReport` | interface | What one `recover()` did. |
 | `A2aRole` | type | Who a message is from. |
 | `A2aSendOptions` | interface | What to send: text, and optionally data, a conversation, or the paused task it answers. |
 | `A2aServerOptions` | interface | Options for `a2aHandler()`. |
 | `A2aSkill` | interface | A skill an agent card advertises. |
 | `A2aStreamEvent` | type | A streamed event: a task, a status change, or a piece of an artifact. |
 | `A2aTask` | interface | A unit of work an agent was asked to do. |
+| `A2aTaskLease` | interface | A replica's hold on a working task. |
 | `A2aTaskPage` | interface | A page of tasks. |
 | `A2aTaskQuery` | interface | Which tasks `A2aTaskStore.list()` returns. |
 | `A2aTaskRecord` | interface | A task as a store keeps it: the task, its messages, the questions it waits on, and its webhooks. |
+| `A2aTaskRun` | interface | A working run, as kept with its task: started by a message, or answering the task's questions. |
 | `A2aTaskState` | type | Where a task stands. |
 | `A2aTaskStore` | interface | Where an A2A agent keeps its tasks and conversations. |
 | `a2aTool` | function | A remote A2A agent as a tool another agent can call. |
@@ -505,6 +551,7 @@ specific entry point that provides it.
 | `AcpStopReason` | type | Why a prompt's turn ended. |
 | `AcpStreams` | interface | Where the agent reads and writes: `process.stdin` and `process.stdout`, or any pair like them. |
 | `AcpToolKind` | type | What a tool call does, so the editor can show it: ACP's tool kinds. |
+| `AcpTurnRecord` | interface | A turn in progress, as a session keeps it. |
 | `MemoryAcpSessionStore` | class | Sessions in this process: the default. |
 | `serveAcp` | function | Serves a graph to an editor over ACP. |
 | `storeAcpSessions` | function | Sessions in any long-term `Store`: the memory, Redis, Postgres, or SQLite store. |

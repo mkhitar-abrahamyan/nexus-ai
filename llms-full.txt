@@ -2109,6 +2109,7 @@ was asked.
 | `resume()`, `resumeWith()` | Answer the one pending question. |
 | `resumeInterrupts()`, `resumeInterruptsWith()` | Answer several, by id. |
 | `continue()` | Carries on from a breakpoint, a drain, or a failure. On a finished thread it changes nothing and returns its state. |
+| `continueWith()` | The same, returning the final result: what a replica calls to finish a run whose process stopped. |
 | `resumeFrom()` | Rewinds to a step and runs forward. |
 
 `interruptKey()` is the stable key an answer is stored under: task, step, and index. That is how
@@ -3922,8 +3923,34 @@ shared checkpointer too.
 import { a2aHandler, storeA2aTasks } from 'nexus-ai-pro/protocols/a2a';
 
 const agent = createAgent({ client: ai, tools, interruptOn: { send_email: true }, checkpointer: postgresCheckpointer });
-export const handler = a2aHandler(agent, { card, store: storeA2aTasks(postgresStore) });
+export const handler = a2aHandler(agent, {
+  card,
+  store: storeA2aTasks(postgresStore),
+  recoverEveryMs: 15_000, // take over what a stopped replica was working on
+});
 ```
+
+A task that is working survives its replica too. `a2aHandler()` returns an `A2aHandler`: the
+request handler, plus `recover()` and `close()`. While a replica runs a task, the record holds its
+`A2aTaskLease`: the replica's `owner` name and when the lease lapses. The replica renews it every
+third of `lease.ms` (30 seconds). The record also holds the `A2aTaskRun`: whether a message started
+the run or answers resumed it, that message, the answers, and the principal.
+
+`recover()` reads the working tasks whose lease has lapsed and takes each over, up to `limit` (10).
+It claims the lease, then carries the run on: from the graph's last checkpoint through the graph's
+`continueWith()`, by answering the questions again when a resume never reached the graph, or from
+the start when the run left no checkpoint. It resolves to an `A2aRecoveryReport` once the tasks are
+claimed. `recoverEveryMs` runs it on a timer, which `close()` stops.
+
+`A2aTaskStore.claim()` takes a lease in one step, so of two replicas recovering at once, one takes
+the task. `MemoryA2aTaskStore` has it, and `storeA2aTasks()` builds it on the store's
+`putIfVersion()`, bumping the record's `version`. A replica that finds another holding its task's
+lease stops the run, and never records its result over the other's. A graph of your own without
+`continueWith()` cannot carry a run on: its task fails with that reason rather than staying working.
+
+In the test suite, a task whose replica dies halfway through a tool is taken over on every store.
+The model call the dead replica finished is not made again, the email it never sent is sent once,
+and two replicas recovering at the same moment take the task over once.
 
 ### Push notifications and the extended card
 
@@ -4041,6 +4068,20 @@ A store outside the process makes a session survive a restart; give the graph a 
 checkpointer too, so the paused run resumes. Audio is kept in a session as a note that it was
 heard, not as its bytes.
 
+A turn the agent was in the middle of survives too. While a prompt runs, its record holds an
+`AcpTurnRecord`: whether the prompt started a run or answered the last turn's questions, the prompt,
+and the answers. When `session/load` finds one, the agent carries the turn on once the load has
+answered, streaming its updates as a prompt would:
+- from the graph's last checkpoint, so steps that finished are not run again;
+- by answering again a resume that never reached the graph;
+- or from the start, when the run left no checkpoint.
+
+A turn stopped while the editor was deciding an approval asks for it again. A prompt sent meanwhile
+waits for the carried-on turn. A graph without `continueWith()` cannot carry a turn on, so the agent
+says so in the session, and the turn ends. In the test suite, an agent that stops halfway through a
+tool is started again and its session reopened: the model call it finished is not made again, the
+email it never sent is sent once, and the answer reaches the editor.
+
 ### The editor's files, terminal, and MCP servers
 
 `acpEditor()`, on `nexus-ai-pro/protocols/acp/editor`, gives an agent what the editor offers, as an
@@ -4141,13 +4182,15 @@ Each protocol is also tested across releases and against the reference client of
 - **AG-UI.** A state delta compares JSON: a value JSON cannot carry, such as a `Date` or a `Map`,
   reaches the frontend as JSON makes it. A change inside an array other than appending replaces the
   whole array.
-- **A2A tasks running when their process stops.** A task paused for an answer survives anything,
-  but one that was working stays `TASK_STATE_WORKING` until it is cancelled: nothing resumes a run
-  its process lost.
+- **A2A tasks running when their process stops.** A step that was halfway through when the
+  process stopped runs again on the replica that takes it over, as a graph's steps do after any
+  crash, so a tool with side effects needs an idempotency key. A slow replica that loses its lease
+  stops its run, but a tool already running finishes.
 - **A2A coverage.** Only the JSON-RPC binding is served. A webhook receives state changes, not each
   piece of streamed text.
-- **ACP turns.** A session survives a restart between turns. A turn the agent was in the middle of,
-  such as one waiting on an approval in the editor, is lost with its process.
+- **ACP turns.** A turn goes on when the editor reopens its session, not before. A step that was
+  halfway through when the agent stopped runs again, so a tool with side effects needs an
+  idempotency key.
 - **The editor's MCP servers.** Servers over stdio and HTTP are connected; an SSE server is not. A
   server's tools declare no capabilities, so a permission policy needs a rule for them by name.
 
@@ -12360,7 +12403,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 343 KB | 100% | none |
 | `nexus-ai-pro/config` | 336 KB | 98% | none |
 | `nexus-ai-pro/core` | 332 KB | 97% | none |
-| `nexus-ai-pro/deep-agent` | 184 KB | 54% | none |
+| `nexus-ai-pro/deep-agent` | 185 KB | 54% | none |
 | `nexus-ai-pro/realtime` | 158 KB | 46% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |
@@ -12375,7 +12418,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/openrouter` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
-| `nexus-ai-pro/graph` | 81 KB | 24% | none |
+| `nexus-ai-pro/graph` | 82 KB | 24% | none |
 | `nexus-ai-pro/router` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
 | `nexus-ai-pro/evaluate/online` | 74 KB | 22% | none |
@@ -12393,6 +12436,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 13% | none |
+| `nexus-ai-pro/protocols/a2a` | 42 KB | 12% | none |
 | `nexus-ai-pro/embeddings` | 40 KB | 12% | none |
 | `nexus-ai-pro/embeddings/batch` | 40 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
@@ -12400,7 +12444,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/ops` | 39 KB | 11% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
-| `nexus-ai-pro/protocols/a2a` | 36 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
@@ -12420,11 +12463,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/lifecycle` | 27 KB | 8% | none |
 | `nexus-ai-pro/runtime` | 25 KB | 7% | none |
 | `nexus-ai-pro/images/assets` | 25 KB | 7% | none |
+| `nexus-ai-pro/protocols/acp` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
 | `nexus-ai-pro/agent/sandbox` | 22 KB | 6% | none |
-| `nexus-ai-pro/protocols/acp` | 22 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |

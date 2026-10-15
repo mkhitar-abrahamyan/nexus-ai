@@ -51,6 +51,16 @@ export interface ProtocolGraph {
     answers: Record<string, unknown>,
     options?: ProtocolRunOptions,
   ): Promise<ProtocolResult>;
+  /**
+   * Carries a thread on from its last checkpoint, for a run whose process stopped. A compiled graph
+   * with a checkpointer has it; without it, a run a stopped process left is failed, not taken over.
+   */
+  continueWith?(threadId: string, options?: ProtocolRunOptions): Promise<ProtocolResult>;
+  /**
+   * The thread's latest checkpoint: where it stands and the questions it waits on, or `undefined` when
+   * it has none.
+   */
+  state?(threadId: string): Promise<{ status: string; interrupts?: Array<{ id: string }> } | undefined>;
 }
 
 /** A role a protocol message may carry. */

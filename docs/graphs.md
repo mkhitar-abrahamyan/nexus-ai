@@ -340,6 +340,7 @@ was asked.
 | `resume()`, `resumeWith()` | Answer the one pending question. |
 | `resumeInterrupts()`, `resumeInterruptsWith()` | Answer several, by id. |
 | `continue()` | Carries on from a breakpoint, a drain, or a failure. On a finished thread it changes nothing and returns its state. |
+| `continueWith()` | The same, returning the final result: what a replica calls to finish a run whose process stopped. |
 | `resumeFrom()` | Rewinds to a step and runs forward. |
 
 `interruptKey()` is the stable key an answer is stored under: task, step, and index. That is how

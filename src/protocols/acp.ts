@@ -11,7 +11,8 @@
  * A choice to always allow or always reject is kept for the rest of the session.
  *
  * Sessions live in an `AcpSessionStore`, so an editor reopens one with `session/load` after the agent
- * restarts. A prompt may carry images and audio. An `AcpEditorBridge`, such as `acpEditor()` from
+ * restarts, and a turn the agent was in the middle of is carried on there. A prompt may carry images
+ * and audio. An `AcpEditorBridge`, such as `acpEditor()` from
  * `nexus-ai-pro/protocols/acp/editor`, gives the agent the editor's files, terminal, and MCP servers.
  */
 import type { GraphEvent } from '../types/graph.js';
@@ -102,7 +103,7 @@ export interface AcpOptions {
   /**
    * Where sessions are kept. Defaults to memory; `storeAcpSessions()` keeps them in a long-term store,
    * so an editor reopens a session with `session/load` after the agent restarts. A question the last
-   * turn asked is kept too; a turn the agent was in the middle of is not.
+   * turn asked is kept too, and so is a turn the agent was in the middle of, which the load carries on.
    */
   sessions?: AcpSessionStore;
   /** Gives the agent what the editor offers: its files, its terminal, and its MCP servers. */
@@ -147,8 +148,24 @@ export interface AcpSessionRecord {
   answered?: Record<string, unknown>;
   /** Tool names a person chose to always allow (true) or always reject (false). */
   always: Array<[string, boolean]>;
+  /** The turn the agent is in the middle of, so a load after the agent stopped can carry it on. */
+  turn?: AcpTurnRecord;
   /** ISO-8601 time it was last written. */
   updatedAt: string;
+}
+
+/** A turn in progress, as a session keeps it. */
+export interface AcpTurnRecord {
+  /** `invoke` for a prompt that started a run, `resume` for one answering the last turn's questions. */
+  kind: 'invoke' | 'resume';
+  /** The prompt, as the conversation keeps it. */
+  user: Message;
+  /** The prompt's blocks, for an `input` that reads them, when the run must start over. */
+  blocks?: AcpContentBlock[];
+  /** The answers a resume gave, by interrupt id. */
+  answers?: Record<string, unknown>;
+  /** ISO-8601 time it began. */
+  startedAt: string;
 }
 
 /** Where an ACP agent keeps its sessions. */
@@ -206,6 +223,10 @@ interface Session {
   /** Tool names a person chose to always allow, or always reject. */
   always: Map<string, boolean>;
   controller?: AbortController;
+  /** The turn in progress, kept so a load after the agent stops carries it on. */
+  turn?: AcpTurnRecord;
+  /** A turn a load is carrying on, which a new prompt waits for. */
+  recovering?: Promise<void>;
 }
 
 type Incoming = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> } & {
@@ -232,6 +253,7 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
       ...(session.pending ? { pending: session.pending } : {}),
       ...(session.answered ? { answered: session.answered } : {}),
       always: [...session.always],
+      ...(session.turn ? { turn: { ...session.turn, user: storable([session.turn.user])[0] as Message } } : {}),
       updatedAt: new Date().toISOString(),
     });
   };
@@ -294,14 +316,18 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
     return allowed;
   };
 
-  /** Runs one prompt to the end of its turn. */
-  const prompt = async (session: Session, blocks: AcpContentBlock[]): Promise<AcpStopReason> => {
+  /**
+   * Runs a turn to its end: `begin` starts it, a prompt's run or the carrying on of one the agent
+   * stopped in the middle of, and the turn then asks for each approval and gives the answer.
+   */
+  const runTurn = async (
+    session: Session,
+    begin: (runOptions: ProtocolRunOptions) => Promise<ProtocolResult>,
+  ): Promise<AcpStopReason> => {
     session.controller?.abort();
     const controller = new AbortController();
     session.controller = controller;
     const id = session.info.id;
-    const text = promptText(blocks);
-    const media = mediaParts(blocks);
     let spoke = false;
     // A result does not repeat its arguments, which its diff needs.
     const calls = new Map<string, Record<string, unknown>>();
@@ -325,49 +351,97 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
     };
 
     try {
-      return await turn(session, text, media, blocks, runOptions, controller.signal, () => spoke);
+      return await finish(session, await begin(runOptions), runOptions, controller.signal, () => spoke);
     } catch (error) {
       // A cancelled run may end by throwing; the editor is owed a turn that ended as cancelled.
       if (controller.signal.aborted) return 'cancelled';
       throw error;
     } finally {
+      session.turn = undefined;
       await save(session);
     }
   };
 
-  /** A prompt's turn: the run, each approval it waits on, and the answer. */
-  const turn = async (
+  /** Runs one prompt to the end of its turn, after any turn a load is still carrying on. */
+  const prompt = async (session: Session, blocks: AcpContentBlock[]): Promise<AcpStopReason> => {
+    await session.recovering?.catch(() => undefined);
+    const id = session.info.id;
+    const text = promptText(blocks);
+    const media = mediaParts(blocks);
+    const user: Message = media.length
+      ? { role: 'user', content: [...(text ? [{ type: 'text' as const, text }] : []), ...media] }
+      : messageOf('user', text);
+    return runTurn(session, async (runOptions) => {
+      const startedAt = new Date().toISOString();
+      if (session.pending?.length) {
+        const answers = {
+          ...session.answered,
+          ...Object.fromEntries(session.pending.map((item) => [item.id, answerText(text, item)])),
+        };
+        session.pending = undefined;
+        session.answered = undefined;
+        session.history.push(user);
+        // Kept before the run starts, so a load after the agent stops answers again.
+        session.turn = { kind: 'resume', user, answers, startedAt };
+        await save(session);
+        return graph.resumeInterruptsWith(id, answers, runOptions);
+      }
+      const history = session.history;
+      session.turn = { kind: 'invoke', user, ...(options.input ? { blocks } : {}), startedAt };
+      await save(session);
+      const result = await graph.invoke(
+        options.input ? options.input(text, session.info, history, blocks) : { messages: [...history, user] },
+        runOptions,
+      );
+      session.history = [...history, user];
+      return result;
+    });
+  };
+
+  /**
+   * Carries on the turn a stopped agent left: answers its questions again when the graph still waits
+   * on them, continues from the graph's last checkpoint, and starts over when it left none.
+   */
+  const carryOn = async (session: Session, turnRecord: AcpTurnRecord, runOptions: ProtocolRunOptions) => {
+    const id = session.info.id;
+    const checkpoint = graph.state ? await graph.state(id) : undefined;
+    let result: ProtocolResult;
+    const waiting = checkpoint?.status === 'awaiting_input' ? (checkpoint.interrupts ?? []) : [];
+    if (
+      turnRecord.kind === 'resume' &&
+      turnRecord.answers &&
+      waiting.length > 0 &&
+      waiting.every((interrupt) => turnRecord.answers && interrupt.id in turnRecord.answers)
+    ) {
+      result = await graph.resumeInterruptsWith(id, turnRecord.answers, runOptions);
+    } else if (checkpoint && graph.continueWith) {
+      result = await graph.continueWith(id, runOptions);
+    } else if (!checkpoint && turnRecord.kind === 'invoke') {
+      const text = typeof turnRecord.user.content === 'string' ? turnRecord.user.content : '';
+      result = await graph.invoke(
+        options.input
+          ? options.input(text, session.info, session.history, turnRecord.blocks ?? [{ type: 'text', text }])
+          : { messages: [...session.history, turnRecord.user] },
+        runOptions,
+      );
+    } else {
+      throw new Error('The agent stopped in the middle of this turn, and its graph cannot carry the turn on');
+    }
+    // A prompt's message joins the conversation once its run has an answer, as it would have.
+    if (turnRecord.kind === 'invoke') session.history = [...session.history, turnRecord.user];
+    return result;
+  };
+
+  /** A turn after its run starts: each approval it waits on, and the answer. */
+  const finish = async (
     session: Session,
-    text: string,
-    media: ContentPart[],
-    blocks: AcpContentBlock[],
+    started: ProtocolResult,
     runOptions: ProtocolRunOptions,
     signal: AbortSignal,
     spoke: () => boolean,
   ): Promise<AcpStopReason> => {
     const id = session.info.id;
-    const user: Message = media.length
-      ? { role: 'user', content: [...(text ? [{ type: 'text' as const, text }] : []), ...media] }
-      : messageOf('user', text);
-    let result: ProtocolResult;
-    if (session.pending?.length) {
-      const answers = {
-        ...session.answered,
-        ...Object.fromEntries(session.pending.map((item) => [item.id, answerText(text, item)])),
-      };
-      session.pending = undefined;
-      session.answered = undefined;
-      session.history.push(user);
-      result = await graph.resumeInterruptsWith(id, answers, runOptions);
-    } else {
-      const history = session.history;
-      result = await graph.invoke(
-        options.input ? options.input(text, session.info, history, blocks) : { messages: [...history, user] },
-        runOptions,
-      );
-      session.history = [...history, user];
-    }
-
+    let result = started;
     while (result.status === 'awaiting_input' && result.interrupts?.length) {
       if (signal.aborted) return 'cancelled';
       const approvals = result.interrupts.filter((item) => toolCallOf(item));
@@ -398,6 +472,29 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
     return (result.state as { stopReason?: string } | null)?.stopReason === 'max_iterations'
       ? 'max_turn_requests'
       : 'end_turn';
+  };
+
+  /** Carries on a turn a load found in progress, once the load has answered; tells the editor if it cannot. */
+  const recoverTurn = (session: Session, turnRecord: AcpTurnRecord) => {
+    session.turn = turnRecord;
+    const recovering = new Promise<void>((resolve) => setTimeout(resolve, 0))
+      .then(() => runTurn(session, (runOptions) => carryOn(session, turnRecord, runOptions)))
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          notify(session.info.id, {
+            sessionUpdate: 'agent_message_chunk',
+            content: {
+              type: 'text',
+              text: `The turn the agent was in the middle of could not be carried on: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          });
+        },
+      )
+      .finally(() => {
+        if (session.recovering === recovering) session.recovering = undefined;
+      });
+    session.recovering = recovering;
   };
 
   const handle = async (message: Incoming): Promise<unknown> => {
@@ -454,6 +551,8 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
           });
         }
         await save(session);
+        // A turn the agent stopped in the middle of goes on, its updates streamed as they happen.
+        if (record.turn) recoverTurn(session, record.turn);
         return null;
       }
       case 'session/prompt': {

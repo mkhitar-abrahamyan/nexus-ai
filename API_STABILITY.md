@@ -41,6 +41,18 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.10 stage (Unreleased)
+
+Everything 2.10 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- on `nexus-ai-pro/protocols/a2a`: `A2aHandler`, which `a2aHandler()` now returns, with `owner`,
+  `recover()`, and `close()`; `A2aRecoveryReport`; `A2aTaskLease` and `A2aTaskRun`, and
+  `A2aTaskRecord.lease`, `run`, and `version`; `A2aTaskStore.claim()`, optional;
+  `A2aServerOptions.lease` and `recoverEveryMs`. The handler is still the request function it was;
+- on `nexus-ai-pro/protocols/acp`: `AcpTurnRecord` and `AcpSessionRecord.turn`;
+- `CompiledGraph.continueWith()`, and `ProtocolGraph.continueWith()` and `state()`, both optional.
+
 ## 2.9 stage (2.9.0)
 
 Everything 2.9 adds is stable from the start and additive, unless this section says otherwise.

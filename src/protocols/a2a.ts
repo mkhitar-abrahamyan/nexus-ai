@@ -211,6 +211,35 @@ export interface A2aTaskRecord {
   push?: A2aPushNotificationConfig[];
   /** ISO-8601 time it was last written. */
   updatedAt: string;
+  /**
+   * Who is running the task, and until when, while it works. The replica running it renews the lease;
+   * once it lapses, another replica's `recover()` may take the task over.
+   */
+  lease?: A2aTaskLease;
+  /** What the working run was asked to do, so a replica that takes it over can carry it on. */
+  run?: A2aTaskRun;
+  /** Bumped by every claim of the lease, so two replicas claiming one task cannot both win. */
+  version?: number;
+}
+
+/** A replica's hold on a working task. */
+export interface A2aTaskLease {
+  /** The replica holding it. */
+  owner: string;
+  /** ISO-8601 time it lapses unless renewed. */
+  expiresAt: string;
+}
+
+/** A working run, as kept with its task: started by a message, or answering the task's questions. */
+export interface A2aTaskRun {
+  /** `invoke` for a run a message started, `resume` for one answering a paused task's questions. */
+  kind: 'invoke' | 'resume';
+  /** The message that started it. */
+  message: A2aMessage;
+  /** The answers it resumed with, by interrupt id. */
+  answers?: Record<string, unknown>;
+  /** Who it runs for. */
+  principal?: Principal;
 }
 
 /** Which tasks `A2aTaskStore.list()` returns. */
@@ -242,6 +271,29 @@ export interface A2aTaskStore {
   conversation(contextId: string): Promise<Message[] | undefined> | Message[] | undefined;
   /** Writes a conversation's transcript. */
   saveConversation(contextId: string, messages: Message[]): Promise<void> | void;
+  /**
+   * Takes, or renews, the lease of a working task, in one step: when the task has no lease, its lease
+   * has lapsed by `lease.now`, or `lease.owner` already holds it. Resolves to the record as claimed,
+   * or `undefined` when another replica holds it. Optional; without it, a claim is a read and a write,
+   * and two replicas recovering at once may both take one task.
+   */
+  claim?(
+    taskId: string,
+    lease: A2aTaskLease & { now: string },
+  ): Promise<A2aTaskRecord | undefined> | A2aTaskRecord | undefined;
+}
+
+/** Whether a lease may be taken: the task works, and no other replica holds it now. */
+function claimable(record: A2aTaskRecord | undefined, lease: A2aTaskLease & { now: string }): boolean {
+  return (
+    record?.task.status.state === 'TASK_STATE_WORKING' &&
+    (!record.lease || record.lease.owner === lease.owner || record.lease.expiresAt <= lease.now)
+  );
+}
+
+/** A record with a lease taken, its version bumped. */
+function claimed(record: A2aTaskRecord, lease: A2aTaskLease): A2aTaskRecord {
+  return { ...record, lease: { owner: lease.owner, expiresAt: lease.expiresAt }, version: (record.version ?? 0) + 1 };
 }
 
 /** Tasks and conversations in this process: the default, for one replica. */
@@ -290,6 +342,15 @@ export class MemoryA2aTaskStore implements A2aTaskStore {
   saveConversation(contextId: string, messages: Message[]): void {
     remember(this.conversations, contextId, structuredClone(messages), this.max);
   }
+
+  /** Takes or renews a working task's lease, in one step. */
+  claim(taskId: string, lease: A2aTaskLease & { now: string }): A2aTaskRecord | undefined {
+    const record = this.tasks.get(taskId);
+    if (!record || !claimable(record, lease)) return undefined;
+    const next = claimed(record, lease);
+    this.tasks.set(taskId, next);
+    return structuredClone(next);
+  }
 }
 
 /**
@@ -325,6 +386,28 @@ export function storeA2aTasks(store: Store, options: { namespace?: readonly stri
     },
     async saveConversation(contextId, messages) {
       await store.put(conversations, contextId, { messages });
+    },
+    // A compare-and-set on the record's version where the store has one, so of two replicas claiming
+    // a task at once, one wins; otherwise a read and a write.
+    async claim(taskId, lease) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const current = (await store.get<A2aTaskRecord>(tasks, taskId))?.value;
+        if (!current || !claimable(current, lease)) return undefined;
+        const next = claimed(current, lease);
+        if (!store.putIfVersion) {
+          await store.put(tasks, taskId, next);
+          return next;
+        }
+        // A record written before tasks had versions gets one first, then is claimed as any other.
+        if (current.version === undefined) {
+          await store.put(tasks, taskId, { ...current, version: 0 });
+          continue;
+        }
+        if (await store.putIfVersion(tasks, taskId, next as A2aTaskRecord & { version: number }, current.version)) {
+          return next;
+        }
+      }
+      return undefined;
     },
   };
 }
@@ -385,8 +468,47 @@ export interface A2aServerOptions {
   extendedCard?: (principal: Principal) => Partial<A2aAgentCard> | Promise<Partial<A2aAgentCard>>;
   /** How often `SubscribeToTask` reads a task another replica runs, in milliseconds. Defaults to 1 second. */
   pollMs?: number;
+  /**
+   * The lease a replica holds on each task it runs: renewed every third of `ms` (30 seconds by
+   * default), and taken over by another replica's `recover()` once it lapses. `owner` names this
+   * replica; it defaults to a random id.
+   */
+  lease?: { ms?: number; owner?: string };
+  /**
+   * Runs `recover()` every this many milliseconds, so a task a stopped replica was working on is taken
+   * over without a caller asking. Off by default; `close()` stops it.
+   */
+  recoverEveryMs?: number;
   /** Receives push delivery failures, which never fail a task. */
   onError?: (error: unknown) => void;
+}
+
+/** What one `recover()` did. */
+export interface A2aRecoveryReport {
+  /** Tasks whose lease had lapsed, taken over and carried on here. */
+  tookOver: string[];
+  /** Tasks another replica claimed first, or that finished meanwhile. */
+  skipped: number;
+}
+
+/**
+ * An A2A agent's HTTP handler, with what keeps its tasks alive across replicas: `recover()` takes over
+ * the working tasks whose replica stopped renewing their lease, and `close()` stops the recovery timer.
+ */
+export interface A2aHandler {
+  /** Answers one HTTP request: `GET` the card, `POST` JSON-RPC. */
+  (request: Request): Promise<Response>;
+  /** This replica's name in the leases it holds. */
+  readonly owner: string;
+  /**
+   * Takes over working tasks whose lease lapsed, up to `limit` (10), and carries each on: from the
+   * graph's last checkpoint, by answering its questions again when the run was a resume that never
+   * reached the graph, or from the start when the run left no checkpoint. Resolves once they are
+   * claimed, not finished.
+   */
+  recover(options?: { limit?: number }): Promise<A2aRecoveryReport>;
+  /** Stops the recovery timer `recoverEveryMs` started. Tasks running here carry on. */
+  close(): void;
 }
 
 /** Where a running task's events go: every stream and subscriber following it here. */
@@ -421,7 +543,7 @@ const settled = (state: A2aTaskState) => TERMINAL.has(state) || state === 'TASK_
  * });
  * ```
  */
-export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (request: Request) => Promise<Response> {
+export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2aHandler {
   const card: A2aAgentCard = {
     name: options.card.name,
     description: options.card.description,
@@ -438,6 +560,9 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
     skills: options.card.skills,
   };
   const store = options.store ?? new MemoryA2aTaskStore({ maxTasks: options.maxTasks ?? 10_000 });
+  const owner = options.lease?.owner ?? protocolId('replica');
+  const leaseMs = options.lease?.ms ?? 30_000;
+  const leaseUntil = () => new Date(Date.now() + leaseMs).toISOString();
   /** The tasks this process is running, which a cancel here stops at once. */
   const running = new Map<string, AbortController>();
   const listeners = new Map<string, Set<Listener>>();
@@ -499,11 +624,29 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
     pushUpdate(record, event);
   };
 
-  /** Runs, or resumes, the graph for a task, telling its listeners about text and progress as they happen. */
+  /**
+   * Claims a working task's lease, or renews the one held. With a store that has no `claim()`, a read
+   * and a write.
+   */
+  const claimLease = async (taskId: string): Promise<A2aTaskRecord | undefined> => {
+    const lease = { owner, expiresAt: leaseUntil(), now: new Date().toISOString() };
+    if (store.claim) return (await store.claim(taskId, lease)) ?? undefined;
+    const current = await store.get(taskId);
+    if (!current || !claimable(current, lease)) return undefined;
+    const next = claimed(current, lease);
+    await store.put(next);
+    return next;
+  };
+
+  /**
+   * Runs, or resumes, the graph for a task, telling its listeners about text and progress as they
+   * happen. A takeover carries on the run the record says a stopped replica was working on.
+   */
   const execute = async (
     record: A2aTaskRecord,
     message: A2aMessage,
     principal: Principal | undefined,
+    takeover = false,
   ): Promise<void> => {
     const task = record.task;
     const controller = new AbortController();
@@ -530,26 +673,60 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
         }
       },
     };
+    // The lease is renewed while the run works. A replica that finds another holding it has lost the
+    // task, and stops, so the run is carried on once, by the replica that took it.
+    let lost = false;
+    const heartbeat = setInterval(
+      () => {
+        void claimLease(task.id).then(
+          (renewed) => {
+            if (renewed) {
+              record.lease = renewed.lease;
+              record.version = renewed.version;
+            } else if (!controller.signal.aborted) {
+              lost = true;
+              controller.abort(new Error(`Task ${task.id} was taken over by another replica`));
+            }
+          },
+          () => undefined,
+        );
+      },
+      Math.max(10, Math.floor(leaseMs / 3)),
+    );
+    (heartbeat as { unref?: () => void }).unref?.();
     try {
-      await changeStatus(record, 'TASK_STATE_WORKING');
       let result: ProtocolResult;
-      if (record.interrupts?.length) {
+      if (takeover) {
+        result = await carryOn(record, runOptions);
+      } else if (record.interrupts?.length) {
         const answers = Object.fromEntries(
           record.interrupts.map((interrupt) => [interrupt.id, answer(message, interrupt)]),
         );
+        record.lease = { owner, expiresAt: leaseUntil() };
+        record.run = { kind: 'resume', message, answers, ...(principal ? { principal } : {}) };
+        await changeStatus(record, 'TASK_STATE_WORKING');
         record.interrupts = undefined;
         result = await graph.resumeInterruptsWith(task.id, answers, runOptions);
       } else {
-        const history = (await store.conversation(task.contextId)) ?? [];
-        const said = messageOf('user', textOfParts(message.parts));
-        result = await graph.invoke(
-          options.input ? options.input(message, history) : { messages: [...history, said] },
-          runOptions,
-        );
-        await store.saveConversation(task.contextId, [...history, said]);
+        record.lease = { owner, expiresAt: leaseUntil() };
+        record.run = { kind: 'invoke', message, ...(principal ? { principal } : {}) };
+        await changeStatus(record, 'TASK_STATE_WORKING');
+        result = await startRun(record, message, runOptions);
       }
-      // A cancel here or on another replica stands: the result is not recorded over it.
-      if (controller.signal.aborted || (await store.get(task.id))?.task.status.state === 'TASK_STATE_CANCELED') return;
+      // A cancel here or on another replica stands, and so does another replica's takeover: the result
+      // is not recorded over either.
+      const stored = await store.get(task.id);
+      if (
+        controller.signal.aborted ||
+        lost ||
+        stored?.task.status.state === 'TASK_STATE_CANCELED' ||
+        (stored?.lease && stored.lease.owner !== owner)
+      ) {
+        return;
+      }
+      record.lease = undefined;
+      record.run = undefined;
+      if (stored?.version !== undefined) record.version = stored.version;
       if (result.status === 'awaiting_input' && result.interrupts?.length) {
         record.interrupts = result.interrupts;
         await changeStatus(
@@ -584,15 +761,87 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
       }
     } catch (error) {
       if (controller.signal.aborted) return;
+      record.lease = undefined;
+      record.run = undefined;
       await changeStatus(
         record,
         'TASK_STATE_FAILED',
         agentMessage(task, error instanceof Error ? error.message : String(error)),
       );
     } finally {
+      clearInterval(heartbeat);
       running.delete(task.id);
     }
   };
+
+  /** Starts a run from a message: the context's conversation, then the message. */
+  const startRun = async (
+    record: A2aTaskRecord,
+    message: A2aMessage,
+    runOptions: ProtocolRunOptions,
+  ): Promise<ProtocolResult> => {
+    const history = (await store.conversation(record.task.contextId)) ?? [];
+    const said = messageOf('user', textOfParts(message.parts));
+    const result = await graph.invoke(
+      options.input ? options.input(message, history) : { messages: [...history, said] },
+      runOptions,
+    );
+    await store.saveConversation(record.task.contextId, [...history, said]);
+    return result;
+  };
+
+  /**
+   * Carries on the run a stopped replica left: answers its questions again when the graph still waits
+   * on them, starts it over when it left no checkpoint, and otherwise continues from its last one.
+   */
+  const carryOn = async (record: A2aTaskRecord, runOptions: ProtocolRunOptions): Promise<ProtocolResult> => {
+    const run = record.run;
+    const checkpoint = graph.state ? await graph.state(record.task.id) : undefined;
+    if (run?.kind === 'resume' && run.answers && (!checkpoint || checkpoint.status === 'awaiting_input')) {
+      return graph.resumeInterruptsWith(record.task.id, run.answers, runOptions);
+    }
+    if (checkpoint && graph.continueWith) return graph.continueWith(record.task.id, runOptions);
+    if (!checkpoint && run?.kind === 'invoke') return startRun(record, run.message, runOptions);
+    throw new Error(
+      `The replica running task ${record.task.id} stopped, and this agent's graph cannot carry its run on`,
+    );
+  };
+
+  /** Takes over working tasks whose lease lapsed, and carries each on. */
+  const recover = async (recoverOptions: { limit?: number } = {}): Promise<A2aRecoveryReport> => {
+    const report: A2aRecoveryReport = { tookOver: [], skipped: 0 };
+    const limit = recoverOptions.limit ?? 10;
+    const now = new Date().toISOString();
+    const stale = new Date(Date.now() - leaseMs).toISOString();
+    for (let offset = 0; report.tookOver.length < limit; offset += 100) {
+      const { records } = await store.list({ state: 'TASK_STATE_WORKING', limit: 100, offset });
+      for (const candidate of records) {
+        if (report.tookOver.length >= limit) break;
+        if (running.has(candidate.task.id)) continue;
+        // A task working without a lease was written before tasks had them: lapsed once it is stale.
+        const lapsed = candidate.lease ? candidate.lease.expiresAt <= now : candidate.updatedAt <= stale;
+        if (!lapsed) continue;
+        const record = await claimLease(candidate.task.id);
+        if (!record) {
+          report.skipped += 1;
+          continue;
+        }
+        report.tookOver.push(record.task.id);
+        const message = record.run?.message ?? record.history.at(-1) ?? ({ parts: [] } as unknown as A2aMessage);
+        void execute(record, message, record.run?.principal, true).catch((error: unknown) => options.onError?.(error));
+      }
+      if (records.length < 100) break;
+    }
+    return report;
+  };
+
+  const timer =
+    options.recoverEveryMs === undefined
+      ? undefined
+      : setInterval(() => {
+          void recover().catch((error: unknown) => options.onError?.(error));
+        }, options.recoverEveryMs);
+  (timer as { unref?: () => void } | undefined)?.unref?.();
 
   /** The task a message starts, or the paused one it answers. */
   const taskFor = async (message: A2aMessage): Promise<A2aTaskRecord | { error: number; message: string }> => {
@@ -691,7 +940,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
     return kept;
   };
 
-  return async (request) => {
+  const handle = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     if (request.method === 'GET') {
       if (url.pathname.endsWith('/.well-known/agent-card.json') || url.pathname.endsWith('/agent-card.json')) {
@@ -802,6 +1051,8 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
             return rpcError(id, A2A_ERRORS.taskNotCancelable, `Task ${record.task.id} has already finished`);
           }
           running.get(record.task.id)?.abort(new Error('Cancelled by the calling agent'));
+          record.lease = undefined;
+          record.run = undefined;
           await changeStatus(record, 'TASK_STATE_CANCELED');
           return rpcResult(id, view(record));
         }
@@ -857,6 +1108,13 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): (re
       );
     }
   };
+  return Object.assign(handle, {
+    owner,
+    recover,
+    close: () => {
+      if (timer) clearInterval(timer);
+    },
+  });
 }
 
 /** A task as returned, with as much of its history as was asked for. */

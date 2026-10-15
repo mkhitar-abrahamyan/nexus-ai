@@ -437,6 +437,16 @@ export class CompiledGraph<S extends ChannelSchema, I extends keyof S = keyof S,
   }
 
   /**
+   * Like `continue`, but returns the final result rather than the stream: what a replica calls to
+   * finish a run whose process stopped, from the last checkpoint it wrote.
+   */
+  async continueWith(threadId: string, runOptions: GraphRunOptions = {}): Promise<GraphResult<S, O>> {
+    let last: GraphStepEvent<S> | undefined;
+    for await (const event of this.continue(threadId, runOptions)) last = event;
+    return this.toResult(threadId, last);
+  }
+
+  /**
    * Rewinds to an earlier superstep and runs forward from there.
    *
    * Checkpoints after `step` belong to the timeline being abandoned, so the checkpointer drops them
