@@ -169,6 +169,7 @@ class FakePeerConnection extends FakeEventTarget implements RealtimePeerConnecti
   iceConnectionState = 'new';
   localDescription: RealtimeSessionDescriptionLike | null = null;
   readonly addedTracks: RealtimeMediaTrackLike[] = [];
+  readonly transceivers: Array<[string, unknown]> = [];
   readonly remoteDescriptions: RealtimeSessionDescriptionLike[] = [];
   closeCalls = 0;
 
@@ -182,6 +183,11 @@ class FakePeerConnection extends FakeEventTarget implements RealtimePeerConnecti
 
   addTrack(track: RealtimeMediaTrackLike): unknown {
     this.addedTracks.push(track);
+    return {};
+  }
+
+  addTransceiver(kind: 'audio', init: { direction: 'recvonly' }): unknown {
+    this.transceivers.push([kind, init]);
     return {};
   }
 
@@ -378,7 +384,8 @@ test('OpenAI WebRTC unified SDP transport attaches structural media, emits event
   assert.equal(transport.state, 'connected');
   assert.deepEqual(mediaDevices.constraints, [{ audio: { echoCancellation: true } }]);
   assert.deepEqual(peer.addedTracks, [localTrack]);
-  assert.deepEqual(peer.remoteDescriptions, [{ type: 'answer', sdp: 'answer-sdp' }]);
+  // Every line of a description ends with a line break, as Chromium requires of the last one too.
+  assert.deepEqual(peer.remoteDescriptions, [{ type: 'answer', sdp: 'answer-sdp\r\n' }]);
   assert.equal(requests[0]?.url, '/api/realtime/session');
   assert.equal(requests[0]?.init?.method, 'POST');
   assert.equal(requests[0]?.init?.headers?.['content-type'], 'application/sdp');
@@ -555,4 +562,30 @@ test('secure OpenAI server helpers build authenticated requests, parse client se
     () => createOpenAIRealtimeClientSecret({ ...options, apiKey: ' ' }),
     /server-side OpenAI API key is required/,
   );
+});
+
+test('OpenAI WebRTC asks to receive the model audio when it sends no microphone, unless the session is text only', async () => {
+  const answer: RealtimeFetchLike = async () => ({ ok: true, status: 200, text: async () => 'v=0\r\na=end' });
+  const connectWith = async (overrides: Partial<RealtimeSessionConfig>, options: { mediaStream?: FakeStream } = {}) => {
+    const channel = new FakeDataChannel();
+    const peer = new FakePeerConnection(channel);
+    const transport = new OpenAIWebRTCTransport({
+      sessionEndpoint: '/session',
+      peerConnectionFactory: () => peer,
+      fetch: answer,
+      timers: new ManualTimers(),
+      ...options,
+    });
+    await transport.connect(config(transport, overrides));
+    await transport.disconnect();
+    return peer;
+  };
+
+  const listening = await connectWith({});
+  assert.deepEqual(listening.transceivers, [['audio', { direction: 'recvonly' }]], 'no microphone: receive only');
+  assert.deepEqual(listening.remoteDescriptions, [{ type: 'answer', sdp: 'v=0\r\na=end\r\n' }]);
+  assert.deepEqual((await connectWith({ modalities: ['text'] })).transceivers, [], 'text only: no audio at all');
+  const speaking = await connectWith({}, { mediaStream: new FakeStream([new FakeTrack()]) });
+  assert.deepEqual(speaking.transceivers, [], 'the microphone carries the audio both ways');
+  assert.equal(speaking.addedTracks.length, 1);
 });

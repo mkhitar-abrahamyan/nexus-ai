@@ -1,0 +1,11 @@
+{
+  "measuredAt": "2026-10-16",
+  "note": "Ratios of each timing to a calibration loop on the same machine, and the heap a live session holds. Regenerate with npm run bench:realtime -- --update.",
+  "tolerance": 3,
+  "calibrationMs": 8.089,
+  "ratios": {
+    "realtime.one-call-550-turns": 42.462,
+    "realtime.1000-sessions-10-turns": 561.7076
+  },
+  "kbPerSession": 44
+}

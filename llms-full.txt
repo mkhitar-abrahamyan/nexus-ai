@@ -9949,7 +9949,7 @@ The option groups:
 | `RealtimeInterruptionOptions` | What barge-in does: `enabled`, `cancelResponse`, `truncateUnheardAudio`, a `stopPlayback` hook, and `getPlaybackPositionMs` for where to cut. |
 | `RealtimeReconnectOptions` | `maxAttempts`, and a backoff from `initialDelayMs` growing by `multiplier` up to `maxDelayMs`. |
 | `RealtimeSecurityOptions` | Hard limits: `maxSessionDurationMs` and `maxAudioDurationMs` end the session. Also a `toolAllowlist`, `retainTranscripts`, and a `piiHook` that rewrites every transcript first. |
-| `RealtimeConversationOptions` | What the record keeps: transcripts, tool calls, raw events (10,000 by default), and a `redactTranscript` hook. `replayItems` caps what a resumed session gives the provider back. |
+| `RealtimeConversationOptions` | What the record keeps: transcripts, tool calls, raw events (10,000 by default), and a `redactTranscript` hook. Raw audio events keep the size of their audio, `delta_bytes`, not the audio, unless `retainRawAudio`. `replayItems` caps what a resumed session gives the provider back. |
 | `RealtimeTelemetryOptions` | Tracing and metrics without a dependency, so OpenTelemetry plugs in. See the next table. |
 | `RealtimeConnectOptions` | What `connect()` takes in a browser: a signal, the microphone, and where audio plays. |
 
@@ -10061,10 +10061,17 @@ it authenticates:
 The other options cover your endpoint's headers, the peer connection (settings, or a
 `RealtimePeerConnectionFactory`), the microphone or your own stream or track, a `fetch`, timers, and
 timeouts: 15 seconds to connect, and a grace period after an ICE disconnect. You can also name the
-data channel and decide whether `sendAudio()` may use it.
+data channel and decide whether `sendAudio()` may use it. A session that sends no microphone still
+hears the model: the offer asks to receive audio, unless the session's `modalities` are text only.
 
 Every browser API is used through a structural type, so the transport runs without a DOM shim and is
-tested without a browser:
+unit-tested without a browser. It also runs in a real one: `npm run test:browser:realtime` drives a
+session over WebRTC in headless Chromium, against a second peer connection in the page that plays the
+provider. The offer, the answer, ICE, DTLS, and the data channel are real; Chromium's fake microphone
+is sent up, a tone comes back as the model's voice and plays, a tool call is answered, and a session
+with no microphone still hears the model. That run found two defects the structural tests could not:
+the answer's last line lost its line break, which Chromium refuses, and a session without a
+microphone offered no audio to receive.
 
 | Browser API | Structural type |
 | --- | --- |
@@ -10297,7 +10304,7 @@ rebuild a record from stored events:
 | Function | What it does |
 | --- | --- |
 | `createRealtimeConversation()` | Starts a record, from `CreateRealtimeConversationOptions`. |
-| `reduceRealtimeConversation()` | Applies one event, with `RealtimeConversationReducerOptions`. |
+| `reduceRealtimeConversation()` | Applies one event, with `RealtimeConversationReducerOptions`, to a copy of the record; with `inPlace`, to the record given, for its one owner. |
 | `createConversationMetrics()`, `withConversationMetrics()` | Start and update the metrics. |
 | `snapshotRealtimeConversation()` | An immutable copy. |
 | `exportRealtimeConversation()` | Writes it in a `RealtimeConversationExportFormat`: `json`, `openai-events`, `text`, or `analytics`. |
@@ -10353,6 +10360,40 @@ await session.connect();
 In the test suite, a session's process is killed mid-conversation on the memory and SQLite stores.
 Another process resumes it by id: the provider is first told what the person said and what the model
 answered, and the conversation goes on under its own id, with nothing recorded twice.
+
+## Turn latency and session load
+
+What the library adds to a call is held to a budget, as its size and runtime are.
+`npm run bench:realtime` runs sessions over an in-memory transport that delivers a provider's
+messages for a spoken turn, each message in a macrotask of its own, as a socket does: the caller's
+speech and its transcript, the response, 25 frames of 20 ms audio with its transcript, and the
+turn's end. It measures:
+- **Added latency**: from a message's arrival to the session's event for it. Held under 5 ms at p99
+  for one call, and under 20 ms, one audio frame, with 250 calls at real time.
+- **A long call**: 550 turns in one session. A late turn must cost what an early one does, within
+  twice, so work that grows with the conversation is caught on any machine.
+- **Calls at real time**: 250 sessions, each sent its messages at a call's own pace. The process must
+  keep up: event-loop delay under 50 ms at p99, and finished within 100 ms of the calls' length.
+- **Throughput and memory**: 1,000 sessions of ten turns, as a ratio to a calibration loop, so a
+  budget recorded on one machine holds on a slower one, and the heap each live session holds.
+- **Retention**: 1,000 sessions that end leave the heap within 8 MB of where it started.
+
+The budgets are in `realtime-budget.json`, and the release gate runs the check. On the machine that
+recorded them, under Node 22:
+
+| Measure | Measured |
+| --- | --- |
+| A spoken turn, one call | 0.57 ms of the session's time, at p50 |
+| Added to a message | 2 µs at p50, 10 µs at p99 |
+| 250 calls at real time | 15% of a core: about 1,700 calls per core; event-loop delay 19 ms at p99 |
+| A live session | 44 KB, with transcripts and raw events |
+| Over WebRTC in Chromium, `sendText()` to the response starting | 0.4 ms at p50, under 1 ms at p95, on loopback |
+
+Writing the method down found what it measures. Before it, a session copied its whole record twice
+for every event, once to apply it and once to announce it, so a turn cost 39 ms by the 500th and 250
+calls took half a core. It also kept every audio frame it had played, about 13 MB for a 3-minute
+call. Now the session applies events to its own record in place, copies it only for a
+`conversation.updated` listener, and keeps an audio event's size in place of its audio.
 
 ## Errors
 
@@ -12662,13 +12703,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 344 KB | 100% | none |
 | `nexus-ai-pro/config` | 336 KB | 98% | none |
 | `nexus-ai-pro/core` | 332 KB | 97% | none |
-| `nexus-ai-pro/realtime` | 210 KB | 61% | none |
+| `nexus-ai-pro/realtime` | 211 KB | 61% | none |
 | `nexus-ai-pro/deep-agent` | 187 KB | 54% | none |
-| `nexus-ai-pro/realtime/openai-sip` | 136 KB | 40% | none |
+| `nexus-ai-pro/realtime/openai-sip` | 137 KB | 40% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
-| `nexus-ai-pro/realtime/session` | 106 KB | 31% | none |
+| `nexus-ai-pro/realtime/session` | 107 KB | 31% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 26% | none |
 | `nexus-ai-pro/providers/groq` | 88 KB | 26% | none |
 | `nexus-ai-pro/providers/mistral` | 88 KB | 26% | none |
@@ -12859,7 +12900,8 @@ Memory is checked by retention: 100,000 checkpoints through one thread, and 10,0
 after another with a long-lived signal, must each leave the heap within 8 MB of where it started
 after a collection. That check found 2.1 keeping about 5 KB per run whenever runs shared a signal.
 The release gate runs it; `npm run bench:runtime -- --update` records new budgets after a change
-that is meant to cost more.
+that is meant to cost more. Realtime has budgets of its own, for turn latency and session load, in
+`realtime-budget.json`: see [Turn latency and session load](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/realtime.md#turn-latency-and-session-load).
 
 ---
 

@@ -850,6 +850,12 @@ export interface RealtimeConversationOptions {
   retainRawEvents?: boolean;
   /** Raw events kept before the oldest are dropped. Defaults to 10,000. */
   maxRawEvents?: number;
+  /**
+   * Keeps the audio of the raw events retained. Off by default: an audio event is kept with the size
+   * of its audio, `delta_bytes`, in place of the audio, so a long call does not hold its audio in
+   * memory, about 13 MB for 10,000 frames.
+   */
+  retainRawAudio?: boolean;
   /** Rewrites transcript text before it is recorded. */
   redactTranscript?: (text: string, role: 'user' | 'assistant') => string;
   /**

@@ -185,9 +185,10 @@ export class RealtimeSession {
     return { ...this.conversation.metrics };
   }
 
-  /** Raw provider events retained so far. */
+  /** Raw provider events retained so far, the latest `maxRawEvents` of them. */
   getRawEvents(): RealtimeServerEvent[] {
-    return this.rawEvents.map((event) => ({ ...event }));
+    const maximum = Math.max(0, this.config.conversation?.maxRawEvents ?? 10_000);
+    return this.rawEvents.slice(Math.max(0, this.rawEvents.length - maximum)).map((event) => ({ ...event }));
   }
 
   /** Waits until all provider events already received by the session have been normalized. */
@@ -206,7 +207,7 @@ export class RealtimeSession {
   export(
     format: RealtimeConversationExportFormat,
   ): RealtimeConversation | RealtimeServerEvent[] | string | RealtimeAnalyticsExport {
-    return exportRealtimeConversation(this.conversation, format, this.rawEvents);
+    return exportRealtimeConversation(this.conversation, format, this.getRawEvents());
   }
 
   /**
@@ -788,11 +789,13 @@ export class RealtimeSession {
       this.turnStartedAt = undefined;
     }
 
+    // The session's record is its own, handed out only as copies, so events apply to it in place.
     this.conversation = reduceRealtimeConversation(this.conversation, event, {
       ...this.config.conversation,
       captureTranscripts:
         this.config.security?.retainTranscripts === false ? false : this.config.conversation?.captureTranscripts,
       idFactory: this.config.idFactory,
+      inPlace: true,
     });
     this.emitNormalized(event);
     this.runTelemetry(() => this.config.telemetry?.onEvent?.(this.telemetryEvent(event)));
@@ -1032,9 +1035,19 @@ export class RealtimeSession {
   private retainRawEvent(event: RealtimeServerEvent): void {
     if (this.config.conversation?.retainRawEvents === false) return;
     if (this.config.security?.retainTranscripts === false && /transcript|audio/.test(event.type)) return;
-    this.rawEvents.push({ ...event });
+    const audio = typeof event.delta === 'string' && /audio\.delta$/.test(event.type) ? event.delta : undefined;
+    if (audio !== undefined && this.config.conversation?.retainRawAudio !== true) {
+      // The audio is played, not kept: its size stands in for it.
+      const { delta: _audio, ...kept } = event;
+      this.rawEvents.push({ ...kept, delta_bytes: Math.floor((audio.length * 3) / 4) });
+    } else {
+      this.rawEvents.push({ ...event });
+    }
+    // The oldest are dropped in batches, so a full history costs no more per event than an empty one.
     const maximum = Math.max(0, this.config.conversation?.maxRawEvents ?? 10_000);
-    if (this.rawEvents.length > maximum) this.rawEvents.splice(0, this.rawEvents.length - maximum);
+    if (this.rawEvents.length > maximum + Math.max(16, maximum >> 3)) {
+      this.rawEvents.splice(0, this.rawEvents.length - maximum);
+    }
   }
 
   private emitRaw(event: RealtimeServerEvent): void {
@@ -1050,7 +1063,9 @@ export class RealtimeSession {
     emitter.emit(event.type, event);
   }
 
+  /** A copy of the record for each listener's event: made only when one is listening. */
   private emitConversation(): void {
+    if (this.emitter.listenerCount('conversation.updated') === 0) return;
     this.emitter.emit('conversation.updated', snapshotRealtimeConversation(this.conversation));
   }
 

@@ -62,6 +62,8 @@ New and stable:
   `GeminiLiveProviderOptions`; `RealtimeSession.sendImage()` and `sendVideoFrame()`,
   `RealtimeSessionConfig.video`, `RealtimeImageInput`, `RealtimeImageOptions`, and
   `RealtimeVideoOptions`; `RealtimeTransport.sendVideo()`, optional;
+- `RealtimeConversationOptions.retainRawAudio`, `RealtimeConversationReducerOptions.inPlace`, and
+  `RealtimePeerConnectionLike.addTransceiver()`, optional;
 - `nexus-ai-pro/realtime/gemini-live`, with `GeminiLiveTransport` and `GeminiLiveTransportOptions`;
 - `nexus-ai-pro/realtime/openai-sip`, with `answerOpenAISipCalls()` and its types, also on
   `nexus-ai-pro/realtime`;
@@ -73,6 +75,11 @@ New and stable:
 The realtime family stays experimental, and all of these with it.
 
 Changed, each to keep a promise the surface already made:
+- A realtime session's raw events keep an audio event's size, `delta_bytes`, in place of its audio,
+  unless `retainRawAudio`: a session held every frame it played, about 13 MB a 3-minute call. The
+  `openai-events` export follows.
+- A realtime session announces `conversation.updated` only to a listener, as before, but no longer
+  copies its record for each event when none is listening.
 - A realtime session given a lifecycle runs each turn as a `realtime.turn` operation and charges it
   as it finishes; its `realtime.session` operation reports the total and charges nothing more. Its
   usage and cost are the sum of its turns', where each turn's replaced the last before.

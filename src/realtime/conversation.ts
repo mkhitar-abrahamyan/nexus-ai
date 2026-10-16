@@ -37,6 +37,12 @@ export interface CreateRealtimeConversationOptions {
 export interface RealtimeConversationReducerOptions extends RealtimeConversationOptions {
   /** Creates ids for items the reducer adds. */
   idFactory?: RealtimeIdFactory;
+  /**
+   * Applies the event to the record given and returns it, instead of to a copy. For the one owner of
+   * a record no one else holds, as a session holds its own: a copy per event costs the whole record,
+   * which grows with the conversation.
+   */
+  inPlace?: boolean;
 }
 
 /** Conversation metrics with every counter at zero. */
@@ -77,7 +83,7 @@ export function reduceRealtimeConversation(
   event: RealtimeEvent,
   options: RealtimeConversationReducerOptions = {},
 ): RealtimeConversation {
-  const next = snapshotRealtimeConversation(conversation);
+  const next = options.inPlace ? conversation : snapshotRealtimeConversation(conversation);
   const idFactory = options.idFactory || createRealtimeId;
   const timestamp = iso(event.timestamp);
 

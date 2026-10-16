@@ -87,6 +87,11 @@ export interface RealtimePeerConnectionLike extends EventTargetLike {
   createDataChannel(label: string, options?: Record<string, unknown>): RealtimeDataChannelLike;
   /** Sends the microphone's audio to the provider. */
   addTrack(track: RealtimeMediaTrackLike, ...streams: RealtimeMediaStreamLike[]): unknown;
+  /**
+   * Offers a media section without a track: the transport asks for one to receive the model's audio
+   * when it sends no microphone. Without it, a session that sends no audio receives none either.
+   */
+  addTransceiver?(kind: 'audio', init: { direction: 'recvonly' }): unknown;
   /** Creates the SDP offer sent to the provider. */
   createOffer(options?: Record<string, unknown>): Promise<RealtimeSessionDescriptionLike>;
   /** Applies this side's offer. */
@@ -505,6 +510,11 @@ export class OpenAIWebRTCTransport implements RealtimeTransport {
         provider: 'openai',
       });
     }
+    // Without a microphone the offer would hold no audio at all, so the model's voice could not come
+    // back: ask to receive it, unless the session wants text only.
+    if (tracks.length === 0 && peer.addTransceiver && (config.modalities?.includes('audio') ?? true)) {
+      peer.addTransceiver('audio', { direction: 'recvonly' });
+    }
     for (const audioTrack of tracks) {
       peer.addTrack(audioTrack, ...(stream ? [stream] : []));
       if (owned || this.options.stopProvidedTracks) this.ownedTracks.add(audioTrack);
@@ -694,6 +704,9 @@ export class OpenAIWebRTCTransport implements RealtimeTransport {
       sessionId = this.sessionIdFromResponse(parsed) || sessionId;
     }
     if (!sdp) throw this.negotiationError('Realtime session endpoint returned an empty SDP answer', 'empty_sdp_answer');
+    // Every line of a description ends with a line break, the last one too: Chromium refuses one whose
+    // last line has none.
+    sdp = `${sdp.replace(/\s+$/, '')}\r\n`;
     return { sdp, sessionId, raw };
   }
 

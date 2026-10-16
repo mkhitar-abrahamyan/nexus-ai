@@ -61,6 +61,18 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   `rejectOpenAIRealtimeCall()`, `referOpenAIRealtimeCall()`, `hangupOpenAIRealtimeCall()`, and
   `verifyOpenAIWebhook()`, on Web Crypto. `OpenAIWebSocketTransportOptions.callId` attaches a
   transport to a call.
+- **A published method and budget for realtime turn latency and session load.** `npm run
+  bench:realtime`, in the release gate, holds what a session adds to a message (under 5 ms at p99 for
+  one call, under 20 ms with 250 calls at real time), that a turn late in a long call costs what an
+  early one does, that 250 calls at real time keep up, the heap each session holds, and that ended
+  sessions leave nothing. Budgets are in `realtime-budget.json`.
+- **Realtime over real WebRTC in a browser.** `npm run test:browser:realtime`, in `npm test`, drives a
+  session in headless Chromium against a peer connection in the page that plays the provider: real
+  SDP, ICE, DTLS, and data channel, the microphone up, the model's voice down, a tool call, and a
+  session with no microphone.
+- `retainRawAudio` on a realtime conversation's options, `inPlace` on
+  `RealtimeConversationReducerOptions`, and `addTransceiver()`, optional, on
+  `RealtimePeerConnectionLike`.
 - **Video and images in a realtime session.** `sendVideoFrame()` streams camera or screen frames:
   as realtime video on Gemini Live, as images in the conversation elsewhere, spaced by
   `RealtimeVideoOptions.minIntervalMs`. `sendImage()` adds an image, with text, to the conversation.
@@ -71,6 +83,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- The WebRTC transport trimmed the SDP answer's final line break, and Chromium refuses a description
+  whose last line has none, so a session in Chrome or Edge never connected.
+- A WebRTC session that sent no microphone offered no audio to receive, so it never heard the model.
+- A realtime session copied its whole conversation record twice for every event, so each event cost
+  more as the call went on: a turn took 39 ms by the 500th, and 250 calls took half a core. It now
+  applies events in place and copies the record only for a `conversation.updated` listener.
 - An A2A `SendMessage` with `returnImmediately`, whose store failed while the task ran, raised an
   unhandled rejection, which ends a Node process by default. A store that cannot record a task's
   failure now leaves the task working, with its lease, for the replica that takes it over.

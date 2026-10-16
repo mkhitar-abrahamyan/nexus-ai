@@ -96,13 +96,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 344 KB | 100% | none |
 | `nexus-ai-pro/config` | 336 KB | 98% | none |
 | `nexus-ai-pro/core` | 332 KB | 97% | none |
-| `nexus-ai-pro/realtime` | 210 KB | 61% | none |
+| `nexus-ai-pro/realtime` | 211 KB | 61% | none |
 | `nexus-ai-pro/deep-agent` | 187 KB | 54% | none |
-| `nexus-ai-pro/realtime/openai-sip` | 136 KB | 40% | none |
+| `nexus-ai-pro/realtime/openai-sip` | 137 KB | 40% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
-| `nexus-ai-pro/realtime/session` | 106 KB | 31% | none |
+| `nexus-ai-pro/realtime/session` | 107 KB | 31% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 26% | none |
 | `nexus-ai-pro/providers/groq` | 88 KB | 26% | none |
 | `nexus-ai-pro/providers/mistral` | 88 KB | 26% | none |
@@ -294,4 +294,5 @@ Memory is checked by retention: 100,000 checkpoints through one thread, and 10,0
 after another with a long-lived signal, must each leave the heap within 8 MB of where it started
 after a collection. That check found 2.1 keeping about 5 KB per run whenever runs shared a signal.
 The release gate runs it; `npm run bench:runtime -- --update` records new budgets after a change
-that is meant to cost more.
+that is meant to cost more. Realtime has budgets of its own, for turn latency and session load, in
+`realtime-budget.json`: see [Turn latency and session load](realtime.md#turn-latency-and-session-load).
