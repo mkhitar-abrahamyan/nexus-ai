@@ -142,6 +142,11 @@ export interface RealtimeTransport {
   sendEvent(event: RealtimeClientEvent): void;
   /** Stops the model speaking now, for barge-in or a manual interruption. */
   interrupt(): void;
+  /**
+   * Streams one frame of video, for providers that take video as realtime input. Without it, the
+   * session sends frames as images in the conversation.
+   */
+  sendVideo?(frame: ArrayBuffer, mimeType: string): void;
   /** Closes the connection. Resolves once it is closed. */
   disconnect(): Promise<void>;
   /** Subscribes to a transport event. Returns a function that unsubscribes. */
@@ -710,6 +715,30 @@ export interface RealtimeAudioOptions {
   };
 }
 
+/** An image for the session: its bytes, a `data:` URL, or base64 with `mimeType`. */
+export type RealtimeImageInput = ArrayBuffer | Uint8Array | string;
+
+/** How `RealtimeSession.sendImage()` adds an image. */
+export interface RealtimeImageOptions {
+  /** The image's type, for bytes and base64. Defaults to `image/jpeg`. */
+  mimeType?: string;
+  /** Text sent with the image, in the same message: a question about it, say. */
+  text?: string;
+  /** Asks the model to answer now. Defaults to true when `text` is given. */
+  createResponse?: boolean;
+}
+
+/** How a session streams video. */
+export interface RealtimeVideoOptions {
+  /**
+   * The least time between frames, in milliseconds: a frame sooner than this after the last one sent
+   * is dropped. Defaults to 1,000, about what the models take.
+   */
+  minIntervalMs?: number;
+  /** The frames' type. Defaults to `image/jpeg`. */
+  mimeType?: string;
+}
+
 /** The subset of an `HTMLAudioElement` the WebRTC transport needs to play the model's audio. */
 export interface RealtimeAudioElementLike {
   /** Receives the remote media stream. */
@@ -891,6 +920,8 @@ export interface RealtimeSessionConfig {
    * it; the socket and the audio that was in flight are not recovered.
    */
   resume?: RealtimeConversation | string;
+  /** How `sendVideoFrame()` streams video: how often, and in what format. */
+  video?: RealtimeVideoOptions;
   /** Provider name, for records and telemetry. Defaults to `openai`. */
   provider?: RealtimeProviderName;
   /** The realtime model to use. */

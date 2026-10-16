@@ -33,10 +33,12 @@ export {
 export { createRealtimeSession, RealtimeSession } from './session.js';
 export {
   createRealtimeAgent,
+  GeminiLiveProvider,
   OpenAIRealtimeProvider,
 } from './provider.js';
 export type {
   CreateRealtimeAgentOptions,
+  GeminiLiveProviderOptions,
   OpenAIRealtimeProviderOptions,
   RealtimeAgentVoiceOptions,
   RealtimeTransportProvider,
@@ -47,6 +49,8 @@ export { OpenAIWebRTCTransport } from './openai-webrtc.transport.js';
 export type * from './openai-webrtc.transport.js';
 export { OpenAIWebSocketTransport } from './openai-websocket.transport.js';
 export type * from './openai-websocket.transport.js';
+export { GeminiLiveTransport } from './gemini-live.transport.js';
+export type { GeminiLiveTransportOptions } from './gemini-live.transport.js';
 export {
   createOpenAIRealtimeCall,
   createOpenAIRealtimeClientSecret,

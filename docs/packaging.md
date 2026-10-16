@@ -96,12 +96,12 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 344 KB | 100% | none |
 | `nexus-ai-pro/config` | 336 KB | 98% | none |
 | `nexus-ai-pro/core` | 332 KB | 97% | none |
+| `nexus-ai-pro/realtime` | 200 KB | 58% | none |
 | `nexus-ai-pro/deep-agent` | 185 KB | 54% | none |
-| `nexus-ai-pro/realtime` | 167 KB | 49% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
-| `nexus-ai-pro/realtime/session` | 105 KB | 31% | none |
+| `nexus-ai-pro/realtime/session` | 106 KB | 31% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 26% | none |
 | `nexus-ai-pro/providers/groq` | 88 KB | 26% | none |
 | `nexus-ai-pro/providers/mistral` | 88 KB | 26% | none |
@@ -128,6 +128,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/evaluate` | 46 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
+| `nexus-ai-pro/realtime/gemini-live` | 44 KB | 13% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 13% | none |
 | `nexus-ai-pro/protocols/a2a` | 42 KB | 12% | none |
 | `nexus-ai-pro/embeddings` | 40 KB | 12% | none |

@@ -38,6 +38,17 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   connecting, the provider is given what was said and what the tools returned before anything new,
   through `replayRealtimeConversation()`. Echoes carry `REALTIME_REPLAY_PREFIX` and are not recorded
   twice. `conversation.replayItems` caps the replay.
+- **Gemini Live, behind the same realtime session.** `GeminiLiveTransport`, on the new
+  `nexus-ai-pro/realtime/gemini-live`, speaks Gemini's Live API, and `GeminiLiveProvider`, on
+  `nexus-ai-pro/realtime`, creates sessions on it for `createRealtimeAgent()`. The session's
+  configuration becomes Gemini's setup; audio, messages, and tool results become its realtime input,
+  turns, and tool responses; and its audio, transcripts, tool calls, interruptions, and usage become
+  the events the session already reads. It takes an API key on a server or an ephemeral token
+  anywhere, and reconnects a dropped socket with Gemini's latest resumption handle.
+- **Video and images in a realtime session.** `sendVideoFrame()` streams camera or screen frames:
+  as realtime video on Gemini Live, as images in the conversation elsewhere, spaced by
+  `RealtimeVideoOptions.minIntervalMs`. `sendImage()` adds an image, with text, to the conversation.
+  `RealtimeTransport.sendVideo()`, optional, is what a transport with video input implements.
 - `continueWith()` on a compiled graph: `continue()`, returning the final result.
   `ProtocolGraph.continueWith()` and `state()`, both optional, are what A2A and ACP carry a run on
   with.
@@ -49,6 +60,11 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Proof
 
+- `tests/realtime-gemini.test.ts`: one agent definition (instructions, a tool, conversation settings)
+  runs on OpenAI's realtime API and on Gemini Live, each over its own scripted wire protocol. The two
+  records match item for item: what the person asked, the tool call and its result, and what the model
+  answered, with the same usage, and the tool runs once on each. Without the tool response, or with
+  the request for a response not dropped after it, the proof fails.
 - `tests/realtime-lifecycle.test.ts`: through a real client with a five-cent budget, two
   two-cent turns run, and the third is cancelled as it starts and ends the session; the budget holds
   four cents, and every operation names the tenant and user. Connection failures open the client's

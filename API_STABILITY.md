@@ -57,8 +57,13 @@ New and stable:
 - on `nexus-ai-pro/realtime`: `RealtimeSessionConfig.tenantId`, `userId`, `principal`,
   `traceContext`, `conversationStore`, and `resume`; `RealtimeConversationOptions.replayItems`;
   `RealtimeConversationStore`, `MemoryRealtimeConversationStore`, `storeRealtimeConversations()`,
-  `replayRealtimeConversation()`, and `REALTIME_REPLAY_PREFIX`. The realtime family stays
-  experimental, and these with it.
+  `replayRealtimeConversation()`, and `REALTIME_REPLAY_PREFIX`; `GeminiLiveProvider` and
+  `GeminiLiveProviderOptions`; `RealtimeSession.sendImage()` and `sendVideoFrame()`,
+  `RealtimeSessionConfig.video`, `RealtimeImageInput`, `RealtimeImageOptions`, and
+  `RealtimeVideoOptions`; `RealtimeTransport.sendVideo()`, optional;
+- `nexus-ai-pro/realtime/gemini-live`, with `GeminiLiveTransport` and `GeminiLiveTransportOptions`.
+
+The realtime family stays experimental, and all of these with it.
 
 Changed, each to keep a promise the surface already made:
 - A realtime session given a lifecycle runs each turn as a `realtime.turn` operation and charges it

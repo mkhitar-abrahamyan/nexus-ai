@@ -1,6 +1,6 @@
 # Realtime voice agents
 
-<!-- covers: ./realtime ./realtime/session ./realtime/tools ./realtime/conversation ./realtime/openai-webrtc ./realtime/openai-websocket ./realtime/openai-server ./realtime/mock -->
+<!-- covers: ./realtime ./realtime/session ./realtime/tools ./realtime/conversation ./realtime/openai-webrtc ./realtime/openai-websocket ./realtime/gemini-live ./realtime/openai-server ./realtime/mock -->
 
 Realtime voice agents from `nexus-ai-pro/realtime`: a session over WebRTC in the browser or WebSocket on a server, with barge-in, tools that can require confirmation, reconnection, metrics, and conversation exports. The browser entry points use no Node API.
 
@@ -202,7 +202,7 @@ not a durable session store, distributed rate limiter, or authorization system.
 
 Focused public imports are available for `realtime`, `realtime/session`, `realtime/tools`,
 `realtime/conversation`, `realtime/openai-webrtc`, `realtime/openai-websocket`,
-`realtime/openai-server`, and `realtime/mock`. The deterministic mock is suitable for tests and demos;
+`realtime/gemini-live`, `realtime/openai-server`, and `realtime/mock`. The deterministic mock is suitable for tests and demos;
 see [`examples/realtime-scheduling.ts`](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/examples/realtime-scheduling.ts).
 
 ## Sessions in detail
@@ -216,6 +216,7 @@ optional; the ones you will set first are the provider, the model, and the trans
 | `lifecycle` | `ai.lifecycle`, to run the session and each of its turns as operations of a client. See [On the client's lifecycle](#on-the-clients-lifecycle). |
 | `tenantId`, `userId`, `principal`, `traceContext` | Who the session's operations are for, and the trace they belong to. The tenant and user default to the principal's. |
 | `conversationStore`, `resume` | Where the record is kept after each committed turn, and a conversation to carry on. See [Conversations that outlive their process](#conversations-that-outlive-their-process). |
+| `video` | `RealtimeVideoOptions`: how often `sendVideoFrame()` sends a frame, and in what format. See [Video and images](#video-and-images). |
 | `model` | The realtime model, such as `gpt-realtime`. |
 | `transport` | How the session connects: WebRTC, WebSocket, or the mock. |
 | `modalities` | Each a `RealtimeModality`: `audio`, `text`, or both. |
@@ -256,6 +257,7 @@ A session moves through `RealtimeSessionState`: `idle`, `connecting`, `connected
 | --- | --- |
 | `connect()`, `disconnect()` | Opens and closes the session. |
 | `sendText()` | Sends a user message as text. |
+| `sendImage()`, `sendVideoFrame()` | Adds an image to the conversation, or streams a frame of video. See [Video and images](#video-and-images). |
 | `sendAudio()`, `commitAudio()`, `clearAudio()` | Streams audio by hand, then ends or discards the turn. |
 | `createResponse()` | Asks the model to respond now. |
 | `updateSession()` | Changes instructions, tools, or audio mid-session. |
@@ -286,6 +288,28 @@ A provider creates transports. `OpenAIRealtimeProvider` is a `RealtimeTransportP
 `createTransport()`. `OpenAIRealtimeProviderOptions` sets the default transport (`webrtc`), the
 `sessionEndpoint` for WebRTC, the `apiKey` for server WebSockets, and options for each transport.
 
+`GeminiLiveProvider` is the other bundled provider: Gemini Live, behind the same session, tools,
+and conversation record. Its options are those of every `GeminiLiveTransport` it creates
+(`GeminiLiveProviderOptions`), and its sessions are recorded as the `google` provider's. One agent
+definition runs on either:
+
+```ts
+import { createRealtimeAgent, GeminiLiveProvider, OpenAIRealtimeProvider } from 'nexus-ai-pro/realtime';
+
+const definition = { instructions: 'You track orders.', tools: [trackOrder], voice: { interruption: true } };
+
+const onOpenAI = createRealtimeAgent({ ...definition, provider: new OpenAIRealtimeProvider(), model: 'gpt-realtime' });
+const onGemini = createRealtimeAgent({
+  ...definition,
+  provider: new GeminiLiveProvider({ apiKey: process.env.GEMINI_API_KEY! }),
+  model: 'gemini-live-2.5-flash-preview',
+});
+```
+
+In the test suite, one agent definition holds the same conversation on both, each over its own wire
+protocol: the person asks where an order is, the model calls the tool, the tool runs once, and the
+model answers. The two records match item for item, with the same usage.
+
 Three functions are the building blocks of a custom OpenAI transport:
 
 | Function | What it does |
@@ -297,7 +321,8 @@ Three functions are the building blocks of a custom OpenAI transport:
 ## Transports
 
 A `RealtimeTransport` is the connection under a session. It has a `kind`, a `state`, and methods to
-connect, send audio and events, interrupt, disconnect, and subscribe with `on()`.
+connect, send audio and events, interrupt, disconnect, and subscribe with `on()`. A transport whose
+provider takes video as realtime input also has `sendVideo()`.
 
 | Type | Meaning |
 | --- | --- |
@@ -346,6 +371,40 @@ returns a `RealtimeWebSocketLike`. The remaining options set the URL, headers, s
 (10 seconds to connect, 1 to disconnect), the largest audio chunk (15 MiB), a text codec, timers, and
 a clock.
 
+### Gemini Live
+
+`GeminiLiveTransport`, from `nexus-ai-pro/realtime/gemini-live`, speaks Gemini's Live API over a
+WebSocket and translates, both ways, between it and the events the session speaks. Its
+`GeminiLiveTransportOptions` authenticate with an `apiKey`, sent in the URL, or an ephemeral token,
+given as `ephemeralToken` or fetched by `ephemeralTokenProvider`, sent to the constrained endpoint.
+A key is refused in a browser. Because the key travels in the URL rather than a header, the runtime's
+own `WebSocket` (Node 22 and later) is enough on a server; `webSocketFactory` replaces it. The other
+options set the URL, extra `setup` fields, timeouts (10 seconds to connect, 1 to disconnect), the
+largest audio chunk (15 MiB), a text codec, timers, and a clock.
+
+What the session sends becomes Gemini's, and what Gemini sends becomes the session's:
+
+| The session | Gemini Live |
+| --- | --- |
+| Its configuration: model, instructions, tools, voice, language, modalities, turn detection | The `setup` message, once, at connect. Tool schemas lose `additionalProperties` and `$schema`, which Gemini does not take. |
+| Microphone audio, and committing it | `realtimeInput` audio, at the input format's rate (16 kHz by default), and the end of the audio stream. |
+| A message, an image, a tool call or result given back on resume | A `clientContent` turn. |
+| A request for a response | The end of the person's turn. |
+| A tool's result | A `toolResponse`, by the call's id and name. Gemini goes on by itself after it, so the request for a response that follows is dropped. |
+| Speech transcribed, the model's audio, text, and transcript | The same events the session reads from OpenAI. |
+| A `toolCall` | A finished response that calls the tools. |
+| A turn's end, with its usage | A finished response, with its tokens. |
+| An interruption | The person's speech starting, then the response cancelled, so the session sees the barge-in. |
+
+Gemini's transcription of the person trails their speech. Words that arrive while the model answers
+join the turn it is answering, and that turn's transcript completes when the model's turn does; only
+Gemini's own interruption starts a new turn before then, so late words never read as the person
+speaking over the model. Gemini does not echo what it is given; the transport does, so the record
+keeps typed messages as it does on OpenAI. A tool call Gemini cancels, because the person spoke over it, is not answered.
+`sessionResumption`, on by default, asks Gemini for resumption handles: a socket that drops
+reconnects with the latest resumable one, and Gemini carries the conversation on where it left it.
+Gemini's warning that it will close the socket arrives as a raw `session.go_away` event.
+
 ### Server helpers
 
 `nexus-ai-pro/realtime/openai-server` keeps the API key on your server.
@@ -367,6 +426,29 @@ They share `OpenAIRealtimeServerOptions`: the key, the model, session settings, 
 a provider event, audio, an error, or a disconnect. `MockRealtimeTransportOptions` sets the script,
 `autoPlay`, a session id, a clock, and `strictState`. Drive it by hand with `enqueue()`, `advance()`,
 `flush()`, and the `emit` methods.
+
+## Video and images
+
+`sendImage()` adds an image to the conversation as the person's: a photo, a screenshot, a page. It
+takes a `RealtimeImageInput` (bytes, a `data:` URL, or base64) with `RealtimeImageOptions`: the `mimeType` (`image/jpeg` by
+default), `text` sent in the same message, and `createResponse`, true by default when there is text.
+
+`sendVideoFrame()` streams one frame of video, from a camera or a shared screen. On a provider that
+takes video as realtime input, such as Gemini Live, the frame goes there; otherwise it goes into the
+conversation as an image. `RealtimeVideoOptions` spaces frames out: one sooner than `minIntervalMs`
+after the last one sent is dropped (1,000 by default, about what the models take), and the method
+returns whether the frame was sent.
+
+```ts
+const session = createRealtimeAgent({
+  provider: new GeminiLiveProvider({ apiKey }),
+  model: 'gemini-live-2.5-flash-preview',
+  video: { minIntervalMs: 1000 },
+});
+await session.connect();
+camera.onFrame((jpeg) => session.sendVideoFrame(jpeg));
+session.sendImage(receiptPng, { mimeType: 'image/png', text: 'What is the total on this receipt?' });
+```
 
 ## Tools in detail
 
@@ -507,7 +589,15 @@ its category.
 
 ## Limitations
 
-- OpenAI is the only bundled provider. Another provider implements `RealtimeTransportProvider`.
+- OpenAI and Gemini Live are the bundled providers. Another provider implements
+  `RealtimeTransportProvider`.
+- Gemini Live is configured once, at connect: `updateSession()` changes nothing there, and neither
+  `clearAudio()` nor truncating unheard audio has a counterpart. Gemini stops its own response when
+  the person speaks.
+- On a provider without video input, each frame becomes an image in the conversation, and so part of
+  the model's context: space frames out further there.
+- Images and frames are not kept in the conversation record, and a resumed conversation does not give
+  them back.
 - A resumed conversation gives the provider its transcripts as text, not its audio, so the model
   hears what was said as written, not how it was said.
 - A turn is charged from `estimateCost`: a session without one is admitted and rate-limited turn by
@@ -533,6 +623,8 @@ specific entry point that provides it.
 | `createRealtimeAgent` | function | Creates a voice agent: a realtime session on a provider, with its voice settings folded into the session's audio configuration. |
 | `CreateRealtimeAgentOptions` | interface | Options for `createRealtimeAgent()`: a session's configuration, with the provider and voice settings kept separate. |
 | `createRealtimeId` | function | Creates `<prefix>_<uuid>` ids, falling back to time and random parts where `crypto.randomUUID` is unavailable. |
+| `GeminiLiveProvider` | class | Gemini Live as a realtime provider, behind the same session, tools, and conversation record as OpenAI's. |
+| `GeminiLiveProviderOptions` | interface | Options for `GeminiLiveProvider`: those of every transport it creates. |
 | `InferRealtimeSchema` | type | The argument type a schema produces, or a plain record when it cannot be inferred. |
 | `InterruptionItem` | interface | The model being cut off mid-response. |
 | `normalizeOpenAIRealtimeEvent` | function | Converts one OpenAI realtime event into neutral session events. |
@@ -556,6 +648,8 @@ specific entry point that provides it.
 | `RealtimeErrorOptions` | interface | Options for constructing a `RealtimeError`. |
 | `RealtimeEvent` | type | Everything a realtime session reports, as a discriminated union on `type`. |
 | `RealtimeIdFactory` | type | Creates unique ids, with an optional prefix. |
+| `RealtimeImageInput` | type | An image for the session: its bytes, a `data:` URL, or base64 with `mimeType`. |
+| `RealtimeImageOptions` | interface | How `RealtimeSession.sendImage()` adds an image. |
 | `RealtimeInterruptionOptions` | interface | How the session handles the user speaking over the model. |
 | `RealtimeLatencyMetrics` | interface | Latency of the moments a user notices in a spoken exchange, in milliseconds. |
 | `RealtimeMeterLike` | interface | The part of an OpenTelemetry meter the session creates instruments from. |
@@ -590,6 +684,7 @@ specific entry point that provides it.
 | `RealtimeTransportProvider` | interface | Creates transports for one realtime provider. |
 | `RealtimeTransportState` | type | Lifecycle of a transport connection, from construction to a clean or failed close. |
 | `RealtimeTurnDetectionOptions` | type | How the provider decides the user finished speaking: silence-based, meaning-based, or `null` to leave turn-taking to the application. |
+| `RealtimeVideoOptions` | interface | How a session streams video. |
 | `TextMessageItem` | interface | A text message in the conversation, typed rather than spoken. |
 | `ToolCallItem` | interface | The model asking to call a tool. |
 | `ToolResultItem` | interface | What a tool returned to the model. |
@@ -613,6 +708,13 @@ specific entry point that provides it.
 | `snapshotRealtimeConversation` | function | A deep copy of the record. |
 | `storeRealtimeConversations` | function | Conversation records in any long-term `Store`: the memory, Redis, Postgres, or SQLite store. |
 | `withConversationMetrics` | function | Returns a copy of the record with some metrics replaced. |
+
+### `nexus-ai-pro/realtime/gemini-live`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `GeminiLiveTransport` | class | Gemini Live over a WebSocket, behind the realtime session. |
+| `GeminiLiveTransportOptions` | interface | Options for the Gemini Live transport. |
 
 ### `nexus-ai-pro/realtime/mock`
 

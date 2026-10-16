@@ -1420,6 +1420,16 @@
         "default": "./dist-cjs/realtime/openai-websocket.transport.js"
       }
     },
+    "./realtime/gemini-live": {
+      "import": {
+        "types": "./dist/realtime/gemini-live.transport.d.ts",
+        "default": "./dist/realtime/gemini-live.transport.js"
+      },
+      "require": {
+        "types": "./dist-cjs/realtime/gemini-live.transport.d.ts",
+        "default": "./dist-cjs/realtime/gemini-live.transport.js"
+      }
+    },
     "./realtime/openai-server": {
       "import": {
         "types": "./dist/realtime/openai-server.d.ts",
@@ -2431,6 +2441,9 @@
       ],
       "realtime/openai-websocket": [
         "dist-cjs/realtime/openai-websocket.transport.d.ts"
+      ],
+      "realtime/gemini-live": [
+        "dist-cjs/realtime/gemini-live.transport.d.ts"
       ],
       "realtime/openai-server": [
         "dist-cjs/realtime/openai-server.d.ts"

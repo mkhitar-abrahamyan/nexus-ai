@@ -248,9 +248,10 @@ const imports = [
   ['nexus-ai-pro/images/comfyui', ['ComfyUIImageProvider']],
   ['nexus-ai-pro/images/transform', ['PngMaskTransformer', 'decodePng']],
   ['nexus-ai-pro/images/inputs', ['ImageInputResolver']],
-  ['nexus-ai-pro/realtime', ['RealtimeSession', 'createRealtimeAgent', 'MockRealtimeTransport']],
+  ['nexus-ai-pro/realtime', ['RealtimeSession', 'createRealtimeAgent', 'MockRealtimeTransport', 'GeminiLiveProvider']],
   ['nexus-ai-pro/realtime/openai-webrtc', ['OpenAIWebRTCTransport']],
   ['nexus-ai-pro/realtime/openai-websocket', ['OpenAIWebSocketTransport']],
+  ['nexus-ai-pro/realtime/gemini-live', ['GeminiLiveTransport']],
   ['nexus-ai-pro/jobs/batch', ['runBatch']],
   ['nexus-ai-pro/workflows', ['ragAnswer']],
 ];

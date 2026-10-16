@@ -16,6 +16,7 @@ import {
   normalizeOpenAIRealtimeEvent,
 } from './openai-events.js';
 import { RealtimeToolExecutor } from './tools.js';
+import { encodeBase64 } from './transport-utils.js';
 import type {
   ConversationMetrics,
   RealtimeAnalyticsExport,
@@ -26,6 +27,8 @@ import type {
   RealtimeConversation,
   RealtimeConversationExportFormat,
   RealtimeEvent,
+  RealtimeImageInput,
+  RealtimeImageOptions,
   RealtimeInterruptionOptions,
   RealtimeServerEvent,
   RealtimeSessionConfig,
@@ -87,6 +90,8 @@ export class RealtimeSession {
   private activeItemId?: string;
   private outputPlaybackStartedAt?: number;
   private sessionTimeout?: ReturnType<typeof setTimeout>;
+  /** When the last video frame was sent, to space frames out. */
+  private lastFrameAt?: number;
   private audioLimitTriggered = false;
   private activeConnectionCounted = false;
   private connectionSpan?: RealtimeSpanLike;
@@ -339,6 +344,39 @@ export class RealtimeSession {
       },
     });
     if (createResponse) this.createResponse();
+  }
+
+  /**
+   * Adds an image to the conversation as the user's: a photo, a screenshot, a page. With `text`, the
+   * two go in one message, and the model answers unless `createResponse` is false.
+   */
+  sendImage(image: RealtimeImageInput, options: RealtimeImageOptions = {}): void {
+    const content: Array<Record<string, unknown>> = [
+      { type: 'input_image', image_url: imageUrl(image, options.mimeType || 'image/jpeg') },
+    ];
+    const text = options.text?.trim() ? options.text : undefined;
+    if (text) content.push({ type: 'input_text', text });
+    this.sendProviderEvent({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content } });
+    if (options.createResponse ?? Boolean(text)) this.createResponse();
+  }
+
+  /**
+   * Streams one frame of video, from a camera or a shared screen: as realtime video input on a
+   * provider that takes it, such as Gemini Live, and otherwise as an image in the conversation. A
+   * frame sooner than `video.minIntervalMs` after the last one sent is dropped. Returns whether this
+   * one was sent.
+   */
+  sendVideoFrame(frame: ArrayBuffer | Uint8Array, mimeType = this.config.video?.mimeType || 'image/jpeg'): boolean {
+    this.assertConnected('send video');
+    const now = this.clock.now();
+    if (this.lastFrameAt !== undefined && now - this.lastFrameAt < (this.config.video?.minIntervalMs ?? 1_000)) {
+      return false;
+    }
+    this.lastFrameAt = now;
+    const transport = this.config.transport;
+    if (transport.sendVideo) transport.sendVideo(frame instanceof Uint8Array ? frame.slice().buffer : frame, mimeType);
+    else this.sendImage(frame, { mimeType, createResponse: false });
+    return true;
   }
 
   /**
@@ -1340,4 +1378,10 @@ function isReplayEcho(raw: RealtimeServerEvent): boolean {
   const item = raw.item as { id?: unknown } | undefined;
   const id = typeof item?.id === 'string' ? item.id : typeof raw.item_id === 'string' ? raw.item_id : '';
   return id.startsWith(REALTIME_REPLAY_PREFIX);
+}
+
+/** An image as the `data:` URL a conversation item carries. */
+function imageUrl(image: RealtimeImageInput, mimeType: string): string {
+  if (typeof image === 'string') return image.startsWith('data:') ? image : `data:${mimeType};base64,${image}`;
+  return `data:${mimeType};base64,${encodeBase64(image)}`;
 }

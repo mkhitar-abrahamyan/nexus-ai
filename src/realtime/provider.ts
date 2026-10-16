@@ -1,3 +1,4 @@
+import { GeminiLiveTransport, type GeminiLiveTransportOptions } from './gemini-live.transport.js';
 import { OpenAIWebRTCTransport, type OpenAIWebRTCTransportOptions } from './openai-webrtc.transport.js';
 import { OpenAIWebSocketTransport, type OpenAIWebSocketTransportOptions } from './openai-websocket.transport.js';
 import { RealtimeSession } from './session.js';
@@ -67,6 +68,35 @@ export class OpenAIRealtimeProvider implements RealtimeTransportProvider {
       typeof config.transport === 'object' && config.transport
         ? config.transport
         : this.createTransport(config.transport || this.options.defaultTransport);
+    return new RealtimeSession({ ...config, provider: this.name, transport });
+  }
+}
+
+/** Options for `GeminiLiveProvider`: those of every transport it creates. */
+export interface GeminiLiveProviderOptions extends GeminiLiveTransportOptions {}
+
+/**
+ * Gemini Live as a realtime provider, behind the same session, tools, and conversation record as
+ * OpenAI's. Its sessions are recorded as the `google` provider's.
+ */
+export class GeminiLiveProvider implements RealtimeTransportProvider {
+  /** Always `google`. */
+  readonly name = 'google';
+
+  constructor(private readonly options: GeminiLiveProviderOptions = {}) {}
+
+  /** Creates a Gemini Live transport. Gemini Live speaks over a WebSocket only; any other kind throws. */
+  createTransport(kind: RealtimeTransportKind = 'websocket'): RealtimeTransport {
+    if (kind !== 'websocket') throw new Error(`Gemini Live does not support transport "${kind}"`);
+    return new GeminiLiveTransport(this.options);
+  }
+
+  /** Creates a session on Gemini Live, with a transport you supply or a new one. */
+  createSession(
+    config: Omit<RealtimeSessionConfig, 'provider' | 'transport'> & { transport?: 'websocket' | RealtimeTransport },
+  ): RealtimeSession {
+    const transport =
+      typeof config.transport === 'object' && config.transport ? config.transport : this.createTransport();
     return new RealtimeSession({ ...config, provider: this.name, transport });
   }
 }

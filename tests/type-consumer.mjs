@@ -311,6 +311,7 @@ import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/teleph
 import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
 import {
+  GeminiLiveProvider,
   MockRealtimeTransport,
   OpenAIRealtimeProvider,
   createRealtimeAgent,
@@ -325,6 +326,7 @@ import { RealtimeToolExecutor } from 'nexus-ai-pro/realtime/tools';
 import { createRealtimeConversation } from 'nexus-ai-pro/realtime/conversation';
 import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
 import { OpenAIWebSocketTransport } from 'nexus-ai-pro/realtime/openai-websocket';
+import { GeminiLiveTransport } from 'nexus-ai-pro/realtime/gemini-live';
 import { createOpenAIRealtimeSessionEndpoint } from 'nexus-ai-pro/realtime/openai-server';
 import { MockRealtimeTransport as DirectMockRealtimeTransport } from 'nexus-ai-pro/realtime/mock';
 
@@ -428,6 +430,13 @@ const realtimeExecutor = new RealtimeToolExecutor([realtimeTool], {
 });
 const realtimeWebRTC = new OpenAIWebRTCTransport({ sessionEndpoint: '/api/realtime/session' });
 const realtimeWebSocket = new OpenAIWebSocketTransport({ ephemeralToken: 'ephemeral' });
+const geminiLive = new GeminiLiveTransport({ ephemeralToken: 'ephemeral', sessionResumption: true });
+const geminiSession = new GeminiLiveProvider({ apiKey: 'server-only' }).createSession({
+  model: 'gemini-live-2.5-flash-preview',
+  video: { minIntervalMs: 1000 },
+});
+const sentFrame: boolean = geminiSession.sendVideoFrame(new Uint8Array([1, 2, 3]));
+geminiSession.sendImage('data:image/png;base64,AAAA', { text: 'What is this?' });
 const directMockRealtime = new DirectMockRealtimeTransport();
 const realtimeEndpoint = createOpenAIRealtimeSessionEndpoint({
   apiKey: 'server-only',
@@ -1050,6 +1059,8 @@ void realtimeToolCall;
 void realtimeExecutor;
 void realtimeWebRTC;
 void realtimeWebSocket;
+void geminiLive;
+void sentFrame;
 void directMockRealtime;
 void realtimeEndpoint;
 void unsubscribeRealtime;
