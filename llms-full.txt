@@ -306,14 +306,19 @@ Shipped so far:
   priced per second; online evaluation that reads every run however many share a millisecond, and
   budget reservations a dead worker leaves settled by what its call did; a deep agent's helper limit
   across processes; a media index that remembers what it holds; and the experimental families run
-  against their live services every week.
+  against their live services every week;
+- 2.10 durable conversations, and a second realtime provider: A2A tasks, ACP turns, and realtime
+  sessions taken over by another worker when theirs dies, each proven killed at every write; realtime
+  on the client's lifecycle; Gemini Live behind the same session, with video and images; phone calls
+  answered over SIP; helpers on another server whose runs outlive their worker; and realtime over
+  real WebRTC in a browser, with published budgets for turn latency and session load.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.10 makes every conversation that runs on a worker durable, A2A tasks, ACP turns, and
-realtime sessions, and adds Gemini Live as a second realtime provider; Pinecone, images, the Gemini
-embedding batch tier, media understanding, and video graduate once the live workflow passes against
-each. The
+Next, 2.11 separates where an agent's files live from where its code runs, with workspaces, and
+completes telephony: a second provider, messaging, recording, conference, and transfer. Pinecone,
+images, the Gemini embedding batch tier, media understanding, and video graduate once the live
+workflow passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order
 applications ask for it.
 
@@ -10410,6 +10415,8 @@ its category.
 
 - OpenAI and Gemini Live are the bundled providers. Another provider implements
   `RealtimeTransportProvider`.
+- Gemini Live and SIP calls are verified in the test suite against scripted versions of their
+  protocols, not yet against the live services.
 - Gemini Live is configured once, at connect: `updateSession()` changes nothing there, and neither
   `clearAudio()` nor truncating unheard audio has a counterpart. Gemini stops its own response when
   the person speaks.

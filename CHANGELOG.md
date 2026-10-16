@@ -4,6 +4,10 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-10-16
+
+Durable conversations, and a second realtime provider.
+
 ### Added
 
 - **A2A tasks that outlive their replica.** A working task's record now holds an `A2aTaskLease` and
@@ -2690,7 +2694,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.9.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.10.0...HEAD
+[2.10.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.6.0...v2.7.0
