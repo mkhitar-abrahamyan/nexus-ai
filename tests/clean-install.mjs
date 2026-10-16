@@ -97,15 +97,18 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // mock adapters), durable budget reservations in every usage store, the media index manifest, and
 // cursor paging. None is loaded by the root. Measured at 1,367,081 bytes packed and 8,211,953
 // unpacked.
-const MAX_PACKED_BYTES = 1_410_000;
-const MAX_UNPACKED_BYTES = 8_460_000;
+// Raised again in 2.10.0 for two opt-in entry points (Gemini Live and SIP calls), the realtime
+// lifecycle, durable realtime conversations, video into a session, remote helpers, and A2A and ACP
+// takeover. None is loaded by the root. Measured at 1,407,870 bytes packed and 8,437,286 unpacked.
+const MAX_PACKED_BYTES = 1_450_000;
+const MAX_UNPACKED_BYTES = 8_700_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
 // came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0 and
-// 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0, for the same reasons, and still nothing
-// but the package itself: 6,908,187 bytes in 2.4.0.
-const MAX_INSTALLED_BYTES = 8_560_000;
+// 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0 and 2.10.0, for the same reasons, and
+// still nothing but the package itself: 6,908,187 bytes in 2.4.0.
+const MAX_INSTALLED_BYTES = 8_800_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
