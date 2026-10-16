@@ -5,6 +5,8 @@
 Phone calls, from `nexus-ai-pro/telephony`: place calls, answer webhooks, control calls, manage phone
 numbers, and handle media streams. The Twilio adapter is on `nexus-ai-pro/telephony/twilio`. To put a
 voice agent on a call, `nexus-ai-pro/telephony/realtime-bridge` connects the call to a realtime session.
+A SIP trunk can also send calls to OpenAI directly, with no media stream to relay: see
+[Phone calls over SIP](realtime.md#phone-calls-over-sip).
 
 ## Phone Number Telephony
 

@@ -1,4 +1,5 @@
 import { RealtimeError } from './errors.js';
+import { decodeBase64, encodeBase64 } from './transport-utils.js';
 
 /** The part of a `fetch` response the server helpers read. */
 export interface OpenAIRealtimeServerFetchResponse {
@@ -136,6 +137,147 @@ export async function createOpenAIRealtimeClientSecret(
   };
 }
 
+/** What controlling a call OpenAI carries needs: the key, and how to reach OpenAI. */
+export type OpenAIRealtimeCallOptions = Pick<
+  OpenAIRealtimeServerOptions,
+  'apiKey' | 'baseUrl' | 'safetyIdentifier' | 'fetch'
+>;
+
+/**
+ * Answers a call OpenAI is carrying, such as an incoming SIP call, with the session that will run
+ * it: its model, instructions, tools, and audio, as `createOpenAISessionUpdate()` builds them.
+ */
+export async function acceptOpenAIRealtimeCall(
+  callId: string,
+  session: Record<string, unknown>,
+  options: OpenAIRealtimeCallOptions,
+  signal?: AbortSignal,
+): Promise<void> {
+  await callRequest(callId, 'accept', { type: 'realtime', ...session }, options, signal);
+}
+
+/** Declines a call, with a SIP status: 603 (decline) by default, or 486 (busy), say. */
+export async function rejectOpenAIRealtimeCall(
+  callId: string,
+  options: OpenAIRealtimeCallOptions & { statusCode?: number },
+  signal?: AbortSignal,
+): Promise<void> {
+  await callRequest(callId, 'reject', { status_code: options.statusCode ?? 603 }, options, signal);
+}
+
+/** Transfers an accepted call to another number or SIP address, such as `tel:+14155550123`. */
+export async function referOpenAIRealtimeCall(
+  callId: string,
+  targetUri: string,
+  options: OpenAIRealtimeCallOptions,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!targetUri.trim()) throw configurationError('A transfer needs a target URI');
+  await callRequest(callId, 'refer', { target_uri: targetUri }, options, signal);
+}
+
+/** Ends a call. */
+export async function hangupOpenAIRealtimeCall(
+  callId: string,
+  options: OpenAIRealtimeCallOptions,
+  signal?: AbortSignal,
+): Promise<void> {
+  await callRequest(callId, 'hangup', undefined, options, signal);
+}
+
+/** Headers as a `Headers` object or a plain record, such as Node's `request.headers`. */
+export type OpenAIWebhookHeaders =
+  | { get(name: string): string | null }
+  | Record<string, string | readonly string[] | undefined>;
+
+/** One event OpenAI delivered to your webhook. */
+export interface OpenAIWebhookEvent {
+  /** The event's id. */
+  id: string;
+  /** What happened, such as `realtime.call.incoming`. */
+  type: string;
+  /** Epoch seconds when it happened. */
+  created_at?: number;
+  /** The event's data. */
+  data: Record<string, unknown>;
+  /** The webhook delivery's id, the same on every retry of it. */
+  webhookId: string;
+}
+
+/** How `verifyOpenAIWebhook()` checks a delivery. */
+export interface OpenAIWebhookVerifyOptions {
+  /** How old a delivery may be, in seconds, before it is refused as a replay. Defaults to 300. */
+  toleranceSeconds?: number;
+  /** Replaces the system clock, in milliseconds, for tests. */
+  now?: () => number;
+}
+
+/**
+ * Checks a webhook delivery's signature against your endpoint's signing secret (`whsec_...`) and
+ * returns its event. A delivery that is unsigned, signed with another secret, altered, or older than
+ * the tolerance is refused with a `RealtimeError` of code `invalid_webhook_signature`. Pass the body
+ * exactly as it arrived: reformatted JSON no longer matches its signature.
+ */
+export async function verifyOpenAIWebhook(
+  request: { headers: OpenAIWebhookHeaders; body: string | Uint8Array },
+  secret: string,
+  options: OpenAIWebhookVerifyOptions = {},
+): Promise<OpenAIWebhookEvent> {
+  const id = header(request.headers, 'webhook-id');
+  const timestamp = header(request.headers, 'webhook-timestamp');
+  const signatures = header(request.headers, 'webhook-signature');
+  if (!id || !timestamp || !signatures) throw signatureError('The delivery is not signed');
+  const seconds = Number(timestamp);
+  const now = (options.now?.() ?? Date.now()) / 1_000;
+  if (!Number.isFinite(seconds) || Math.abs(now - seconds) > (options.toleranceSeconds ?? 300)) {
+    throw signatureError('The delivery is too old or from the future');
+  }
+  const body = typeof request.body === 'string' ? request.body : new TextDecoder().decode(request.body);
+  const subtle = (globalThis as { crypto?: { subtle?: HmacSubtle } }).crypto?.subtle;
+  if (!subtle) throw configurationError('This environment does not provide Web Crypto');
+  const key = await subtle.importKey(
+    'raw',
+    decodeBase64(secret.startsWith('whsec_') ? secret.slice('whsec_'.length) : secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signed = await subtle.sign('HMAC', key, new TextEncoder().encode(`${id}.${timestamp}.${body}`));
+  const expected = encodeBase64(signed);
+  const matches = signatures
+    .split(' ')
+    .map((entry) => entry.split(','))
+    .some(([version, signature]) => version === 'v1' && signature !== undefined && sameText(signature, expected));
+  if (!matches) throw signatureError('The delivery is not signed with this secret');
+  let event: unknown;
+  try {
+    event = JSON.parse(body);
+  } catch (error) {
+    throw new RealtimeError({
+      message: 'The webhook delivery is not JSON',
+      code: 'invalid_webhook_event',
+      category: 'protocol',
+      provider: 'openai',
+      cause: error,
+    });
+  }
+  if (!isRecord(event) || typeof event.type !== 'string') {
+    throw new RealtimeError({
+      message: 'The webhook delivery is not an event',
+      code: 'invalid_webhook_event',
+      category: 'protocol',
+      provider: 'openai',
+    });
+  }
+  return {
+    ...event,
+    id: typeof event.id === 'string' ? event.id : id,
+    type: event.type,
+    data: isRecord(event.data) ? event.data : {},
+    webhookId: id,
+  } as OpenAIWebhookEvent;
+}
+
 /** Returns a function that exchanges an SDP offer, ready to put behind your own HTTP route. */
 export function createOpenAIRealtimeSessionEndpoint(options: OpenAIRealtimeServerOptions) {
   return (sdp: string, signal?: AbortSignal) => createOpenAIRealtimeCall(sdp, options, signal);
@@ -144,7 +286,7 @@ export function createOpenAIRealtimeSessionEndpoint(options: OpenAIRealtimeServe
 async function request(
   input: string,
   init: Parameters<OpenAIRealtimeServerFetch>[1],
-  options: OpenAIRealtimeServerOptions,
+  options: OpenAIRealtimeCallOptions,
 ): Promise<OpenAIRealtimeServerFetchResponse> {
   if (!options.apiKey.trim()) throw configurationError('A server-side OpenAI API key is required');
   let response: OpenAIRealtimeServerFetchResponse;
@@ -176,6 +318,67 @@ async function request(
   });
 }
 
+async function callRequest(
+  callId: string,
+  action: 'accept' | 'reject' | 'refer' | 'hangup',
+  body: Record<string, unknown> | undefined,
+  options: OpenAIRealtimeCallOptions,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!callId.trim()) throw configurationError('A call id is required');
+  const response = await request(
+    `${baseUrl(options)}/realtime/calls/${encodeURIComponent(callId)}/${action}`,
+    {
+      method: 'POST',
+      headers: { ...authorizationHeaders(options), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal,
+    },
+    options,
+  );
+  await response.text().catch(() => '');
+}
+
+function header(headers: OpenAIWebhookHeaders, name: string): string | undefined {
+  if (typeof (headers as { get?: unknown }).get === 'function') {
+    return (headers as { get(name: string): string | null }).get(name) ?? undefined;
+  }
+  const record = headers as Record<string, string | readonly string[] | undefined>;
+  const key = Object.keys(record).find((candidate) => candidate.toLowerCase() === name);
+  const value = key === undefined ? undefined : record[key];
+  return Array.isArray(value) ? value[0] : (value as string | undefined);
+}
+
+/** The part of Web Crypto's `crypto.subtle` that signs with HMAC. */
+interface HmacSubtle {
+  importKey(
+    format: 'raw',
+    key: ArrayBuffer,
+    algorithm: { name: 'HMAC'; hash: 'SHA-256' },
+    extractable: boolean,
+    usages: ['sign'],
+  ): Promise<unknown>;
+  sign(algorithm: 'HMAC', key: unknown, data: Uint8Array): Promise<ArrayBuffer>;
+}
+
+/** Compares two strings in time that does not depend on where they differ. */
+function sameText(left: string, right: string): boolean {
+  let difference = left.length ^ right.length;
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+  return difference === 0;
+}
+
+function signatureError(message: string): RealtimeError {
+  return new RealtimeError({
+    message,
+    code: 'invalid_webhook_signature',
+    category: 'authentication',
+    provider: 'openai',
+  });
+}
+
 function sessionConfig(options: OpenAIRealtimeServerOptions): Record<string, unknown> {
   return {
     type: 'realtime',
@@ -184,18 +387,18 @@ function sessionConfig(options: OpenAIRealtimeServerOptions): Record<string, unk
   };
 }
 
-function authorizationHeaders(options: OpenAIRealtimeServerOptions): Record<string, string> {
+function authorizationHeaders(options: OpenAIRealtimeCallOptions): Record<string, string> {
   return {
     Authorization: `Bearer ${options.apiKey}`,
     ...(options.safetyIdentifier ? { 'OpenAI-Safety-Identifier': options.safetyIdentifier } : {}),
   };
 }
 
-function baseUrl(options: OpenAIRealtimeServerOptions): string {
+function baseUrl(options: OpenAIRealtimeCallOptions): string {
   return (options.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
 }
 
-function resolveFetch(options: OpenAIRealtimeServerOptions): OpenAIRealtimeServerFetch {
+function resolveFetch(options: OpenAIRealtimeCallOptions): OpenAIRealtimeServerFetch {
   if (options.fetch) return options.fetch;
   const runtime = globalThis as unknown as { fetch?: OpenAIRealtimeServerFetch };
   if (!runtime.fetch) throw configurationError('This environment does not provide fetch');

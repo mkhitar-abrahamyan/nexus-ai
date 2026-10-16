@@ -52,9 +52,16 @@ export type * from './openai-websocket.transport.js';
 export { GeminiLiveTransport } from './gemini-live.transport.js';
 export type { GeminiLiveTransportOptions } from './gemini-live.transport.js';
 export {
+  acceptOpenAIRealtimeCall,
   createOpenAIRealtimeCall,
   createOpenAIRealtimeClientSecret,
   createOpenAIRealtimeSessionEndpoint,
+  hangupOpenAIRealtimeCall,
+  referOpenAIRealtimeCall,
+  rejectOpenAIRealtimeCall,
+  verifyOpenAIWebhook,
 } from './openai-server.js';
 export type * from './openai-server.js';
+export { answerOpenAISipCalls } from './openai-sip.js';
+export type * from './openai-sip.js';
 export type * from './types.js';

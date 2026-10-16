@@ -327,6 +327,7 @@ import { createRealtimeConversation } from 'nexus-ai-pro/realtime/conversation';
 import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
 import { OpenAIWebSocketTransport } from 'nexus-ai-pro/realtime/openai-websocket';
 import { GeminiLiveTransport } from 'nexus-ai-pro/realtime/gemini-live';
+import { answerOpenAISipCalls, type OpenAISipCall } from 'nexus-ai-pro/realtime/openai-sip';
 import { createOpenAIRealtimeSessionEndpoint } from 'nexus-ai-pro/realtime/openai-server';
 import { MockRealtimeTransport as DirectMockRealtimeTransport } from 'nexus-ai-pro/realtime/mock';
 
@@ -1060,6 +1061,14 @@ void realtimeExecutor;
 void realtimeWebRTC;
 void realtimeWebSocket;
 void geminiLive;
+const sipCalls = answerOpenAISipCalls({
+  apiKey: 'server-only',
+  webhookSecret: 'whsec_c2VjcmV0',
+  webSocketFactory: () => ({}) as never,
+  answer: (call: OpenAISipCall) =>
+    call.from?.includes('+1415') ? { model: 'gpt-realtime', instructions: 'Book tables.' } : { reject: 486 },
+});
+void sipCalls.handle({ headers: { 'webhook-id': 'w' }, body: '{}' });
 void sentFrame;
 void directMockRealtime;
 void realtimeEndpoint;

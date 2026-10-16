@@ -69,6 +69,11 @@ export type OpenAIEphemeralTokenProvider = (
 export interface OpenAIWebSocketTransportOptions {
   /** Realtime endpoint. Defaults to OpenAI's production URL. */
   url?: string;
+  /**
+   * Attaches to a call OpenAI is already carrying, such as an accepted SIP call, by its id, instead
+   * of starting a session on a model.
+   */
+  callId?: string;
   /** API key. Keep it on a server; a browser should use WebRTC with an ephemeral token. */
   apiKey?: string;
   /** A token already issued. */
@@ -467,6 +472,9 @@ export class OpenAIWebSocketTransport implements RealtimeTransport {
 
   private url(model: string): string {
     const base = this.options.url || DEFAULT_URL;
+    if (this.options.callId) {
+      return `${base}${base.includes('?') ? '&' : '?'}call_id=${encodeURIComponent(this.options.callId)}`;
+    }
     if (/[?&]model=/.test(base)) return base;
     return `${base}${base.includes('?') ? '&' : '?'}model=${encodeURIComponent(model)}`;
   }

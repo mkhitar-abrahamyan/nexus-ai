@@ -1430,6 +1430,16 @@
         "default": "./dist-cjs/realtime/gemini-live.transport.js"
       }
     },
+    "./realtime/openai-sip": {
+      "import": {
+        "types": "./dist/realtime/openai-sip.d.ts",
+        "default": "./dist/realtime/openai-sip.js"
+      },
+      "require": {
+        "types": "./dist-cjs/realtime/openai-sip.d.ts",
+        "default": "./dist-cjs/realtime/openai-sip.js"
+      }
+    },
     "./realtime/openai-server": {
       "import": {
         "types": "./dist/realtime/openai-server.d.ts",
@@ -2444,6 +2454,9 @@
       ],
       "realtime/gemini-live": [
         "dist-cjs/realtime/gemini-live.transport.d.ts"
+      ],
+      "realtime/openai-sip": [
+        "dist-cjs/realtime/openai-sip.d.ts"
       ],
       "realtime/openai-server": [
         "dist-cjs/realtime/openai-server.d.ts"

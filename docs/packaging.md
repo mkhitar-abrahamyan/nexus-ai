@@ -96,8 +96,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 344 KB | 100% | none |
 | `nexus-ai-pro/config` | 336 KB | 98% | none |
 | `nexus-ai-pro/core` | 332 KB | 97% | none |
-| `nexus-ai-pro/realtime` | 200 KB | 58% | none |
+| `nexus-ai-pro/realtime` | 210 KB | 61% | none |
 | `nexus-ai-pro/deep-agent` | 185 KB | 54% | none |
+| `nexus-ai-pro/realtime/openai-sip` | 136 KB | 40% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
@@ -150,7 +151,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/tracing` | 31 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony` | 31 KB | 9% | none |
-| `nexus-ai-pro/realtime/openai-websocket` | 28 KB | 8% | none |
+| `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 8% | none |
 | `nexus-ai-pro/server/tenancy` | 27 KB | 8% | none |
@@ -164,6 +165,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/sandbox` | 22 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
+| `nexus-ai-pro/realtime/openai-server` | 21 KB | 6% | none |
 | `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/protocols/acp/editor` | 20 KB | 6% | none |
@@ -229,7 +231,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 8 KB | 2% | none |
 | `nexus-ai-pro/evaluate/threads` | 8 KB | 2% | none |
-| `nexus-ai-pro/realtime/openai-server` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
 | `nexus-ai-pro/store` | 7 KB | 2% | none |
 | `nexus-ai-pro/ops/rate-limit-adapters` | 7 KB | 2% | none |

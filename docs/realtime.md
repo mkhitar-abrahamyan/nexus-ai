@@ -1,6 +1,6 @@
 # Realtime voice agents
 
-<!-- covers: ./realtime ./realtime/session ./realtime/tools ./realtime/conversation ./realtime/openai-webrtc ./realtime/openai-websocket ./realtime/gemini-live ./realtime/openai-server ./realtime/mock -->
+<!-- covers: ./realtime ./realtime/session ./realtime/tools ./realtime/conversation ./realtime/openai-webrtc ./realtime/openai-websocket ./realtime/gemini-live ./realtime/openai-sip ./realtime/openai-server ./realtime/mock -->
 
 Realtime voice agents from `nexus-ai-pro/realtime`: a session over WebRTC in the browser or WebSocket on a server, with barge-in, tools that can require confirmation, reconnection, metrics, and conversation exports. The browser entry points use no Node API.
 
@@ -202,7 +202,7 @@ not a durable session store, distributed rate limiter, or authorization system.
 
 Focused public imports are available for `realtime`, `realtime/session`, `realtime/tools`,
 `realtime/conversation`, `realtime/openai-webrtc`, `realtime/openai-websocket`,
-`realtime/gemini-live`, `realtime/openai-server`, and `realtime/mock`. The deterministic mock is suitable for tests and demos;
+`realtime/gemini-live`, `realtime/openai-sip`, `realtime/openai-server`, and `realtime/mock`. The deterministic mock is suitable for tests and demos;
 see [`examples/realtime-scheduling.ts`](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/examples/realtime-scheduling.ts).
 
 ## Sessions in detail
@@ -369,7 +369,8 @@ an ephemeral token, or an `OpenAIEphemeralTokenProvider`. You supply the socket 
 `OpenAIWebSocketFactory`: it receives `OpenAIWebSocketFactoryOptions` (headers and protocols) and
 returns a `RealtimeWebSocketLike`. The remaining options set the URL, headers, subprotocols, timeouts
 (10 seconds to connect, 1 to disconnect), the largest audio chunk (15 MiB), a text codec, timers, and
-a clock.
+a clock. `callId` attaches the transport to a call OpenAI is already carrying, such as an accepted
+SIP call, instead of starting a session on a model.
 
 ### Gemini Live
 
@@ -414,6 +415,18 @@ Gemini's warning that it will close the socket arrives as a raw `session.go_away
 | `createOpenAIRealtimeCall()` | Exchanges a browser's SDP offer for OpenAI's answer. |
 | `createOpenAIRealtimeSessionEndpoint()` | Wraps that as a handler for your route. |
 | `createOpenAIRealtimeClientSecret()` | Mints an `OpenAIRealtimeClientSecret` for a browser: a token, its expiry, and OpenAI's response. |
+| `acceptOpenAIRealtimeCall()` | Answers a call OpenAI carries with the session that will run it. |
+| `rejectOpenAIRealtimeCall()` | Declines it, with a SIP status: 603 by default. |
+| `referOpenAIRealtimeCall()` | Transfers an accepted call to another number or SIP address. |
+| `hangupOpenAIRealtimeCall()` | Ends it. |
+| `verifyOpenAIWebhook()` | Checks a webhook delivery's signature and returns its `OpenAIWebhookEvent`. |
+
+Controlling a call takes `OpenAIRealtimeCallOptions`: the key, the base URL, the safety identifier,
+and a `fetch`. `verifyOpenAIWebhook()` takes the delivery's `OpenAIWebhookHeaders`, a `Headers`
+object or a plain record, and its raw body, with your endpoint's signing secret. It refuses a
+delivery that is unsigned, signed with another secret, altered, or older than
+`OpenAIWebhookVerifyOptions.toleranceSeconds` (300), with a `RealtimeError` of code
+`invalid_webhook_signature`. It runs on Web Crypto, so anywhere.
 
 They share `OpenAIRealtimeServerOptions`: the key, the model, session settings, a base URL, a
 `safetyIdentifier` for the end user, a `fetch`, and a `formDataFactory` for runtimes without
@@ -426,6 +439,57 @@ They share `OpenAIRealtimeServerOptions`: the key, the model, session settings, 
 a provider event, audio, an error, or a disconnect. `MockRealtimeTransportOptions` sets the script,
 `autoPlay`, a session id, a clock, and `strictState`. Drive it by hand with `enqueue()`, `advance()`,
 `flush()`, and the `emit` methods.
+
+## Phone calls over SIP
+
+`answerOpenAISipCalls()`, from `nexus-ai-pro/realtime/openai-sip`, answers phone calls with a
+realtime agent. Point a SIP trunk at OpenAI, and OpenAI's `realtime.call.incoming` webhook at the
+handler of the `OpenAISipCalls` it returns. For each verified delivery, `answer()` decides from the `OpenAISipCall` (who is
+calling, what they called, and every SIP header) and returns an `OpenAISipAnswer`:
+- a session's configuration (`OpenAISipSessionConfig`): the call is accepted with it, and a session
+  attaches to the call over a WebSocket and runs it, with its tools, conversation record, and
+  lifecycle. Its id is the call's;
+- `false`, which declines the call with SIP 603, or `{ reject }` with another status, such as 486
+  when busy.
+
+```ts
+import { answerOpenAISipCalls } from 'nexus-ai-pro/realtime/openai-sip';
+import WebSocket from 'ws';
+
+const calls = answerOpenAISipCalls({
+  apiKey: process.env.OPENAI_API_KEY!,
+  webhookSecret: process.env.OPENAI_WEBHOOK_SECRET!,
+  webSocketFactory: (url, { headers }) => new WebSocket(url, { headers }),
+  answer: async (call) => {
+    const account = await accounts.byPhone(call.from);
+    if (!account) return { reject: 486 };
+    return { model: 'gpt-realtime', instructions: account.greeting, tools: [bookTable], lifecycle: ai.lifecycle, tenantId: account.id };
+  },
+  onSession: (session, call) => session.on('error', (error) => log.warn({ callId: call.callId, error })),
+});
+
+// Your route, with the body exactly as it arrived:
+const { status, body } = await calls.handle({ headers: request.headers, body: rawBody });
+```
+
+`handle()` takes an `OpenAISipWebhookRequest` and returns an `OpenAISipWebhookResponse` to reply
+with: 200 once the call is accepted or declined, 401 for a delivery your secret did not sign, and
+500 when answering failed, so OpenAI delivers it again. Each delivery is claimed by its webhook id
+before it is acted on, so a retry or a duplicate answers its call once; a failed one is released, so
+its retry is acted on. The claims are remembered in the process, the last 10,000; give `claim` and
+`release` backed by a shared store when several replicas take the webhook. The session connects after
+the reply; `onSession()` receives it, and `onError()` what fails after. Other verified events go to
+`onEvent()`.
+
+An `OpenAISipCall` also transfers the call with `refer()` and ends it with `hangup()`. `sessions`
+holds the calls in progress by id, and `close()` hangs each up, for shutdown. `OpenAISipHeader` is one
+SIP header, and `OpenAISipOptions` the whole configuration.
+
+In the test suite, a signed delivery of an incoming call is accepted with the agent's session, chosen
+from the caller's number. The session attaches by the call's id and books a table through its tool
+when the caller asks, and the call is hung up. Forged, altered, and stale deliveries answer nothing. A
+retry after a failed accept answers the call, and a duplicate, on the same replica or another, does
+not answer it twice.
 
 ## Video and images
 
@@ -728,14 +792,37 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `acceptOpenAIRealtimeCall` | function | Answers a call OpenAI is carrying, such as an incoming SIP call, with the session that will run it: its model, instructions, tools, and audio, as `createOpenAISessionUpdate()` builds them. |
 | `createOpenAIRealtimeCall` | function | Exchanges a browser's SDP offer with OpenAI and returns the SDP answer. |
 | `createOpenAIRealtimeClientSecret` | function | Mints an ephemeral client secret for a browser session. |
 | `createOpenAIRealtimeSessionEndpoint` | function | Returns a function that exchanges an SDP offer, ready to put behind your own HTTP route. |
 | `FormDataLike` | interface | The part of `FormData` the SDP exchange needs. |
+| `hangupOpenAIRealtimeCall` | function | Ends a call. |
+| `OpenAIRealtimeCallOptions` | type | What controlling a call OpenAI carries needs: the key, and how to reach OpenAI. |
 | `OpenAIRealtimeClientSecret` | interface | A short-lived client secret a browser can connect with. |
 | `OpenAIRealtimeServerFetch` | type | The part of `fetch` the server helpers use. |
 | `OpenAIRealtimeServerFetchResponse` | interface | The part of a `fetch` response the server helpers read. |
 | `OpenAIRealtimeServerOptions` | interface | Server-side options for creating OpenAI realtime sessions, where the API key lives. |
+| `OpenAIWebhookEvent` | interface | One event OpenAI delivered to your webhook. |
+| `OpenAIWebhookHeaders` | type | Headers as a `Headers` object or a plain record, such as Node's `request.headers`. |
+| `OpenAIWebhookVerifyOptions` | interface | How `verifyOpenAIWebhook()` checks a delivery. |
+| `referOpenAIRealtimeCall` | function | Transfers an accepted call to another number or SIP address, such as `tel:+14155550123`. |
+| `rejectOpenAIRealtimeCall` | function | Declines a call, with a SIP status: 603 (decline) by default, or 486 (busy), say. |
+| `verifyOpenAIWebhook` | function | Checks a webhook delivery's signature against your endpoint's signing secret (`whsec_...`) and returns its event. |
+
+### `nexus-ai-pro/realtime/openai-sip`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `answerOpenAISipCalls` | function | Answers phone calls with a realtime agent, over OpenAI's SIP interface. |
+| `OpenAISipAnswer` | type | How to answer a call: with the session that runs it, or not at all, with a SIP status. |
+| `OpenAISipCall` | interface | An incoming phone call, and what can be done with it once it is answered. |
+| `OpenAISipCalls` | interface | Phone calls answered by a realtime agent, from `answerOpenAISipCalls()`. |
+| `OpenAISipHeader` | interface | One SIP header of a call, as it arrived. |
+| `OpenAISipOptions` | interface | Options for `answerOpenAISipCalls()`. |
+| `OpenAISipSessionConfig` | type | The session that answers a call: a session's configuration, less the transport the call provides. |
+| `OpenAISipWebhookRequest` | interface | A webhook delivery, as your HTTP server received it. |
+| `OpenAISipWebhookResponse` | interface | What to reply to a webhook delivery. |
 
 ### `nexus-ai-pro/realtime/openai-webrtc`
 

@@ -61,7 +61,13 @@ New and stable:
   `GeminiLiveProviderOptions`; `RealtimeSession.sendImage()` and `sendVideoFrame()`,
   `RealtimeSessionConfig.video`, `RealtimeImageInput`, `RealtimeImageOptions`, and
   `RealtimeVideoOptions`; `RealtimeTransport.sendVideo()`, optional;
-- `nexus-ai-pro/realtime/gemini-live`, with `GeminiLiveTransport` and `GeminiLiveTransportOptions`.
+- `nexus-ai-pro/realtime/gemini-live`, with `GeminiLiveTransport` and `GeminiLiveTransportOptions`;
+- `nexus-ai-pro/realtime/openai-sip`, with `answerOpenAISipCalls()` and its types, also on
+  `nexus-ai-pro/realtime`;
+- on `nexus-ai-pro/realtime/openai-server` and `nexus-ai-pro/realtime`: `acceptOpenAIRealtimeCall()`,
+  `rejectOpenAIRealtimeCall()`, `referOpenAIRealtimeCall()`, `hangupOpenAIRealtimeCall()`,
+  `verifyOpenAIWebhook()`, `OpenAIRealtimeCallOptions`, `OpenAIWebhookEvent`, `OpenAIWebhookHeaders`,
+  and `OpenAIWebhookVerifyOptions`; `OpenAIWebSocketTransportOptions.callId`.
 
 The realtime family stays experimental, and all of these with it.
 

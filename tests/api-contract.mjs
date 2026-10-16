@@ -188,6 +188,7 @@ const expectedSubpaths = [
   './realtime/openai-webrtc',
   './realtime/openai-websocket',
   './realtime/gemini-live',
+  './realtime/openai-sip',
   './realtime/openai-server',
   './realtime/mock',
   './telephony',

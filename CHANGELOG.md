@@ -45,6 +45,15 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   turns, and tool responses; and its audio, transcripts, tool calls, interruptions, and usage become
   the events the session already reads. It takes an API key on a server or an ephemeral token
   anywhere, and reconnects a dropped socket with Gemini's latest resumption handle.
+- **Phone calls answered by a realtime agent, over SIP.** `answerOpenAISipCalls()`, on the new
+  `nexus-ai-pro/realtime/openai-sip`, handles OpenAI's `realtime.call.incoming` webhook: it verifies
+  each delivery, claims it so a retry answers its call once, and answers the call with the session
+  `answer()` chooses from the caller, which attaches to the call and runs it with its tools,
+  record, and lifecycle; or declines it with a SIP status. `OpenAISipCall` transfers and hangs up.
+  The call control is on `nexus-ai-pro/realtime/openai-server` too: `acceptOpenAIRealtimeCall()`,
+  `rejectOpenAIRealtimeCall()`, `referOpenAIRealtimeCall()`, `hangupOpenAIRealtimeCall()`, and
+  `verifyOpenAIWebhook()`, on Web Crypto. `OpenAIWebSocketTransportOptions.callId` attaches a
+  transport to a call.
 - **Video and images in a realtime session.** `sendVideoFrame()` streams camera or screen frames:
   as realtime video on Gemini Live, as images in the conversation elsewhere, spaced by
   `RealtimeVideoOptions.minIntervalMs`. `sendImage()` adds an image, with text, to the conversation.
@@ -60,6 +69,11 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Proof
 
+- `tests/realtime-sip.test.ts`: a signed incoming-call delivery is accepted with the agent's session,
+  chosen from the caller's number; the session attaches by the call's id, books a table through its
+  tool when the caller asks, and hangs up. Forged, altered, and stale deliveries answer nothing; a
+  retry after a failed accept answers the call, and a duplicate, on one replica or two, answers it
+  once. Without the signature check, the claim, or the release, a test fails.
 - `tests/realtime-gemini.test.ts`: one agent definition (instructions, a tool, conversation settings)
   runs on OpenAI's realtime API and on Gemini Live, each over its own scripted wire protocol. The two
   records match item for item: what the person asked, the tool call and its result, and what the model

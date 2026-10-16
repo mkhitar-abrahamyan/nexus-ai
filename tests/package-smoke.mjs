@@ -337,6 +337,7 @@ const imports = [
   { specifier: 'nexus-ai-pro/realtime/openai-webrtc', exports: ['OpenAIWebRTCTransport'] },
   { specifier: 'nexus-ai-pro/realtime/openai-websocket', exports: ['OpenAIWebSocketTransport'] },
   { specifier: 'nexus-ai-pro/realtime/gemini-live', exports: ['GeminiLiveTransport'] },
+  { specifier: 'nexus-ai-pro/realtime/openai-sip', exports: ['answerOpenAISipCalls'] },
   {
     specifier: 'nexus-ai-pro/realtime/openai-server',
     exports: ['createOpenAIRealtimeCall', 'createOpenAIRealtimeClientSecret'],
