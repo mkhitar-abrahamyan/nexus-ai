@@ -539,6 +539,9 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
           history: record.history,
           ...(record.pending ? { pending: record.pending } : {}),
           ...(record.answered ? { answered: record.answered } : {}),
+          // Kept through the save below, so the record still holds the turn until it is carried on:
+          // an agent that stops again while carrying it on leaves it for the next load.
+          ...(record.turn ? { turn: record.turn } : {}),
           always: new Map(record.always),
         };
         sessions.get(sessionId)?.controller?.abort();

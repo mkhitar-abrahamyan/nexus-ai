@@ -229,9 +229,12 @@ A task that is working survives its replica too. `a2aHandler()` returns an `A2aH
 request handler, plus `recover()` and `close()`. While a replica runs a task, the record holds its
 `A2aTaskLease`: the replica's `owner` name and when the lease lapses. The replica renews it every
 third of `lease.ms` (30 seconds). The record also holds the `A2aTaskRun`: whether a message started
-the run or answers resumed it, that message, the answers, and the principal.
+the run or answers resumed it, that message, the answers, and the principal. A new task is written
+with its run from its first write, so a task submitted to a replica that stops before starting it is
+started by another, for the same principal.
 
-`recover()` reads the working tasks whose lease has lapsed and takes each over, up to `limit` (10).
+`recover()` reads the working tasks whose lease has lapsed, and the submitted tasks no replica
+started, and takes each over, up to `limit` (10).
 It claims the lease, then carries the run on: from the graph's last checkpoint through the graph's
 `continueWith()`, by answering the questions again when a resume never reached the graph, or from
 the start when the run left no checkpoint. It resolves to an `A2aRecoveryReport` once the tasks are
@@ -245,7 +248,11 @@ lease stops the run, and never records its result over the other's. A graph of y
 
 In the test suite, a task whose replica dies halfway through a tool is taken over on every store.
 The model call the dead replica finished is not made again, the email it never sent is sent once,
-and two replicas recovering at the same moment take the task over once.
+and two replicas recovering at the same moment take the task over once. A crash-injection suite then
+kills the replica at every write a task makes, and another replica takes it over each time and ends
+it as a task never interrupted ends. A replica that dies before the task's first write has told its
+caller so. A store that cannot record a task's failure leaves the task working, with its lease, for
+the replica that takes it over.
 
 ### Push notifications and the extended card
 
@@ -483,9 +490,9 @@ Each protocol is also tested across releases and against the reference client of
   stops its run, but a tool already running finishes.
 - **A2A coverage.** Only the JSON-RPC binding is served. A webhook receives state changes, not each
   piece of streamed text.
-- **ACP turns.** A turn goes on when the editor reopens its session, not before. A step that was
-  halfway through when the agent stopped runs again, so a tool with side effects needs an
-  idempotency key.
+- **ACP turns.** A turn goes on when the editor reopens its session, not before; one the agent stops
+  in again while carrying it on goes on at the next reopening. A step that was halfway through when
+  the agent stopped runs again, so a tool with side effects needs an idempotency key.
 - **The editor's MCP servers.** Servers over stdio and HTTP are connected; an SSE server is not. A
   server's tools declare no capabilities, so a permission policy needs a rule for them by name.
 

@@ -131,7 +131,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 13% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 13% | none |
-| `nexus-ai-pro/protocols/a2a` | 42 KB | 12% | none |
+| `nexus-ai-pro/protocols/a2a` | 43 KB | 13% | none |
 | `nexus-ai-pro/embeddings` | 40 KB | 12% | none |
 | `nexus-ai-pro/embeddings/batch` | 40 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |

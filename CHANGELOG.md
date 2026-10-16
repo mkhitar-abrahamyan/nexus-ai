@@ -71,11 +71,20 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- An A2A `SendMessage` with `returnImmediately`, whose store failed while the task ran, raised an
+  unhandled rejection, which ends a Node process by default. A store that cannot record a task's
+  failure now leaves the task working, with its lease, for the replica that takes it over.
 - A realtime session's usage and estimated cost are the sum of its responses'. Before, each
   response's usage replaced the last, so a session recorded, and settled, only its last turn.
 
 ### Proof
 
+- `tests/conversation-crash.test.ts`: an A2A task, an ACP turn, and a realtime conversation are each
+  killed at every write a clean run makes, and taken over elsewhere. Each ends as the clean run did,
+  or its caller was told it never started; nothing is left half done, and nothing is recorded twice.
+  The suite found three defects before they shipped, each fixed: an unhandled rejection from a
+  failing store; a task submitted to a replica that stopped before starting it, which no replica
+  would ever start; and a reopened session's save that dropped the turn it was about to carry on.
 - `tests/deep-agent-remote-helpers.test.ts`: against two replicas of a real agent server, the agent's
   process and the worker running its remote helper both die; the second replica takes the run over,
   and the agent, resumed in a new process, collects that same run: one run, its answer, and the

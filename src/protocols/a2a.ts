@@ -272,8 +272,9 @@ export interface A2aTaskStore {
   /** Writes a conversation's transcript. */
   saveConversation(contextId: string, messages: Message[]): Promise<void> | void;
   /**
-   * Takes, or renews, the lease of a working task, in one step: when the task has no lease, its lease
-   * has lapsed by `lease.now`, or `lease.owner` already holds it. Resolves to the record as claimed,
+   * Takes, or renews, the lease of a working task, or of one submitted and not yet started, in one
+   * step: when the task has no lease, its lease has lapsed by `lease.now`, or `lease.owner` already
+   * holds it. Resolves to the record as claimed,
    * or `undefined` when another replica holds it. Optional; without it, a claim is a read and a write,
    * and two replicas recovering at once may both take one task.
    */
@@ -283,10 +284,15 @@ export interface A2aTaskStore {
   ): Promise<A2aTaskRecord | undefined> | A2aTaskRecord | undefined;
 }
 
-/** Whether a lease may be taken: the task works, and no other replica holds it now. */
+/**
+ * Whether a lease may be taken: the task works, or was submitted and not yet started, and no other
+ * replica holds it now.
+ */
 function claimable(record: A2aTaskRecord | undefined, lease: A2aTaskLease & { now: string }): boolean {
+  if (!record) return false;
+  const state = record.task.status.state;
   return (
-    record?.task.status.state === 'TASK_STATE_WORKING' &&
+    (state === 'TASK_STATE_WORKING' || state === 'TASK_STATE_SUBMITTED') &&
     (!record.lease || record.lease.owner === lease.owner || record.lease.expiresAt <= lease.now)
   );
 }
@@ -697,6 +703,8 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
     try {
       let result: ProtocolResult;
       if (takeover) {
+        // A task submitted to a replica that stopped before starting it starts here.
+        if (task.status.state === 'TASK_STATE_SUBMITTED') await changeStatus(record, 'TASK_STATE_WORKING');
         result = await carryOn(record, runOptions);
       } else if (record.interrupts?.length) {
         const answers = Object.fromEntries(
@@ -761,13 +769,23 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
       }
     } catch (error) {
       if (controller.signal.aborted) return;
+      const lease = record.lease;
+      const run = record.run;
       record.lease = undefined;
       record.run = undefined;
-      await changeStatus(
-        record,
-        'TASK_STATE_FAILED',
-        agentMessage(task, error instanceof Error ? error.message : String(error)),
-      );
+      try {
+        await changeStatus(
+          record,
+          'TASK_STATE_FAILED',
+          agentMessage(task, error instanceof Error ? error.message : String(error)),
+        );
+      } catch (unrecorded) {
+        // The store would not take the failure either: the task is left as it was, with its lease, so
+        // the replica that takes it over once the lease lapses carries it on.
+        record.lease = lease;
+        record.run = run;
+        options.onError?.(unrecorded);
+      }
     } finally {
       clearInterval(heartbeat);
       running.delete(task.id);
@@ -807,30 +825,38 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
     );
   };
 
-  /** Takes over working tasks whose lease lapsed, and carries each on. */
+  /**
+   * Takes over the working tasks whose lease lapsed, and the tasks submitted to a replica that stopped
+   * before starting them, and carries each on.
+   */
   const recover = async (recoverOptions: { limit?: number } = {}): Promise<A2aRecoveryReport> => {
     const report: A2aRecoveryReport = { tookOver: [], skipped: 0 };
     const limit = recoverOptions.limit ?? 10;
     const now = new Date().toISOString();
     const stale = new Date(Date.now() - leaseMs).toISOString();
-    for (let offset = 0; report.tookOver.length < limit; offset += 100) {
-      const { records } = await store.list({ state: 'TASK_STATE_WORKING', limit: 100, offset });
-      for (const candidate of records) {
-        if (report.tookOver.length >= limit) break;
-        if (running.has(candidate.task.id)) continue;
-        // A task working without a lease was written before tasks had them: lapsed once it is stale.
-        const lapsed = candidate.lease ? candidate.lease.expiresAt <= now : candidate.updatedAt <= stale;
-        if (!lapsed) continue;
-        const record = await claimLease(candidate.task.id);
-        if (!record) {
-          report.skipped += 1;
-          continue;
+    for (const state of ['TASK_STATE_WORKING', 'TASK_STATE_SUBMITTED'] as const) {
+      for (let offset = 0; report.tookOver.length < limit; offset += 100) {
+        const { records } = await store.list({ state, limit: 100, offset });
+        for (const candidate of records) {
+          if (report.tookOver.length >= limit) break;
+          if (running.has(candidate.task.id)) continue;
+          // A task without a lease is lapsed once it is stale: one working, written before tasks had
+          // leases, or one submitted to a replica that stopped before it started the run.
+          const lapsed = candidate.lease ? candidate.lease.expiresAt <= now : candidate.updatedAt <= stale;
+          if (!lapsed) continue;
+          const record = await claimLease(candidate.task.id);
+          if (!record) {
+            report.skipped += 1;
+            continue;
+          }
+          report.tookOver.push(record.task.id);
+          const message = record.run?.message ?? record.history.at(-1) ?? ({ parts: [] } as unknown as A2aMessage);
+          void execute(record, message, record.run?.principal, true).catch((error: unknown) =>
+            options.onError?.(error),
+          );
         }
-        report.tookOver.push(record.task.id);
-        const message = record.run?.message ?? record.history.at(-1) ?? ({ parts: [] } as unknown as A2aMessage);
-        void execute(record, message, record.run?.principal, true).catch((error: unknown) => options.onError?.(error));
+        if (records.length < 100) break;
       }
-      if (records.length < 100) break;
     }
     return report;
   };
@@ -843,8 +869,14 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
         }, options.recoverEveryMs);
   (timer as { unref?: () => void } | undefined)?.unref?.();
 
-  /** The task a message starts, or the paused one it answers. */
-  const taskFor = async (message: A2aMessage): Promise<A2aTaskRecord | { error: number; message: string }> => {
+  /**
+   * The task a message starts, or the paused one it answers. A new task is written with the run it
+   * asks for, so a replica that stops before starting it leaves it for another to start.
+   */
+  const taskFor = async (
+    message: A2aMessage,
+    principal: Principal | undefined,
+  ): Promise<A2aTaskRecord | { error: number; message: string }> => {
     if (message.taskId) {
       const existing = await store.get(message.taskId);
       if (!existing) return { error: A2A_ERRORS.taskNotFound, message: `Task ${message.taskId} was not found` };
@@ -860,9 +892,11 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
       contextId,
       status: { state: 'TASK_STATE_SUBMITTED', timestamp: new Date().toISOString() },
     };
+    const said = { ...message, contextId, taskId: task.id };
     const record: A2aTaskRecord = {
       task,
-      history: [{ ...message, contextId, taskId: task.id }],
+      history: [said],
+      run: { kind: 'invoke', message: said, ...(principal ? { principal } : {}) },
       updatedAt: new Date().toISOString(),
     };
     await store.put(record);
@@ -986,7 +1020,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           if (configuration.pushNotificationConfig && !pushOn) {
             return rpcError(id, A2A_ERRORS.pushNotificationNotSupported, 'This agent does not push notifications');
           }
-          const record = await taskFor(message);
+          const record = await taskFor(message, principal);
           if ('error' in record) return rpcError(id, record.error, record.message);
           if (configuration.pushNotificationConfig) {
             addPush(record, configuration.pushNotificationConfig);
@@ -994,7 +1028,8 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           }
           if (call.method === 'SendMessage') {
             const run = execute(record, message, principal);
-            if (!configuration.returnImmediately) await run;
+            if (configuration.returnImmediately) void run.catch((error: unknown) => options.onError?.(error));
+            else await run;
             return rpcResult(id, { task: view(record, configuration.historyLength) });
           }
           return follow(id, record, () => execute(record, message, principal), request.signal);
