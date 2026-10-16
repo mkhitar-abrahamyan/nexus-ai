@@ -3352,6 +3352,37 @@ agent creates is recorded, with its instructions, on a thread beside the agent's
 `<thread>/helpers-created`, before the call that created it returns. An agent resumed in another
 process counts those helpers against the limit and delegates to them again by name.
 
+**On another server.** A helper with `remote` runs on another agent server instead: give it a
+`DeepRemoteHelper`, such as `createRemoteGraph()` returns for one of that server's assistants. It is
+sent its `instructions` and the task, and its run's output is its answer: text, an agent's `answer`,
+or its last message, from a `DeepRemoteRunResult`. Its `tools`, `model`, and model calls are the
+remote assistant's own.
+
+The run is an operation on that server, leased to the worker that runs it, so when that worker stops,
+another takes the run over. The agent starts the run under a key made from the call that started
+it, and the server answers a second start under the same key with the run it already has. In the
+background, the task is marked on its thread, with what it was asked, before `delegate` returns, so:
+- collecting it in another process, after a crash, waits for that same run;
+- a run that never reached the server, because it was down when the agent delegated, is started by
+  the process that collects it, once.
+
+```ts
+import { createRemoteGraph } from 'nexus-ai-pro/server/remote';
+
+const agent = createDeepAgent({
+  client,
+  checkpointer,
+  subagents: [
+    {
+      name: 'researcher',
+      description: 'Researches a question in depth',
+      instructions: 'Research the question; answer with sources.',
+      remote: createRemoteGraph({ url: 'https://agents.internal/api', assistant: 'researcher' }),
+    },
+  ],
+});
+```
+
 **Its events.** Streamed with `subgraphs: true`, a helper's model output, tool calls, and steps reach
 the agent's own event stream under the helper's namespace, such as `tools/researcher@call-7`, in the
 background as in the foreground. A tool of your own that starts a run of its own can do the same
@@ -3387,14 +3418,19 @@ Helpers have proofs of their own:
   where it still delegates to the helper it created by name.
 - A crash while the agent waits for its helper, and a crash before the agent has saved the call that
   started it, both end with one lookup, one note, and one start of the helper.
+- A remote helper runs on two replicas of a real agent server. The agent's process dies while the
+  helper works, and so does the server worker running it. The second replica takes the run over when
+  its lease lapses, and the agent, resumed in a new process, collects that same run's answer: one run,
+  and the agent's note not written again. A helper whose start never reached the server is started by
+  the process that collects it, once.
 
 ## Limitations
 
 - The reference sandbox, `processSandbox()`, is for development. It is never a security boundary.
   Use `containerSandbox()`, from `nexus-ai-pro/agent/sandbox/container`, or a VM of your own behind
   the `Sandbox` interface, in production.
-- Helpers run in the agent's process. A helper that should run elsewhere is an agent on another
-  server, called through `createRemoteGraph()`.
+- A helper without `remote` runs in the agent's process. A remote helper's events stay on its
+  server; they do not reach the agent's stream.
 - Workspace search is bounded: `glob_files` lists at most 500 paths and `grep_files` 200 lines.
   The reference sandbox skips files over 1 MB, binary files, `.git`, and `node_modules`. A wider
   search is a command the sandbox runs.
@@ -12620,7 +12656,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/config` | 336 KB | 98% | none |
 | `nexus-ai-pro/core` | 332 KB | 97% | none |
 | `nexus-ai-pro/realtime` | 210 KB | 61% | none |
-| `nexus-ai-pro/deep-agent` | 185 KB | 54% | none |
+| `nexus-ai-pro/deep-agent` | 187 KB | 54% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 136 KB | 40% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |

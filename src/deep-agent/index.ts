@@ -15,9 +15,9 @@ import { permissionPolicy, type PermissionPolicyLike } from '../agent/permission
 import { type Sandbox, sandboxTools } from '../agent/sandbox.js';
 import { tool } from '../agent/tool.js';
 import type { ToolDefinition } from '../types/messages.js';
-import { type DeepHelperLimits, helperTools } from './helpers.js';
+import { type DeepHelperLimits, type DeepRemoteHelper, helperTools } from './helpers.js';
 
-export type { DeepHelperLimits } from './helpers.js';
+export type { DeepHelperLimits, DeepRemoteHelper, DeepRemoteRunResult } from './helpers.js';
 
 /** A helper the deep agent can hand a self-contained piece of work to, with a fresh context. */
 export interface DeepSubagent {
@@ -37,6 +37,14 @@ export interface DeepSubagent {
   model?: string;
   /** Model calls it may make. Defaults to 20. */
   maxIterations?: number;
+  /**
+   * Runs it on another agent server instead, such as `createRemoteGraph()` reaches: it is sent its
+   * `instructions` and the task, and its run's output is its answer. The run is leased to the
+   * server's worker that runs it, so another worker takes it over when that one stops, and the agent
+   * finds the same run again by the call that started it. `tools`, `model`, and `maxIterations` are
+   * the remote assistant's own.
+   */
+  remote?: DeepRemoteHelper;
 }
 
 /** Instructions the agent loads only when a task needs them: a procedure, a checklist, a house style. */

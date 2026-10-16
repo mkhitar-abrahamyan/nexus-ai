@@ -10,6 +10,10 @@
  * The helpers an agent creates are recorded on a thread of their own beside its own, before the call
  * that creates one returns, so an agent resumed in another process counts them against its `max` and
  * delegates to them again by name.
+ *
+ * A remote helper runs on another agent server, as a run that server's workers lease: when the worker
+ * running it stops, another takes it over. The agent starts it under a key made from the call that
+ * started it, so delegating again or collecting it, in this process or another, finds that same run.
  */
 import {
   type AgentGraph,
@@ -37,6 +41,30 @@ export interface DeepHelperLimits {
   max?: number;
 }
 
+/** How a run on another agent server ended, as `createRemoteGraph()` reports it. */
+export interface DeepRemoteRunResult {
+  /** The run's id on that server. */
+  runId: string;
+  /** Where it ended: `succeeded`, `failed`, `cancelled`, `expired`, or `awaiting_input`. */
+  status: string;
+  /** What it produced. */
+  output?: unknown;
+  /** Why it failed. */
+  error?: { message?: string };
+}
+
+/**
+ * A helper on another agent server: what `createRemoteGraph()` returns, or anything that runs an input
+ * there and waits for it.
+ */
+export interface DeepRemoteHelper {
+  /**
+   * Runs an input there and waits for it to end. A second call with the same `idempotencyKey` waits
+   * for the run the first started, as the agent server does, rather than starting another.
+   */
+  invoke(input: unknown, options: { idempotencyKey: string; signal?: AbortSignal }): Promise<DeepRemoteRunResult>;
+}
+
 /** A helper as `delegate` runs it: one the application declared, or one the agent created. */
 interface HelperSpec {
   name: string;
@@ -45,6 +73,7 @@ interface HelperSpec {
   model?: string;
   maxIterations: number;
   created: boolean;
+  remote?: DeepRemoteHelper;
 }
 
 /** What the deep agent hands the helper tools. */
@@ -57,6 +86,7 @@ export interface HelperSetup {
     tools?: readonly string[];
     model?: string;
     maxIterations?: number;
+    remote?: DeepRemoteHelper;
   }>;
   /** Limits on created helpers, when the agent may create them. */
   create?: DeepHelperLimits;
@@ -161,6 +191,7 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
         ...(helper.model ? { model: helper.model } : {}),
         maxIterations: helper.maxIterations ?? 20,
         created: false,
+        ...(helper.remote ? { remote: helper.remote } : {}),
       };
     }
     await loadCreated(thread);
@@ -250,10 +281,61 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
 
   const thread = (parent: string | undefined, task: string) => `${parent ?? 'thread'}/helper/${task}`;
 
+  // A remote helper is sent its brief and the task, and its answer is read from what its run produced.
+  const remoteRun = async (
+    helper: HelperSpec,
+    remote: DeepRemoteHelper,
+    task: string,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<Outcome> => {
+    const run = await remote.invoke(agentInput(`${helper.instructions}\n\n${task}`), {
+      idempotencyKey: key,
+      ...(signal ? { signal } : {}),
+    });
+    if (run.status === 'succeeded') return { helper: helper.name, ok: true, answer: remoteAnswer(run.output) };
+    const why = run.status === 'awaiting_input' ? 'it stopped to ask for input' : (run.error?.message ?? run.status);
+    return { helper: helper.name, ok: false, error: `The ${helper.name} helper stopped: ${why}` };
+  };
+
+  // A remote helper's task is marked on its thread before `delegate` returns, with what it was asked,
+  // so a process that collects it after a crash finds the same run, or starts it if it never reached
+  // the server.
+  const markRemote = async (helper: HelperSpec, task: string, threadId: string): Promise<void> => {
+    await setup.checkpointer?.put({
+      version: 2,
+      id: `${threadId}:remote`,
+      threadId,
+      step: 0,
+      state: {},
+      next: [],
+      tasks: [],
+      status: 'running',
+      interrupts: [],
+      createdAt: new Date().toISOString(),
+      metadata: { [MARK]: { name: helper.name, created: false, remote: true, task } },
+    });
+  };
+
   // Starts a background task, or carries on one a stopped process left behind. It returns once the
   // task's first checkpoint is written, so the task outlives a crash from then on.
   const start = async (helper: HelperSpec, task: string | undefined, threadId: string, context: ToolContext) => {
     if (live.has(threadId)) return;
+    if (helper.remote) {
+      if (task !== undefined) await markRemote(helper, task, threadId);
+      const entry: LiveTask = { helper: helper.name, settled: false, outcome: Promise.resolve(undefined as never) };
+      entry.outcome = remoteRun(helper, helper.remote, task ?? '', threadId)
+        .catch((error: unknown) => ({
+          helper: helper.name,
+          ok: false as const,
+          error: error instanceof Error ? error.message : String(error),
+        }))
+        .finally(() => {
+          entry.settled = true;
+        });
+      live.set(threadId, entry);
+      return;
+    }
     const runner = graph(helper, true);
     const stored = setup.checkpointer ? await runner.state(threadId) : undefined;
     let ready = () => {};
@@ -330,6 +412,17 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
       );
       const task = String(args.task ?? '');
       const call = context.toolCallId ?? Math.random().toString(36).slice(2, 10);
+      if (args.background !== true && helper.remote) {
+        const ended = await remoteRun(
+          helper,
+          helper.remote,
+          task,
+          thread(context.threadId, `${helper.name}@${call}`),
+          context.signal,
+        );
+        if (!ended.ok) throw new Error(ended.error);
+        return ended.answer;
+      }
       if (args.background !== true) {
         const result = await graph(helper, false).invoke(
           agentInput(task),
@@ -380,12 +473,16 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
         // Not running here: it finished, or a process that ran it stopped before it did.
         const stored = setup.checkpointer ? await setup.checkpointer.get(threadId) : undefined;
         if (!stored) throw new Error(`No helper task "${task}" in this run`);
-        const mark = stored.metadata?.[MARK] as { name?: string; created?: boolean; instructions?: string } | undefined;
+        const mark = stored.metadata?.[MARK] as
+          | { name?: string; created?: boolean; instructions?: string; remote?: boolean; task?: string }
+          | undefined;
         const name = mark?.name ?? task.slice(0, task.lastIndexOf('@'));
         const helper = mark?.created
           ? await spec(name, mark.instructions, context.threadId ?? '')
           : await spec(name, undefined, context.threadId ?? '');
-        await start(helper, undefined, threadId, context);
+        // A remote helper's run is found again by its key; the task it was asked goes with it, in case
+        // the run never reached the server.
+        await start(helper, mark?.remote ? (mark.task ?? '') : undefined, threadId, context);
       }
       const entry = live.get(threadId) as LiveTask;
       const waitMs = Math.min(Math.max(Number(args.wait_seconds) || 0, 0), 120) * 1_000;
@@ -403,4 +500,16 @@ export function helperTools(setup: HelperSetup): ToolDefinition[] {
   };
 
   return [delegate, collect];
+}
+
+/** A remote helper's answer, from what its run produced: text, an agent's answer, or its last message. */
+function remoteAnswer(output: unknown): string {
+  if (typeof output === 'string') return output;
+  if (output && typeof output === 'object') {
+    const record = output as { answer?: unknown; messages?: Array<{ role?: string; content?: unknown }> };
+    if (typeof record.answer === 'string' && record.answer) return record.answer;
+    const last = record.messages?.filter((message) => message.role === 'assistant').at(-1);
+    if (typeof last?.content === 'string' && last.content) return last.content;
+  }
+  return JSON.stringify(output ?? null);
 }

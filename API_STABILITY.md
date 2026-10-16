@@ -51,6 +51,7 @@ New and stable:
   `A2aTaskRecord.lease`, `run`, and `version`; `A2aTaskStore.claim()`, optional;
   `A2aServerOptions.lease` and `recoverEveryMs`. The handler is still the request function it was;
 - on `nexus-ai-pro/protocols/acp`: `AcpTurnRecord` and `AcpSessionRecord.turn`;
+- on `nexus-ai-pro/deep-agent`: `DeepSubagent.remote`, `DeepRemoteHelper`, and `DeepRemoteRunResult`;
 - `CompiledGraph.continueWith()`, and `ProtocolGraph.continueWith()` and `state()`, both optional;
 - on `nexus-ai-pro/lifecycle`: `ProviderHealthOutcome`, `OperationLifecycle.reportHealth()`,
   `OperationLifecycleLike.reportHealth()`, optional, and `LifecycleRuntime.providerHealth`;

@@ -45,6 +45,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   turns, and tool responses; and its audio, transcripts, tool calls, interruptions, and usage become
   the events the session already reads. It takes an API key on a server or an ephemeral token
   anywhere, and reconnects a dropped socket with Gemini's latest resumption handle.
+- **Helpers on another server, whose runs outlive their worker.** A `DeepSubagent` with `remote`, a
+  `DeepRemoteHelper` such as `createRemoteGraph()` returns, runs on another agent server, as a run
+  leased to the worker that runs it: when that worker stops, another takes it over. The agent starts
+  the run under a key made from the call that started it, so delegating again or collecting it, in
+  this process or another, finds the same run; a background task is marked on its thread first, so a
+  run that never reached the server is started by the process that collects it. Its answer comes from
+  a `DeepRemoteRunResult`.
 - **Phone calls answered by a realtime agent, over SIP.** `answerOpenAISipCalls()`, on the new
   `nexus-ai-pro/realtime/openai-sip`, handles OpenAI's `realtime.call.incoming` webhook: it verifies
   each delivery, claims it so a retry answers its call once, and answers the call with the session
@@ -69,6 +76,11 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Proof
 
+- `tests/deep-agent-remote-helpers.test.ts`: against two replicas of a real agent server, the agent's
+  process and the worker running its remote helper both die; the second replica takes the run over,
+  and the agent, resumed in a new process, collects that same run: one run, its answer, and the
+  agent's note not written again. Without the key, the resumed agent starts a second run, and the
+  proof fails.
 - `tests/realtime-sip.test.ts`: a signed incoming-call delivery is accepted with the agent's session,
   chosen from the caller's number; the session attaches by the call's id, books a table through its
   tool when the caller asks, and hangs up. Forged, altered, and stale deliveries answer nothing; a
