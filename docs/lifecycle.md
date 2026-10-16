@@ -173,6 +173,15 @@ held in memory.
 The budget is separate from `costBudget`, which caps one request's estimate. Both apply when both are
 set.
 
+## Provider health
+
+`reportHealth(provider, outcome)` reports how a provider answered a call a family made itself, such
+as a realtime connection, to the client's provider health and circuit breaker, as a completion's
+attempts are. A `ProviderHealthOutcome` is `{ ok: true, latencyMs }` or `{ ok: false, error }`.
+`ai.lifecycle` forwards it; a lifecycle built on its own does so through
+`LifecycleRuntime.providerHealth`, and without it reports go nowhere. It is optional on
+`OperationLifecycleLike`, so a family checks before it reports.
+
 ## Hooks
 
 `LifecycleHooks` has two:
@@ -311,4 +320,5 @@ specific entry point that provides it.
 | `OperationStartOptions` | interface | Options for admitting one operation. |
 | `OperationTicket` | interface | An admitted operation that has not finished yet. |
 | `ProviderCallContext` | interface | What every provider call receives besides its request, in every family: how to stop, when to finish by, and what to carry to the provider. |
+| `ProviderHealthOutcome` | type | How a provider answered: in time, or with an error. |
 <!-- reference:end -->

@@ -213,7 +213,9 @@ optional; the ones you will set first are the provider, the model, and the trans
 | Field | What it sets |
 | --- | --- |
 | `provider` | A `RealtimeProviderName`. Defaults to `openai`. |
-| `lifecycle` | `ai.lifecycle`, to run the session as one operation of a client: authorized when it first connects, finished with its estimated cost when it disconnects. |
+| `lifecycle` | `ai.lifecycle`, to run the session and each of its turns as operations of a client. See [On the client's lifecycle](#on-the-clients-lifecycle). |
+| `tenantId`, `userId`, `principal`, `traceContext` | Who the session's operations are for, and the trace they belong to. The tenant and user default to the principal's. |
+| `conversationStore`, `resume` | Where the record is kept after each committed turn, and a conversation to carry on. See [Conversations that outlive their process](#conversations-that-outlive-their-process). |
 | `model` | The realtime model, such as `gpt-realtime`. |
 | `transport` | How the session connects: WebRTC, WebSocket, or the mock. |
 | `modalities` | Each a `RealtimeModality`: `audio`, `text`, or both. |
@@ -232,7 +234,7 @@ The option groups:
 | `RealtimeInterruptionOptions` | What barge-in does: `enabled`, `cancelResponse`, `truncateUnheardAudio`, a `stopPlayback` hook, and `getPlaybackPositionMs` for where to cut. |
 | `RealtimeReconnectOptions` | `maxAttempts`, and a backoff from `initialDelayMs` growing by `multiplier` up to `maxDelayMs`. |
 | `RealtimeSecurityOptions` | Hard limits: `maxSessionDurationMs` and `maxAudioDurationMs` end the session. Also a `toolAllowlist`, `retainTranscripts`, and a `piiHook` that rewrites every transcript first. |
-| `RealtimeConversationOptions` | What the record keeps: transcripts, tool calls, raw events (10,000 by default), and a `redactTranscript` hook. |
+| `RealtimeConversationOptions` | What the record keeps: transcripts, tool calls, raw events (10,000 by default), and a `redactTranscript` hook. `replayItems` caps what a resumed session gives the provider back. |
 | `RealtimeTelemetryOptions` | Tracing and metrics without a dependency, so OpenTelemetry plugs in. See the next table. |
 | `RealtimeConnectOptions` | What `connect()` takes in a browser: a signal, the microphone, and where audio plays. |
 
@@ -443,6 +445,55 @@ rebuild a record from stored events:
 The `analytics` format is a `RealtimeAnalyticsExport`: durations, item counts, and metrics, without
 transcripts.
 
+### On the client's lifecycle
+
+Given `ai.lifecycle`, a session runs through the same lifecycle as every other family. Its
+operations carry the session's `tenantId` and `userId` (the principal's by default) and its
+`traceContext`:
+- the session itself is one operation, `realtime.session`, admitted when it first connects;
+- each model turn is one more, `realtime.turn`, admitted as the turn starts: rate-limited,
+  authorized, and holding the turns' average cost so far against the budget;
+- when the turn finishes, its operation is charged what the turn cost, from `estimateCost`;
+- a session's usage and estimated cost are the sum of its turns'.
+
+A turn the lifecycle refuses, because the budget cannot cover it, the rate limit is reached, or
+authorization says no, is cancelled before the model runs it. The session then ends with a
+`RealtimeError` of code `lifecycle_refused`. A connection that succeeds or fails is reported to the
+client's provider health and circuit breaker, as a completion's attempts are.
+
+In the test suite, through a real client: with a five-cent budget and two cents a turn, the first two
+turns run, and the third is cancelled as it starts and ends the session. The budget then holds four
+cents, and every operation names the session's tenant and user.
+
+## Conversations that outlive their process
+
+Give a session a `conversationStore`, a `RealtimeConversationStore`, and it writes its record after
+each committed turn: a finished response, a transcribed utterance, a typed message, and a tool's
+result. `MemoryRealtimeConversationStore` keeps records in the process, and
+`storeRealtimeConversations()` in any long-term `Store`: the memory, Redis, Postgres, or SQLite store.
+
+Another process carries the conversation on with `resume`: its record, or its id in the store. The
+new session takes the conversation's id, items, metrics, and metadata, active again. On connecting,
+it gives the provider what was said and what the tools returned, before anything new, so the model
+answers with it. `replayRealtimeConversation()` builds those items: speech as text from its
+transcript, typed messages, tool calls, and their results, the latest `replayItems` of them. Each
+carries an id that begins with `REALTIME_REPLAY_PREFIX`, so the provider's echoes are not recorded
+twice. A new transport carries the conversation; the socket and the audio that was in flight are not
+recovered.
+
+```ts
+import { createRealtimeSession, storeRealtimeConversations } from 'nexus-ai-pro/realtime';
+
+const conversationStore = storeRealtimeConversations(redisStore);
+// In the process that takes over, by the id the first one stored:
+const session = createRealtimeSession({ model: 'gpt-realtime', transport, conversationStore, resume: conversationId });
+await session.connect();
+```
+
+In the test suite, a session's process is killed mid-conversation on the memory and SQLite stores.
+Another process resumes it by id: the provider is first told what the person said and what the model
+answered, and the conversation goes on under its own id, with nothing recorded twice.
+
 ## Errors
 
 Every failure is a `RealtimeError`. It carries a message, the provider's code, the HTTP status, the
@@ -457,10 +508,10 @@ its category.
 ## Limitations
 
 - OpenAI is the only bundled provider. Another provider implements `RealtimeTransportProvider`.
-- A session is not durable: a process that dies loses it, and the conversation record is what you
-  store to keep it.
-- Realtime sessions report through their own `telemetry` hooks, not yet through the client's shared
-  metrics, audit log, and rate limiter that every other family uses.
+- A resumed conversation gives the provider its transcripts as text, not its audio, so the model
+  hears what was said as written, not how it was said.
+- A turn is charged from `estimateCost`: a session without one is admitted and rate-limited turn by
+  turn, but charges nothing to the budget.
 
 <!-- reference:start -->
 ## Reference
@@ -499,6 +550,7 @@ specific entry point that provides it.
 | `RealtimeConversationErrorItem` | interface | An error recorded in the conversation, so an export shows where a session went wrong. |
 | `RealtimeConversationExportFormat` | type | How a conversation can be exported: the record as JSON, the provider's events, a readable transcript, or analytics. |
 | `RealtimeConversationOptions` | interface | What the session keeps in its conversation record. |
+| `RealtimeConversationStore` | interface | Where conversation records are kept, so a session resumes in another process. |
 | `RealtimeError` | class | An error from a realtime session or transport. |
 | `RealtimeErrorCategory` | type | Why a realtime session failed. |
 | `RealtimeErrorOptions` | interface | Options for constructing a `RealtimeError`. |
@@ -553,9 +605,13 @@ specific entry point that provides it.
 | `createRealtimeConversation` | function | Creates an empty, active conversation record. |
 | `CreateRealtimeConversationOptions` | interface | Options for `createRealtimeConversation()`. |
 | `exportRealtimeConversation` | function | Exports a record as JSON, the provider's raw events, a readable transcript, or analytics without transcripts. |
+| `MemoryRealtimeConversationStore` | class | Conversation records in this process. |
+| `REALTIME_REPLAY_PREFIX` | constant | The prefix of the item ids a resumed session gives the provider, so their echoes are not recorded twice. |
 | `RealtimeConversationReducerOptions` | interface | Options for `reduceRealtimeConversation()`. |
 | `reduceRealtimeConversation` | function | Applies one realtime event to a conversation record and returns the new record. |
+| `replayRealtimeConversation` | function | A conversation's items as the provider's `conversation.item.create` events, oldest first: what a resumed session gives a new provider session, so the model knows what was said and what the tools returned. |
 | `snapshotRealtimeConversation` | function | A deep copy of the record. |
+| `storeRealtimeConversations` | function | Conversation records in any long-term `Store`: the memory, Redis, Postgres, or SQLite store. |
 | `withConversationMetrics` | function | Returns a copy of the record with some metrics replaced. |
 
 ### `nexus-ai-pro/realtime/mock`

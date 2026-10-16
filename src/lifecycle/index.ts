@@ -39,4 +39,5 @@ export type {
   OperationStartOptions,
   OperationTicket,
   ProviderCallContext,
+  ProviderHealthOutcome,
 } from '../types/lifecycle.js';

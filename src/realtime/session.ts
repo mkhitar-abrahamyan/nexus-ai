@@ -1,7 +1,9 @@
 import {
   createRealtimeConversation,
   exportRealtimeConversation,
+  REALTIME_REPLAY_PREFIX,
   reduceRealtimeConversation,
+  replayRealtimeConversation,
   snapshotRealtimeConversation,
 } from './conversation.js';
 import { RealtimeError, toRealtimeError } from './errors.js';
@@ -91,9 +93,25 @@ export class RealtimeSession {
   /** The lifecycle operation this session runs as, between its first connect and its disconnect. */
   private ticket?: OperationTicket;
   private operationSettled: Promise<void> = Promise.resolve();
+  /** Each turn's lifecycle operation, finished one after another. */
+  private turnsMetered: Promise<void> = Promise.resolve();
+  /** Turns admitted as they started, by response id, until they finish. */
+  private readonly turnTickets = new Map<string, Promise<OperationTicket | undefined>>();
+  /** What each finished turn cost, to estimate the next one by. */
+  private readonly turnCosts: number[] = [];
+  /** The record's writes to the conversation store, one after another. */
+  private persisted: Promise<void> = Promise.resolve();
+  /** A conversation this session carries on, given back to the provider on its first connect. */
+  private resumeFrom?: RealtimeConversation | string;
 
   constructor(private readonly config: RealtimeSessionConfig) {
-    this.id = config.id || (config.idFactory || createRealtimeId)('session');
+    const resumed = typeof config.resume === 'object' ? config.resume : undefined;
+    this.id =
+      resumed?.id ||
+      (typeof config.resume === 'string' ? config.resume : undefined) ||
+      config.id ||
+      (config.idFactory || createRealtimeId)('session');
+    this.resumeFrom = config.resume;
     this.provider = config.provider || 'openai';
     this.model = config.model;
     this.clock = config.clock || defaultClock;
@@ -105,6 +123,7 @@ export class RealtimeSession {
       metadata: config.metadata,
       idFactory: config.idFactory,
     });
+    if (resumed) this.conversation = carriedOn(resumed);
     const allowedTools = intersectAllowlists(config.toolExecution?.allowedTools, config.security?.toolAllowlist);
     this.toolExecutor = new RealtimeToolExecutor(config.tools || [], {
       ...config.toolExecution,
@@ -221,14 +240,8 @@ export class RealtimeSession {
       if (this.config.lifecycle && !this.ticket) {
         try {
           this.ticket = await this.config.lifecycle.start(
-            {
-              family: 'realtime',
-              operation: 'realtime.session',
-              provider: this.provider,
-              model: this.model,
-              metadata: { sessionId: this.id },
-            },
-            { signal: this.controller.signal },
+            { ...this.operationOf('realtime.session'), metadata: { sessionId: this.id } },
+            this.operationOptions(),
           );
         } catch (error) {
           // Refused before anything connected: the lifecycle has already recorded why.
@@ -239,9 +252,15 @@ export class RealtimeSession {
         }
       }
       try {
+        await this.loadResumed();
         await this.config.transport.connect(mergedConfig);
         if (this.manualDisconnect || this.controller.signal.aborted) throw abortError(this.controller.signal);
+        this.config.lifecycle?.reportHealth?.(this.provider, {
+          ok: true,
+          latencyMs: Math.max(0, this.clock.now() - this.connectionStartedAt),
+        });
         this.config.transport.sendEvent(createOpenAISessionUpdate(mergedConfig));
+        this.replayResumed();
         this.completeConnection(this.pendingConnectedEvent);
         this.flushOutbox();
         this.startSessionLimit();
@@ -259,6 +278,9 @@ export class RealtimeSession {
           this.connectionSpan?.end();
         });
         if (!this.manualDisconnect) {
+          if (!this.controller.signal.aborted) {
+            this.config.lifecycle?.reportHealth?.(this.provider, { ok: false, error: normalized });
+          }
           this.runTelemetry(() =>
             this.config.telemetry?.meter
               ?.createCounter?.('nexus.realtime.connection_failures')
@@ -494,9 +516,15 @@ export class RealtimeSession {
     const timestamp = this.clock.now();
     this.emitRaw(raw);
     this.retainRawEvent(raw);
+    // The provider's echo of an item a resumed session gave it back is already in the record.
+    if (isReplayEcho(raw)) return;
     const events = normalizeOpenAIRealtimeEvent(raw, timestamp, this.config.idFactory);
     this.eventQueue = this.eventQueue
       .then(async () => {
+        if (raw.type === 'response.created') {
+          const id = asRecord(raw.response)?.id;
+          if (typeof id === 'string') this.beginTurn(id);
+        }
         this.updateUsage(raw);
         this.observeOutputBuffer(raw, timestamp);
         for (const event of events) await this.processProviderEvent(await this.applyPiiHook(event));
@@ -734,6 +762,51 @@ export class RealtimeSession {
     this.emitMetrics();
     this.recordMetricEvent(event);
     this.enforceAudioLimit();
+    if (COMMITTED.has(event.type)) this.persistConversation();
+  }
+
+  /** Writes the record to the conversation store, after the writes before it. */
+  private persistConversation(): void {
+    const store = this.config.conversationStore;
+    if (!store) return;
+    const snapshot = snapshotRealtimeConversation(this.conversation);
+    this.persisted = this.persisted
+      .then(() => store.put(snapshot))
+      .catch((error: unknown) => {
+        const failed = toRealtimeError(error, {
+          code: 'conversation_store_failed',
+          category: 'unknown',
+          provider: this.provider,
+          retryable: true,
+        });
+        this.emitter.emit('error', failed);
+      });
+  }
+
+  /** Reads the record a resume names by id, before the first connect. */
+  private async loadResumed(): Promise<void> {
+    if (typeof this.resumeFrom !== 'string') return;
+    const id = this.resumeFrom;
+    const record = await this.config.conversationStore?.get(id);
+    if (!record) {
+      throw new RealtimeError({
+        message: `No conversation ${id} is kept to resume${this.config.conversationStore ? '' : ': the session has no conversationStore'}`,
+        code: 'conversation_not_found',
+        category: 'configuration',
+        fatal: true,
+      });
+    }
+    this.conversation = carriedOn(record);
+    this.resumeFrom = record;
+  }
+
+  /** Gives a new provider session what the resumed conversation said, once, before anything new. */
+  private replayResumed(): void {
+    if (typeof this.resumeFrom !== 'object') return;
+    this.resumeFrom = undefined;
+    for (const event of replayRealtimeConversation(this.conversation, this.config.conversation?.replayItems)) {
+      this.config.transport.sendEvent(event);
+    }
   }
 
   private finishDisconnect(reason: string | undefined, expected: boolean): void {
@@ -742,6 +815,8 @@ export class RealtimeSession {
     this.recordInactiveConnection();
     this.setState('disconnected');
     this.applyEvent({ type: 'session.disconnected', reason, expected, timestamp: this.clock.now() });
+    // The record as the session ended, for the resume that follows an unexpected end.
+    this.persistConversation();
     this.settleOperation(expected ? undefined : new Error(reason ?? 'Realtime session disconnected unexpectedly'));
   }
 
@@ -750,12 +825,22 @@ export class RealtimeSession {
     const ticket = this.ticket;
     if (!ticket) return;
     this.ticket = undefined;
-    const cost = this.conversation.metrics.estimatedCost;
-    this.operationSettled = (
-      error === undefined
-        ? ticket.succeed({ ...(cost !== undefined ? { cost } : {}), metadata: { sessionId: this.id } })
-        : ticket.fail(error)
-    ).catch(() => undefined);
+    // Each turn was charged as it finished: the session reports what they came to, once the last is
+    // metered, and charges nothing more.
+    this.operationSettled = this.turnsMetered
+      .then(() => {
+        const cost = this.conversation.metrics.estimatedCost;
+        return error === undefined
+          ? ticket.succeed({
+              metadata: {
+                sessionId: this.id,
+                turns: this.conversation.metrics.turns,
+                ...(cost !== undefined ? { cost } : {}),
+              },
+            })
+          : ticket.fail(error);
+      })
+      .catch(() => undefined);
   }
 
   private awaitConfirmation(call: RealtimeToolCall, signal: AbortSignal): Promise<boolean> {
@@ -985,6 +1070,10 @@ export class RealtimeSession {
     }
   }
 
+  /**
+   * Adds a finished response's usage to the session's, and its estimated cost: a provider reports
+   * each response's usage, so the session's is the sum. With a lifecycle, the turn is charged too.
+   */
   private updateUsage(raw: RealtimeServerEvent): void {
     if (raw.type !== 'response.done') return;
     const response = asRecord(raw.response);
@@ -992,8 +1081,10 @@ export class RealtimeSession {
     if (!usage) return;
     const input = finiteNumber(usage.input_tokens) ?? finiteNumber(usage.total_input_tokens);
     const output = finiteNumber(usage.output_tokens) ?? finiteNumber(usage.total_output_tokens);
-    if (input !== undefined) this.conversation.metrics.inputTokens = input;
-    if (output !== undefined) this.conversation.metrics.outputTokens = output;
+    const metrics = this.conversation.metrics;
+    if (input !== undefined) metrics.inputTokens = (metrics.inputTokens ?? 0) + input;
+    if (output !== undefined) metrics.outputTokens = (metrics.outputTokens ?? 0) + output;
+    let cost: number | undefined;
     try {
       const estimated = this.config.telemetry?.estimateCost?.({
         provider: this.provider,
@@ -1003,11 +1094,115 @@ export class RealtimeSession {
         raw: usage,
       });
       if (estimated !== undefined && Number.isFinite(estimated) && estimated >= 0) {
-        this.conversation.metrics.estimatedCost = estimated;
+        cost = estimated;
+        metrics.estimatedCost = (metrics.estimatedCost ?? 0) + estimated;
       }
     } catch {
       // Telemetry callbacks must not disrupt the realtime event loop.
     }
+    this.meterTurn(typeof response?.id === 'string' ? response.id : undefined, cost, input, output);
+  }
+
+  /**
+   * Admits a turn as it starts, as one lifecycle operation, `realtime.turn`: rate-limited, authorized,
+   * and holding what the turns so far cost on average against the budget. A turn the lifecycle
+   * refuses is cancelled before the model runs it, and the session ends.
+   */
+  private beginTurn(responseId: string): void {
+    const lifecycle = this.config.lifecycle;
+    if (!lifecycle || this.turnTickets.has(responseId)) return;
+    const estimate = this.turnCosts.length
+      ? this.turnCosts.reduce((sum, cost) => sum + cost, 0) / this.turnCosts.length
+      : 0;
+    const admitted = (async () => {
+      // A turn that started is charged even as the session disconnects, so it carries no signal.
+      const ticket = await lifecycle.start(
+        { ...this.operationOf('realtime.turn'), metadata: { sessionId: this.id, responseId } },
+        this.config.traceContext ? { traceContext: this.config.traceContext } : {},
+      );
+      try {
+        await ticket.reserve(estimate);
+      } catch (error) {
+        await ticket.fail(error);
+        throw error;
+      }
+      return ticket;
+    })().catch((error: unknown) => {
+      this.refuseTurn(error);
+      return undefined;
+    });
+    this.turnTickets.set(responseId, admitted);
+  }
+
+  /** Finishes a turn's operation with what it cost, once it was admitted. */
+  private meterTurn(
+    responseId: string | undefined,
+    cost: number | undefined,
+    inputTokens: number | undefined,
+    outputTokens: number | undefined,
+  ): void {
+    if (!this.config.lifecycle) return;
+    const id = responseId ?? createRealtimeId('response');
+    // A turn whose start went unseen is admitted now, and charged all the same.
+    if (!this.turnTickets.has(id)) this.beginTurn(id);
+    const admitted = this.turnTickets.get(id);
+    this.turnTickets.delete(id);
+    if (cost !== undefined) this.turnCosts.push(cost);
+    this.turnsMetered = this.turnsMetered.then(async () => {
+      const ticket = await admitted;
+      await ticket
+        ?.succeed({
+          ...(cost !== undefined ? { cost } : {}),
+          metadata: {
+            sessionId: this.id,
+            ...(inputTokens !== undefined ? { inputTokens } : {}),
+            ...(outputTokens !== undefined ? { outputTokens } : {}),
+          },
+        })
+        .catch(() => undefined);
+    });
+  }
+
+  /** Ends the session because the lifecycle refused a turn: past the budget, the rate limit, or authorization. */
+  private refuseTurn(error: unknown): void {
+    if (this.sessionState === 'disconnected' || this.manualDisconnect) return;
+    try {
+      this.config.transport.interrupt();
+    } catch {
+      // The session ends either way.
+    }
+    const refused = new RealtimeError({
+      message: `The realtime session was stopped: ${error instanceof Error ? error.message : String(error)}`,
+      code: 'lifecycle_refused',
+      category: (error as { name?: string })?.name === 'NexusRateLimitError' ? 'rate-limit' : 'permission',
+      provider: this.provider,
+      fatal: true,
+      cause: error,
+    });
+    this.applyEvent({ type: 'error', error: refused, timestamp: this.clock.now() });
+    void this.disconnect();
+  }
+
+  /** The descriptor every operation of the session shares. */
+  private operationOf(operation: 'realtime.session' | 'realtime.turn') {
+    const tenantId = this.config.tenantId ?? this.config.principal?.tenantId;
+    const userId = this.config.userId ?? this.config.principal?.userId;
+    return {
+      family: 'realtime' as const,
+      operation,
+      provider: this.provider,
+      model: this.model,
+      ...(tenantId !== undefined ? { tenantId } : {}),
+      ...(userId !== undefined ? { userId } : {}),
+    };
+  }
+
+  /** The options every operation of the session starts with. */
+  private operationOptions() {
+    return {
+      signal: this.controller.signal,
+      ...(this.config.traceContext ? { traceContext: this.config.traceContext } : {}),
+    };
   }
 
   private startSessionLimit(): void {
@@ -1120,4 +1315,29 @@ function audioDurationMs(audio: ArrayBuffer, format?: RealtimeAudioFormat): numb
   const type = format?.type || 'audio/pcm';
   const bytesPerSample = type === 'audio/pcmu' || type === 'audio/pcma' ? 1 : type === 'audio/pcm' ? 2 : undefined;
   return bytesPerSample ? (audio.byteLength / bytesPerSample / rate) * 1_000 : undefined;
+}
+
+/** Events after which a turn is committed to the record: what a resume can rely on. */
+const COMMITTED = new Set<string>([
+  'assistant.response.completed',
+  'assistant.response.cancelled',
+  'user.transcript.completed',
+  'message.text.completed',
+  'tool.call.completed',
+]);
+
+/** A record taken up by a resumed session: active again, its end undone. */
+function carriedOn(record: RealtimeConversation): RealtimeConversation {
+  const conversation = snapshotRealtimeConversation(record);
+  conversation.status = 'active';
+  delete conversation.endedAt;
+  return conversation;
+}
+
+/** Whether a provider event echoes an item a resumed session gave it back. */
+function isReplayEcho(raw: RealtimeServerEvent): boolean {
+  if (!String(raw.type).startsWith('conversation.item.')) return false;
+  const item = raw.item as { id?: unknown } | undefined;
+  const id = typeof item?.id === 'string' ? item.id : typeof raw.item_id === 'string' ? raw.item_id : '';
+  return id.startsWith(REALTIME_REPLAY_PREFIX);
 }

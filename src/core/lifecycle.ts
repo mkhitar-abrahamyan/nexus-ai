@@ -1,5 +1,6 @@
 import type { AuditLogEvent, RateLimitConfig } from '../types/config.js';
 import type {
+  ProviderHealthOutcome,
   BudgetReservation,
   LifecycleConfig,
   LifecycleStage,
@@ -76,6 +77,11 @@ export interface LifecycleRuntime {
   config?: LifecycleConfig;
   /** Default milliseconds an operation may run before its signal aborts. */
   timeoutMs?: number;
+  /** Where `reportHealth()` goes: the client's provider health and circuit breaker. */
+  providerHealth?: {
+    recordSuccess(provider: string, latencyMs: number): void;
+    recordFailure(provider: string, error: unknown): void;
+  };
 }
 
 /** The family's part of one operation: what each stage does for it. Every stage but `execute` is optional. */
@@ -176,6 +182,17 @@ export class OperationLifecycle implements OperationLifecycleLike {
       await ticket.fail(error);
       throw error;
     }
+  }
+
+  /**
+   * Reports how a provider answered a call a family made itself, such as a realtime connection, to the
+   * client's provider health and circuit breaker.
+   */
+  reportHealth(provider: string, outcome: ProviderHealthOutcome): void {
+    const health = this.runtime.providerHealth;
+    if (!health || !provider) return;
+    if (outcome.ok) health.recordSuccess(provider, outcome.latencyMs);
+    else health.recordFailure(provider, outcome.error);
   }
 
   /** True when nothing is configured, so a caller may skip work that only feeds the lifecycle. */

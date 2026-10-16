@@ -51,7 +51,19 @@ New and stable:
   `A2aTaskRecord.lease`, `run`, and `version`; `A2aTaskStore.claim()`, optional;
   `A2aServerOptions.lease` and `recoverEveryMs`. The handler is still the request function it was;
 - on `nexus-ai-pro/protocols/acp`: `AcpTurnRecord` and `AcpSessionRecord.turn`;
-- `CompiledGraph.continueWith()`, and `ProtocolGraph.continueWith()` and `state()`, both optional.
+- `CompiledGraph.continueWith()`, and `ProtocolGraph.continueWith()` and `state()`, both optional;
+- on `nexus-ai-pro/lifecycle`: `ProviderHealthOutcome`, `OperationLifecycle.reportHealth()`,
+  `OperationLifecycleLike.reportHealth()`, optional, and `LifecycleRuntime.providerHealth`;
+- on `nexus-ai-pro/realtime`: `RealtimeSessionConfig.tenantId`, `userId`, `principal`,
+  `traceContext`, `conversationStore`, and `resume`; `RealtimeConversationOptions.replayItems`;
+  `RealtimeConversationStore`, `MemoryRealtimeConversationStore`, `storeRealtimeConversations()`,
+  `replayRealtimeConversation()`, and `REALTIME_REPLAY_PREFIX`. The realtime family stays
+  experimental, and these with it.
+
+Changed, each to keep a promise the surface already made:
+- A realtime session given a lifecycle runs each turn as a `realtime.turn` operation and charges it
+  as it finishes; its `realtime.session` operation reports the total and charges nothing more. Its
+  usage and cost are the sum of its turns', where each turn's replaced the last before.
 
 ## 2.9 stage (2.9.0)
 

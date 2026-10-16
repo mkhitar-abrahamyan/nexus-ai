@@ -147,6 +147,11 @@ export class NexusAI {
       rateLimiter: this.rateLimiter,
       rateLimit: this.config.rateLimit,
       config: this.config.lifecycle,
+      // Read when called, after the constructor has built the health monitor and circuit breaker.
+      providerHealth: {
+        recordSuccess: (provider, latencyMs) => this.attemptHooks.onAttemptSuccess(provider, latencyMs),
+        recordFailure: (provider, error) => this.attemptHooks.onAttemptFailure(provider, error),
+      },
     });
     // Built before the families so every one of them runs through this client's lifecycle rather
     // than reporting into instances nobody can read.

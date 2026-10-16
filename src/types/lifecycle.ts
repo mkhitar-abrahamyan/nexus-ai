@@ -282,11 +282,19 @@ export interface OperationTicket {
   fail(error: unknown): Promise<void>;
 }
 
+/** How a provider answered: in time, or with an error. */
+export type ProviderHealthOutcome = { ok: true; latencyMs: number } | { ok: false; error: unknown };
+
 /**
  * The part of a client's lifecycle a module outside the core needs: a graph, an agent, or a realtime
  * session given one runs as an operation of that client.
  */
 export interface OperationLifecycleLike {
+  /**
+   * Reports how a provider answered a call the family made itself, such as a realtime connection, to
+   * the client's provider health and circuit breaker, as a completion's attempts are. Optional.
+   */
+  reportHealth?(provider: string, outcome: ProviderHealthOutcome): void;
   /** Admits an operation and returns its ticket. Throws when authorization or a rate limit refuses it. */
   start(
     operation: Omit<OperationDescriptor, 'requestId'> & { requestId?: string },

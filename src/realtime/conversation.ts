@@ -1,5 +1,8 @@
 import { createRealtimeId, type RealtimeIdFactory } from './id.js';
+import type { Store } from '../types/store.js';
 import type {
+  RealtimeClientEvent,
+  RealtimeConversationStore,
   AssistantSpeechItem,
   ConversationItem,
   ConversationMetrics,
@@ -297,6 +300,81 @@ export function withConversationMetrics(
 /** A deep copy of the record. */
 export function snapshotRealtimeConversation(conversation: RealtimeConversation): RealtimeConversation {
   return cloneValue(conversation);
+}
+
+/** The prefix of the item ids a resumed session gives the provider, so their echoes are not recorded twice. */
+export const REALTIME_REPLAY_PREFIX = 'nx_replay_';
+
+/**
+ * A conversation's items as the provider's `conversation.item.create` events, oldest first: what a
+ * resumed session gives a new provider session, so the model knows what was said and what the tools
+ * returned. Speech becomes text from its transcript; interruptions and errors are left out.
+ */
+export function replayRealtimeConversation(conversation: RealtimeConversation, limit?: number): RealtimeClientEvent[] {
+  const events: RealtimeClientEvent[] = [];
+  const message = (role: 'user' | 'assistant' | 'system', text: string) => ({
+    type: 'message',
+    role,
+    content: [{ type: role === 'assistant' ? 'output_text' : 'input_text', text }],
+  });
+  for (const item of conversation.items) {
+    let created: Record<string, unknown> | undefined;
+    if (item.type === 'user_speech' && item.transcript) created = message('user', item.transcript);
+    else if (item.type === 'assistant_speech' && item.transcript) created = message('assistant', item.transcript);
+    else if (item.type === 'text_message' && item.text) created = message(item.role, item.text);
+    else if (item.type === 'tool_call') {
+      created = {
+        type: 'function_call',
+        call_id: item.callId,
+        name: item.name,
+        arguments: JSON.stringify(item.arguments),
+      };
+    } else if (item.type === 'tool_result') {
+      created = {
+        type: 'function_call_output',
+        call_id: item.callId,
+        output: JSON.stringify(item.error === undefined ? (item.result ?? null) : { error: item.error }),
+      };
+    }
+    if (created) events.push({ type: 'conversation.item.create', item: created });
+  }
+  const kept = limit === undefined ? events : events.slice(Math.max(0, events.length - Math.max(0, limit)));
+  return kept.map((event, index) => ({
+    ...event,
+    item: { ...(event.item as Record<string, unknown>), id: `${REALTIME_REPLAY_PREFIX}${index + 1}` },
+  }));
+}
+
+/** Conversation records in this process. */
+export class MemoryRealtimeConversationStore implements RealtimeConversationStore {
+  private readonly records = new Map<string, RealtimeConversation>();
+
+  /** A record, as a copy. */
+  get(id: string): RealtimeConversation | undefined {
+    const record = this.records.get(id);
+    return record ? cloneValue(record) : undefined;
+  }
+
+  /** Writes a record. */
+  put(conversation: RealtimeConversation): void {
+    this.records.set(conversation.id, cloneValue(conversation));
+  }
+}
+
+/** Conversation records in any long-term `Store`: the memory, Redis, Postgres, or SQLite store. */
+export function storeRealtimeConversations(
+  store: Store,
+  options: { namespace?: readonly string[] } = {},
+): RealtimeConversationStore {
+  const namespace = [...(options.namespace ?? ['nexus', 'realtime', 'conversations'])];
+  return {
+    async get(id) {
+      return (await store.get<RealtimeConversation>(namespace, id))?.value;
+    },
+    async put(conversation) {
+      await store.put(namespace, conversation.id, conversation);
+    },
+  };
 }
 
 /**

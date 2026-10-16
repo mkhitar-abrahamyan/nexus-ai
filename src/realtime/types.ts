@@ -1,4 +1,5 @@
 import type { OperationLifecycleLike } from '../types/lifecycle.js';
+import type { Principal } from '../types/principal.js';
 import type { RealtimeError } from './errors.js';
 
 /**
@@ -822,6 +823,23 @@ export interface RealtimeConversationOptions {
   maxRawEvents?: number;
   /** Rewrites transcript text before it is recorded. */
   redactTranscript?: (text: string, role: 'user' | 'assistant') => string;
+  /**
+   * The most recent items a resumed session gives the provider back, so a long conversation does
+   * not overflow the model's context. Defaults to all of them.
+   */
+  replayItems?: number;
+}
+
+/**
+ * Where conversation records are kept, so a session resumes in another process. A session with one
+ * writes its record after each committed turn: a finished response, a transcribed utterance, a typed
+ * message, and a tool's result.
+ */
+export interface RealtimeConversationStore {
+  /** A conversation's record, or `undefined`. */
+  get(id: string): Promise<RealtimeConversation | undefined> | RealtimeConversation | undefined;
+  /** Writes a conversation's record. */
+  put(conversation: RealtimeConversation): Promise<void> | void;
 }
 
 /** Limits and privacy controls for a session. */
@@ -849,10 +867,30 @@ export interface RealtimeSessionConfig {
   /** Session id. Generated when omitted. */
   id?: string;
   /**
-   * Runs the session as one operation of a client's lifecycle: pass `ai.lifecycle`. It is admitted
-   * when it first connects and finishes when it disconnects, with its estimated cost.
+   * Runs the session through a client's lifecycle: pass `ai.lifecycle`. The session is one operation,
+   * admitted when it first connects, and each model turn is one more, `realtime.turn`: rate-limited,
+   * authorized, and charged to the budget at its estimated cost as it finishes. A turn the lifecycle
+   * refuses, such as one past the budget, ends the session. Connections are reported to the client's
+   * provider health.
    */
   lifecycle?: OperationLifecycleLike;
+  /** The tenant the session's operations are for, for budgets, rate limits, and audit. Defaults to the principal's. */
+  tenantId?: string;
+  /** The user the session's operations are for. Defaults to the principal's. */
+  userId?: string;
+  /** Who the session runs for, when the transport's caller was authenticated. */
+  principal?: Principal;
+  /** Trace propagation headers, such as `traceparent`, carried on every operation of the session. */
+  traceContext?: Record<string, string>;
+  /** Writes the conversation record after each committed turn, so another process can resume it. */
+  conversationStore?: RealtimeConversationStore;
+  /**
+   * Carries on a conversation a stopped process left: its record, or its id in `conversationStore`.
+   * The session takes the conversation's id, items, and metrics, and on connecting gives the provider
+   * what was said and what the tools returned, so the model answers with it. A new transport carries
+   * it; the socket and the audio that was in flight are not recovered.
+   */
+  resume?: RealtimeConversation | string;
   /** Provider name, for records and telemetry. Defaults to `openai`. */
   provider?: RealtimeProviderName;
   /** The realtime model to use. */

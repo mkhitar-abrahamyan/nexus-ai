@@ -1111,6 +1111,15 @@ held in memory.
 The budget is separate from `costBudget`, which caps one request's estimate. Both apply when both are
 set.
 
+## Provider health
+
+`reportHealth(provider, outcome)` reports how a provider answered a call a family made itself, such
+as a realtime connection, to the client's provider health and circuit breaker, as a completion's
+attempts are. A `ProviderHealthOutcome` is `{ ok: true, latencyMs }` or `{ ok: false, error }`.
+`ai.lifecycle` forwards it; a lifecycle built on its own does so through
+`LifecycleRuntime.providerHealth`, and without it reports go nowhere. It is optional on
+`OperationLifecycleLike`, so a family checks before it reports.
+
 ## Hooks
 
 `LifecycleHooks` has two:
@@ -9875,7 +9884,9 @@ optional; the ones you will set first are the provider, the model, and the trans
 | Field | What it sets |
 | --- | --- |
 | `provider` | A `RealtimeProviderName`. Defaults to `openai`. |
-| `lifecycle` | `ai.lifecycle`, to run the session as one operation of a client: authorized when it first connects, finished with its estimated cost when it disconnects. |
+| `lifecycle` | `ai.lifecycle`, to run the session and each of its turns as operations of a client. See [On the client's lifecycle](#on-the-clients-lifecycle). |
+| `tenantId`, `userId`, `principal`, `traceContext` | Who the session's operations are for, and the trace they belong to. The tenant and user default to the principal's. |
+| `conversationStore`, `resume` | Where the record is kept after each committed turn, and a conversation to carry on. See [Conversations that outlive their process](#conversations-that-outlive-their-process). |
 | `model` | The realtime model, such as `gpt-realtime`. |
 | `transport` | How the session connects: WebRTC, WebSocket, or the mock. |
 | `modalities` | Each a `RealtimeModality`: `audio`, `text`, or both. |
@@ -9894,7 +9905,7 @@ The option groups:
 | `RealtimeInterruptionOptions` | What barge-in does: `enabled`, `cancelResponse`, `truncateUnheardAudio`, a `stopPlayback` hook, and `getPlaybackPositionMs` for where to cut. |
 | `RealtimeReconnectOptions` | `maxAttempts`, and a backoff from `initialDelayMs` growing by `multiplier` up to `maxDelayMs`. |
 | `RealtimeSecurityOptions` | Hard limits: `maxSessionDurationMs` and `maxAudioDurationMs` end the session. Also a `toolAllowlist`, `retainTranscripts`, and a `piiHook` that rewrites every transcript first. |
-| `RealtimeConversationOptions` | What the record keeps: transcripts, tool calls, raw events (10,000 by default), and a `redactTranscript` hook. |
+| `RealtimeConversationOptions` | What the record keeps: transcripts, tool calls, raw events (10,000 by default), and a `redactTranscript` hook. `replayItems` caps what a resumed session gives the provider back. |
 | `RealtimeTelemetryOptions` | Tracing and metrics without a dependency, so OpenTelemetry plugs in. See the next table. |
 | `RealtimeConnectOptions` | What `connect()` takes in a browser: a signal, the microphone, and where audio plays. |
 
@@ -10105,6 +10116,55 @@ rebuild a record from stored events:
 The `analytics` format is a `RealtimeAnalyticsExport`: durations, item counts, and metrics, without
 transcripts.
 
+### On the client's lifecycle
+
+Given `ai.lifecycle`, a session runs through the same lifecycle as every other family. Its
+operations carry the session's `tenantId` and `userId` (the principal's by default) and its
+`traceContext`:
+- the session itself is one operation, `realtime.session`, admitted when it first connects;
+- each model turn is one more, `realtime.turn`, admitted as the turn starts: rate-limited,
+  authorized, and holding the turns' average cost so far against the budget;
+- when the turn finishes, its operation is charged what the turn cost, from `estimateCost`;
+- a session's usage and estimated cost are the sum of its turns'.
+
+A turn the lifecycle refuses, because the budget cannot cover it, the rate limit is reached, or
+authorization says no, is cancelled before the model runs it. The session then ends with a
+`RealtimeError` of code `lifecycle_refused`. A connection that succeeds or fails is reported to the
+client's provider health and circuit breaker, as a completion's attempts are.
+
+In the test suite, through a real client: with a five-cent budget and two cents a turn, the first two
+turns run, and the third is cancelled as it starts and ends the session. The budget then holds four
+cents, and every operation names the session's tenant and user.
+
+## Conversations that outlive their process
+
+Give a session a `conversationStore`, a `RealtimeConversationStore`, and it writes its record after
+each committed turn: a finished response, a transcribed utterance, a typed message, and a tool's
+result. `MemoryRealtimeConversationStore` keeps records in the process, and
+`storeRealtimeConversations()` in any long-term `Store`: the memory, Redis, Postgres, or SQLite store.
+
+Another process carries the conversation on with `resume`: its record, or its id in the store. The
+new session takes the conversation's id, items, metrics, and metadata, active again. On connecting,
+it gives the provider what was said and what the tools returned, before anything new, so the model
+answers with it. `replayRealtimeConversation()` builds those items: speech as text from its
+transcript, typed messages, tool calls, and their results, the latest `replayItems` of them. Each
+carries an id that begins with `REALTIME_REPLAY_PREFIX`, so the provider's echoes are not recorded
+twice. A new transport carries the conversation; the socket and the audio that was in flight are not
+recovered.
+
+```ts
+import { createRealtimeSession, storeRealtimeConversations } from 'nexus-ai-pro/realtime';
+
+const conversationStore = storeRealtimeConversations(redisStore);
+// In the process that takes over, by the id the first one stored:
+const session = createRealtimeSession({ model: 'gpt-realtime', transport, conversationStore, resume: conversationId });
+await session.connect();
+```
+
+In the test suite, a session's process is killed mid-conversation on the memory and SQLite stores.
+Another process resumes it by id: the provider is first told what the person said and what the model
+answered, and the conversation goes on under its own id, with nothing recorded twice.
+
 ## Errors
 
 Every failure is a `RealtimeError`. It carries a message, the provider's code, the HTTP status, the
@@ -10119,10 +10179,10 @@ its category.
 ## Limitations
 
 - OpenAI is the only bundled provider. Another provider implements `RealtimeTransportProvider`.
-- A session is not durable: a process that dies loses it, and the conversation record is what you
-  store to keep it.
-- Realtime sessions report through their own `telemetry` hooks, not yet through the client's shared
-  metrics, audit log, and rate limiter that every other family uses.
+- A resumed conversation gives the provider its transcripts as text, not its audio, so the model
+  hears what was said as written, not how it was said.
+- A turn is charged from `estimateCost`: a session without one is admitted and rate-limited turn by
+  turn, but charges nothing to the budget.
 
 ---
 
@@ -12400,15 +12460,15 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 343 KB | 100% | none |
+| `nexus-ai-pro` | 344 KB | 100% | none |
 | `nexus-ai-pro/config` | 336 KB | 98% | none |
 | `nexus-ai-pro/core` | 332 KB | 97% | none |
 | `nexus-ai-pro/deep-agent` | 185 KB | 54% | none |
-| `nexus-ai-pro/realtime` | 158 KB | 46% | none |
+| `nexus-ai-pro/realtime` | 167 KB | 49% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
-| `nexus-ai-pro/realtime/session` | 96 KB | 28% | none |
+| `nexus-ai-pro/realtime/session` | 105 KB | 31% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 26% | none |
 | `nexus-ai-pro/providers/groq` | 88 KB | 26% | none |
 | `nexus-ai-pro/providers/mistral` | 88 KB | 26% | none |
@@ -12422,8 +12482,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/router` | 81 KB | 24% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
 | `nexus-ai-pro/evaluate/online` | 74 KB | 22% | none |
+| `nexus-ai-pro/images` | 73 KB | 21% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
-| `nexus-ai-pro/images` | 72 KB | 21% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
@@ -12440,8 +12500,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings` | 40 KB | 12% | none |
 | `nexus-ai-pro/embeddings/batch` | 40 KB | 12% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
+| `nexus-ai-pro/ops` | 40 KB | 12% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 12% | none |
-| `nexus-ai-pro/ops` | 39 KB | 11% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
@@ -12479,6 +12539,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/mcp` | 19 KB | 6% | none |
 | `nexus-ai-pro/connectors` | 19 KB | 6% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
+| `nexus-ai-pro/realtime/conversation` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
 | `nexus-ai-pro/agent/interpreter` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
@@ -12486,7 +12547,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
 | `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
-| `nexus-ai-pro/realtime/conversation` | 16 KB | 5% | none |
 | `nexus-ai-pro/sqlite/operations` | 15 KB | 4% | none |
 | `nexus-ai-pro/tracing/otlp` | 15 KB | 4% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |

@@ -23,12 +23,40 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   `AcpTurnRecord`. When the editor reopens the session with `session/load`, the agent carries the
   turn on, streaming its updates: from the graph's last checkpoint, by answering again, or from the
   start. A turn stopped while the editor was deciding an approval asks for it again.
+- **Realtime on the client's lifecycle.** A session given `ai.lifecycle` runs as `realtime.session`,
+  and each model turn as `realtime.turn`, carrying the session's `tenantId`, `userId` (the
+  `principal`'s by default), and `traceContext`. A turn is admitted as it starts, rate-limited,
+  authorized, and holding the average turn cost against the budget, and charged its cost when it
+  finishes. A turn the lifecycle refuses is cancelled before the model runs it, and the session ends
+  with `lifecycle_refused`. Connections are reported to the client's provider health and circuit
+  breaker through the new `reportHealth()`, on `OperationLifecycleLike` and `OperationLifecycle`,
+  with `ProviderHealthOutcome` and `LifecycleRuntime.providerHealth`.
+- **Realtime conversations that outlive their process.** `conversationStore`, a
+  `RealtimeConversationStore`, keeps the record after each committed turn:
+  `MemoryRealtimeConversationStore`, or `storeRealtimeConversations()` on any `Store`. `resume`
+  carries a conversation on, from its record or its id: same id, items, metrics, and metadata. On
+  connecting, the provider is given what was said and what the tools returned before anything new,
+  through `replayRealtimeConversation()`. Echoes carry `REALTIME_REPLAY_PREFIX` and are not recorded
+  twice. `conversation.replayItems` caps the replay.
 - `continueWith()` on a compiled graph: `continue()`, returning the final result.
   `ProtocolGraph.continueWith()` and `state()`, both optional, are what A2A and ACP carry a run on
   with.
 
+### Fixed
+
+- A realtime session's usage and estimated cost are the sum of its responses'. Before, each
+  response's usage replaced the last, so a session recorded, and settled, only its last turn.
+
 ### Proof
 
+- `tests/realtime-lifecycle.test.ts`: through a real client with a five-cent budget, two
+  two-cent turns run, and the third is cancelled as it starts and ends the session; the budget holds
+  four cents, and every operation names the tenant and user. Connection failures open the client's
+  circuit. Without the admission at the turn's start, the proof fails.
+- `tests/realtime-resume.test.ts`: a session's process is killed mid-conversation on the memory and
+  SQLite stores. Another resumes it by id on a new transport, and gives the provider what was said
+  before anything new. The conversation goes on under its own id with nothing recorded twice.
+  Without the replay, or without skipping the echoes, the proof fails.
 - `tests/a2a-takeover.test.ts`: a task whose replica dies halfway through a tool is taken over, on
   the memory, SQLite, Postgres, and Redis stores. The model call the dead replica finished is not
   made again, and the email it never sent is sent once. Two replicas recovering at the same moment

@@ -7,8 +7,12 @@ export {
   createConversationMetrics,
   createRealtimeConversation,
   exportRealtimeConversation,
+  MemoryRealtimeConversationStore,
+  REALTIME_REPLAY_PREFIX,
   reduceRealtimeConversation,
+  replayRealtimeConversation,
   snapshotRealtimeConversation,
+  storeRealtimeConversations,
   withConversationMetrics,
 } from './conversation.js';
 export type {
