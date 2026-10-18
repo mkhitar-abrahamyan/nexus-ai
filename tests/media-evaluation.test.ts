@@ -274,8 +274,8 @@ test('an experiment scores a target that draws, with checks and a judge, and rec
   const judge = mediaJudge({
     client: {
       async complete(request: CompletionRequest) {
-        const image = (request.messages[1]?.content as ContentPart[]).find((part) => part.type === 'image');
-        const size = readImageDimensions(Buffer.from((image?.source as { base64: string }).base64, 'base64'));
+        const image = userContent(request).find((part) => part.type === 'image') as { source: { base64: string } };
+        const size = readImageDimensions(Buffer.from(image.source.base64, 'base64'));
         return { content: `{"score": ${size && size.width > size.height ? 1 : 0}}` } as never;
       },
     },
