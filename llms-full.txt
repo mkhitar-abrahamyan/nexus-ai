@@ -4565,8 +4565,8 @@ model call or a retrieval, lands beneath it. The run records the trace's id as `
 `TraceExporter`: an object with `export(run)` and an optional `flush()`. An exporter that fails is
 reported through `onError` and never fails the run.
 
-`OtlpTraceExporter` from `nexus-ai-pro/tracing/otlp` sends runs to any OpenTelemetry collector as
-OTLP/HTTP JSON, with no SDK to install:
+`OtlpTraceExporter` from `nexus-ai-pro/tracing/otlp` sends runs to any OpenTelemetry collector over
+OTLP/HTTP, with no SDK to install:
 
 ```ts
 import { OtlpTraceExporter } from 'nexus-ai-pro/tracing/otlp';
@@ -4579,9 +4579,51 @@ const tracer = new Tracer({
 
 `OtlpTraceExporterOptions` sets the collector's base URL (spans go to `/v1/traces`), headers such as an
 API key, the `service.name`, more resource attributes, the batch size (100) and how long a span waits
-to batch (2 seconds), a `fetch` of your own, and an `onError`. On its own, a batch the collector
-refuses is dropped; `send()` sends runs as one batch and rejects when the collector refuses them, which
-is what the spool below sends through.
+to batch (2 seconds), a `fetch` of your own, and an `onError`. `protocol` chooses the encoding:
+`http/json` by default, or `http/protobuf`, OTLP's binary encoding, which is smaller and quicker for a
+collector to read. On its own, a batch the collector refuses is dropped; `send()` sends runs as one
+batch and rejects when the collector refuses them, which is what the spool below sends through. A
+collector that takes a batch but rejects some of its spans says so in a partial success, which
+reaches `onError` as an `OtlpPartialSuccessError` with the `rejectedSpans` and the collector's
+`errorMessage`; sending them again would change nothing, so it is not a refusal.
+
+`encodeOtlpTraceRequest()` writes an `OtlpExportRequest`, the spans grouped by resource and scope,
+each attribute an `OtlpKeyValue` holding an `OtlpAttributeValue`, in that encoding, and
+`decodeOtlpTraceResponse()` reads the `OtlpPartialSuccess` from a collector's answer. Both run
+anywhere.
+
+### OTLP over gRPC
+
+`OtlpGrpcTraceExporter`, from `nexus-ai-pro/tracing/otlp-grpc`, sends the same spans over gRPC, port
+4317, for a collector or a backend that takes only that. It needs no gRPC library: it frames the
+trace service's `Export` call itself, over Node's own HTTP/2 client, so it runs on Node.js only.
+
+```ts
+import { OtlpGrpcTraceExporter } from 'nexus-ai-pro/tracing/otlp-grpc';
+
+const exporter = new OtlpGrpcTraceExporter({
+  endpoint: 'https://collector.internal:4317',
+  headers: { 'x-api-key': process.env.OTEL_KEY ?? '' },
+});
+const tracer = new Tracer({ store, exporters: [exporter] });
+// On shutdown: send what is waiting, and close the connection.
+await exporter.close();
+```
+
+`OtlpGrpcTraceExporterOptions` takes everything `OtlpTraceExporterOptions` does but `fetch` and
+`protocol`. An `http://` endpoint connects without TLS, and an `https://` one with it; the headers
+are the call's metadata. `gzip` compresses each batch (on by default), `timeoutMs` is each call's
+deadline (10 seconds), and `connect` passes options such as a `ca`, a client `cert` and `key`, or
+`servername` to `http2.connect()`. One connection is kept, opened again when it drops, and it never
+keeps the process alive while no call is in flight. A connection that dropped without a word, as when
+a collector dies, fails the first call made on it before anything reaches a collector; that call is
+made once more, on a new connection, as gRPC clients do. A call the collector answers with a status other
+than OK rejects `send()` with an `OtlpGrpcError`, carrying the gRPC `code`, such as 14 for
+`UNAVAILABLE`, and the collector's `details`, so a spool keeps the batch.
+
+In the test suite, the OpenTelemetry Collector itself, in a container, takes the spans over gRPC and
+sends them on as OTLP/HTTP JSON, and every one arrives with its ids, times, kind, attributes, and
+status as it was sent.
 
 ### Spans that a collector being down cannot lose
 
@@ -4759,8 +4801,9 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
   loses that trace.
 - With `incremental`, a run is written twice, so a store pays twice the writes. A run left by a dead
   process stays `running` until `closeAbandonedRuns()` closes it.
-- `OtlpTraceExporter` speaks OTLP/HTTP JSON, not gRPC or protobuf; every collector accepts JSON on port
-  4318.
+- `OtlpGrpcTraceExporter` runs on Node.js only. On another runtime, send OTLP/HTTP with
+  `OtlpTraceExporter`, in JSON or protobuf.
+- Spans carry no events or links: a run is one span, with its attributes.
 - Without `writeAhead`, the runs waiting to be batched, at most `flushIntervalMs` of them, are lost
   with a process that stops before it sends them; what the collector refused is not. Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a
   `RollupStore` of your own.
@@ -13121,6 +13164,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 32 KB | 9% | none |
+| `nexus-ai-pro/tracing/otlp-grpc` | 32 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
@@ -13134,6 +13178,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/assets` | 25 KB | 7% | none |
 | `nexus-ai-pro/protocols/acp` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
+| `nexus-ai-pro/tracing/otlp` | 24 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
@@ -13154,7 +13199,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/rag/pipeline` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
-| `nexus-ai-pro/tracing/otlp` | 16 KB | 5% | none |
 | `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
 | `nexus-ai-pro/sqlite/operations` | 15 KB | 4% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |
@@ -13425,7 +13469,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 185 entry points, 148 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 186 entry points, 148 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |
@@ -13447,6 +13491,7 @@ Of 185 entry points, 148 run on any runtime. These need Node.js, or a runtime wi
 | `nexus-ai-pro/protocols/acp/editor` | the `process` global |
 | `nexus-ai-pro/tracing` | `node:fs/promises`, `node:path`, `node:async_hooks` |
 | `nexus-ai-pro/tracing/otlp` | `node:async_hooks` |
+| `nexus-ai-pro/tracing/otlp-grpc` | `node:http2`, `node:zlib`, `node:async_hooks`; the `Buffer` global |
 | `nexus-ai-pro/evaluate` | `node:fs/promises`, `node:path`; the `process` global |
 | `nexus-ai-pro/evaluate/generate` | `node:fs/promises`, `node:path` |
 | `nexus-ai-pro/evaluate/online` | `node:crypto`; the `Buffer` global |

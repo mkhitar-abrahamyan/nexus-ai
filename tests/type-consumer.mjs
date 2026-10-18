@@ -312,6 +312,8 @@ import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/teleph
 import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { TelnyxTelephonyProvider } from 'nexus-ai-pro/telephony/telnyx';
 import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
+import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
+import { encodeOtlpTraceRequest, OtlpPartialSuccessError } from 'nexus-ai-pro/tracing/otlp';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
 import {
   GeminiLiveProvider,
@@ -1074,6 +1076,14 @@ void geminiLive;
 const spooled = spoolingExporter({ sender: { send: async () => undefined }, store: {} as never, drainEveryMs: 0 });
 const spoolStats: Promise<SpoolStats> = spooled.stats();
 void spoolStats;
+const grpcOptions: OtlpGrpcTraceExporterOptions = { endpoint: 'http://localhost:4317', gzip: true, timeoutMs: 5_000 };
+const grpcExporter = new OtlpGrpcTraceExporter(grpcOptions);
+const spooledGrpc = spoolingExporter({ sender: grpcExporter, store: {} as never, drainEveryMs: 0 });
+void spooledGrpc;
+void grpcExporter.close();
+const encoded: Uint8Array = encodeOtlpTraceRequest({ resourceSpans: [] });
+void encoded;
+void new OtlpPartialSuccessError(1);
 // A retriever from the package keeps its type through tracing, and a deployment's runs are evaluated
 // from their traces through a worker.
 const tracedRetriever: Retriever = traceRetriever(vectorRetriever(new RagMemoryVectorStore()), new Tracer({ store: new MemoryTraceStore() }));

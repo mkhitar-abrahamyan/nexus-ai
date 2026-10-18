@@ -1,6 +1,6 @@
 # Traces
 
-<!-- covers: ./tracing ./tracing/otlp ./tracing/spool ./tracing/rollups -->
+<!-- covers: ./tracing ./tracing/otlp ./tracing/otlp-grpc ./tracing/spool ./tracing/rollups -->
 
 Traces you can search, from `nexus-ai-pro/tracing`. Each request becomes a tree of runs — the graph,
 its nodes, its model and tool calls — stored in memory, a JSONL file, or Postgres. You can filter
@@ -220,8 +220,8 @@ model call or a retrieval, lands beneath it. The run records the trace's id as `
 `TraceExporter`: an object with `export(run)` and an optional `flush()`. An exporter that fails is
 reported through `onError` and never fails the run.
 
-`OtlpTraceExporter` from `nexus-ai-pro/tracing/otlp` sends runs to any OpenTelemetry collector as
-OTLP/HTTP JSON, with no SDK to install:
+`OtlpTraceExporter` from `nexus-ai-pro/tracing/otlp` sends runs to any OpenTelemetry collector over
+OTLP/HTTP, with no SDK to install:
 
 ```ts
 import { OtlpTraceExporter } from 'nexus-ai-pro/tracing/otlp';
@@ -234,9 +234,51 @@ const tracer = new Tracer({
 
 `OtlpTraceExporterOptions` sets the collector's base URL (spans go to `/v1/traces`), headers such as an
 API key, the `service.name`, more resource attributes, the batch size (100) and how long a span waits
-to batch (2 seconds), a `fetch` of your own, and an `onError`. On its own, a batch the collector
-refuses is dropped; `send()` sends runs as one batch and rejects when the collector refuses them, which
-is what the spool below sends through.
+to batch (2 seconds), a `fetch` of your own, and an `onError`. `protocol` chooses the encoding:
+`http/json` by default, or `http/protobuf`, OTLP's binary encoding, which is smaller and quicker for a
+collector to read. On its own, a batch the collector refuses is dropped; `send()` sends runs as one
+batch and rejects when the collector refuses them, which is what the spool below sends through. A
+collector that takes a batch but rejects some of its spans says so in a partial success, which
+reaches `onError` as an `OtlpPartialSuccessError` with the `rejectedSpans` and the collector's
+`errorMessage`; sending them again would change nothing, so it is not a refusal.
+
+`encodeOtlpTraceRequest()` writes an `OtlpExportRequest`, the spans grouped by resource and scope,
+each attribute an `OtlpKeyValue` holding an `OtlpAttributeValue`, in that encoding, and
+`decodeOtlpTraceResponse()` reads the `OtlpPartialSuccess` from a collector's answer. Both run
+anywhere.
+
+### OTLP over gRPC
+
+`OtlpGrpcTraceExporter`, from `nexus-ai-pro/tracing/otlp-grpc`, sends the same spans over gRPC, port
+4317, for a collector or a backend that takes only that. It needs no gRPC library: it frames the
+trace service's `Export` call itself, over Node's own HTTP/2 client, so it runs on Node.js only.
+
+```ts
+import { OtlpGrpcTraceExporter } from 'nexus-ai-pro/tracing/otlp-grpc';
+
+const exporter = new OtlpGrpcTraceExporter({
+  endpoint: 'https://collector.internal:4317',
+  headers: { 'x-api-key': process.env.OTEL_KEY ?? '' },
+});
+const tracer = new Tracer({ store, exporters: [exporter] });
+// On shutdown: send what is waiting, and close the connection.
+await exporter.close();
+```
+
+`OtlpGrpcTraceExporterOptions` takes everything `OtlpTraceExporterOptions` does but `fetch` and
+`protocol`. An `http://` endpoint connects without TLS, and an `https://` one with it; the headers
+are the call's metadata. `gzip` compresses each batch (on by default), `timeoutMs` is each call's
+deadline (10 seconds), and `connect` passes options such as a `ca`, a client `cert` and `key`, or
+`servername` to `http2.connect()`. One connection is kept, opened again when it drops, and it never
+keeps the process alive while no call is in flight. A connection that dropped without a word, as when
+a collector dies, fails the first call made on it before anything reaches a collector; that call is
+made once more, on a new connection, as gRPC clients do. A call the collector answers with a status other
+than OK rejects `send()` with an `OtlpGrpcError`, carrying the gRPC `code`, such as 14 for
+`UNAVAILABLE`, and the collector's `details`, so a spool keeps the batch.
+
+In the test suite, the OpenTelemetry Collector itself, in a container, takes the spans over gRPC and
+sends them on as OTLP/HTTP JSON, and every one arrives with its ids, times, kind, attributes, and
+status as it was sent.
 
 ### Spans that a collector being down cannot lose
 
@@ -414,8 +456,9 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
   loses that trace.
 - With `incremental`, a run is written twice, so a store pays twice the writes. A run left by a dead
   process stays `running` until `closeAbandonedRuns()` closes it.
-- `OtlpTraceExporter` speaks OTLP/HTTP JSON, not gRPC or protobuf; every collector accepts JSON on port
-  4318.
+- `OtlpGrpcTraceExporter` runs on Node.js only. On another runtime, send OTLP/HTTP with
+  `OtlpTraceExporter`, in JSON or protobuf.
+- Spans carry no events or links: a run is one span, with its attributes.
 - Without `writeAhead`, the runs waiting to be batched, at most `flushIntervalMs` of them, are lost
   with a process that stops before it sends them; what the collector refused is not. Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a
   `RollupStore` of your own.
@@ -486,10 +529,25 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `decodeOtlpTraceResponse` | function | Reads an `ExportTraceServiceResponse` in the protobuf encoding: its partial success, or nothing when the collector took every span. |
+| `encodeOtlpTraceRequest` | function | An export request in OTLP's protobuf encoding, as a collector takes it over gRPC or OTLP/HTTP with `content-type: application/x-protobuf`. |
+| `OtlpAttributeValue` | type | A typed attribute value, in OTLP's JSON encoding. |
+| `OtlpExportRequest` | interface | An `ExportTraceServiceRequest` in OTLP's JSON encoding: spans grouped by resource and scope. |
+| `OtlpKeyValue` | interface | One attribute, in OTLP's JSON encoding. |
+| `OtlpPartialSuccess` | interface | What a collector says it rejected of an export it otherwise took, from OTLP's partial success. |
+| `OtlpPartialSuccessError` | class | Thrown to `onError` when a collector took a batch but rejected some of its spans. |
 | `OtlpSpan` | interface | One span in OTLP's JSON encoding. |
 | `OtlpTraceExporter` | class | Sends finished runs to any OpenTelemetry collector as OTLP/HTTP JSON, with no SDK to install. |
 | `OtlpTraceExporterOptions` | interface | Options for `OtlpTraceExporter`. |
 | `runToOtlpSpan` | function | Turns one finished run into an OpenTelemetry span, with the GenAI semantic conventions. |
+
+### `nexus-ai-pro/tracing/otlp-grpc`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `OtlpGrpcError` | class | Thrown when the collector answers an export with a gRPC status other than OK. |
+| `OtlpGrpcTraceExporter` | class | Sends finished runs to any OpenTelemetry collector as OTLP over gRPC, port 4317, in OTLP's protobuf encoding: the same spans, batching, and GenAI attributes as `OtlpTraceExporter`, for a collector or backend that takes gRPC only. |
+| `OtlpGrpcTraceExporterOptions` | interface | Options for `OtlpGrpcTraceExporter`. |
 
 ### `nexus-ai-pro/tracing/rollups`
 

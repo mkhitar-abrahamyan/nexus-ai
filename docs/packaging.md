@@ -151,6 +151,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 32 KB | 9% | none |
+| `nexus-ai-pro/tracing/otlp-grpc` | 32 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
@@ -164,6 +165,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/assets` | 25 KB | 7% | none |
 | `nexus-ai-pro/protocols/acp` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
+| `nexus-ai-pro/tracing/otlp` | 24 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
@@ -184,7 +186,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/rag/pipeline` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
-| `nexus-ai-pro/tracing/otlp` | 16 KB | 5% | none |
 | `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
 | `nexus-ai-pro/sqlite/operations` | 15 KB | 4% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |

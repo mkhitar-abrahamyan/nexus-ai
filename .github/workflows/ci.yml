@@ -31,13 +31,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Pull the container sandbox image
-        run: docker pull node:22-alpine
+      - name: Pull the container images
+        run: |
+          docker pull node:22-alpine
+          docker pull otel/opentelemetry-collector:0.111.0
 
       - name: Build, lint, test, type-check, and verify package
         run: npm run check:release
         env:
-          # The container sandbox's proof runs against the runner's Docker, and must not be skipped.
+          # The container sandbox's proof and the OTLP collector's run against the runner's Docker,
+          # and must not be skipped.
           NEXUS_REQUIRE_CONTAINER: '1'
 
   kernel:

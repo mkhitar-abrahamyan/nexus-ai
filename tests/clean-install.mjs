@@ -261,6 +261,7 @@ const imports = [
   ['nexus-ai-pro/agent/workspace', ['compositeWorkspace', 'storeWorkspace']],
   ['nexus-ai-pro/telephony/telnyx', ['TelnyxTelephonyProvider']],
   ['nexus-ai-pro/tracing/spool', ['spoolingExporter']],
+  ['nexus-ai-pro/tracing/otlp-grpc', ['OtlpGrpcTraceExporter', 'OtlpGrpcError']],
   ['nexus-ai-pro/realtime/openai-sip', ['answerOpenAISipCalls']],
   ['nexus-ai-pro/jobs/batch', ['runBatch']],
   ['nexus-ai-pro/workflows', ['ragAnswer']],

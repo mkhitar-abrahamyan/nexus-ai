@@ -26,6 +26,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - `onlineEvaluationWorker()` takes `withTrace`, which gives evaluators `context.trace`, and
   `onScored`, which hears each run's scores once they are written, with `onError` for its failures.
 - `traceRetriever()`: every retrieval as a `retriever` run, with the query and the documents.
+- **OTLP over gRPC.** `OtlpGrpcTraceExporter`, on the new `nexus-ai-pro/tracing/otlp-grpc`, sends
+  spans to a collector's port 4317 with no gRPC library: the trace service's `Export` call framed by
+  hand over Node's HTTP/2 client, gzip-compressed, with metadata, a deadline, TLS options, one
+  connection kept and reopened, and a failed call rejecting with an `OtlpGrpcError` so a spool keeps
+  the batch. `OtlpTraceExporter` takes `protocol: 'http/protobuf'`, and both read a collector's
+  partial success into an `OtlpPartialSuccessError` for `onError`. `encodeOtlpTraceRequest()` and
+  `decodeOtlpTraceResponse()` are OTLP's protobuf encoding, written by hand, on any runtime.
 - `Tracer.within()`: runs a function with a run started by `startRun()` in scope.
 
 ### Changed
@@ -43,6 +50,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   SQLite, Postgres, and Redis operation stores. The bound, dead letters, two replicas on one spool,
   and write-ahead through a process that dies mid-send. Without the spool, its bound, its claim, its
   dead letters, write-ahead, or taking over a lapsed lease, a test fails.
+- `tests/otlp-grpc.test.ts`: the OpenTelemetry Collector itself, in a container, takes spans over
+  gRPC and sends every one on as it came, ids, times, kinds, attributes, and status. Against a gRPC
+  server of the test's, with a protobuf reader written apart from the encoder: compression and
+  metadata, a refusal, a deadline, a partial success, a collector that is down, one that restarts
+  under a live connection, and a spool that keeps what is refused. Without the compressed flag, the
+  status, the deadline, the metadata, the parent span, the status message, typed values, the
+  reconnection, or the retry on a dropped connection, a test fails.
 - `tests/deployment-trace-evaluation.test.ts`: a traced server whose assistant retrieves a policy,
   calls a tool, and asks a model about a photo; its evaluators see the input, the tool call, the
   documents, the model call, and the photo once. Two replicas evaluating at once over one operation

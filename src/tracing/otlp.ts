@@ -1,13 +1,20 @@
 import type { Run, TraceExporter } from '../types/tracing.js';
+import { decodeOtlpTraceResponse, encodeOtlpTraceRequest } from './otlp-proto.js';
 import { w3cSpanId, w3cTraceId } from './tracer.js';
 
 /** Options for `OtlpTraceExporter`. */
 export interface OtlpTraceExporterOptions {
   /**
    * The collector's OTLP/HTTP base URL, such as `http://localhost:4318`. Spans are posted to
-   * `/v1/traces` under it, as JSON.
+   * `/v1/traces` under it.
    */
   endpoint: string;
+  /**
+   * How spans are encoded: `http/json`, the default, or `http/protobuf`, OTLP's binary encoding,
+   * smaller and faster for a collector to read. For OTLP over gRPC, use `OtlpGrpcTraceExporter`
+   * from `nexus-ai-pro/tracing/otlp-grpc`.
+   */
+  protocol?: 'http/json' | 'http/protobuf';
   /** Headers on every request, such as an API key a hosted backend wants. */
   headers?: Record<string, string>;
   /** `service.name` on every span. Defaults to `nexus-ai-pro`. */
@@ -22,12 +29,53 @@ export interface OtlpTraceExporterOptions {
   fetch?: typeof globalThis.fetch;
   /**
    * Called when a batch cannot be sent. The batch is dropped; a trace is never worth a retry storm.
-   * To keep it instead, send through `spoolingExporter()`, from `nexus-ai-pro/tracing/spool`.
+   * To keep it instead, send through `spoolingExporter()`, from `nexus-ai-pro/tracing/spool`. Also
+   * called, with an `OtlpPartialSuccessError`, when the collector took a batch but rejected some of
+   * its spans, which sending again would not change.
    */
   onError?: (error: unknown) => void;
 }
 
-type AttributeValue = { stringValue: string } | { intValue: string } | { doubleValue: number } | { boolValue: boolean };
+/** A typed attribute value, in OTLP's JSON encoding. */
+export type OtlpAttributeValue =
+  | { stringValue: string }
+  | { intValue: string }
+  | { doubleValue: number }
+  | { boolValue: boolean };
+
+/** One attribute, in OTLP's JSON encoding. */
+export interface OtlpKeyValue {
+  /** The attribute's name. */
+  key: string;
+  /** Its typed value. */
+  value: OtlpAttributeValue;
+}
+
+/** An `ExportTraceServiceRequest` in OTLP's JSON encoding: spans grouped by resource and scope. */
+export interface OtlpExportRequest {
+  /** One entry per resource. */
+  resourceSpans: Array<{
+    /** The resource's attributes, such as `service.name`. */
+    resource: { attributes: OtlpKeyValue[] };
+    /** The spans, grouped by the instrumentation scope that made them. */
+    scopeSpans: Array<{ scope: { name: string; version?: string }; spans: OtlpSpan[] }>;
+  }>;
+}
+
+/** Thrown to `onError` when a collector took a batch but rejected some of its spans. */
+export class OtlpPartialSuccessError extends Error {
+  constructor(
+    /** Spans the collector rejected. */
+    public readonly rejectedSpans: number,
+    /** Why, in its words. */
+    public readonly errorMessage?: string,
+  ) {
+    super(`The collector rejected ${rejectedSpans} span(s)${errorMessage ? `: ${errorMessage}` : ''}`);
+    this.name = 'OtlpPartialSuccessError';
+  }
+}
+
+type AttributeValue = OtlpAttributeValue;
 
 /** One span in OTLP's JSON encoding. */
 export interface OtlpSpan {
@@ -46,7 +94,7 @@ export interface OtlpSpan {
   /** Nanoseconds since the epoch, as a decimal string. */
   endTimeUnixNano: string;
   /** Typed attributes. */
-  attributes: Array<{ key: string; value: AttributeValue }>;
+  attributes: OtlpKeyValue[];
   /** 1 ok, 2 error. */
   status: { code: number; message?: string };
 }
@@ -123,7 +171,7 @@ export class OtlpTraceExporter implements TraceExporter {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private sending: Promise<void> = Promise.resolve();
 
-  constructor(private readonly options: OtlpTraceExporterOptions) {}
+  constructor(protected readonly options: OtlpTraceExporterOptions) {}
 
   /** Queues a run, sending a batch when one is full. Runs still in progress are skipped. */
   export(run: Run): void {
@@ -164,9 +212,10 @@ export class OtlpTraceExporter implements TraceExporter {
     if (spans.length) await this.post(spans);
   }
 
-  private async post(spans: OtlpSpan[]): Promise<void> {
+  /** The export request a batch of spans makes, under this exporter's resource. */
+  protected request(spans: OtlpSpan[]): OtlpExportRequest {
     const resource = { 'service.name': this.options.serviceName ?? 'nexus-ai-pro', ...this.options.resource };
-    const body = {
+    return {
       resourceSpans: [
         {
           resource: { attributes: Object.entries(resource).map(([key, value]) => ({ key, value: typed(value) })) },
@@ -174,17 +223,64 @@ export class OtlpTraceExporter implements TraceExporter {
         },
       ],
     };
+  }
+
+  /** Sends one batch, rejecting when the collector does not take it. */
+  protected async post(spans: OtlpSpan[]): Promise<void> {
+    const protobuf = this.options.protocol === 'http/protobuf';
+    const request = this.request(spans);
     const response = await (this.options.fetch ?? globalThis.fetch)(
       `${this.options.endpoint.replace(/\/+$/, '')}/v1/traces`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...this.options.headers },
-        body: JSON.stringify(body),
+        headers: {
+          'content-type': protobuf ? 'application/x-protobuf' : 'application/json',
+          ...this.options.headers,
+        },
+        body: protobuf
+          ? (encodeOtlpTraceRequest(request) as NonNullable<RequestInit['body']>)
+          : JSON.stringify(request),
       },
     );
     if (!response.ok) throw new Error(`The collector answered ${response.status}`);
+    this.partial(protobuf ? await partialFromProtobuf(response) : await partialFromJson(response));
+  }
+
+  /** Reports spans the collector rejected from a batch it took. */
+  protected partial(partial: { rejectedSpans: number; errorMessage?: string } | undefined): void {
+    if (partial && partial.rejectedSpans > 0) {
+      this.options.onError?.(new OtlpPartialSuccessError(partial.rejectedSpans, partial.errorMessage));
+    }
   }
 }
+
+async function partialFromJson(
+  response: Response,
+): Promise<{ rejectedSpans: number; errorMessage?: string } | undefined> {
+  const text = await response.text().catch(() => '');
+  if (!text) return undefined;
+  try {
+    const body = JSON.parse(text) as { partialSuccess?: { rejectedSpans?: string | number; errorMessage?: string } };
+    const rejected = Number(body.partialSuccess?.rejectedSpans ?? 0);
+    return rejected > 0
+      ? {
+          rejectedSpans: rejected,
+          ...(body.partialSuccess?.errorMessage ? { errorMessage: body.partialSuccess.errorMessage } : {}),
+        }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function partialFromProtobuf(
+  response: Response,
+): Promise<{ rejectedSpans: number; errorMessage?: string } | undefined> {
+  const bytes = new Uint8Array(await response.arrayBuffer().catch(() => new ArrayBuffer(0)));
+  return bytes.length ? decodeOtlpTraceResponse(bytes) : undefined;
+}
+
+export { decodeOtlpTraceResponse, encodeOtlpTraceRequest, type OtlpPartialSuccess } from './otlp-proto.js';
 
 function nanos(milliseconds: number): string {
   return `${BigInt(Math.round(milliseconds)) * 1_000_000n}`;

@@ -57,7 +57,12 @@ New and stable:
   `TraceToolCall`, `TraceRetrieval`, `TraceDocument`, `TraceModelCall`, `TraceMedia`, and
   `EvaluationContext.trace`;
 - `OnlineEvaluationWorkerOptions.withTrace`, `onScored`, and `onError`, and `OnlineScored`;
-- `traceRetriever()`, `RetrieverLike`, and `Tracer.within()`.
+- `traceRetriever()`, `RetrieverLike`, and `Tracer.within()`;
+- `nexus-ai-pro/tracing/otlp-grpc`: `OtlpGrpcTraceExporter`, `OtlpGrpcTraceExporterOptions`, and
+  `OtlpGrpcError`;
+- in `nexus-ai-pro/tracing/otlp`: `OtlpTraceExporterOptions.protocol`, `encodeOtlpTraceRequest()`,
+  `decodeOtlpTraceResponse()`, `OtlpExportRequest`, `OtlpKeyValue`, `OtlpAttributeValue`,
+  `OtlpPartialSuccess`, and `OtlpPartialSuccessError`.
 
 Changed: `Deployments.evaluate()` runs through the online-evaluation worker, scoring up to 4 runs at
 once rather than one, so evaluators that are not safe to call concurrently need `concurrency: 1`.

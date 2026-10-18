@@ -780,6 +780,16 @@
         "default": "./dist-cjs/tracing/otlp.js"
       }
     },
+    "./tracing/otlp-grpc": {
+      "import": {
+        "types": "./dist/tracing/otlp-grpc.d.ts",
+        "default": "./dist/tracing/otlp-grpc.js"
+      },
+      "require": {
+        "types": "./dist-cjs/tracing/otlp-grpc.d.ts",
+        "default": "./dist-cjs/tracing/otlp-grpc.js"
+      }
+    },
     "./tracing/spool": {
       "import": {
         "types": "./dist/tracing/spool.d.ts",
@@ -2300,6 +2310,9 @@
       ],
       "tracing/spool": [
         "dist-cjs/tracing/spool.d.ts"
+      ],
+      "tracing/otlp-grpc": [
+        "dist-cjs/tracing/otlp-grpc.d.ts"
       ],
       "tracing/rollups": [
         "dist-cjs/tracing/rollups.d.ts"
