@@ -103,15 +103,19 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // Raised again in 2.11.0 for two opt-in entry points (workspaces and the Telnyx provider), transfer,
 // conferences, recordings, and messages on both phone providers, and the recording keeper. None is
 // loaded by the root. Measured at 1,437,970 bytes packed and 8,670,411 unpacked.
-const MAX_PACKED_BYTES = 1_490_000;
-const MAX_UNPACKED_BYTES = 8_950_000;
+// Raised again in 2.12.0 for five opt-in entry points (the trace spool, OTLP over gRPC, media
+// evaluators, automation rules, and the media catalog), OTLP's protobuf encoding, traced server runs,
+// and deployment evaluation through the online worker. None is loaded by the root. Measured at
+// 1,483,687 bytes packed and 8,977,677 unpacked.
+const MAX_PACKED_BYTES = 1_540_000;
+const MAX_UNPACKED_BYTES = 9_260_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
 // came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0 and
-// 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0 and 2.10.0 and 2.11.0, for the same
-// reasons, and still nothing but the package itself: 6,908,187 bytes in 2.4.0.
-const MAX_INSTALLED_BYTES = 9_050_000;
+// 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0 and 2.10.0 and 2.11.0 and 2.12.0, for the
+// same reasons, and still nothing but the package itself: 6,908,187 bytes in 2.4.0.
+const MAX_INSTALLED_BYTES = 9_360_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
