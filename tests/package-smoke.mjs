@@ -356,6 +356,7 @@ const imports = [
     exports: ['createTelephonyRealtimeBridge', 'twilioRealtimeAudioOptions'],
   },
   { specifier: 'nexus-ai-pro/telephony/twilio', exports: ['TwilioTelephonyProvider'] },
+  { specifier: 'nexus-ai-pro/telephony/telnyx', exports: ['TelnyxTelephonyProvider'] },
   { specifier: 'nexus-ai-pro/cache', exports: ['MemoryCacheAdapter'] },
   { specifier: 'nexus-ai-pro/cache/adapters', exports: ['MemoryCacheAdapter'] },
   { specifier: 'nexus-ai-pro/cache/memory-cache', exports: ['MemoryCache', 'createCacheKey'] },

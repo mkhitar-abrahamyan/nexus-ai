@@ -1,10 +1,24 @@
 import type {
+  AnswerCallRequest,
   CreateCallRequest,
   CreateCallResponse,
+  DeleteRecordingRequest,
+  DownloadRecordingRequest,
   EndCallRequest,
   GetCallRequest,
+  JoinConferenceRequest,
   ListPhoneNumbersRequest,
+  SendMessageRequest,
+  StartRecordingRequest,
+  StopRecordingRequest,
   TelephonyCallDetails,
+  TelephonyConferenceJoin,
+  TelephonyMessage,
+  TelephonyRecording,
+  TelephonyRecordingAudio,
+  TelephonyRecordingStarted,
+  TelephonyTransfer,
+  TransferCallRequest,
   TelephonyConfig,
   TelephonyMediaStreamEvent,
   TelephonyOutboundAudioMessage,
@@ -30,7 +44,17 @@ type TelephonyCapability =
   | 'endCall'
   | 'parseStatusCallback'
   | 'listPhoneNumbers'
-  | 'updatePhoneNumber';
+  | 'updatePhoneNumber'
+  | 'answerCall'
+  | 'transferCall'
+  | 'joinConference'
+  | 'startRecording'
+  | 'stopRecording'
+  | 'parseRecordingCallback'
+  | 'downloadRecording'
+  | 'deleteRecording'
+  | 'sendMessage'
+  | 'parseMessageWebhook';
 
 /**
  * Routes telephony operations to registered providers: the one a request names, the configured
@@ -40,12 +64,15 @@ export class TelephonyManager {
   private providers = new Map<string, TelephonyProvider>();
 
   private readonly telemetry: FamilyTelemetry;
+  /** Text messages are a family of their own, so a budget or a rate limit can hold them apart from calls. */
+  private readonly messaging: FamilyTelemetry;
 
   constructor(
     private config: TelephonyConfig = {},
     runtime: FamilyRuntime = {},
   ) {
     this.telemetry = new FamilyTelemetry('telephony', runtime);
+    this.messaging = new FamilyTelemetry('messaging', runtime);
     for (const [name, provider] of Object.entries(config.providers || {})) {
       this.registerProvider(name, provider);
     }
@@ -151,6 +178,129 @@ export class TelephonyManager {
     return this.call('updatePhoneNumber', provider, request.signal, 'Telephony phone number update', (context) =>
       updatePhoneNumber.call(provider, request, context),
     );
+  }
+
+  /**
+   * Answers a call webhook, the same way on every provider: on one answered with markup, such as
+   * Twilio, it renders the response the webhook returns; on one controlled by command, such as
+   * Telnyx, it runs the response as the call's commands, and the webhook returns an empty body.
+   * Either way, return what it resolves to from the webhook.
+   */
+  async answer(request: AnswerCallRequest): Promise<TelephonyWebhookResponse> {
+    const provider = this.resolveProvider('createWebhookResponse', request.provider || this.config.defaultProvider);
+    const answerCall = provider.answerCall;
+    if (answerCall) {
+      return this.call('answerCall', provider, request.signal, 'Telephony call answer', (context) =>
+        answerCall.call(provider, request, context),
+      );
+    }
+    return this.createWebhookResponse(request);
+  }
+
+  /** Moves a call to another number or SIP address. */
+  async transferCall(request: TransferCallRequest): Promise<TelephonyTransfer> {
+    const provider = this.resolveProvider('transferCall', request.provider || this.config.defaultProvider);
+    const transferCall = provider.transferCall;
+    if (!transferCall) throw new TelephonyCapabilityError(provider.info.name, 'call transfer');
+    return this.call('transferCall', provider, request.signal, 'Telephony call transfer', (context) =>
+      transferCall.call(provider, request, context),
+    );
+  }
+
+  /** Puts a call into a conference, created by the first call to join it. */
+  async joinConference(request: JoinConferenceRequest): Promise<TelephonyConferenceJoin> {
+    const provider = this.resolveProvider('joinConference', request.provider || this.config.defaultProvider);
+    const joinConference = provider.joinConference;
+    if (!joinConference) throw new TelephonyCapabilityError(provider.info.name, 'conferences');
+    return this.call('joinConference', provider, request.signal, 'Telephony conference join', (context) =>
+      joinConference.call(provider, request, context),
+    );
+  }
+
+  /** Starts recording a call. The provider reports the recording once it is ready. */
+  async startRecording(request: StartRecordingRequest): Promise<TelephonyRecordingStarted> {
+    const provider = this.resolveProvider('startRecording', request.provider || this.config.defaultProvider);
+    const startRecording = provider.startRecording;
+    if (!startRecording) throw new TelephonyCapabilityError(provider.info.name, 'call recording');
+    return this.call('startRecording', provider, request.signal, 'Telephony recording start', (context) =>
+      startRecording.call(provider, request, context),
+    );
+  }
+
+  /** Stops recording a call. */
+  async stopRecording(request: StopRecordingRequest): Promise<void> {
+    const provider = this.resolveProvider('stopRecording', request.provider || this.config.defaultProvider);
+    const stopRecording = provider.stopRecording;
+    if (!stopRecording) throw new TelephonyCapabilityError(provider.info.name, 'call recording');
+    return this.call('stopRecording', provider, request.signal, 'Telephony recording stop', (context) =>
+      stopRecording.call(provider, request, context),
+    );
+  }
+
+  /** Parses a finished recording's callback through the named provider. */
+  parseRecordingCallback(
+    providerName: string,
+    body: string | URLSearchParams | Record<string, unknown>,
+  ): TelephonyRecording | undefined {
+    const provider = this.resolveProvider('parseRecordingCallback', providerName);
+    if (!provider.parseRecordingCallback) throw new TelephonyCapabilityError(provider.info.name, 'recording callbacks');
+    return provider.parseRecordingCallback(body);
+  }
+
+  /** Fetches a recording's audio from the provider that made it. */
+  async downloadRecording(request: DownloadRecordingRequest): Promise<TelephonyRecordingAudio> {
+    const provider = this.resolveProvider('downloadRecording', request.provider || request.recording.providerUsed);
+    const downloadRecording = provider.downloadRecording;
+    if (!downloadRecording) throw new TelephonyCapabilityError(provider.info.name, 'recording downloads');
+    return this.call('downloadRecording', provider, request.signal, 'Telephony recording download', (context) =>
+      downloadRecording.call(provider, request, context),
+    );
+  }
+
+  /** Deletes a recording at the provider. */
+  async deleteRecording(request: DeleteRecordingRequest): Promise<void> {
+    const provider = this.resolveProvider('deleteRecording', request.provider || this.config.defaultProvider);
+    const deleteRecording = provider.deleteRecording;
+    if (!deleteRecording) throw new TelephonyCapabilityError(provider.info.name, 'recording deletion');
+    return this.call('deleteRecording', provider, request.signal, 'Telephony recording delete', (context) =>
+      deleteRecording.call(provider, request, context),
+    );
+  }
+
+  /**
+   * Sends a text message: an SMS, or an MMS with media. It runs through the client's lifecycle as a
+   * `messaging` operation, so it is authorized, rate-limited, and audited apart from calls.
+   */
+  async sendMessage(request: SendMessageRequest): Promise<TelephonyMessage> {
+    const provider = this.resolveProvider('sendMessage', request.provider || this.config.defaultProvider);
+    const sendMessage = provider.sendMessage;
+    if (!sendMessage) throw new TelephonyCapabilityError(provider.info.name, 'messaging');
+    const name = provider.info.name;
+    // An empty message is refused before it is an operation: it never counts against a rate or a budget.
+    if (!request.body && !request.mediaUrls?.length) {
+      throw new TelephonyProviderError('A message needs a body, media, or both', name);
+    }
+    return this.messaging.run(
+      { operation: 'sendMessage', provider: name, ...(request.signal ? { signal: request.signal } : {}) },
+      async (context) => {
+        try {
+          return await sendMessage.call(provider, request, context);
+        } catch (error) {
+          if (error instanceof TelephonyProviderError) throw error;
+          throw new TelephonyProviderError(`Message send failed for provider "${name}"`, name, error);
+        }
+      },
+    );
+  }
+
+  /** Parses a messaging webhook through the named provider: a message received, or a delivery change. */
+  parseMessageWebhook(
+    providerName: string,
+    body: string | URLSearchParams | Record<string, unknown>,
+  ): TelephonyMessage | undefined {
+    const provider = this.resolveProvider('parseMessageWebhook', providerName);
+    if (!provider.parseMessageWebhook) throw new TelephonyCapabilityError(provider.info.name, 'messaging webhooks');
+    return provider.parseMessageWebhook(body);
   }
 
   /** Parses a media-stream message through the named provider. */

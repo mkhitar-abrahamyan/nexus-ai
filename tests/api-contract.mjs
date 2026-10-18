@@ -195,6 +195,7 @@ const expectedSubpaths = [
   './telephony',
   './telephony/realtime-bridge',
   './telephony/twilio',
+  './telephony/telnyx',
   './cache',
   './cache/adapters',
   './cache/memory-cache',

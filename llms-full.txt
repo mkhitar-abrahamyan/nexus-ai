@@ -10521,9 +10521,12 @@ Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/telephony.
 # Telephony
 
 
-Phone calls, from `nexus-ai-pro/telephony`: place calls, answer webhooks, control calls, manage phone
-numbers, and handle media streams. The Twilio adapter is on `nexus-ai-pro/telephony/twilio`. To put a
-voice agent on a call, `nexus-ai-pro/telephony/realtime-bridge` connects the call to a realtime session.
+Phone calls and text messages, from `nexus-ai-pro/telephony`: place and answer calls, transfer
+them, put them in conferences, record them and keep the recordings under a retention policy, send
+and receive messages, manage phone numbers, and handle media streams. Two providers ship, each on
+its own protocol: Twilio, on `nexus-ai-pro/telephony/twilio`, answered with markup, and Telnyx, on
+`nexus-ai-pro/telephony/telnyx`, controlled by command. To put a voice agent on a call,
+`nexus-ai-pro/telephony/realtime-bridge` connects the call to a realtime session, on either.
 A SIP trunk can also send calls to OpenAI directly, with no media stream to relay: see
 [Phone calls over SIP](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/realtime.md#phone-calls-over-sip).
 
@@ -10645,6 +10648,97 @@ const details = await ai.getCall({ callId });
 await ai.endCall({ callId });
 ```
 
+### One answer on either provider
+
+Twilio answers a call webhook with TwiML; Telnyx answers it with commands sent to the call, and the
+webhook returns nothing. `ai.telephony.answer()` takes an `AnswerCallRequest`, the call's id and a
+`TelephonyResponseRequest`, and does the right thing on each: it renders the markup on Twilio, and
+runs the commands on Telnyx. Return what it resolves to from the webhook, whichever provider called:
+
+```ts
+const reply = await ai.telephony.answer({
+  provider,                       // 'twilio' or 'telnyx'
+  callId,
+  say: 'Connecting you to the assistant.',
+  stream: { url: 'wss://voice.example.com/media', mode: 'bidirectional' },
+});
+return new Response(reply.body, { headers: { 'content-type': reply.contentType } });
+```
+
+`ai.telephony` is the client's `TelephonyManager`, for everything the client's own methods leave out:
+answering, transfer, conferences, recordings, and messages.
+
+### Transfer and conferences
+
+`transferCall()` takes a `TransferCallRequest` and moves a call to a number or a `sip:` address: the
+caller leaves your application for whoever answers. It resolves to a `TelephonyTransfer`.
+`joinConference()` takes a `JoinConferenceRequest`, a conference's name and how the call joins it,
+as a `TelephonyConferenceConfig`: whether the conference starts when it joins and ends when it
+leaves, whether it is muted, and whether a tone plays. Every call that joins the same name meets in
+the same conference, created by the first; it resolves to a `TelephonyConferenceJoin`. On Twilio both
+replace the live call's TwiML with a `<Dial>`; on Telnyx both are commands.
+
+A webhook answer can dial as well: `dial`, a `TelephonyDialConfig`, connects the caller to a number,
+a SIP address, or a conference, with the number shown and how long it rings.
+
+```ts
+// A tool the agent calls when the caller asks for a person.
+await ai.telephony.transferCall({ provider, callId, to: '+15551230000' });
+// Or bring a supervisor into the call.
+await ai.telephony.joinConference({ provider, callId, name: `call-${callId}`, endOnExit: true });
+```
+
+### Recordings, kept on your terms
+
+`startRecording()` takes a `StartRecordingRequest` (the call, one channel or one per side, and where
+Twilio reports the recording) and resolves to a `TelephonyRecordingStarted`; `stopRecording()` takes
+a `StopRecordingRequest`. The provider then reports the finished recording to your webhook:
+`parseRecordingCallback()` turns that into a `TelephonyRecording`, with where its audio is and how
+long it runs. `downloadRecording()` takes a `DownloadRecordingRequest` and fetches its audio as a
+`TelephonyRecordingAudio`, and `deleteRecording()` a `DeleteRecordingRequest`.
+
+`recordingKeeper()` does all of that under a retention policy. Given the telephony client, an
+`AssetStore` (in memory, on disk, or an S3 bucket), and a `RecordingRetention` in days or seconds, the
+`RecordingKeeper` it returns keeps each recording a callback reports: it fetches the audio, stores it
+to expire when the policy says, and deletes the provider's copy, so the recording is kept in one
+place, for as long as you decided. `sweep()` removes what has expired. A callback the provider retries
+keeps its recording once; a recording that fails to keep is kept on the retry.
+
+```ts
+import { recordingKeeper } from 'nexus-ai-pro/telephony';
+
+const recordings = recordingKeeper({
+  telephony: ai.telephony,
+  store: new S3AssetStore({ client, bucket: 'call-recordings' }),
+  retention: { days: 30 },
+  tenantId: (recording) => tenantOfCall(recording.callId),
+});
+// The recording webhook:
+const kept = await recordings.handle(provider, await request.text());
+// Every night:
+await recordings.sweep();
+```
+
+Each `KeptRecording` names its asset, its tenant, when it expires, and whether the provider's copy
+was deleted. `RecordingKeeperOptions` also takes `deleteFromProvider: false`, and `claim` and
+`release` backed by a shared store, for replicas that take the same callback.
+
+### Messages
+
+`sendMessage()` sends an SMS, or an MMS with `mediaUrls`, from a `SendMessageRequest`, and resolves to
+a `TelephonyMessage`: its id, its numbers, its text and media, how many segments it was billed as,
+and its `TelephonyMessageStatus`. A message is its own operation family in the client's lifecycle,
+`messaging`, so a budget or a rate limit holds messages apart from calls; one with neither text nor
+media is refused before it counts. `parseMessageWebhook()` turns a provider's messaging webhook into
+a `TelephonyMessage`: a message `received` by one of your numbers, or a change in one sent's delivery,
+from `queued` through `sent` to `delivered`, `undelivered`, or `failed`.
+
+```ts
+await ai.telephony.sendMessage({ provider, to: caller, from: ourNumber, body: 'Your table is booked for 7 pm.' });
+const message = ai.telephony.parseMessageWebhook(provider, await request.text());
+if (message?.direction === 'inbound' && /^stop$/i.test(message.body ?? '')) await unsubscribe(message.from);
+```
+
 ### Pointing a Number at Your Webhook
 
 ```ts
@@ -10678,6 +10772,12 @@ if (!valid) return new Response('Forbidden', { status: 403 });
 | `body` | The body, raw or parsed. |
 | `params` | Query parameters, when the body was not what was signed. |
 | `authToken` | A token to use instead of the configured one. |
+| `publicKey` | For Telnyx, a public key to verify with instead of the configured one. |
+
+Twilio signs with an HMAC of the URL and parameters, under the auth token. Telnyx signs the timestamp
+and the raw body with Ed25519, under your account's key pair: the provider verifies it against the
+public key with Web Crypto, and refuses a webhook more than five minutes old. Pass Telnyx's body
+exactly as it arrived.
 
 ## Webhook responses
 
@@ -10690,6 +10790,7 @@ markup. Combine any of these:
 | `playUrl` | Audio played from a URL. |
 | `gather` | A `TelephonyGatherConfig` that collects speech or keypad digits: what to listen for, where to post it, timeouts, language, the key that ends input, how many digits, and prompts spoken while listening. |
 | `stream` | A `TelephonyStreamConfig` that opens a media stream, below. |
+| `dial` | A `TelephonyDialConfig` that connects the caller to a number, a SIP address, or a conference. |
 | redirect, pause, hangup | Call flow. |
 
 A `TelephonyStreamConfig` has:
@@ -10777,6 +10878,13 @@ second argument. Rendering a webhook response and parsing a message are local, s
 `TwilioTelephonyProvider` implements all of it. `TwilioTelephonyProviderConfig` takes the account SID
 and auth token (the token also validates webhooks), a REST base URL, and a `fetch`.
 
+`TelnyxTelephonyProvider` implements all of it too, on Telnyx's Call Control API. Its
+`TelnyxTelephonyProviderConfig` takes the API key, the Call Control application calls are placed
+through, the messaging profile messages are sent through, the public key webhooks are verified with,
+the voice and language it speaks in, a base URL, a `fetch`, and a clock. It runs on any runtime with
+`fetch` and Web Crypto. `TelephonyProviderInfo.supports` says, for each provider, whether it
+transfers, conferences, records, and messages.
+
 Two errors cover failures. `TelephonyProviderError` means a provider failed, or none was configured
 for the operation; it names the provider and carries the cause. `TelephonyCapabilityError` means the
 provider lacks the operation.
@@ -10800,12 +10908,31 @@ The returned `TelephonyRealtimeBridge` exposes the `callId`, `streamId`, and `pa
 stream starts, whether it has `closed`, and `handleMessage()`, `flush()`, and `close()`.
 
 `twilioRealtimeAudioOptions()` sets both audio directions to 8 kHz mu-law, so audio passes through
-without transcoding.
+without transcoding. Telnyx streams the same audio, so `telnyxRealtimeAudioOptions()` is the same
+setting, under its name; pass `provider: 'telnyx'` to the bridge and it reads Telnyx's messages.
+
+## Proof
+
+In the test suite, one phone agent runs on both providers against stand-ins for their APIs. A call
+comes in and is answered the same way on each, recorded, and streamed through the bridge to a
+realtime session: the caller's audio reaches the model, the model's reaches the caller, and the agent
+texts a receipt, as a `messaging` operation, and transfers the call. Its recording is then kept in
+memory, on disk, and in an S3 bucket, deleted at the provider, and kept once when the callback comes
+again; the day before its 30 days end it is there, and the day after a sweep removes it.
 
 ## Limitations
 
-- Twilio is the only bundled provider; others implement `TelephonyProvider`.
-- SMS is not sent or received here; the number settings only point SMS webhooks somewhere.
+- Twilio and Telnyx are the bundled providers; another implements `TelephonyProvider`.
+- On Telnyx, a gather collects keypad digits, not speech, and there is no redirect to another webhook.
+  A stream carries no custom parameters, so they ride in its URL, which your socket server reads.
+- On Telnyx, a number's calls go to its Call Control application and its messages to its messaging
+  profile, so updating a number's `voiceUrl` or `smsUrl` changes them for every number that shares
+  them.
+- Two calls joining a Telnyx conference that does not exist yet at the same moment may make two.
+- The recording keeper remembers what it kept in its process by default; replicas that take the same
+  callback need a shared `claim`.
+- Calls and messages are verified against stand-ins for the providers' APIs, not yet against the live
+  services.
 
 ---
 
@@ -12792,29 +12919,29 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 344 KB | 100% | none |
-| `nexus-ai-pro/config` | 336 KB | 98% | none |
-| `nexus-ai-pro/core` | 332 KB | 97% | none |
-| `nexus-ai-pro/deep-agent` | 213 KB | 62% | none |
-| `nexus-ai-pro/realtime` | 211 KB | 61% | none |
-| `nexus-ai-pro/realtime/openai-sip` | 137 KB | 40% | none |
-| `nexus-ai-pro/server` | 120 KB | 35% | none |
-| `nexus-ai-pro/batch` | 116 KB | 34% | none |
+| `nexus-ai-pro` | 349 KB | 100% | none |
+| `nexus-ai-pro/config` | 342 KB | 98% | none |
+| `nexus-ai-pro/core` | 337 KB | 97% | none |
+| `nexus-ai-pro/deep-agent` | 213 KB | 61% | none |
+| `nexus-ai-pro/realtime` | 212 KB | 61% | none |
+| `nexus-ai-pro/realtime/openai-sip` | 138 KB | 40% | none |
+| `nexus-ai-pro/server` | 120 KB | 34% | none |
+| `nexus-ai-pro/batch` | 116 KB | 33% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
-| `nexus-ai-pro/realtime/session` | 107 KB | 31% | none |
+| `nexus-ai-pro/realtime/session` | 108 KB | 31% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 26% | none |
-| `nexus-ai-pro/providers/groq` | 88 KB | 26% | none |
-| `nexus-ai-pro/providers/mistral` | 88 KB | 26% | none |
+| `nexus-ai-pro/providers/groq` | 88 KB | 25% | none |
+| `nexus-ai-pro/providers/mistral` | 88 KB | 25% | none |
 | `nexus-ai-pro/providers/azure-openai` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/llamacpp` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/lmstudio` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/openrouter` | 87 KB | 25% | none |
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
-| `nexus-ai-pro/graph` | 82 KB | 24% | none |
-| `nexus-ai-pro/router` | 81 KB | 24% | none |
+| `nexus-ai-pro/graph` | 82 KB | 23% | none |
+| `nexus-ai-pro/router` | 81 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
-| `nexus-ai-pro/evaluate/online` | 74 KB | 22% | none |
+| `nexus-ai-pro/evaluate/online` | 74 KB | 21% | none |
 | `nexus-ai-pro/images` | 73 KB | 21% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 17% | none |
@@ -12822,7 +12949,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 16% | none |
-| `nexus-ai-pro/server/deployments` | 54 KB | 16% | none |
+| `nexus-ai-pro/server/deployments` | 54 KB | 15% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
 | `nexus-ai-pro/models/data` | 51 KB | 15% | none |
@@ -12831,13 +12958,14 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 13% | none |
-| `nexus-ai-pro/sqlite` | 43 KB | 13% | none |
-| `nexus-ai-pro/protocols/a2a` | 43 KB | 13% | none |
-| `nexus-ai-pro/embeddings` | 40 KB | 12% | none |
-| `nexus-ai-pro/embeddings/batch` | 40 KB | 12% | none |
-| `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
-| `nexus-ai-pro/ops` | 40 KB | 12% | none |
-| `nexus-ai-pro/context-hub` | 40 KB | 12% | none |
+| `nexus-ai-pro/sqlite` | 43 KB | 12% | none |
+| `nexus-ai-pro/protocols/a2a` | 43 KB | 12% | none |
+| `nexus-ai-pro/telephony` | 41 KB | 12% | none |
+| `nexus-ai-pro/embeddings` | 40 KB | 11% | none |
+| `nexus-ai-pro/embeddings/batch` | 40 KB | 11% | none |
+| `nexus-ai-pro/optimizer/cost` | 40 KB | 11% | none |
+| `nexus-ai-pro/ops` | 40 KB | 11% | none |
+| `nexus-ai-pro/context-hub` | 40 KB | 11% | none |
 | `nexus-ai-pro/agent/workspace` | 38 KB | 11% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
@@ -12845,14 +12973,15 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/video` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 10% | none |
-| `nexus-ai-pro/voice` | 33 KB | 10% | none |
-| `nexus-ai-pro/graph/functional` | 33 KB | 10% | none |
-| `nexus-ai-pro/agent/middleware` | 33 KB | 10% | none |
+| `nexus-ai-pro/voice` | 33 KB | 9% | none |
+| `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
+| `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 31 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
-| `nexus-ai-pro/telephony` | 31 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
+| `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |
+| `nexus-ai-pro/telephony/twilio` | 29 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 8% | none |
 | `nexus-ai-pro/server/tenancy` | 27 KB | 8% | none |
@@ -12866,14 +12995,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/realtime/openai-server` | 21 KB | 6% | none |
-| `nexus-ai-pro/telephony/twilio` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/protocols/acp/editor` | 20 KB | 6% | none |
-| `nexus-ai-pro/images/openai` | 19 KB | 6% | none |
-| `nexus-ai-pro/embeddings/adapters` | 19 KB | 6% | none |
-| `nexus-ai-pro/operations/adapters` | 19 KB | 6% | none |
-| `nexus-ai-pro/mcp` | 19 KB | 6% | none |
-| `nexus-ai-pro/connectors` | 19 KB | 6% | none |
+| `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
+| `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |
+| `nexus-ai-pro/operations/adapters` | 19 KB | 5% | none |
+| `nexus-ai-pro/mcp` | 19 KB | 5% | none |
+| `nexus-ai-pro/connectors` | 19 KB | 5% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
@@ -13152,7 +13280,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 183 entry points, 147 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 184 entry points, 148 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

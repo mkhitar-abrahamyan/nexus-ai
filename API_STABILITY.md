@@ -52,6 +52,16 @@ New and stable:
   `compositeWorkspace()` and their options, `WorkspaceMount`, `workspaceTools()` and
   `WorkspaceToolsOptions`, and `runWorkspaceConformance()` with its report and check;
 - `DeepAgentOptions.workspace`;
+- `nexus-ai-pro/telephony/telnyx`, with `TelnyxTelephonyProvider` and its config;
+- on `nexus-ai-pro/telephony`: `TelephonyManager.answer()`, `transferCall()`, `joinConference()`,
+  `startRecording()`, `stopRecording()`, `parseRecordingCallback()`, `downloadRecording()`,
+  `deleteRecording()`, `sendMessage()`, and `parseMessageWebhook()`, the matching optional
+  `TelephonyProvider` methods, their request and result types, `TelephonyDialConfig`,
+  `TelephonyConferenceConfig`, and `TelephonyResponseRequest.dial`; `recordingKeeper()` with
+  `RecordingKeeper`, `RecordingKeeperOptions`, `RecordingRetention`, and `KeptRecording`;
+  `telnyxRealtimeAudioOptions()`; the `TelephonyProviderInfo.supports` flags `transfer`,
+  `conference`, `recording`, and `messaging`; `TelephonyWebhookValidationRequest.publicKey`;
+- `NexusAI.telephony`; the operation family `messaging`;
 - `Sandbox` extends `Workspace`, so it gains `writeBytes()`, optional; `SandboxGlobOptions`,
   `SandboxGrepOptions`, and `SandboxMatch` are the workspace's types under their old names, and
   `SandboxPathError` is a `WorkspacePathError`.

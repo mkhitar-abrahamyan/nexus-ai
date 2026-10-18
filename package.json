@@ -1490,6 +1490,16 @@
         "default": "./dist-cjs/telephony/realtime-bridge.js"
       }
     },
+    "./telephony/telnyx": {
+      "import": {
+        "types": "./dist/telephony/providers/telnyx.d.ts",
+        "default": "./dist/telephony/providers/telnyx.js"
+      },
+      "require": {
+        "types": "./dist-cjs/telephony/providers/telnyx.d.ts",
+        "default": "./dist-cjs/telephony/providers/telnyx.js"
+      }
+    },
     "./telephony/twilio": {
       "import": {
         "types": "./dist/telephony/providers/twilio.d.ts",
@@ -2484,6 +2494,9 @@
       ],
       "telephony/realtime-bridge": [
         "dist-cjs/telephony/realtime-bridge.d.ts"
+      ],
+      "telephony/telnyx": [
+        "dist-cjs/telephony/providers/telnyx.d.ts"
       ],
       "telephony/twilio": [
         "dist-cjs/telephony/providers/twilio.d.ts"

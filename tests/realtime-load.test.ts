@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import { createRealtimeConversation, reduceRealtimeConversation } from '../src/realtime/conversation.js';
 import { TypedEventEmitter } from '../src/realtime/events.js';
 import { RealtimeSession } from '../src/realtime/session.js';
+import { defineTool } from '../src/realtime/tools.js';
 import type {
   RealtimeConversation,
   RealtimeServerEvent,
@@ -110,4 +111,56 @@ test('a listener still gets a record of its own after every event', async () => 
     1,
     "a listener's record is a copy",
   );
+});
+
+test('whenIdle waits for a running tool and its result, but not for a call waiting on a person', async () => {
+  const transport = new Transport();
+  const sent: unknown[] = [];
+  Object.assign(transport, { sendEvent: (event: unknown) => void sent.push(event) });
+  const slow = defineTool({
+    name: 'slow_lookup',
+    description: 'Takes its time',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return { found: true };
+    },
+  });
+  const risky = defineTool({
+    name: 'refund',
+    description: 'Needs a person to approve',
+    parameters: { type: 'object', properties: {} },
+    requiresConfirmation: true,
+    execute: async () => ({ refunded: true }),
+  });
+  const session = new RealtimeSession({ model: 'gpt-realtime', transport, tools: [slow, risky] });
+  await session.connect();
+  transport.emit({
+    type: 'response.done',
+    response: {
+      id: 'r1',
+      status: 'completed',
+      output: [
+        { type: 'function_call', call_id: 'c1', name: 'slow_lookup', arguments: '{}' },
+        { type: 'function_call', call_id: 'c2', name: 'refund', arguments: '{}' },
+      ],
+    },
+  });
+  const started = Date.now();
+  await session.whenIdle();
+  assert.ok(Date.now() - started < 5_000, 'the call waiting on a person did not hold it');
+  const results = session.getConversation().items.filter((item) => item.type === 'tool_result');
+  assert.deepEqual(
+    results.map((item) => (item as { callId: string }).callId),
+    ['c1'],
+    "the slow tool's result is in the record by the time it resolves",
+  );
+  assert.ok(
+    sent.some((event) => (event as { item?: { call_id?: string } }).item?.call_id === 'c1'),
+    'and was sent back to the model',
+  );
+  session.confirmTool('c2', true);
+  await session.whenIdle();
+  assert.equal(session.getConversation().items.filter((item) => item.type === 'tool_result').length, 2);
+  await session.disconnect();
 });

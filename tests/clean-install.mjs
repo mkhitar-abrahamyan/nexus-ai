@@ -256,6 +256,7 @@ const imports = [
   ['nexus-ai-pro/realtime/openai-websocket', ['OpenAIWebSocketTransport']],
   ['nexus-ai-pro/realtime/gemini-live', ['GeminiLiveTransport']],
   ['nexus-ai-pro/agent/workspace', ['compositeWorkspace', 'storeWorkspace']],
+  ['nexus-ai-pro/telephony/telnyx', ['TelnyxTelephonyProvider']],
   ['nexus-ai-pro/realtime/openai-sip', ['answerOpenAISipCalls']],
   ['nexus-ai-pro/jobs/batch', ['runBatch']],
   ['nexus-ai-pro/workflows', ['ragAnswer']],

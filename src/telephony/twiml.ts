@@ -1,7 +1,13 @@
-import type { TelephonyGatherConfig, TelephonyResponseRequest, TelephonyStreamConfig } from '../types/telephony.js';
+import type {
+  TelephonyDialConfig,
+  TelephonyGatherConfig,
+  TelephonyResponseRequest,
+  TelephonyStreamConfig,
+} from '../types/telephony.js';
 
 /**
- * Builds a TwiML voice response: say or gather, play, pause, stream, redirect, and hang up, as the request asks.
+ * Builds a TwiML voice response: say or gather, play, pause, stream, dial, redirect, and hang up, as the
+ * request asks.
  */
 export function createVoiceTwiML(request: TelephonyResponseRequest): string {
   const body: string[] = [];
@@ -19,6 +25,8 @@ export function createVoiceTwiML(request: TelephonyResponseRequest): string {
   }
 
   if (request.stream) body.push(createStream(request.stream));
+
+  if (request.dial) body.push(createDial(request.dial));
 
   if (request.redirectUrl) {
     body.push(
@@ -70,6 +78,32 @@ function createStream(stream: TelephonyStreamConfig): string {
 
   if (stream.mode === 'bidirectional') return tag('Connect', {}, streamXml);
   return tag('Start', {}, streamXml);
+}
+
+function createDial(dial: TelephonyDialConfig): string {
+  const attributes = {
+    ...(dial.callerId ? { callerId: dial.callerId } : {}),
+    ...(dial.timeoutSeconds !== undefined ? { timeout: String(dial.timeoutSeconds) } : {}),
+  };
+  if (dial.conference) {
+    const conference = dial.conference;
+    return tag(
+      'Dial',
+      attributes,
+      tag(
+        'Conference',
+        {
+          ...(conference.startOnEnter !== undefined ? { startConferenceOnEnter: String(conference.startOnEnter) } : {}),
+          ...(conference.endOnExit !== undefined ? { endConferenceOnExit: String(conference.endOnExit) } : {}),
+          ...(conference.muted !== undefined ? { muted: String(conference.muted) } : {}),
+          ...(conference.beep !== undefined ? { beep: String(conference.beep) } : {}),
+        },
+        escapeXml(conference.name),
+      ),
+    );
+  }
+  if (!dial.to) throw new Error('A dial needs a number, a SIP address, or a conference');
+  return tag('Dial', attributes, tag(dial.to.startsWith('sip:') ? 'Sip' : 'Number', {}, escapeXml(dial.to)));
 }
 
 function tag(name: string, attributes: Record<string, string> = {}, body = ''): string {

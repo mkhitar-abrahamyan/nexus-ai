@@ -1,14 +1,42 @@
 export { TelephonyManager } from './manager.js';
 export { TelephonyProviderError, TelephonyCapabilityError } from './errors.js';
 export { createVoiceTwiML } from './twiml.js';
-export { createTelephonyRealtimeBridge, twilioRealtimeAudioOptions } from './realtime-bridge.js';
+export { recordingKeeper } from './recordings.js';
+export type {
+  KeptRecording,
+  RecordingKeeper,
+  RecordingKeeperOptions,
+  RecordingRetention,
+} from './recordings.js';
+export {
+  createTelephonyRealtimeBridge,
+  telnyxRealtimeAudioOptions,
+  twilioRealtimeAudioOptions,
+} from './realtime-bridge.js';
 export type { TelephonyRealtimeBridge, TelephonyRealtimeBridgeOptions } from './realtime-bridge.js';
 export type {
+  AnswerCallRequest,
   CreateCallRequest,
   CreateCallResponse,
+  DeleteRecordingRequest,
+  DownloadRecordingRequest,
   EndCallRequest,
   GetCallRequest,
+  JoinConferenceRequest,
   ListPhoneNumbersRequest,
+  SendMessageRequest,
+  StartRecordingRequest,
+  StopRecordingRequest,
+  TelephonyConferenceConfig,
+  TelephonyConferenceJoin,
+  TelephonyDialConfig,
+  TelephonyMessage,
+  TelephonyMessageStatus,
+  TelephonyRecording,
+  TelephonyRecordingAudio,
+  TelephonyRecordingStarted,
+  TelephonyTransfer,
+  TransferCallRequest,
   TelephonyAudioEncoding,
   TelephonyCallDetails,
   TelephonyCallDirection,

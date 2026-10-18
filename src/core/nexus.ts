@@ -634,6 +634,15 @@ export class NexusAI {
   }
 
   /**
+   * The client's telephony, for what its own methods leave out: answering a call the same way on
+   * every provider, transfer, conferences, recordings, and messages. Its operations run through the
+   * client's lifecycle, so they are authorized, rate-limited, budgeted, and audited.
+   */
+  get telephony(): TelephonyManager {
+    return this.telephonyManager;
+  }
+
+  /**
    * Creates an outbound call through a registered telephony provider.
    */
   async createCall(request: CreateCallRequest): Promise<CreateCallResponse> {

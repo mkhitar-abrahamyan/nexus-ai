@@ -2,10 +2,24 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type {
   CreateCallRequest,
   CreateCallResponse,
+  DeleteRecordingRequest,
+  DownloadRecordingRequest,
   EndCallRequest,
   GetCallRequest,
+  JoinConferenceRequest,
   ListPhoneNumbersRequest,
+  SendMessageRequest,
+  StartRecordingRequest,
+  StopRecordingRequest,
   TelephonyCallDetails,
+  TelephonyConferenceJoin,
+  TelephonyMessage,
+  TelephonyMessageStatus,
+  TelephonyRecording,
+  TelephonyRecordingAudio,
+  TelephonyRecordingStarted,
+  TelephonyTransfer,
+  TransferCallRequest,
   TelephonyCallDirection,
   TelephonyCallStatus,
   TelephonyHttpMethod,
@@ -38,8 +52,8 @@ export interface TwilioTelephonyProviderConfig {
 type TwilioPayload = Record<string, unknown>;
 
 /**
- * Twilio Programmable Voice: outbound calls, TwiML webhooks, call control, phone numbers, and
- * bidirectional Media Streams.
+ * Twilio Programmable Voice and Messaging: outbound calls, TwiML webhooks, call control, transfer,
+ * conferences, recordings, phone numbers, bidirectional Media Streams, and SMS and MMS.
  */
 export class TwilioTelephonyProvider implements TelephonyProvider {
   /** Always `twilio`, with every telephony capability. */
@@ -54,6 +68,10 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       webhookValidation: true,
       callControl: true,
       phoneNumbers: true,
+      transfer: true,
+      conference: true,
+      recording: true,
+      messaging: true,
     },
   };
 
@@ -335,9 +353,182 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     return { event, streamId, body };
   }
 
+  /** Moves a live call to another number or SIP address, with `<Dial>` TwiML. */
+  async transferCall(request: TransferCallRequest): Promise<TelephonyTransfer> {
+    const raw = await this.redirect(
+      request.callId,
+      createVoiceTwiML({
+        dial: {
+          to: request.to,
+          ...(request.from ? { callerId: request.from } : {}),
+          ...(request.timeoutSeconds !== undefined ? { timeoutSeconds: request.timeoutSeconds } : {}),
+        },
+      }),
+      request.signal,
+      'Twilio call transfer failed',
+    );
+    return { callId: request.callId, providerUsed: 'twilio', to: request.to, raw };
+  }
+
+  /** Puts a live call into a conference, with `<Dial><Conference>` TwiML. Twilio names conferences. */
+  async joinConference(request: JoinConferenceRequest): Promise<TelephonyConferenceJoin> {
+    const { provider: _provider, callId, signal, ...conference } = request;
+    const raw = await this.redirect(
+      callId,
+      createVoiceTwiML({ dial: { conference } }),
+      signal,
+      'Twilio conference join failed',
+    );
+    return { callId, conference: request.name, providerUsed: 'twilio', raw };
+  }
+
+  /** Starts recording a call, reporting the recording to `statusCallbackUrl` once it is ready. */
+  async startRecording(request: StartRecordingRequest): Promise<TelephonyRecordingStarted> {
+    const body = new URLSearchParams();
+    body.set('RecordingChannels', request.channels === 'single' ? 'mono' : 'dual');
+    if (request.statusCallbackUrl) {
+      body.set('RecordingStatusCallback', request.statusCallbackUrl);
+      body.set('RecordingStatusCallbackEvent', 'completed');
+    }
+    const raw = await this.request(`/Calls/${encodeURIComponent(request.callId)}/Recordings.json`, {
+      method: 'POST',
+      body,
+      signal: request.signal,
+      errorPrefix: 'Twilio recording start failed',
+    });
+    return { callId: request.callId, providerUsed: 'twilio', recordingId: stringValue(raw.sid), raw };
+  }
+
+  /** Stops a call's recording: the one named, or the call's current one. */
+  async stopRecording(request: StopRecordingRequest): Promise<void> {
+    const body = new URLSearchParams();
+    body.set('Status', 'stopped');
+    const recording = encodeURIComponent(request.recordingId ?? 'Twilio.CURRENT');
+    await this.request(`/Calls/${encodeURIComponent(request.callId)}/Recordings/${recording}.json`, {
+      method: 'POST',
+      body,
+      signal: request.signal,
+      errorPrefix: 'Twilio recording stop failed',
+    });
+  }
+
+  /** Parses a recording status callback for a finished recording, as MP3. */
+  parseRecordingCallback(body: string | URLSearchParams | Record<string, unknown>): TelephonyRecording | undefined {
+    const params = toParamRecord(body as Parameters<typeof toParamRecord>[0]);
+    const recordingId = params.RecordingSid;
+    const url = params.RecordingUrl;
+    if (!recordingId || !url || (params.RecordingStatus && params.RecordingStatus !== 'completed')) return undefined;
+    return {
+      recordingId,
+      callId: params.CallSid ?? '',
+      providerUsed: 'twilio',
+      url: `${url}.mp3`,
+      format: 'mp3',
+      durationSeconds: numberValue(params.RecordingDuration),
+      channels: numberValue(params.RecordingChannels),
+      raw: params,
+    };
+  }
+
+  /** Fetches a recording's audio, with the account's credentials. */
+  async downloadRecording(request: DownloadRecordingRequest): Promise<TelephonyRecordingAudio> {
+    const response = await this.fetchImpl()(request.recording.url, {
+      method: 'GET',
+      headers: { authorization: this.authorization() },
+      signal: request.signal,
+    });
+    if (!response.ok) {
+      throw new TelephonyProviderError(`Twilio recording download failed: ${response.status}`, 'twilio');
+    }
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      mimeType:
+        response.headers.get('content-type') || (request.recording.format === 'wav' ? 'audio/wav' : 'audio/mpeg'),
+    };
+  }
+
+  /** Deletes a recording at Twilio. */
+  async deleteRecording(request: DeleteRecordingRequest): Promise<void> {
+    await this.request(`/Recordings/${encodeURIComponent(request.recordingId)}.json`, {
+      method: 'DELETE',
+      signal: request.signal,
+      errorPrefix: 'Twilio recording delete failed',
+    });
+  }
+
+  /** Sends an SMS, or an MMS with `mediaUrls`. */
+  async sendMessage(request: SendMessageRequest): Promise<TelephonyMessage> {
+    if (!request.body && !request.mediaUrls?.length) {
+      throw new TelephonyProviderError('A message needs a body, media, or both', 'twilio');
+    }
+    const body = new URLSearchParams();
+    body.set('To', request.to);
+    body.set('From', request.from);
+    if (request.body) body.set('Body', request.body);
+    for (const url of request.mediaUrls ?? []) body.append('MediaUrl', url);
+    if (request.statusCallbackUrl) body.set('StatusCallback', request.statusCallbackUrl);
+    const raw = await this.request('/Messages.json', {
+      method: 'POST',
+      body,
+      signal: request.signal,
+      errorPrefix: 'Twilio message request failed',
+    });
+    return {
+      messageId: stringValue(raw.sid) ?? '',
+      providerUsed: 'twilio',
+      direction: 'outbound',
+      from: stringValue(raw.from) ?? request.from,
+      to: stringValue(raw.to) ?? request.to,
+      ...(request.body ? { body: request.body } : {}),
+      ...(request.mediaUrls?.length ? { mediaUrls: request.mediaUrls } : {}),
+      status: messageStatus(stringValue(raw.status)),
+      segments: numberValue(raw.num_segments),
+      ...(raw.error_code ? { errorCode: String(raw.error_code) } : {}),
+      raw,
+    };
+  }
+
+  /** Parses an inbound message webhook, or a message status callback. */
+  parseMessageWebhook(body: string | URLSearchParams | Record<string, unknown>): TelephonyMessage | undefined {
+    const params = toParamRecord(body as Parameters<typeof toParamRecord>[0]);
+    const messageId = params.MessageSid || params.SmsSid;
+    if (!messageId) return undefined;
+    const status = messageStatus(params.MessageStatus || params.SmsStatus);
+    const media = Array.from(
+      { length: numberValue(params.NumMedia) ?? 0 },
+      (_, index) => params[`MediaUrl${index}`],
+    ).filter((url): url is string => Boolean(url));
+    return {
+      messageId,
+      providerUsed: 'twilio',
+      direction: status === 'received' ? 'inbound' : 'outbound',
+      from: params.From,
+      to: params.To,
+      ...(params.Body !== undefined ? { body: params.Body } : {}),
+      ...(media.length ? { mediaUrls: media } : {}),
+      status,
+      segments: numberValue(params.NumSegments),
+      ...(params.ErrorCode ? { errorCode: params.ErrorCode } : {}),
+      raw: params,
+    };
+  }
+
+  /** Replaces a live call's instructions with TwiML. */
+  private redirect(callId: string, twiml: string, signal: AbortSignal | undefined, errorPrefix: string) {
+    const body = new URLSearchParams();
+    body.set('Twiml', twiml);
+    return this.request(`/Calls/${encodeURIComponent(callId)}.json`, { method: 'POST', body, signal, errorPrefix });
+  }
+
+  private authorization(): string {
+    const accountSid = this.requireConfig('accountSid');
+    const authToken = this.requireConfig('authToken');
+    return `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`;
+  }
+
   private async request(
     path: string,
-    options: { method: 'GET' | 'POST'; body?: URLSearchParams; signal?: AbortSignal; errorPrefix: string },
+    options: { method: 'GET' | 'POST' | 'DELETE'; body?: URLSearchParams; signal?: AbortSignal; errorPrefix: string },
   ): Promise<TwilioPayload> {
     const accountSid = this.requireConfig('accountSid');
     const authToken = this.requireConfig('authToken');
@@ -357,6 +548,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       throw new TelephonyProviderError(`${options.errorPrefix}: ${response.status} ${message}`, 'twilio');
     }
 
+    if (response.status === 204) return {};
     return (await response.json()) as TwilioPayload;
   }
 
@@ -529,4 +721,30 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
   const entries = Object.entries(object);
   if (!entries.length) return undefined;
   return Object.fromEntries(entries.map(([key, entry]) => [key, String(entry)]));
+}
+
+function messageStatus(status: string | undefined): TelephonyMessageStatus {
+  switch (status) {
+    case 'accepted':
+    case 'scheduled':
+    case 'queued':
+      return 'queued';
+    case 'sending':
+      return 'sending';
+    case 'sent':
+      return 'sent';
+    case 'delivered':
+    case 'read':
+      return 'delivered';
+    case 'undelivered':
+      return 'undelivered';
+    case 'failed':
+    case 'canceled':
+      return 'failed';
+    case 'received':
+    case 'receiving':
+      return 'received';
+    default:
+      return 'unknown';
+  }
 }

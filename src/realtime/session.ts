@@ -67,6 +67,12 @@ export class RealtimeSession {
   private readonly rawEvents: RealtimeServerEvent[] = [];
   private readonly pendingCalls = new Map<string, RealtimeToolCall>();
   private readonly pendingConfirmations = new Map<string, PendingConfirmation>();
+  /** Tool calls running on their own, by call id, so `whenIdle()` waits for them. */
+  private readonly runningTools = new Map<string, Promise<void>>();
+  /** Tool results being sent back to the provider. */
+  private readonly handlingResults = new Set<Promise<void>>();
+  /** Woken when a running call starts waiting for a person, which `whenIdle()` then stops waiting on. */
+  private readonly confirmationWaiters = new Set<() => void>();
   private readonly seenToolCalls = new Set<string>();
   private readonly interruptedResponses = new Set<string>();
   private readonly outbox: RealtimeClientEvent[] = [];
@@ -142,7 +148,9 @@ export class RealtimeSession {
         this.applyEvent({ type: 'tool.confirmation.required', call, timestamp: this.clock.now() });
       },
       onCompleted: (result) => {
-        void this.handleToolResult(result);
+        const handled = this.handleToolResult(result).catch(() => undefined);
+        this.handlingResults.add(handled);
+        void handled.finally(() => this.handlingResults.delete(handled));
       },
     });
     this.bindTransport();
@@ -193,7 +201,25 @@ export class RealtimeSession {
 
   /** Waits until all provider events already received by the session have been normalized. */
   async whenIdle(): Promise<void> {
-    await this.eventQueue;
+    for (;;) {
+      await this.eventQueue;
+      // A call waiting for a person's confirmation is not in flight: it waits as long as they take.
+      const busy = [
+        ...[...this.runningTools].filter(([callId]) => !this.pendingConfirmations.has(callId)).map(([, run]) => run),
+        ...this.handlingResults,
+      ];
+      if (busy.length === 0) return;
+      let wake = () => {};
+      const asked = new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+      this.confirmationWaiters.add(wake);
+      try {
+        await Promise.race([Promise.all(busy), asked]);
+      } finally {
+        this.confirmationWaiters.delete(wake);
+      }
+    }
   }
 
   /**
@@ -661,7 +687,14 @@ export class RealtimeSession {
     this.pendingCalls.set(call.callId, call);
     this.applyEvent({ type: 'tool.call.started', call, timestamp: this.clock.now() });
     if ((this.config.toolExecution?.mode || 'automatic') === 'automatic') {
-      void this.toolExecutor.execute(call);
+      const running = this.toolExecutor.execute(call).then(
+        () => undefined,
+        () => undefined,
+      );
+      this.runningTools.set(call.callId, running);
+      void running.finally(() => {
+        if (this.runningTools.get(call.callId) === running) this.runningTools.delete(call.callId);
+      });
     }
   }
 
@@ -896,6 +929,7 @@ export class RealtimeSession {
       pending.timeout = setTimeout(pending.abort, timeoutMs);
       signal.addEventListener('abort', pending.abort, { once: true });
       this.pendingConfirmations.set(call.callId, pending);
+      for (const wake of [...this.confirmationWaiters]) wake();
     });
   }
 

@@ -31,6 +31,12 @@ export function twilioRealtimeAudioOptions(overrides: RealtimeAudioOptions = {})
   };
 }
 
+/**
+ * Audio settings that match what Telnyx media streams send and accept: 8 kHz G.711 µ-law, as
+ * Twilio's do. The same settings as `twilioRealtimeAudioOptions()`, named for the provider.
+ */
+export const telnyxRealtimeAudioOptions = twilioRealtimeAudioOptions;
+
 /** Options for `createTelephonyRealtimeBridge()`. */
 export interface TelephonyRealtimeBridgeOptions {
   /** The realtime session driving the call. The bridge does not create it, so tools and instructions stay app-owned. */

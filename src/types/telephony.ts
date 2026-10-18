@@ -40,6 +40,14 @@ export interface TelephonyProviderInfo {
     webhookValidation?: boolean;
     callControl?: boolean;
     phoneNumbers?: boolean;
+    /** Moves a call to another number or SIP address. */
+    transfer?: boolean;
+    /** Puts calls into conferences. */
+    conference?: boolean;
+    /** Records calls and hands the recording over. */
+    recording?: boolean;
+    /** Sends and receives text messages. */
+    messaging?: boolean;
   };
 }
 
@@ -83,9 +91,36 @@ export interface TelephonyGatherConfig {
   prompts?: string[];
 }
 
+/** A conference a call joins, created by the first call to join it. */
+export interface TelephonyConferenceConfig {
+  /** The conference's name: every call that joins the same name meets in it. */
+  name: string;
+  /** Starts the conference when this call joins. Defaults to true. */
+  startOnEnter?: boolean;
+  /** Ends the conference for everyone when this call leaves. Defaults to false. */
+  endOnExit?: boolean;
+  /** Joins without being heard. */
+  muted?: boolean;
+  /** Plays a tone as calls join and leave. Defaults to the provider's own. */
+  beep?: boolean;
+}
+
+/** Connects the caller to someone else: a number, a SIP address, or a conference. */
+export interface TelephonyDialConfig {
+  /** A number in E.164 form, or a `sip:` address. */
+  to?: string;
+  /** A conference to join instead. */
+  conference?: TelephonyConferenceConfig;
+  /** The number shown to the one called. Defaults to the call's own. */
+  callerId?: string;
+  /** Seconds to let the one called ring. */
+  timeoutSeconds?: number;
+}
+
 /**
  * What to answer a provider's call webhook with: speech, audio, input collection, a media stream, a
- * redirect, or a hangup. Rendered into the provider's markup, such as TwiML.
+ * dial, a redirect, or a hangup. Rendered into the provider's markup, such as TwiML, or run as its
+ * commands, on a provider that controls calls by command.
  */
 export interface TelephonyResponseRequest {
   /** Provider to render for. Defaults to the configured default. */
@@ -104,6 +139,8 @@ export interface TelephonyResponseRequest {
   gather?: TelephonyGatherConfig;
   /** Streams the call's audio to a WebSocket, for a realtime voice agent. */
   stream?: TelephonyStreamConfig;
+  /** Connects the caller to a number, a SIP address, or a conference. */
+  dial?: TelephonyDialConfig;
   /** Hands the call to another webhook. */
   redirectUrl?: string;
   /** HTTP method for `redirectUrl`. */
@@ -358,6 +395,11 @@ export interface TelephonyWebhookValidationRequest {
   params?: Record<string, string | number | boolean | undefined>;
   /** Signing secret. Defaults to the provider's configured auth token. */
   authToken?: string;
+  /**
+   * For a provider that signs with a key pair, such as Telnyx: the public key to verify with,
+   * instead of the configured one.
+   */
+  publicKey?: string;
   /** Application data, not used for validation. */
   metadata?: Record<string, unknown>;
 }
@@ -492,6 +534,209 @@ export interface TelephonyOutboundAudioMessage {
   body: string;
 }
 
+/** Answers a call by its id: what to say, play, collect, stream, or dial, as commands on the call. */
+export interface AnswerCallRequest extends TelephonyResponseRequest {
+  /** The provider's id for the call. */
+  callId: string;
+  /** Aborts the commands not yet sent. */
+  signal?: AbortSignal;
+}
+
+/** Moves a call to another number or SIP address. The call leaves your application. */
+export interface TransferCallRequest {
+  /** Provider the call belongs to. */
+  provider?: string;
+  /** The provider's id for the call. */
+  callId: string;
+  /** A number in E.164 form, or a `sip:` address. */
+  to: string;
+  /** The number shown to the one called. Defaults to the call's own. */
+  from?: string;
+  /** Seconds to let the one called ring. */
+  timeoutSeconds?: number;
+  /** Aborts the request. */
+  signal?: AbortSignal;
+}
+
+/** A call transferred. */
+export interface TelephonyTransfer {
+  /** The provider's id for the call. */
+  callId: string;
+  /** Provider the call belongs to. */
+  providerUsed: string;
+  /** Where it went. */
+  to: string;
+  /** The provider's response, unmodified. */
+  raw?: unknown;
+}
+
+/** Puts a call into a conference. */
+export interface JoinConferenceRequest extends TelephonyConferenceConfig {
+  /** Provider the call belongs to. */
+  provider?: string;
+  /** The provider's id for the call. */
+  callId: string;
+  /** Aborts the request. */
+  signal?: AbortSignal;
+}
+
+/** A call in a conference. */
+export interface TelephonyConferenceJoin {
+  /** The provider's id for the call. */
+  callId: string;
+  /** The conference's name. */
+  conference: string;
+  /** The provider's id for the conference, when it has one. */
+  conferenceId?: string;
+  /** Provider the call belongs to. */
+  providerUsed: string;
+  /** The provider's response, unmodified. */
+  raw?: unknown;
+}
+
+/** Starts recording a call. */
+export interface StartRecordingRequest {
+  /** Provider the call belongs to. */
+  provider?: string;
+  /** The provider's id for the call. */
+  callId: string;
+  /** One channel for the whole call, or one per side. Defaults to `dual`. */
+  channels?: 'single' | 'dual';
+  /** Where the provider reports the recording once it is ready, when it reports per request. */
+  statusCallbackUrl?: string;
+  /** Aborts the request. */
+  signal?: AbortSignal;
+}
+
+/** Stops a call's recording. */
+export interface StopRecordingRequest {
+  /** Provider the call belongs to. */
+  provider?: string;
+  /** The provider's id for the call. */
+  callId: string;
+  /** The recording to stop, on a provider that names them. Defaults to the call's current one. */
+  recordingId?: string;
+  /** Aborts the request. */
+  signal?: AbortSignal;
+}
+
+/** A recording started. */
+export interface TelephonyRecordingStarted {
+  /** The provider's id for the call. */
+  callId: string;
+  /** Provider the call belongs to. */
+  providerUsed: string;
+  /** The provider's id for the recording, when it gives one at once. */
+  recordingId?: string;
+  /** The provider's response, unmodified. */
+  raw?: unknown;
+}
+
+/** A finished recording, as the provider reports it: where its audio can be fetched from. */
+export interface TelephonyRecording {
+  /** The provider's id for the recording. */
+  recordingId: string;
+  /** The call it recorded. */
+  callId: string;
+  /** Provider that made it. */
+  providerUsed: string;
+  /** Where its audio is, at the provider. */
+  url: string;
+  /** The audio's format. */
+  format?: 'mp3' | 'wav';
+  /** How long it is, in seconds. */
+  durationSeconds?: number;
+  /** One channel, or one per side. */
+  channels?: number;
+  /** The callback payload, unmodified. */
+  raw?: unknown;
+}
+
+/** Fetches a recording's audio from the provider. */
+export interface DownloadRecordingRequest {
+  /** Provider that made it. */
+  provider?: string;
+  /** The recording, as `parseRecordingCallback()` reported it. */
+  recording: TelephonyRecording;
+  /** Aborts the download. */
+  signal?: AbortSignal;
+}
+
+/** A recording's audio. */
+export interface TelephonyRecordingAudio {
+  /** The audio's bytes. */
+  bytes: Uint8Array;
+  /** Its MIME type, such as `audio/mpeg`. */
+  mimeType: string;
+}
+
+/** Deletes a recording at the provider, once it is kept elsewhere. */
+export interface DeleteRecordingRequest {
+  /** Provider that made it. */
+  provider?: string;
+  /** The provider's id for the recording. */
+  recordingId: string;
+  /** Aborts the request. */
+  signal?: AbortSignal;
+}
+
+/** Where a text message is in its delivery, normalized across providers. */
+export type TelephonyMessageStatus =
+  | 'queued'
+  | 'sending'
+  | 'sent'
+  | 'delivered'
+  | 'undelivered'
+  | 'failed'
+  | 'received'
+  | 'unknown';
+
+/** Sends a text message, with media for MMS. */
+export interface SendMessageRequest {
+  /** Provider to send it through. Defaults to the configured default. */
+  provider?: string;
+  /** Number to send to, in E.164 form. */
+  to: string;
+  /** Your number it comes from, in E.164 form. */
+  from: string;
+  /** The text. A message needs text, media, or both. */
+  body?: string;
+  /** Media sent with it, as public URLs, for MMS. */
+  mediaUrls?: string[];
+  /** Where the provider reports its delivery. */
+  statusCallbackUrl?: string;
+  /** Application data, not sent to the provider. */
+  metadata?: Record<string, unknown>;
+  /** Aborts the request. */
+  signal?: AbortSignal;
+}
+
+/** A text message: one sent, one received, or a change in one's delivery. */
+export interface TelephonyMessage {
+  /** The provider's id for the message. */
+  messageId: string;
+  /** Provider that carried it. */
+  providerUsed: string;
+  /** Sent by your application, or received by one of your numbers. */
+  direction: 'inbound' | 'outbound';
+  /** The number it came from. */
+  from?: string;
+  /** The number it went to. */
+  to?: string;
+  /** Its text. */
+  body?: string;
+  /** Its media, as URLs at the provider. */
+  mediaUrls?: string[];
+  /** Where it is in its delivery. */
+  status: TelephonyMessageStatus;
+  /** How many segments it was billed as, when the provider says. */
+  segments?: number;
+  /** Why it failed, when the provider says. */
+  errorCode?: string;
+  /** The provider's record, unmodified. */
+  raw?: unknown;
+}
+
 /**
  * A telephony provider: places and ends calls, renders webhook responses, validates webhook
  * signatures, and speaks the media stream protocol. Each method is optional, and `info.supports`
@@ -526,6 +771,35 @@ export interface TelephonyProvider {
   listPhoneNumbers?(request?: ListPhoneNumbersRequest, context?: ProviderCallContext): Promise<TelephonyPhoneNumber[]>;
   /** Changes where a number sends calls and messages. */
   updatePhoneNumber?(request: UpdatePhoneNumberRequest, context?: ProviderCallContext): Promise<TelephonyPhoneNumber>;
+  /**
+   * Answers a call by command, for a provider whose webhooks are not answered with markup. Resolves
+   * to the response the webhook itself returns, which then carries nothing.
+   */
+  answerCall?(request: AnswerCallRequest, context?: ProviderCallContext): Promise<TelephonyWebhookResponse>;
+  /** Moves a call to another number or SIP address. */
+  transferCall?(request: TransferCallRequest, context?: ProviderCallContext): Promise<TelephonyTransfer>;
+  /** Puts a call into a conference. */
+  joinConference?(request: JoinConferenceRequest, context?: ProviderCallContext): Promise<TelephonyConferenceJoin>;
+  /** Starts recording a call. */
+  startRecording?(request: StartRecordingRequest, context?: ProviderCallContext): Promise<TelephonyRecordingStarted>;
+  /** Stops recording a call. */
+  stopRecording?(request: StopRecordingRequest, context?: ProviderCallContext): Promise<void>;
+  /** Parses a finished recording's callback, or returns `undefined` for a body that is not one. */
+  parseRecordingCallback?(body: string | URLSearchParams | Record<string, unknown>): TelephonyRecording | undefined;
+  /** Fetches a recording's audio. */
+  downloadRecording?(
+    request: DownloadRecordingRequest,
+    context?: ProviderCallContext,
+  ): Promise<TelephonyRecordingAudio>;
+  /** Deletes a recording at the provider. */
+  deleteRecording?(request: DeleteRecordingRequest, context?: ProviderCallContext): Promise<void>;
+  /** Sends a text message. */
+  sendMessage?(request: SendMessageRequest, context?: ProviderCallContext): Promise<TelephonyMessage>;
+  /**
+   * Parses a messaging webhook: a message received, or a change in one sent's delivery. Returns
+   * `undefined` for a body that is neither.
+   */
+  parseMessageWebhook?(body: string | URLSearchParams | Record<string, unknown>): TelephonyMessage | undefined;
 }
 
 /** Telephony providers available to a client. */

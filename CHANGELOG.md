@@ -17,6 +17,28 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   that can also run commands. A deep agent takes `workspace` apart from `sandbox`: its files, skills,
   instruction files, and offloaded results live in the workspace, and its commands run in the sandbox.
 - `Workspace.writeBytes()`, optional, which the process sandbox now has.
+- **Telephony in full, on a second provider.** `TelnyxTelephonyProvider`, on the new
+  `nexus-ai-pro/telephony/telnyx`, on Telnyx's own call-control protocol: calls placed and answered
+  by command, Ed25519-signed webhooks verified with Web Crypto, media streams that read as Twilio's
+  do, phone numbers, and everything below. `TelephonyManager.answer()` answers a call webhook the same
+  way on either provider: TwiML on Twilio, commands on Telnyx.
+- **Transfer and conferences** on both: `transferCall()` and `joinConference()`, and a `dial` in a
+  webhook answer, rendered as `<Dial>` on Twilio.
+- **Call recordings kept on your terms.** `startRecording()`, `stopRecording()`,
+  `parseRecordingCallback()`, `downloadRecording()`, and `deleteRecording()` on both, and
+  `recordingKeeper()`, which keeps each finished recording in an `AssetStore` to expire under a
+  `RecordingRetention`, deletes the provider's copy, keeps a retried callback's recording once, and
+  sweeps what expired.
+- **Messages, as their own operation family.** `sendMessage()` (SMS and MMS) and
+  `parseMessageWebhook()` on both, running through the client's lifecycle as `messaging` operations.
+- `NexusAI.telephony`, the client's telephony manager; `telnyxRealtimeAudioOptions()`;
+  `TelephonyWebhookValidationRequest.publicKey`.
+
+### Fixed
+
+- A realtime session's `whenIdle()` resolved while a tool it ran on its own was still running, so
+  the tool's result could be missing from the record, and from the model, after it. It now waits for
+  running tools and their results, though not for a call waiting on a person's confirmation.
 
 ### Changed
 
@@ -29,6 +51,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - `tests/workspaces.test.ts`: every workspace the package ships passes the workspace conformance
   suite: in memory, on disk, in the memory, SQLite, Postgres, and Redis stores, the process sandbox,
   and a composite. A composite's shadowing, read-only mounts, and search across mounts.
+- `tests/phone-agent.test.ts`: one phone agent on Twilio and on Telnyx: answered the same way,
+  recorded, streamed through the bridge to a realtime session that hears the caller, answers aloud,
+  texts a receipt, and transfers the call; its recording kept in memory, on disk, and in S3, deleted
+  at the provider, kept once on a retried callback, there the day before its retention ends and gone
+  after the day after's sweep. Without the claim, the expiry, the provider delete, the answer by
+  command, the messaging family, or `whenIdle()` waiting for tools, it fails.
+- `tests/telephony-providers.test.ts`: both providers against stand-ins for their APIs, and Telnyx's
+  webhooks verified with a real Ed25519 key pair: signed, altered, stale, and unsigned.
 - `tests/deep-agent-workspaces.test.ts`: one deep agent does the same work over every workspace and
   each ends holding the same files; and an agent whose code is in a sandbox, notes in a store, and
   docs read-only finds each where it belongs. Without the composite's shadowing, its read-only
