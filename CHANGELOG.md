@@ -4,6 +4,10 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-10-18
+
+Observability that loses nothing, and media you can evaluate.
+
 ### Added
 
 - **Spans that a collector being down cannot lose.** `spoolingExporter()`, on the new
@@ -2875,7 +2879,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.11.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.12.0...HEAD
+[2.12.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.8.0...v2.9.0

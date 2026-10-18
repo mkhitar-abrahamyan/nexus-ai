@@ -303,14 +303,18 @@ Shipped so far:
 - 2.11 workspaces, and telephony in full: an agent's files apart from where its code runs, in memory,
   on disk, in any long-term store, read-only, or a composite of several; and a second phone provider,
   Telnyx, beside Twilio, both answering, transferring, conferencing, recording under a retention
-  policy, and sending and receiving messages.
+  policy, and sending and receiving messages;
+- 2.12 observability that loses nothing, and media you can evaluate: spans spooled through a collector
+  outage, OTLP over gRPC, deployment evaluation that reads each run's whole trace, evaluators that
+  read and judge images, documents, audio, and video, a catalog of every stored asset, and automation
+  rules that roll a canary back when a score falls.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.12 makes observability lose nothing, with spans spooled when the collector is down and
-deployment evaluation that reads the whole trace, and makes media something you can evaluate.
-Pinecone, images, the Gemini embedding batch tier, media understanding, video, Gemini Live, SIP, and
-both phone providers graduate once the live workflow passes against each. The
+Next, 2.13 runs agents across regions, keeps each tenant's requests and data in the region they
+require, and resolves provider keys per tenant from a secret manager. Pinecone, images, the Gemini
+embedding batch tier, media understanding, video, Gemini Live, SIP, and both phone providers graduate
+once the live workflow passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order
 applications ask for it.
 

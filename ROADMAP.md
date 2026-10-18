@@ -4,13 +4,13 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.11.0**. 184 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.12.0**. 189 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 completion batch providers and 2 embedding batch tiers, 3 image
 providers plus a mock, 2 media providers plus a mock, 2 video providers plus a mock, 2 realtime
-providers plus a mock, 2 telephony providers, 5 workspaces, and 98 completion registry models plus 60
-aliases, verified against each provider's documentation on 2026-10-02. 1,175 unit tests and 30
-studio tests pass; coverage sits at **95.7% lines / 82.0% branches / 91.9% functions** against gates
-of 82/67/73. CI verifies lint,
+providers plus a mock, 2 telephony providers, 5 workspaces, OTLP over HTTP and gRPC, and 98
+completion registry models plus 60 aliases, verified against each provider's documentation on
+2026-10-02. 1,220 unit tests and 30 studio tests pass; coverage sits at **96.0% lines / 82.1%
+branches / 92.0% functions** against gates of 82/67/73. CI verifies lint,
 format, build, tests, coverage, registry drift, `llms.txt` drift, per-subpath size, documentation
 and guide coverage, the root import, a graph benchmark with a durability budget, runtime and
 memory-retention budgets, turn-latency and session-load budgets for realtime, load and soak budgets
@@ -29,8 +29,10 @@ worker after its process dies, an A2A task, an ACP turn, and a realtime conversa
 every write and taken over elsewhere, one agent definition holding the same conversation on two
 realtime providers, a phone call answered from a signed SIP webhook, a realtime session over real
 WebRTC in headless Chromium, one phone agent on two telephony providers whose recording expires on
-schedule from every asset store, ten online-evaluation workers through a crash and through 4,000 runs
-started in one millisecond on every trace store, a worker killed holding a budget reservation at
+schedule from every asset store, a collector stopped for an hour losing no span on every operation
+store, the OpenTelemetry Collector taking spans over gRPC, a media catalog on every long-term store,
+a canary rolled back on a media evaluator's score across two replicas, ten online-evaluation workers
+through a crash and through 4,000 runs started in one millisecond on every trace store, a worker killed holding a budget reservation at
 each point of its call on every usage store, an adversarial dataset against an unguarded and a
 guarded agent, the agent protocols driven from the other side of the wire and against the published
 2.5.0 in both directions, a tool's progress on every stream, every studio route called by every role
@@ -68,9 +70,9 @@ the grouping holds, the version each lands in does not.
 
 **What every release protects:**
 
-- No required dependency, and a size budget on every entry point. Today the root import is 343 KB, and
-  an entry point costs a fraction of it: `/agent` 33%, `/graph` 24%, `/operations` 16%, `/evaluate`
-  13%, `/tracing` 9%, `/mcp` 6%, `/store` 2%. `npm run size:check` fails the build when an entry point
+- No required dependency, and a size budget on every entry point. Today the root import is 349 KB, and
+  an entry point costs a fraction of it: `/agent` 33%, `/graph` 23%, `/operations` 16%, `/evaluate`
+  15%, `/tracing` 9%, `/mcp` 5%, `/store` 2%. `npm run size:check` fails the build when an entry point
   grows past its budget or picks up a dependency.
 - A runtime and memory budget. `npm run bench:runtime` fails the release gate when a measured path
   slows past its budget, relative to the machine it runs on, or when a run leaves memory behind.
@@ -92,24 +94,22 @@ it passes its conformance suite against the live service every week.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release: 2.12, or
+Each gap is written down in a guide's limitations today, and each is closed by one release: 2.13, or
 the theme after it that owns it.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.12 |
-| Images have not recorded live conformance on all three backends | API stability | 2.12 |
-| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.12 |
-| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.12 |
-| Video generation has not passed its conformance suite against Veo and Runway | Video guide | 2.12 |
-| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.12 |
-| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.12 |
-| A batch of spans the collector does not accept is dropped | Tracing guide | 2.12 |
-| A deployment's quality evaluation sees a run's output, not its input | Deployments guide | 2.12 |
+| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.13 |
+| Images have not recorded live conformance on all three backends | API stability | 2.13 |
+| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.13 |
+| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.13 |
+| Video generation has not passed its conformance suite against Veo and Runway | Video guide | 2.13 |
+| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.13 |
+| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.13 |
 
 ---
 
-## 2.12.0: Observability that loses nothing, and media you can evaluate
+## 2.13.0: Regions and residency, and credentials per tenant
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
 understanding, video, Gemini Live, SIP call control, and both phone providers graduate when the
@@ -117,16 +117,15 @@ scheduled live workflow passes against each, published with their checklists. Ev
 there now; what stands in the way is the repository's live credentials, and for video, the variable
 that lets it spend seconds of video.
 
-**Observability that loses nothing.** An exporter wrapper that spools to the operation store a batch
-the collector does not accept, retries it, and dead-letters what cannot be sent, under a bound,
-reporting what it exported, retried, spooled, and dropped, and the age of the oldest pending batch.
-Deployment evaluation reads a run's trace (its input, tool calls, retrieved documents, and media) and
-runs through the online-evaluation worker rather than beside it. OTLP over gRPC.
+**Regions and residency.** Multi-region execution: an agent server's runs placed in the region of
+their tenant or thread, a queue per region, and failover between regions that keeps a run where its
+data may live. Routing by residency: a request that requires a region is never sent to a provider,
+replica, trace store, or asset store outside it, and a refusal says which rule held it back.
 
-**Media you can evaluate.** Evaluation subjects that are images, documents, audio, and video; a media
-catalog over every stored asset; and automation rules that open a review item, send a webhook, or
-mark a deployment unhealthy when a score falls below a threshold over enough samples. Proof: a
-collector stopped for an hour loses no span, and a canary is rolled back on a media evaluator's score.
+**Credentials per tenant.** A provider's key resolved per tenant at call time, from a secret manager
+the application supplies, cached for a bounded time, rotated without a restart, and never written to
+a trace, a log, or an error. Proof: a tenant pinned to a region never reaches anything outside it
+across a regional failover, and a key rotated in the middle of a run is the one the next call uses.
 
 ---
 
@@ -134,18 +133,16 @@ collector stopped for an hour loses no span, and a canary is rolled back on a me
 
 Not yet placed, roughly in order of what applications ask for:
 
-1. Multi-region execution.
-2. Routing by residency: a request that requires a region is never routed outside it.
-3. Credential vaults: a provider's key resolved per tenant at call time, from a secret manager.
-4. Guardrail, routing, and budget policy as a versioned file the application supplies, checked by the
+1. Guardrail, routing, and budget policy as a versioned file the application supplies, checked by the
    command line.
-5. A compatibility record for community adapters: the contract suite an adapter passed, against which
+2. A compatibility record for community adapters: the contract suite an adapter passed, against which
    version, with its benchmark, listed on one page.
-6. Tools emulated by a model, for evaluation suites that should not call a payment provider or a
+3. Tools emulated by a model, for evaluation suites that should not call a payment provider or a
    production database.
-7. A2A over its other bindings, and a webhook that receives each piece of streamed text.
-8. ACP's editor MCP servers over SSE, with their tools' capabilities declared.
-9. Video extension and video as an input, and Gemini Omni Flash on Google's own Interactions API.
+4. A2A over its other bindings, and a webhook that receives each piece of streamed text.
+5. ACP's editor MCP servers over SSE, with their tools' capabilities declared.
+6. Video extension and video as an input, and Gemini Omni Flash on Google's own Interactions API.
+7. Span events and links, and media checks that read the duration of compressed audio and video.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:
