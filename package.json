@@ -780,6 +780,16 @@
         "default": "./dist-cjs/tracing/otlp.js"
       }
     },
+    "./tracing/spool": {
+      "import": {
+        "types": "./dist/tracing/spool.d.ts",
+        "default": "./dist/tracing/spool.js"
+      },
+      "require": {
+        "types": "./dist-cjs/tracing/spool.d.ts",
+        "default": "./dist-cjs/tracing/spool.js"
+      }
+    },
     "./tracing/rollups": {
       "import": {
         "types": "./dist/tracing/rollups.d.ts",
@@ -2287,6 +2297,9 @@
       ],
       "tracing/otlp": [
         "dist-cjs/tracing/otlp.d.ts"
+      ],
+      "tracing/spool": [
+        "dist-cjs/tracing/spool.d.ts"
       ],
       "tracing/rollups": [
         "dist-cjs/tracing/rollups.d.ts"

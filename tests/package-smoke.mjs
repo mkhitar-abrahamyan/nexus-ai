@@ -313,6 +313,7 @@ const imports = [
   },
   { specifier: 'nexus-ai-pro/batch', exports: ['BatchManager', 'MockBatchProvider', 'BatchValidationError'] },
   { specifier: 'nexus-ai-pro/tracing/otlp', exports: ['OtlpTraceExporter', 'runToOtlpSpan'] },
+  { specifier: 'nexus-ai-pro/tracing/spool', exports: ['spoolingExporter'] },
   {
     specifier: 'nexus-ai-pro/tracing/rollups',
     exports: ['MemoryRollupStore', 'rollupTraceStore', 'rollupPercentile', 'sumRollups'],

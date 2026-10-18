@@ -133,6 +133,7 @@ const expectedSubpaths = [
   './protocols/acp/editor',
   './tracing',
   './tracing/otlp',
+  './tracing/spool',
   './tracing/rollups',
   './evaluate',
   './evaluate/threads',

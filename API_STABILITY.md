@@ -41,6 +41,15 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.12 stage (Unreleased)
+
+Everything 2.12 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- `nexus-ai-pro/tracing/spool`: `spoolingExporter()`, `SpoolingExporter`, `SpoolingExporterOptions`,
+  `TraceBatchSender`, `SpoolStats`, and `SpoolDrainReport`;
+- `OtlpTraceExporter.send()`.
+
 ## 2.11 stage (2.11.0)
 
 Everything 2.11 adds is stable from the start and additive, unless this section says otherwise.

@@ -1,6 +1,6 @@
 # Traces
 
-<!-- covers: ./tracing ./tracing/otlp ./tracing/rollups -->
+<!-- covers: ./tracing ./tracing/otlp ./tracing/spool ./tracing/rollups -->
 
 Traces you can search, from `nexus-ai-pro/tracing`. Each request becomes a tree of runs — the graph,
 its nodes, its model and tool calls — stored in memory, a JSONL file, or Postgres. You can filter
@@ -220,7 +220,48 @@ const tracer = new Tracer({
 
 `OtlpTraceExporterOptions` sets the collector's base URL (spans go to `/v1/traces`), headers such as an
 API key, the `service.name`, more resource attributes, the batch size (100) and how long a span waits
-to batch (2 seconds), a `fetch` of your own, and an `onError`. A batch that cannot be sent is dropped.
+to batch (2 seconds), a `fetch` of your own, and an `onError`. On its own, a batch the collector
+refuses is dropped; `send()` sends runs as one batch and rejects when the collector refuses them, which
+is what the spool below sends through.
+
+### Spans that a collector being down cannot lose
+
+`spoolingExporter()`, from `nexus-ai-pro/tracing/spool`, wraps any `TraceBatchSender` (something with
+a `send(runs)` that rejects when the receiver refuses them, such as `OtlpTraceExporter`) in a
+`SpoolingExporter` that keeps what the collector refuses. A refused batch is written to an operation
+store, the memory, Redis, Postgres, or SQLite one, and tried again with backoff each `drainEveryMs`
+(15 seconds). Every replica on the same store drains the same spool; each batch is claimed before it
+is tried, so it is sent once, and one a stopped replica was sending is taken over when its lease
+lapses.
+
+```ts
+import { OtlpTraceExporter } from 'nexus-ai-pro/tracing/otlp';
+import { spoolingExporter } from 'nexus-ai-pro/tracing/spool';
+
+const exporter = spoolingExporter({
+  sender: new OtlpTraceExporter({ endpoint: 'https://collector.internal:4318' }),
+  store: operationStore,                 // shared by every replica
+  maxPendingBatches: 10_000,
+  maxAgeMs: 24 * 3_600_000,
+});
+const tracer = new Tracer({ store, exporters: [exporter] });
+```
+
+`SpoolingExporterOptions` bounds what it keeps: at most `maxPendingBatches` (10,000) wait, and
+spooling one more drops the oldest; a batch older than `maxAgeMs` (24 hours), or tried `maxAttempts`
+times (1,000), is dead-lettered: marked failed in the store and never sent. The backoff runs from
+`baseDelayMs` (1 second) to `maxDelayMs` (5 minutes). With `writeAhead`, every batch is written to the
+spool before it is sent and removed once sent, so a process that stops in the middle of a send loses
+nothing either, for a store write per batch.
+
+`stats()` resolves to `SpoolStats`, counted in runs: how many were exported, of those how many were
+retried from the spool, how many were spooled, dropped, and dead-lettered, and how many batches wait
+now, across every replica, with the age of the oldest. `drain()` tries what is due now and resolves to
+a `SpoolDrainReport`; `close()` flushes and stops the timers, leaving the spool for any replica.
+
+In the test suite, a collector stops for an hour while a span finishes every second, and the process
+restarts halfway through. When the collector comes back, every one of the 3,600 spans reaches it,
+once, on the memory, SQLite, Postgres, and Redis operation stores.
 
 Each run becomes an `OtlpSpan` with the GenAI semantic conventions, so Grafana Tempo, Jaeger,
 Honeycomb, Datadog, New Relic, or any OTLP backend reads it like the rest of the application:
@@ -360,7 +401,9 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
 - With `incremental`, a run is written twice, so a store pays twice the writes. A run left by a dead
   process stays `running` until `closeAbandonedRuns()` closes it.
 - `OtlpTraceExporter` speaks OTLP/HTTP JSON, not gRPC or protobuf; every collector accepts JSON on port
-  4318. Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a
+  4318.
+- Without `writeAhead`, the runs waiting to be batched, at most `flushIntervalMs` of them, are lost
+  with a process that stops before it sends them; what the collector refused is not. Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a
   `RollupStore` of your own.
 - An alert measures up to 1,000 runs in its window unless its filter sets a larger `limit`.
 - Cost alerts sum every run in the window, so give a `filter` such as `{ kind: 'model' }` when
@@ -448,4 +491,15 @@ specific entry point that provides it.
 | `rollupTraceStore` | function | Wraps a trace store so every run that finishes is also added to a rollup. |
 | `RollupTraceStoreOptions` | interface | Options for `rollupTraceStore()`. |
 | `sumRollups` | function | Rows summed across their keys: a total over a day, a model, or a whole range. |
+
+### `nexus-ai-pro/tracing/spool`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `SpoolDrainReport` | interface | What one `drain()` did. |
+| `spoolingExporter` | function | Wraps a receiver of traces, such as `OtlpTraceExporter`, so that nothing it refuses is lost. |
+| `SpoolingExporter` | interface | A trace exporter that spools what its receiver refuses, from `spoolingExporter()`. |
+| `SpoolingExporterOptions` | interface | Options for `spoolingExporter()`. |
+| `SpoolStats` | interface | What a spooling exporter has done, counted in runs. |
+| `TraceBatchSender` | interface | Sends finished runs to a receiver, and rejects when the receiver did not take them. |
 <!-- reference:end -->

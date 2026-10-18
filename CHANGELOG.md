@@ -4,6 +4,26 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Spans that a collector being down cannot lose.** `spoolingExporter()`, on the new
+  `nexus-ai-pro/tracing/spool`, keeps each batch the collector refuses in an operation store (the
+  memory, Redis, Postgres, or SQLite one), retries it with backoff, and dead-letters it only once it is
+  too old or has failed too often, under a bound on what waits. Every replica on the store drains the
+  same spool, each batch once. `writeAhead` spools each batch before sending it. `stats()` reports
+  what was exported, retried, spooled, dropped, and dead-lettered, and the age of the oldest batch
+  waiting.
+- `OtlpTraceExporter.send()`: sends runs as one batch now, and rejects when the collector refuses
+  them.
+
+### Proof
+
+- `tests/trace-spool.test.ts`: a collector stopped for an hour while a span finishes every second,
+  and the process restarted halfway: every one of the 3,600 spans reaches it, once, on the memory,
+  SQLite, Postgres, and Redis operation stores. The bound, dead letters, two replicas on one spool,
+  and write-ahead through a process that dies mid-send. Without the spool, its bound, its claim, its
+  dead letters, write-ahead, or taking over a lapsed lease, a test fails.
+
 ## [2.11.0] - 2026-10-18
 
 Workspaces, and telephony in full.

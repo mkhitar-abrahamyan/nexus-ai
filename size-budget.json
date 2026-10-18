@@ -178,6 +178,7 @@
     "./tracing": 36,
     "./tracing/otlp": 18,
     "./tracing/rollups": 6,
+    "./tracing/spool": 10,
     "./video": 40,
     "./video/google": 14,
     "./video/mock": 6,

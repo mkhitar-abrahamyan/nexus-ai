@@ -310,6 +310,7 @@ import { SqliteEmbeddingCache } from 'nexus-ai-pro/sqlite/embedding-cache';
 import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/telephony';
 import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { TelnyxTelephonyProvider } from 'nexus-ai-pro/telephony/telnyx';
+import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
 import {
   GeminiLiveProvider,
@@ -1069,6 +1070,9 @@ void realtimeExecutor;
 void realtimeWebRTC;
 void realtimeWebSocket;
 void geminiLive;
+const spooled = spoolingExporter({ sender: { send: async () => undefined }, store: {} as never, drainEveryMs: 0 });
+const spoolStats: Promise<SpoolStats> = spooled.stats();
+void spoolStats;
 const telnyxProvider = new TelnyxTelephonyProvider({ apiKey: 'server-only', connectionId: 'app' });
 void telnyxProvider.sendMessage({ to: '+15550001', from: '+15559999', body: 'hi' });
 const consumerWorkspace: Workspace = compositeWorkspace({

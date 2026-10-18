@@ -20,7 +20,10 @@ export interface OtlpTraceExporterOptions {
   flushIntervalMs?: number;
   /** Replaces the global `fetch`, for tests or a proxy. */
   fetch?: typeof globalThis.fetch;
-  /** Called when a batch cannot be sent. The batch is dropped; a trace is never worth a retry storm. */
+  /**
+   * Called when a batch cannot be sent. The batch is dropped; a trace is never worth a retry storm.
+   * To keep it instead, send through `spoolingExporter()`, from `nexus-ai-pro/tracing/spool`.
+   */
   onError?: (error: unknown) => void;
 }
 
@@ -143,12 +146,25 @@ export class OtlpTraceExporter implements TraceExporter {
     this.timer = undefined;
     while (this.queue.length > 0) {
       const batch = this.queue.splice(0, this.options.maxBatch ?? 100);
-      this.sending = this.sending.then(() => this.send(batch));
+      this.sending = this.sending.then(() =>
+        this.post(batch).catch((error: unknown) => {
+          this.options.onError?.(error);
+        }),
+      );
     }
     await this.sending;
   }
 
-  private async send(spans: OtlpSpan[]): Promise<void> {
+  /**
+   * Sends finished runs as one batch now, and rejects when the collector does not take them: what a
+   * spooling exporter sends through, so a batch the collector refuses is kept, not dropped.
+   */
+  async send(runs: Run[]): Promise<void> {
+    const spans = runs.filter((run) => run.status !== 'running').map(runToOtlpSpan);
+    if (spans.length) await this.post(spans);
+  }
+
+  private async post(spans: OtlpSpan[]): Promise<void> {
     const resource = { 'service.name': this.options.serviceName ?? 'nexus-ai-pro', ...this.options.resource };
     const body = {
       resourceSpans: [
@@ -158,19 +174,15 @@ export class OtlpTraceExporter implements TraceExporter {
         },
       ],
     };
-    try {
-      const response = await (this.options.fetch ?? globalThis.fetch)(
-        `${this.options.endpoint.replace(/\/+$/, '')}/v1/traces`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', ...this.options.headers },
-          body: JSON.stringify(body),
-        },
-      );
-      if (!response.ok) throw new Error(`The collector answered ${response.status}`);
-    } catch (error) {
-      this.options.onError?.(error);
-    }
+    const response = await (this.options.fetch ?? globalThis.fetch)(
+      `${this.options.endpoint.replace(/\/+$/, '')}/v1/traces`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...this.options.headers },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!response.ok) throw new Error(`The collector answered ${response.status}`);
   }
 }
 

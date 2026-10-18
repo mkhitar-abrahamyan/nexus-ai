@@ -184,9 +184,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/rag/pipeline` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
+| `nexus-ai-pro/tracing/otlp` | 16 KB | 5% | none |
 | `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
 | `nexus-ai-pro/sqlite/operations` | 15 KB | 4% | none |
-| `nexus-ai-pro/tracing/otlp` | 15 KB | 4% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |
 | `nexus-ai-pro/prompts/client` | 15 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 15 KB | 4% | none |
@@ -228,6 +228,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/migrations` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/lint` | 9 KB | 3% | none |
+| `nexus-ai-pro/tracing/spool` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/batch/openai` | 8 KB | 2% | none |
 | `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |
