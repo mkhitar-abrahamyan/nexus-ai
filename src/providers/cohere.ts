@@ -1,5 +1,6 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
 import type { CohereProviderConfig } from '../types/config.js';
+import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
 import { buildMeta, priceUsage } from '../core/usage.js';
@@ -39,15 +40,18 @@ export class CohereProvider extends BaseProvider {
   }
 
   /** Runs one completion. */
-  async complete(request: CompletionRequest): Promise<NexusResponse> {
+  async complete(request: CompletionRequest, context?: ProviderCallContext): Promise<NexusResponse> {
     const model = this.stripPrefix(request.model);
     try {
       this.throwIfAborted(request);
       const startTime = Date.now();
+      // A credential resolved for this call's tenant replaces the configured key.
+      const credential = await context?.credential?.('cohere');
       const response = await (this.config.fetch ?? fetch)(`${this.baseUrl()}/v2/chat`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${this.config.apiKey}`,
+          ...credential?.headers,
+          Authorization: `Bearer ${credential?.apiKey ?? this.config.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -93,11 +97,11 @@ export class CohereProvider extends BaseProvider {
   }
 
   /** Streams one completion. */
-  stream(request: CompletionRequest): NexusStream {
+  stream(request: CompletionRequest, context?: ProviderCallContext): NexusStream {
     const self = this;
     return this.createStream(async function* () {
       try {
-        const response = await self.complete(request);
+        const response = await self.complete(request, context);
         if (response.content) {
           yield { type: 'text', content: response.content } satisfies StreamChunk;
         }

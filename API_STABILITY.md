@@ -41,6 +41,22 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.13 stage (Unreleased)
+
+Everything 2.13 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- `nexus-ai-pro/credentials`: `tenantCredentials()`, `TenantCredentials`, `TenantCredentialsOptions`,
+  `TenantCredentialStats`, `CredentialError`, `parseSecret()`, `credentialRequest()`, `SecretSource`,
+  `awsSecrets()`, `gcpSecrets()`, `azureSecrets()`, `vaultSecrets()`, `envSecrets()`,
+  `memorySecrets()`, `MemorySecrets`, `AwsSecretsClient`, `GcpSecretsClient`, `AzureSecretsClient`,
+  and `VaultSecretsOptions`;
+- `LifecycleConfig.credentials`, `CredentialResolver`, `CredentialRequest`, and `ProviderCredential`;
+  `ProviderCallContext.tenantId` and `credential`; `OperationTicket.refreshCredential()` and
+  `scrub()`;
+- `OpenAIProviderConfig.credentialHeader`, `EmbeddingRequest.tenantId`, and
+  `EmbeddingProviderError.attempts`.
+
 ## 2.12 stage (2.12.0)
 
 Everything 2.12 adds is stable from the start and additive, unless this section says otherwise.

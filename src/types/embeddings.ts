@@ -80,6 +80,11 @@ export interface EmbeddingRequest {
   user?: string;
   /** Identity used for rate-limit bucketing and audit events. */
   userId?: string;
+  /**
+   * The tenant the request runs for: what per-tenant budgets charge, and whose credential a
+   * provider sends when the client resolves credentials per tenant.
+   */
+  tenantId?: string;
   /** Identifies the request in records and traces. Generated when omitted. */
   requestId?: string;
   /** Replays an accepted request instead of paying for it twice. */

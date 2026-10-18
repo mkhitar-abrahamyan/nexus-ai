@@ -21,6 +21,7 @@ export class AzureOpenAIProvider extends OpenAIProvider {
       },
       providerName: 'azure-openai',
       modelPrefix: ['azure-openai', 'azure'],
+      credentialHeader: 'api-key',
     });
   }
 }

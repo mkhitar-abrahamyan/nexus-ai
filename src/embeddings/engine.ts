@@ -105,6 +105,7 @@ export class EmbeddingEngine {
         ...(request.model || this.config.defaultModel ? { model: request.model || this.config.defaultModel } : {}),
         ...(request.provider ? { provider: request.provider } : {}),
         ...(request.userId ? { userId: request.userId } : {}),
+        ...(request.tenantId ? { tenantId: request.tenantId } : {}),
       },
       {
         route: () => {
@@ -443,6 +444,7 @@ export class EmbeddingEngine {
     }
 
     const errors: string[] = [];
+    const failures: unknown[] = [];
     let used = 0;
 
     for (const attempt of attempts) {
@@ -462,6 +464,7 @@ export class EmbeddingEngine {
         } catch (error) {
           if (isAbortError(error)) throw error;
           used += 1;
+          failures.push(error);
           errors.push(`${attempt.providerName}/${attempt.model}: ${describe(error)}`);
           if (!retry.enabled || !isRetryable(error) || retryIndex >= retry.maxRetries) break;
           await delay(retryDelay(retry, retryIndex), request.signal);
@@ -474,6 +477,7 @@ export class EmbeddingEngine {
       `All embedding attempts failed: ${errors.join(' | ')}`,
       route.providerName,
       errors,
+      failures,
     );
   }
 

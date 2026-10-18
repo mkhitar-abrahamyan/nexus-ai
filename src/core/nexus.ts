@@ -306,7 +306,12 @@ export class NexusAI {
       context = await this.pipeline.runHook('beforeProvider', context);
 
       const response = await this.pipeline.trace(context, 'providerCall', () => {
-        return this.failover.complete(context.request, decision, this.providers, this.executionOptions(ticket.context));
+        return this.failover.complete(
+          context.request,
+          decision,
+          this.providers,
+          this.executionOptions(ticket.context, ticket),
+        );
       });
       context.response = response;
       context = await this.pipeline.runHook('afterProvider', context);
@@ -997,11 +1002,16 @@ export class NexusAI {
     };
   }
 
-  /** How failover runs the provider calls of one operation, with the context each attempt hands on. */
+  /**
+   * How failover runs the provider calls of one operation, with the context each attempt hands on,
+   * and, given the operation's ticket, how a refused credential is resolved again and every error
+   * cleaned of the credentials it resolved.
+   */
   private executionOptions(
-    context: Pick<OperationTicket['context'], 'requestId' | 'traceContext' | 'idempotencyKey'>,
+    context: Omit<OperationTicket['context'], 'signal' | 'deadline'>,
+    ticket?: Pick<OperationTicket, 'refreshCredential' | 'scrub'>,
   ): ExecutionOptions {
-    const { requestId, traceContext, idempotencyKey } = context;
+    const { requestId, traceContext, idempotencyKey, tenantId, credential } = context;
     return {
       timeoutMs: this.config.timeout,
       retry: this.config.retry,
@@ -1010,7 +1020,13 @@ export class NexusAI {
         requestId,
         ...(traceContext ? { traceContext } : {}),
         ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...(tenantId !== undefined ? { tenantId } : {}),
+        ...(credential ? { credential } : {}),
       },
+      ...(ticket?.refreshCredential && credential
+        ? { refreshCredential: (provider: string) => ticket.refreshCredential?.(provider) ?? Promise.resolve(false) }
+        : {}),
+      ...(ticket?.scrub && credential ? { scrub: <E>(error: E) => ticket.scrub?.(error) ?? error } : {}),
     };
   }
 
@@ -1130,7 +1146,12 @@ export class NexusAI {
       if (shared) await ticket.reserve(estimate.totalCost);
     }
 
-    const stream = this.failover.stream(routedRequest, decision, this.providers, this.executionOptions(ticket.context));
+    const stream = this.failover.stream(
+      routedRequest,
+      decision,
+      this.providers,
+      this.executionOptions(ticket.context, ticket),
+    );
     return {
       stream: this.isSecurityEnabled() ? protectStreamOutput(stream, this.security, routedRequest.signal) : stream,
       request: routedRequest,

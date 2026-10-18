@@ -4,6 +4,34 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Credentials per tenant.** `LifecycleConfig.credentials` resolves each provider's key per tenant,
+  when a call is made, in every family that runs through the lifecycle: completions, streams,
+  embeddings, and images send it in place of the configured key. `tenantCredentials()`, on the new
+  `nexus-ai-pro/credentials`, reads it from a secret source, cached for `cacheMs`, shared by
+  concurrent calls, carried by the last key while the source is down for up to `staleMs`, and
+  refusing a tenant with no key unless told to fall back. Sources for AWS Secrets Manager, Google
+  Secret Manager, Azure Key Vault, HashiCorp Vault, the environment, and memory, each over the
+  vendor's own client with no dependency.
+- A completion or stream whose provider refuses its credential is resolved again and made once more
+  on the new key; in any other family, the next operation reads the key again. Every key and header
+  value an operation resolves is removed from the errors it raises, before an audit event, a log,
+  a trace, or the health report sees them.
+- `ProviderCallContext.tenantId` and `credential()`; `OperationTicket.refreshCredential()` and
+  `scrub()`; `OpenAIProviderConfig.credentialHeader`; `EmbeddingRequest.tenantId`; and
+  `EmbeddingProviderError.attempts`, each attempt's error.
+
+### Proof
+
+- `tests/tenant-credentials.test.ts`: against a provider of the test's own that takes only live keys,
+  each tenant's calls carry its own key through completions, streams, and embeddings; in a run of five
+  calls whose key is rotated and revoked after the second, the third is answered on the new key and
+  every call after uses it; a key the provider quotes in its refusal reaches no error, stack, cause,
+  audit event, log, trace, or health report. Without the call's credential, the refresh, its limit,
+  either scrub, an adapter's use of the key, the cache's expiry, its single read, its stale key, or
+  its refusal, a test fails.
+
 ## [2.12.0] - 2026-10-18
 
 Observability that loses nothing, and media you can evaluate.

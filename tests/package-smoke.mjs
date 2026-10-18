@@ -320,6 +320,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/batch', exports: ['BatchManager', 'MockBatchProvider', 'BatchValidationError'] },
   { specifier: 'nexus-ai-pro/tracing/otlp', exports: ['OtlpTraceExporter', 'runToOtlpSpan'] },
   { specifier: 'nexus-ai-pro/tracing/spool', exports: ['spoolingExporter'] },
+  {
+    specifier: 'nexus-ai-pro/credentials',
+    exports: ['tenantCredentials', 'memorySecrets', 'vaultSecrets', 'CredentialError'],
+  },
   { specifier: 'nexus-ai-pro/tracing/otlp-grpc', exports: ['OtlpGrpcTraceExporter', 'OtlpGrpcError'] },
   {
     specifier: 'nexus-ai-pro/tracing/rollups',

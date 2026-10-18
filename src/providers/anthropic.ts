@@ -570,7 +570,7 @@ export class AnthropicProvider extends BaseProvider {
       const client = await this.getClient();
       const startTime = Date.now();
       const params = this.createParams(providerRequest);
-      const result = await client.messages.create(params, this.requestOptions(providerRequest, context));
+      const result = await client.messages.create(params, await this.requestOptions(providerRequest, context));
       const latency = Date.now() - startTime;
 
       let content = '';
@@ -621,7 +621,7 @@ export class AnthropicProvider extends BaseProvider {
             ...self.createParams(providerRequest),
             stream: true,
           },
-          self.requestOptions(providerRequest, context),
+          await self.requestOptions(providerRequest, context),
         );
 
         // Anthropic splits usage across the opening and closing events: prompt and cache counts
@@ -735,11 +735,21 @@ export class AnthropicProvider extends BaseProvider {
       .join('\n');
   }
 
-  private requestOptions(request: CompletionRequest, context?: ProviderCallContext): RequestOptions | undefined {
+  private async requestOptions(
+    request: CompletionRequest,
+    context?: ProviderCallContext,
+  ): Promise<RequestOptions | undefined> {
     const options: RequestOptions = {};
     if (request.signal) options.signal = request.signal;
     if (context?.idempotencyKey) options.idempotencyKey = context.idempotencyKey;
-    if (context?.traceContext) options.headers = context.traceContext;
+    // A credential resolved for this call's tenant replaces the configured key for this request.
+    const credential = await context?.credential?.(this.info.name);
+    const headers = {
+      ...context?.traceContext,
+      ...credential?.headers,
+      ...(credential?.apiKey ? { 'x-api-key': credential.apiKey } : {}),
+    };
+    if (Object.keys(headers).length > 0) options.headers = headers;
     return options.signal || options.idempotencyKey || options.headers ? options : undefined;
   }
 

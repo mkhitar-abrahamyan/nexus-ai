@@ -27,6 +27,8 @@ export class EmbeddingProviderError extends EmbeddingError {
     /** The provider. */
     public readonly provider?: string,
     cause?: unknown,
+    /** Each attempt's error, in order, when every attempt failed. */
+    public readonly attempts?: readonly unknown[],
   ) {
     super(message, 'EMBEDDING_PROVIDER_ERROR', cause);
     this.name = 'EmbeddingProviderError';

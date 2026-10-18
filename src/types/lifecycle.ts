@@ -54,6 +54,52 @@ export interface ProviderCallContext {
   traceContext?: Record<string, string>;
   /** Passed to providers that deduplicate requests themselves. */
   idempotencyKey?: string;
+  /** The tenant the call runs for, when the operation names one. */
+  tenantId?: string;
+  /**
+   * The credential a provider sends for this call: the call's tenant's own, resolved by the
+   * lifecycle's `credentials` when the call is made, in place of the key the provider was configured
+   * with. Resolves to `undefined` when there is no resolver, or it has nothing for the provider.
+   * Each provider is resolved once per operation.
+   */
+  credential?: (provider: string) => Promise<ProviderCredential | undefined>;
+}
+
+/** What a provider sends to authenticate one call, in place of its configured key. */
+export interface ProviderCredential {
+  /** The API key, sent as the provider sends its configured one. */
+  apiKey?: string;
+  /** Headers added to the call, such as an organization or a project. */
+  headers?: Record<string, string>;
+}
+
+/** What a credential is resolved for: one provider, for one tenant, in one operation. */
+export interface CredentialRequest {
+  /** The provider the call goes to, by the name it is registered under. */
+  provider: string;
+  /** The tenant the call runs for. */
+  tenantId?: string;
+  /** The operation's family. */
+  family: OperationFamily;
+  /** The operation, such as `complete`. */
+  operation: string;
+}
+
+/**
+ * Resolves a provider's credential per tenant, at call time: from a secret manager, through
+ * `tenantCredentials()` from `nexus-ai-pro/credentials`, or from code of your own.
+ */
+export interface CredentialResolver {
+  /**
+   * The credential for one call, or `undefined` to send the provider's configured key. Throw to
+   * refuse the call.
+   */
+  resolve(request: CredentialRequest): Promise<ProviderCredential | undefined> | ProviderCredential | undefined;
+  /**
+   * Forgets a credential, so the next call resolves it again: called when a provider refuses one,
+   * before the call is made once more.
+   */
+  invalidate?(request: Pick<CredentialRequest, 'provider' | 'tenantId'>): Promise<void> | void;
 }
 
 /** One operation, as authorization, budgets, hooks, audit, and metrics see it. */
@@ -238,6 +284,13 @@ export interface LifecycleConfig {
   budget?: BudgetLedger;
   /** Code that runs around every operation. */
   hooks?: LifecycleHooks;
+  /**
+   * Resolves each provider's credential per tenant, when a call is made, instead of the key the
+   * provider was configured with: `tenantCredentials()` from `nexus-ai-pro/credentials`, over a
+   * secret manager. A provider that refuses a credential gets the call once more with it resolved
+   * again, and a resolved key is removed from every error the operation raises.
+   */
+  credentials?: CredentialResolver;
 }
 
 /** Options for admitting one operation. */
@@ -281,6 +334,13 @@ export interface OperationTicket {
   succeed(info?: OperationResultInfo): Promise<void>;
   /** Finishes with an error: releases the budget, records the failure, runs `onFinish`. */
   fail(error: unknown): Promise<void>;
+  /**
+   * Resolves a provider's credential again, as after the provider refused it. Resolves to true when
+   * there is a credential resolver, so the call is worth making once more.
+   */
+  refreshCredential?(provider: string): Promise<boolean>;
+  /** Removes every credential this operation resolved from an error's text, in place, and returns it. */
+  scrub?<E>(error: E): E;
 }
 
 /** How a provider answered: in time, or with an error. */

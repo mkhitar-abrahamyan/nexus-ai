@@ -11,11 +11,13 @@ import type {
   OperationStartOptions,
   OperationTicket,
   ProviderCallContext,
+  ProviderCredential,
 } from '../types/lifecycle.js';
 import type { AuditLogger } from '../ops/audit-logger.js';
 import type { MetricsCollector } from '../ops/metrics.js';
 import { NexusRateLimitError, type RateLimiter } from '../ops/rate-limiter.js';
 import { generateRequestId } from '../utils/ids.js';
+import { scrubSecrets } from '../utils/scrub.js';
 import { linkSignals } from '../utils/signals.js';
 
 /** Every lifecycle stage, in the order an operation passes through them. */
@@ -140,8 +142,13 @@ export class OperationLifecycle implements OperationLifecycleLike {
       ...(deadline !== undefined ? { deadline } : {}),
       ...(options.traceContext ? { traceContext: options.traceContext } : {}),
       ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+      ...(descriptor.tenantId !== undefined ? { tenantId: descriptor.tenantId } : {}),
     };
-    const ticket = new Ticket(this.runtime, descriptor, context, startedAt, call.dispose);
+    const credentials = this.runtime.config?.credentials
+      ? new CallCredentials(this.runtime.config.credentials, descriptor)
+      : undefined;
+    if (credentials) context.credential = (provider) => credentials.resolve(provider);
+    const ticket = new Ticket(this.runtime, descriptor, context, startedAt, call.dispose, credentials);
 
     try {
       await this.runtime.metrics?.recordRequest(labelsOf(descriptor));
@@ -204,7 +211,8 @@ export class OperationLifecycle implements OperationLifecycleLike {
       !this.runtime.rateLimit?.enabled &&
       !config?.authorize &&
       !config?.budget &&
-      !config?.hooks
+      !config?.hooks &&
+      !config?.credentials
     );
   }
 
@@ -236,6 +244,76 @@ export class OperationLifecycle implements OperationLifecycleLike {
   }
 }
 
+/**
+ * The credentials one operation resolves: each provider's once, kept until a provider refuses one,
+ * with every secret it saw, so an error the operation raises can be cleaned of them.
+ */
+class CallCredentials {
+  private readonly resolved = new Map<string, Promise<ProviderCredential | undefined>>();
+  /** Every key and header value resolved, for scrubbing. */
+  readonly secrets = new Set<string>();
+
+  constructor(
+    private readonly resolver: NonNullable<LifecycleConfig['credentials']>,
+    private readonly descriptor: OperationDescriptor,
+  ) {}
+
+  resolve(provider: string): Promise<ProviderCredential | undefined> {
+    let found = this.resolved.get(provider);
+    if (found) return found;
+    found = Promise.resolve(
+      this.resolver.resolve({
+        provider,
+        ...(this.descriptor.tenantId !== undefined ? { tenantId: this.descriptor.tenantId } : {}),
+        family: this.descriptor.family,
+        operation: this.descriptor.operation,
+      }),
+    ).then((credential) => {
+      if (credential?.apiKey) this.secrets.add(credential.apiKey);
+      for (const value of Object.values(credential?.headers ?? {})) this.secrets.add(value);
+      return credential;
+    });
+    this.resolved.set(provider, found);
+    // A resolution that failed is not kept, so the next attempt tries again.
+    found.catch(() => {
+      if (this.resolved.get(provider) === found) this.resolved.delete(provider);
+    });
+    return found;
+  }
+
+  async refresh(provider: string): Promise<void> {
+    this.resolved.delete(provider);
+    await this.resolver.invalidate?.({
+      provider,
+      ...(this.descriptor.tenantId !== undefined ? { tenantId: this.descriptor.tenantId } : {}),
+    });
+  }
+
+  /** Forgets every credential this operation resolved, so the next operation reads them again. */
+  async refreshAll(): Promise<void> {
+    for (const provider of [...this.resolved.keys()]) await this.refresh(provider);
+  }
+}
+
+/** Whether an error, or one it was caused by, is a provider refusing the caller's credential. */
+function refusedCredential(error: unknown, depth = 0): boolean {
+  if (!error || typeof error !== 'object' || depth > 4) return false;
+  const failed = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    category?: unknown;
+    cause?: unknown;
+    attempts?: unknown;
+    errors?: unknown;
+  };
+  if (failed.category === 'auth' || failed.status === 401 || failed.statusCode === 401) return true;
+  // Every attempt failed: each one's error, as a family's or an `AggregateError` carries them.
+  for (const list of [failed.attempts, failed.errors]) {
+    if (Array.isArray(list) && list.some((item) => refusedCredential(item, depth + 1))) return true;
+  }
+  return refusedCredential(failed.cause, depth + 1);
+}
+
 class Ticket implements OperationTicket {
   private reservation?: BudgetReservation;
   private finished = false;
@@ -247,7 +325,18 @@ class Ticket implements OperationTicket {
     private readonly startedAt: number,
     /** Releases the call signal's hold on the caller's, once the operation has finished. */
     private readonly release: () => void = () => undefined,
+    private readonly credentials?: CallCredentials,
   ) {}
+
+  async refreshCredential(provider: string): Promise<boolean> {
+    if (!this.credentials) return false;
+    await this.credentials.refresh(provider);
+    return true;
+  }
+
+  scrub<E>(error: E): E {
+    return this.credentials ? scrubSecrets(error, this.credentials.secrets) : error;
+  }
 
   async reserve(estimate: number | undefined): Promise<void> {
     const budget = this.runtime.config?.budget;
@@ -282,8 +371,14 @@ class Ticket implements OperationTicket {
   }
 
   async fail(error: unknown): Promise<void> {
+    // Cleaned in place before anything records it, so the caller rethrows the clean one too.
+    this.scrub(error);
     if (this.finished) return;
     this.finished = true;
+    // A key the provider refused is read again by the next operation, in every family.
+    if (this.credentials && refusedCredential(error)) {
+      await this.credentials.refreshAll().catch(() => undefined);
+    }
     const budget = this.runtime.config?.budget;
     if (budget && this.reservation) await budget.release(this.reservation);
     const status = outcomeOf(error, this.context.signal);

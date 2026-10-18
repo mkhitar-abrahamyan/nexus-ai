@@ -45,6 +45,14 @@ export interface ExecutionOptions {
    * headers, and its idempotency key. Each attempt adds its own signal and deadline.
    */
   callContext?: Omit<ProviderCallContext, 'signal' | 'deadline'>;
+  /**
+   * Resolves a provider's credential again after the provider refused it. Resolving to true makes
+   * the attempt once more, without counting it as a retry: how a rotated key reaches a call already
+   * under way.
+   */
+  refreshCredential?: (providerName: string) => Promise<boolean>;
+  /** Removes resolved credentials from an attempt's error before anything records it. */
+  scrub?: <E>(error: E) => E;
 }
 
 /**
@@ -66,6 +74,7 @@ export class FailoverExecutor {
     const errors: string[] = [];
     const retry = this.mergeRetry(options.retry, request.retry);
     const timeoutMs = this.resolveTimeout(request.timeoutMs, options.timeoutMs);
+    const refreshed = new Set<string>();
 
     attemptsLoop: for (const attempt of attempts) {
       const provider = providers.get(attempt.providerName);
@@ -90,7 +99,7 @@ export class FailoverExecutor {
           const providerPromise = Promise.resolve(
             provider.complete(
               { ...request, model: attempt.model, signal: context.signal },
-              callContextOf(options, context),
+              callContextOf(options, context, attempt.providerName),
             ),
           );
           const response = await this.waitForCompletion(providerPromise, context, attempt.providerName, attempt.model);
@@ -106,8 +115,14 @@ export class FailoverExecutor {
           }
           return response;
         } catch (caught) {
-          const error = caught instanceof NexusProviderError ? caught : (context?.cancellationError() ?? caught);
+          const raw = caught instanceof NexusProviderError ? caught : (context?.cancellationError() ?? caught);
+          const error = options.scrub ? options.scrub(raw) : raw;
           lastError = error;
+          // A refused credential is resolved again, and the attempt made once more on it.
+          if (await this.refreshAfterRefusal(error, attempt.providerName, refreshed, options)) {
+            retryIndex -= 1;
+            continue;
+          }
           options.onAttemptFailure?.(attempt.providerName, error);
           if (error instanceof NexusProviderError && error.category === 'abort') {
             throw error;
@@ -183,6 +198,7 @@ export class FailoverExecutor {
     const timeoutMs = this.resolveTimeout(request.timeoutMs, options.timeoutMs);
     const errors: string[] = [];
 
+    const refreshed = new Set<string>();
     attemptsLoop: for (const attempt of attempts) {
       const provider = providers.get(attempt.providerName);
       if (!provider) continue;
@@ -213,7 +229,7 @@ export class FailoverExecutor {
           );
           providerStream = provider.stream(
             { ...request, model: attempt.model, signal: context.signal },
-            callContextOf(options, context),
+            callContextOf(options, context, attempt.providerName),
           );
           abortProviderStream = () => this.abortProviderStream(providerStream);
           context.signal.addEventListener('abort', abortProviderStream, { once: true });
@@ -256,6 +272,12 @@ export class FailoverExecutor {
         }
 
         if (attemptError === undefined) return;
+        attemptError = options.scrub?.(attemptError) ?? attemptError;
+        // Nothing was sent to the caller yet when a provider refuses a credential up front.
+        if (!emitted && (await this.refreshAfterRefusal(attemptError, attempt.providerName, refreshed, options))) {
+          retryIndex -= 1;
+          continue;
+        }
         options.onAttemptFailure?.(attempt.providerName, attemptError);
 
         if (attemptError instanceof NexusProviderError && attemptError.category === 'abort') {
@@ -280,6 +302,22 @@ export class FailoverExecutor {
     }
 
     yield { type: 'error', error: `All streaming attempts failed: ${errors.join(' | ')}` };
+  }
+
+  /**
+   * Whether an attempt is worth making once more because the provider refused its credential and a
+   * fresh one was resolved: once per provider per operation, and only with a resolver.
+   */
+  private async refreshAfterRefusal(
+    error: unknown,
+    providerName: string,
+    refreshed: Set<string>,
+    options: ExecutionOptions,
+  ): Promise<boolean> {
+    if (!options.refreshCredential || refreshed.has(providerName)) return false;
+    if (!(error instanceof NexusProviderError) || error.category !== 'auth') return false;
+    refreshed.add(providerName);
+    return options.refreshCredential(providerName);
   }
 
   private async waitForCompletion<T>(
@@ -531,12 +569,15 @@ export class FailoverExecutor {
 }
 
 /** The context one attempt hands its provider: the operation's, with the attempt's signal and deadline. */
-function callContextOf(options: ExecutionOptions, attempt: AttemptContext): ProviderCallContext {
+function callContextOf(options: ExecutionOptions, attempt: AttemptContext, providerName: string): ProviderCallContext {
+  const credential = options.callContext?.credential;
   return {
     ...options.callContext,
     requestId: options.callContext?.requestId ?? generateRequestId(),
     signal: attempt.signal,
     ...(attempt.deadline !== undefined ? { deadline: attempt.deadline } : {}),
+    // Bound to the name the attempt was routed under, whatever the adapter calls itself.
+    ...(credential ? { credential: () => credential(providerName) } : {}),
   };
 }
 

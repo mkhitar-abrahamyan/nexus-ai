@@ -226,8 +226,12 @@ export class GoogleImageProvider implements ImageProvider {
 
     const headers = new Headers(this.config.defaultHeaders);
     headers.set('content-type', 'application/json');
-    if (this.config.accessToken) headers.set('authorization', `Bearer ${this.config.accessToken}`);
+    // A credential resolved for this call's tenant replaces the configured key or token.
+    const credential = await context.credential?.(this.info.name);
+    if (credential?.apiKey) headers.set('x-goog-api-key', credential.apiKey);
+    else if (this.config.accessToken) headers.set('authorization', `Bearer ${this.config.accessToken}`);
     else if (this.config.apiKey) headers.set('x-goog-api-key', this.config.apiKey);
+    for (const [name, value] of Object.entries(credential?.headers ?? {})) headers.set(name, value);
 
     let response: Response;
     try {

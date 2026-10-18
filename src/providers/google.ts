@@ -1,5 +1,6 @@
 import { decodeBase64 } from '../utils/base64.js';
 import { BaseProvider, type ProviderInfo } from './base.js';
+import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest, ContentPart, Message } from '../types/messages.js';
 import type { GoogleProviderConfig } from '../types/config.js';
 import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
@@ -102,12 +103,12 @@ export class GoogleProvider extends BaseProvider {
   }
 
   /** Runs one completion. */
-  async complete(request: CompletionRequest): Promise<NexusResponse> {
+  async complete(request: CompletionRequest, context?: ProviderCallContext): Promise<NexusResponse> {
     try {
       this.throwIfAborted(request);
       const startTime = Date.now();
       const model = this.extractModel(request.model);
-      const result = await this.generate(model, request, false);
+      const result = await this.generate(model, request, false, context);
       const latency = Date.now() - startTime;
       const candidate = result.candidates?.[0];
       const content = this.extractText(candidate?.content);
@@ -133,7 +134,7 @@ export class GoogleProvider extends BaseProvider {
   }
 
   /** Streams one completion. */
-  stream(request: CompletionRequest): NexusStream {
+  stream(request: CompletionRequest, context?: ProviderCallContext): NexusStream {
     const self = this;
 
     return this.createStream(async function* () {
@@ -141,7 +142,7 @@ export class GoogleProvider extends BaseProvider {
       const model = self.extractModel(request.model);
       try {
         self.throwIfAborted(request);
-        const response = await self.generate(model, request, true);
+        const response = await self.generate(model, request, true, context);
         const reader = response.body?.getReader();
 
         if (!reader) {
@@ -195,19 +196,33 @@ export class GoogleProvider extends BaseProvider {
     }, request.signal);
   }
 
-  private async generate(model: string, request: CompletionRequest, stream: false): Promise<GeminiGenerateResponse>;
-  private async generate(model: string, request: CompletionRequest, stream: true): Promise<Response>;
+  private async generate(
+    model: string,
+    request: CompletionRequest,
+    stream: false,
+    context?: ProviderCallContext,
+  ): Promise<GeminiGenerateResponse>;
+  private async generate(
+    model: string,
+    request: CompletionRequest,
+    stream: true,
+    context?: ProviderCallContext,
+  ): Promise<Response>;
   private async generate(
     model: string,
     request: CompletionRequest,
     stream: boolean,
+    context?: ProviderCallContext,
   ): Promise<GeminiGenerateResponse | Response> {
     const endpoint = stream ? 'streamGenerateContent' : 'generateContent';
-    const url = `${this.baseUrl()}/models/${encodeURIComponent(model)}:${endpoint}?key=${encodeURIComponent(this.config.apiKey)}${stream ? '&alt=sse' : ''}`;
+    // A credential resolved for this call's tenant replaces the configured key.
+    const credential = await context?.credential?.('google');
+    const key = credential?.apiKey ?? this.config.apiKey;
+    const url = `${this.baseUrl()}/models/${encodeURIComponent(model)}:${endpoint}?key=${encodeURIComponent(key)}${stream ? '&alt=sse' : ''}`;
     const body = JSON.stringify(this.createBody(request));
     const response = await (this.config.fetch ?? fetch)(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...credential?.headers },
       body,
       signal: request.signal,
     });

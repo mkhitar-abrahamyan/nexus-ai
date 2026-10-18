@@ -790,6 +790,16 @@
         "default": "./dist-cjs/tracing/otlp-grpc.js"
       }
     },
+    "./credentials": {
+      "import": {
+        "types": "./dist/credentials/index.d.ts",
+        "default": "./dist/credentials/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/credentials/index.d.ts",
+        "default": "./dist-cjs/credentials/index.js"
+      }
+    },
     "./tracing/spool": {
       "import": {
         "types": "./dist/tracing/spool.d.ts",
@@ -2340,6 +2350,9 @@
       ],
       "tracing/spool": [
         "dist-cjs/tracing/spool.d.ts"
+      ],
+      "credentials": [
+        "dist-cjs/credentials/index.d.ts"
       ],
       "tracing/otlp-grpc": [
         "dist-cjs/tracing/otlp-grpc.d.ts"

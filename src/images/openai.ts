@@ -304,7 +304,10 @@ export class OpenAIImageProvider implements ImageProvider {
     }
 
     const headers = new Headers(this.config.defaultHeaders);
-    headers.set('authorization', `Bearer ${this.config.apiKey}`);
+    // A credential resolved for this call's tenant replaces the configured key.
+    const credential = await context.credential?.(this.info.name);
+    headers.set('authorization', `Bearer ${credential?.apiKey ?? this.config.apiKey}`);
+    for (const [name, value] of Object.entries(credential?.headers ?? {})) headers.set(name, value);
     if (this.config.organization) headers.set('openai-organization', this.config.organization);
     if (this.config.project) headers.set('openai-project', this.config.project);
     if (context.idempotencyKey) headers.set('idempotency-key', context.idempotencyKey);

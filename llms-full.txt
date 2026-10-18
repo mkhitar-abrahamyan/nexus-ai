@@ -179,6 +179,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Agent server](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md) | Self-hosted HTTP server for assistants: threads, durable runs, resumable streams, cron, a worker queue, and metrics |
 | [Deployments](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md) | Revisions and canaries with automatic rollback, autoscaling on Kubernetes and Helm, and per-tenant limits |
 | [Tenancy](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tenancy.md) | One tenant model: a tenant's view of every store, tenant graph runs, and the isolation suite |
+| [Regions and credentials](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/regions.md) | Each tenant's provider keys from a secret manager, rotated without a restart and kept out of every error |
 | [Workflows](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md) | Ready-made chains and domain workflows |
 | [Command line](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) | The `nexus` command |
 | [Packaging and install weight](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md) | Every entry point and what it costs |
@@ -1145,7 +1146,9 @@ limit, a budget, or a guardrail refused the call. It also says whether a cache a
 call took, what it cost, and the error when there was one. A throwing hook is ignored, so
 observability can never fail a call.
 
-`LifecycleConfig` is the whole setting: `authorize`, `budget`, and `hooks`.
+`LifecycleConfig` is the whole setting: `authorize`, `budget`, `hooks`, and `credentials`, a
+`CredentialResolver` that gives each provider call its tenant's own key, as the
+[regions and credentials guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/regions.md) describes.
 
 ## Graphs, agents, sessions, queues, and batches
 
@@ -1172,7 +1175,10 @@ So `nexus-ai-pro/graph` and the other families depend on the lifecycle's types o
 ## Writing a provider
 
 Every provider call receives a `ProviderCallContext` beside its request. It holds the operation's
-request id, its abort signal, its deadline, its trace headers, and its idempotency key. A chat
+request id, its abort signal, its deadline, its trace headers, its idempotency key, its tenant, and,
+with a credential resolver, `credential(provider)`: the `ProviderCredential` to send in place of the
+configured key. A provider of your own sends `(await context?.credential?.(name))?.apiKey`, falling
+back to its own. A chat
 provider gets it as the second argument of `complete()` and `stream()`. Each family's own context
 extends it: an image provider's adds the operation id, and an embedding provider's adds the attempt
 and the batch index.
@@ -1218,7 +1224,9 @@ operation and returns an `OperationTicket`:
 - `context`, the `ProviderCallContext` to hand every provider call;
 - `reserve()`, which holds an estimate against the budget;
 - `succeed()`, with an `OperationResultInfo` of cost, cache hit, provider, and model;
-- `fail()`, with the error that ended it.
+- `fail()`, with the error that ended it, cleaned first of every credential the operation resolved;
+- `refreshCredential()`, which resolves a provider's credential again after the provider refused it;
+- `scrub()`, which removes those credentials from any other error, in place.
 
 `OperationStartOptions` add a caller's signal, a timeout, an idempotency key, and trace headers.
 
@@ -12911,6 +12919,106 @@ const hub = new ContextHub({ store: tenantPromptStore(prompts, tenantId) });
 
 ---
 
+Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/regions.md
+
+# Regions and credentials
+
+
+Each tenant's provider keys, resolved when a call is made from the secret manager you already run,
+rotated there without a restart, and kept out of every error, log, trace, and audit event.
+
+```ts
+import { NexusAI } from 'nexus-ai-pro';
+import { awsSecrets, tenantCredentials } from 'nexus-ai-pro/credentials';
+import { SecretsManager } from '@aws-sdk/client-secrets-manager';
+
+const ai = new NexusAI({
+  providers: { openai: { apiKey: process.env.OPENAI_API_KEY ?? '' } },
+  lifecycle: { credentials: tenantCredentials({ secrets: awsSecrets(new SecretsManager({})) }) },
+});
+
+// Sent with acme's own key, read from the secret `acme/openai`.
+await ai.complete({ model: 'gpt-5', tenantId: 'acme', messages: [{ role: 'user', content: 'Hello' }] });
+```
+
+## Credentials per tenant
+
+`LifecycleConfig.credentials` takes a `CredentialResolver`: something that turns a
+`CredentialRequest` (the provider, by the name it is registered under, the tenant, the family, and
+the operation) into a `ProviderCredential`, an `apiKey` and any `headers`. Every family runs through
+the lifecycle, so the resolver is asked for each provider a call reaches. An adapter sends what it
+returns in place of the key it was configured with: OpenAI and every OpenAI-compatible provider as a
+bearer token (in `api-key` for Azure, as its `credentialHeader` says), Anthropic in `x-api-key`,
+Gemini in the URL, Cohere, embeddings, and images in their own headers. A resolver that returns
+nothing leaves the configured key; one that throws refuses the call.
+
+`tenantCredentials()` is the resolver over a `SecretSource`, any object with `get(name)`. It reads
+the secret named `<tenant>/<provider>`, or `<provider>` for a call with no tenant, or whatever `name`
+returns, and `parseSecret()` reads it into a credential: a plain string is the key, and a JSON object
+carries `apiKey` and `headers`, such as an organization. `TenantCredentialsOptions`:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `secrets` | — | Where the secrets are. |
+| `name`, `parse` | as above | The secret's name for a request, and how it becomes a credential. |
+| `missing` | `refuse` | A tenant with no secret is refused with a `CredentialError` before anything is sent, or, with `config`, sent the configured key. |
+| `cacheMs` | 5 minutes | How long a credential is reused before the source is read again. |
+| `missingCacheMs` | 30 seconds | How long a missing secret is remembered as missing. |
+| `staleMs` | 1 hour | While the source fails, how long a credential past its time still carries calls. |
+| `maxEntries` | 1,000 | Credentials cached at once, the least recently read dropped first. |
+| `onError` | — | Hears each failure of the source. |
+
+Calls that need one credential at the same moment share one read of the source. A `TenantCredentials`
+also has `clear()`, which forgets every cached credential or one tenant's, and `stats()`, which
+returns `TenantCredentialStats`: reads, hits, stale credentials served, refusals, and what is cached.
+
+**Rotation.** A key changed in the secret manager is used from the next call that reads the source:
+within `cacheMs`, or at once after `clear()`. When the provider has already revoked the old key, it
+is sooner still. A completion or a stream refused for its credential is resolved again and made once
+more on the new key, without counting as a retry. In any other family, the operation fails and the
+next one reads the source again. A key the source still holds, and the provider still refuses, fails
+the call after that one more attempt.
+
+**Never written down.** Every key and header value an operation resolves is removed from the errors it
+raises, before anything records them: the message, the stack, the cause, and the fields they hold,
+so a provider that says which key it refused is quoted with `[redacted]` in its place. The audit log,
+the logs, traces, and the provider health report see the cleaned error, and a credential is never
+part of a request, so it never reaches a trace or a cache.
+
+### Secret sources
+
+Each source reads a secret that does not exist as none, and throws when the store cannot be read.
+None needs a dependency: each takes a client you build with the vendor's own SDK, through the
+methods it already has.
+
+| Source | Reads from |
+| --- | --- |
+| `awsSecrets(client, { prefix })` | AWS Secrets Manager, through an `AwsSecretsClient`, such as `SecretsManager` from `@aws-sdk/client-secrets-manager`. |
+| `gcpSecrets(client, { project, version })` | Google Secret Manager, through a `GcpSecretsClient`, such as the `@google-cloud/secret-manager` client. `/` in a name becomes `-`. |
+| `azureSecrets(client)` | Azure Key Vault, through an `AzureSecretsClient`, such as `SecretClient` from `@azure/keyvault-secrets`. Anything but letters, digits, and `-` becomes `-`. |
+| `vaultSecrets(options)` | HashiCorp Vault's KV version 2 engine, over HTTP, by `VaultSecretsOptions`: the `address`, a `token` or a function that returns the current one, the `mount` (`secret`), the `field` (`value`), and a `namespace`. |
+| `envSecrets({ prefix, env })` | Environment variables: `acme/openai` is read from `ACME_OPENAI`, after `prefix`. |
+| `memorySecrets(initial)` | This process, as `MemorySecrets`, whose `set()` and `delete()` change it: for tests, and for keys an application rotates itself. |
+
+`credentialRequest()` builds the request a resolver receives, for code that resolves a credential
+outside a call.
+
+In the test suite, a provider of the test's own takes only the keys it is told are live. Each tenant's
+calls carry its own key through completions, streams, and embeddings. In a run of five calls whose
+key is rotated after the second, and revoked by the provider, the third is refused, resolved again,
+and answered on the new key, and every call after it uses that key. A key the provider quotes back in
+its refusal is found in no error, stack, cause, audit event, log, trace, or health report.
+
+## Limitations
+
+- Realtime sessions, telephony, video, voice, media understanding, and batches send the key each
+  provider was configured with; per-tenant credentials reach completions, streams, embeddings, and
+  images.
+- A resolved key is removed from errors when it is at least four characters long, and only where it
+  appears whole.
+
+---
+
 Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md
 
 # Workflows
@@ -13319,67 +13427,68 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 349 KB | 100% | none |
-| `nexus-ai-pro/config` | 342 KB | 98% | none |
-| `nexus-ai-pro/core` | 337 KB | 97% | none |
-| `nexus-ai-pro/deep-agent` | 213 KB | 61% | none |
-| `nexus-ai-pro/realtime` | 212 KB | 61% | none |
-| `nexus-ai-pro/server/deployments` | 143 KB | 41% | none |
-| `nexus-ai-pro/realtime/openai-sip` | 138 KB | 40% | none |
-| `nexus-ai-pro/server` | 122 KB | 35% | none |
+| `nexus-ai-pro` | 356 KB | 100% | none |
+| `nexus-ai-pro/config` | 348 KB | 98% | none |
+| `nexus-ai-pro/core` | 344 KB | 97% | none |
+| `nexus-ai-pro/deep-agent` | 213 KB | 60% | none |
+| `nexus-ai-pro/realtime` | 212 KB | 60% | none |
+| `nexus-ai-pro/server/deployments` | 148 KB | 42% | none |
+| `nexus-ai-pro/realtime/openai-sip` | 138 KB | 39% | none |
+| `nexus-ai-pro/server` | 122 KB | 34% | none |
 | `nexus-ai-pro/batch` | 116 KB | 33% | none |
-| `nexus-ai-pro/agent` | 114 KB | 33% | none |
-| `nexus-ai-pro/realtime/session` | 108 KB | 31% | none |
-| `nexus-ai-pro/postgres` | 90 KB | 26% | none |
+| `nexus-ai-pro/agent` | 114 KB | 32% | none |
+| `nexus-ai-pro/realtime/session` | 108 KB | 30% | none |
+| `nexus-ai-pro/postgres` | 90 KB | 25% | none |
 | `nexus-ai-pro/providers/groq` | 88 KB | 25% | none |
 | `nexus-ai-pro/providers/mistral` | 88 KB | 25% | none |
-| `nexus-ai-pro/providers/azure-openai` | 87 KB | 25% | none |
-| `nexus-ai-pro/providers/llamacpp` | 87 KB | 25% | none |
-| `nexus-ai-pro/providers/lmstudio` | 87 KB | 25% | none |
-| `nexus-ai-pro/providers/openrouter` | 87 KB | 25% | none |
-| `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
-| `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
+| `nexus-ai-pro/providers/azure-openai` | 87 KB | 24% | none |
+| `nexus-ai-pro/providers/deepseek` | 87 KB | 24% | none |
+| `nexus-ai-pro/providers/llamacpp` | 87 KB | 24% | none |
+| `nexus-ai-pro/providers/lmstudio` | 87 KB | 24% | none |
+| `nexus-ai-pro/providers/openai` | 87 KB | 24% | none |
+| `nexus-ai-pro/providers/openrouter` | 87 KB | 24% | none |
+| `nexus-ai-pro/evaluate/online` | 86 KB | 24% | none |
 | `nexus-ai-pro/graph` | 82 KB | 23% | none |
-| `nexus-ai-pro/evaluate/online` | 81 KB | 23% | none |
-| `nexus-ai-pro/router` | 81 KB | 23% | none |
-| `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
-| `nexus-ai-pro/images` | 73 KB | 21% | none |
-| `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
+| `nexus-ai-pro/router` | 82 KB | 23% | none |
+| `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
+| `nexus-ai-pro/images` | 77 KB | 22% | none |
+| `nexus-ai-pro/providers/google` | 73 KB | 21% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 17% | none |
-| `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
-| `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
-| `nexus-ai-pro/security` | 58 KB | 17% | none |
+| `nexus-ai-pro/providers/cohere` | 59 KB | 17% | none |
+| `nexus-ai-pro/providers/ollama` | 58 KB | 16% | none |
+| `nexus-ai-pro/security` | 58 KB | 16% | none |
 | `nexus-ai-pro/operations` | 56 KB | 16% | none |
 | `nexus-ai-pro/evaluate` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 15% | none |
-| `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
-| `nexus-ai-pro/models/data` | 51 KB | 15% | none |
-| `nexus-ai-pro/agent/sandbox` | 48 KB | 14% | none |
+| `nexus-ai-pro/batch/anthropic` | 51 KB | 14% | none |
+| `nexus-ai-pro/models/data` | 51 KB | 14% | none |
+| `nexus-ai-pro/agent/sandbox` | 48 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
-| `nexus-ai-pro/realtime/gemini-live` | 44 KB | 13% | none |
+| `nexus-ai-pro/telephony` | 46 KB | 13% | none |
+| `nexus-ai-pro/ops` | 44 KB | 12% | none |
+| `nexus-ai-pro/realtime/gemini-live` | 44 KB | 12% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 12% | none |
 | `nexus-ai-pro/protocols/a2a` | 43 KB | 12% | none |
+| `nexus-ai-pro/embeddings` | 41 KB | 12% | none |
 | `nexus-ai-pro/evaluate/media` | 41 KB | 12% | none |
-| `nexus-ai-pro/telephony` | 41 KB | 12% | none |
-| `nexus-ai-pro/embeddings` | 40 KB | 11% | none |
 | `nexus-ai-pro/embeddings/batch` | 40 KB | 11% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 11% | none |
-| `nexus-ai-pro/ops` | 40 KB | 11% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 11% | none |
+| `nexus-ai-pro/voice` | 38 KB | 11% | none |
 | `nexus-ai-pro/agent/workspace` | 38 KB | 11% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 11% | none |
-| `nexus-ai-pro/models` | 37 KB | 11% | none |
+| `nexus-ai-pro/models` | 37 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/video` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 10% | none |
-| `nexus-ai-pro/voice` | 33 KB | 9% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
 | `nexus-ai-pro/tracing` | 32 KB | 9% | none |
 | `nexus-ai-pro/tracing/otlp-grpc` | 32 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
+| `nexus-ai-pro/lifecycle` | 32 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
 | `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |
@@ -13387,14 +13496,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/inputs` | 27 KB | 8% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 8% | none |
 | `nexus-ai-pro/server/tenancy` | 27 KB | 8% | none |
-| `nexus-ai-pro/lifecycle` | 27 KB | 8% | none |
 | `nexus-ai-pro/runtime` | 25 KB | 7% | none |
 | `nexus-ai-pro/images/assets` | 25 KB | 7% | none |
 | `nexus-ai-pro/protocols/acp` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/tracing/otlp` | 24 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
-| `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
+| `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/realtime/openai-server` | 21 KB | 6% | none |
@@ -13413,8 +13521,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/pipeline` | 17 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 17 KB | 5% | none |
-| `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
-| `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
+| `nexus-ai-pro/images/comfyui` | 16 KB | 4% | none |
+| `nexus-ai-pro/testing/record` | 16 KB | 4% | none |
 | `nexus-ai-pro/sqlite/operations` | 15 KB | 4% | none |
 | `nexus-ai-pro/evaluate/automation` | 15 KB | 4% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |
@@ -13463,6 +13571,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/batch/openai` | 8 KB | 2% | none |
 | `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |
 | `nexus-ai-pro/store/redis` | 8 KB | 2% | none |
+| `nexus-ai-pro/credentials` | 8 KB | 2% | none |
 | `nexus-ai-pro/evaluate/threads` | 8 KB | 2% | none |
 | `nexus-ai-pro/capabilities` | 8 KB | 2% | none |
 | `nexus-ai-pro/store` | 7 KB | 2% | none |
@@ -13492,12 +13601,12 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/prompts/redis` | 4 KB | 1% | none |
 | `nexus-ai-pro/loaders/csv` | 4 KB | 1% | none |
 | `nexus-ai-pro/loaders/git` | 4 KB | 1% | none |
-| `nexus-ai-pro/operations/webhooks` | 3 KB | 0.9% | none |
-| `nexus-ai-pro/cache/memory-cache` | 3 KB | 0.9% | none |
-| `nexus-ai-pro/loaders/text` | 3 KB | 0.9% | none |
-| `nexus-ai-pro/loaders/markdown` | 3 KB | 0.9% | none |
-| `nexus-ai-pro/loaders/json` | 3 KB | 0.9% | none |
-| `nexus-ai-pro/loaders/pdf` | 3 KB | 0.9% | none |
+| `nexus-ai-pro/operations/webhooks` | 3 KB | 0.8% | none |
+| `nexus-ai-pro/cache/memory-cache` | 3 KB | 0.8% | none |
+| `nexus-ai-pro/loaders/text` | 3 KB | 0.8% | none |
+| `nexus-ai-pro/loaders/markdown` | 3 KB | 0.8% | none |
+| `nexus-ai-pro/loaders/json` | 3 KB | 0.8% | none |
+| `nexus-ai-pro/loaders/pdf` | 3 KB | 0.8% | none |
 | `nexus-ai-pro/media/mock` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/cache` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/cache/adapters` | 2 KB | 0.6% | none |
@@ -13685,7 +13794,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 189 entry points, 151 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 190 entry points, 152 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

@@ -51,13 +51,26 @@ abstract class HttpEmbeddingProvider implements EmbeddingsProvider {
     context: EmbeddingProviderCallContext,
   ): Promise<EmbeddingProviderResult>;
 
-  protected async post(url: string, body: unknown, model: string, signal: AbortSignal): Promise<unknown> {
+  protected async post(
+    url: string,
+    body: unknown,
+    model: string,
+    signal: AbortSignal,
+    context?: EmbeddingProviderCallContext,
+  ): Promise<unknown> {
     const fetchImpl = this.options.fetch ?? fetch;
+    // A credential resolved for this call's tenant replaces the configured key.
+    const credential = await context?.credential?.(this.info.name);
     let response: Response;
     try {
       response = await fetchImpl(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...this.authHeaders(), ...this.options.headers },
+        headers: {
+          'content-type': 'application/json',
+          ...this.authHeaders(credential?.apiKey ?? this.options.apiKey),
+          ...this.options.headers,
+          ...credential?.headers,
+        },
         body: JSON.stringify(body),
         signal,
       });
@@ -71,8 +84,8 @@ abstract class HttpEmbeddingProvider implements EmbeddingsProvider {
     return response.json();
   }
 
-  protected authHeaders(): Record<string, string> {
-    return this.options.apiKey ? { authorization: `Bearer ${this.options.apiKey}` } : {};
+  protected authHeaders(key: string | undefined): Record<string, string> {
+    return key ? { authorization: `Bearer ${key}` } : {};
   }
 
   protected baseUrl(fallback: string): string {
@@ -143,6 +156,7 @@ export class OpenAIEmbeddingProvider extends HttpEmbeddingProvider {
       },
       request.model,
       context.signal,
+      context,
     )) as OpenAIEmbeddingPayload;
 
     const data = payload.data;
@@ -188,8 +202,8 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
     };
   }
 
-  protected override authHeaders(): Record<string, string> {
-    return this.options.apiKey ? { 'x-goog-api-key': this.options.apiKey } : {};
+  protected override authHeaders(key: string | undefined): Record<string, string> {
+    return key ? { 'x-goog-api-key': key } : {};
   }
 
   /** Embeds a batch of inputs: texts, or parts with images, audio, and documents. */
@@ -215,6 +229,7 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
       },
       model,
       context.signal,
+      context,
     )) as GoogleEmbeddingPayload;
 
     const embeddings = payload.embeddings;
@@ -287,6 +302,7 @@ export class CohereEmbeddingProvider extends HttpEmbeddingProvider {
       },
       request.model,
       context.signal,
+      context,
     )) as CoherePayload;
 
     const raw = payload.embeddings;
@@ -376,6 +392,7 @@ export class OllamaEmbeddingProvider extends HttpEmbeddingProvider {
       },
       request.model,
       context.signal,
+      context,
     )) as OllamaPayload;
 
     if (!Array.isArray(payload.embeddings)) {

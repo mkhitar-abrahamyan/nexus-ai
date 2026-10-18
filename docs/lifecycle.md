@@ -194,7 +194,9 @@ limit, a budget, or a guardrail refused the call. It also says whether a cache a
 call took, what it cost, and the error when there was one. A throwing hook is ignored, so
 observability can never fail a call.
 
-`LifecycleConfig` is the whole setting: `authorize`, `budget`, and `hooks`.
+`LifecycleConfig` is the whole setting: `authorize`, `budget`, `hooks`, and `credentials`, a
+`CredentialResolver` that gives each provider call its tenant's own key, as the
+[regions and credentials guide](./regions.md) describes.
 
 ## Graphs, agents, sessions, queues, and batches
 
@@ -221,7 +223,10 @@ So `nexus-ai-pro/graph` and the other families depend on the lifecycle's types o
 ## Writing a provider
 
 Every provider call receives a `ProviderCallContext` beside its request. It holds the operation's
-request id, its abort signal, its deadline, its trace headers, and its idempotency key. A chat
+request id, its abort signal, its deadline, its trace headers, its idempotency key, its tenant, and,
+with a credential resolver, `credential(provider)`: the `ProviderCredential` to send in place of the
+configured key. A provider of your own sends `(await context?.credential?.(name))?.apiKey`, falling
+back to its own. A chat
 provider gets it as the second argument of `complete()` and `stream()`. Each family's own context
 extends it: an image provider's adds the operation id, and an embedding provider's adds the attempt
 and the batch index.
@@ -267,7 +272,9 @@ operation and returns an `OperationTicket`:
 - `context`, the `ProviderCallContext` to hand every provider call;
 - `reserve()`, which holds an estimate against the budget;
 - `succeed()`, with an `OperationResultInfo` of cost, cache hit, provider, and model;
-- `fail()`, with the error that ended it.
+- `fail()`, with the error that ended it, cleaned first of every credential the operation resolved;
+- `refreshCredential()`, which resolves a provider's credential again after the provider refused it;
+- `scrub()`, which removes those credentials from any other error, in place.
 
 `OperationStartOptions` add a caller's signal, a timeout, an idempotency key, and trace headers.
 

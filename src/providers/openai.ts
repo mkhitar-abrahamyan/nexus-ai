@@ -297,7 +297,7 @@ export class OpenAIProvider extends BaseProvider {
       const client = await this.getClient();
       const startTime = Date.now();
       const params = this.createChatParams(providerRequest);
-      const result = await client.chat.completions.create(params, this.requestOptions(providerRequest, context));
+      const result = await client.chat.completions.create(params, await this.requestOptions(providerRequest, context));
       const choice = result.choices[0];
 
       if (!choice?.message) {
@@ -338,7 +338,7 @@ export class OpenAIProvider extends BaseProvider {
         if (self.includeStreamUsage()) streamParams.stream_options = { include_usage: true };
         const stream = await client.chat.completions.create(
           streamParams,
-          self.requestOptions(providerRequest, context),
+          await self.requestOptions(providerRequest, context),
         );
 
         const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
@@ -481,7 +481,10 @@ export class OpenAIProvider extends BaseProvider {
     }
 
     const startTime = Date.now();
-    const result = await responses.create(this.createResponsesParams(request), this.requestOptions(request, context));
+    const result = await responses.create(
+      this.createResponsesParams(request),
+      await this.requestOptions(request, context),
+    );
     const toolCalls = this.extractResponsesToolCalls(result);
 
     return {
@@ -511,7 +514,7 @@ export class OpenAIProvider extends BaseProvider {
         ...this.createResponsesParams(request),
         stream: true,
       },
-      this.requestOptions(request, context),
+      await this.requestOptions(request, context),
     );
     const toolCallBuffers = new Map<string, { id: string; name: string; args: string }>();
 
@@ -798,11 +801,25 @@ export class OpenAIProvider extends BaseProvider {
     return buildMeta({ provider: this.info.name, model, latencyMs, ...usage });
   }
 
-  private requestOptions(request: CompletionRequest, context?: ProviderCallContext): RequestOptions | undefined {
+  private async requestOptions(
+    request: CompletionRequest,
+    context?: ProviderCallContext,
+  ): Promise<RequestOptions | undefined> {
     const options: RequestOptions = {};
     if (request.signal) options.signal = request.signal;
     if (context?.idempotencyKey) options.idempotencyKey = context.idempotencyKey;
-    if (context?.traceContext) options.headers = context.traceContext;
+    // A credential resolved for this call's tenant replaces the configured key for this request.
+    const credential = await context?.credential?.(this.info.name);
+    const headers = {
+      ...context?.traceContext,
+      ...credential?.headers,
+      ...(credential?.apiKey
+        ? this.config.credentialHeader === 'api-key'
+          ? { 'api-key': credential.apiKey }
+          : { Authorization: `Bearer ${credential.apiKey}` }
+        : {}),
+    };
+    if (Object.keys(headers).length > 0) options.headers = headers;
     return options.signal || options.idempotencyKey || options.headers ? options : undefined;
   }
 

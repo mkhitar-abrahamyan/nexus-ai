@@ -312,6 +312,7 @@ import { TelephonyManager as SubpathTelephonyManager } from 'nexus-ai-pro/teleph
 import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { TelnyxTelephonyProvider } from 'nexus-ai-pro/telephony/telnyx';
 import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
+import { awsSecrets, memorySecrets, tenantCredentials, type TenantCredentialStats } from 'nexus-ai-pro/credentials';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
 import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
@@ -1086,6 +1087,15 @@ void geminiLive;
 const spooled = spoolingExporter({ sender: { send: async () => undefined }, store: {} as never, drainEveryMs: 0 });
 const spoolStats: Promise<SpoolStats> = spooled.stats();
 void spoolStats;
+// Each tenant's provider key, from a secret manager, at call time.
+const perTenant = tenantCredentials({
+  secrets: awsSecrets({ getSecretValue: async () => ({ SecretString: 'sk-1' }) }),
+  cacheMs: 60_000,
+  missing: 'refuse',
+});
+const credentialStats: TenantCredentialStats = perTenant.stats();
+void credentialStats;
+void memorySecrets({ 'acme/openai': 'sk-acme' }).set('acme/openai', 'sk-acme-2');
 const grpcOptions: OtlpGrpcTraceExporterOptions = { endpoint: 'http://localhost:4317', gzip: true, timeoutMs: 5_000 };
 const grpcExporter = new OtlpGrpcTraceExporter(grpcOptions);
 const spooledGrpc = spoolingExporter({ sender: grpcExporter, store: {} as never, drainEveryMs: 0 });

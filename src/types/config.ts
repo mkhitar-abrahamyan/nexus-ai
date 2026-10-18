@@ -67,6 +67,11 @@ export interface OpenAIProviderConfig {
    * Azure. Enable it for any other OpenAI-compatible server that accepts the option.
    */
   streamUsage?: boolean;
+  /**
+   * How a credential resolved per call is sent: as a bearer token in `authorization`, the default,
+   * or in `api-key`, as Azure takes it.
+   */
+  credentialHeader?: 'authorization' | 'api-key';
 }
 
 /** Configuration for Anthropic, or an Anthropic-compatible endpoint through `baseUrl`. */
