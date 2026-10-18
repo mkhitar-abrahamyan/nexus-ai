@@ -4,6 +4,37 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Workspaces: where an agent's files live, apart from where its code runs.** A `Workspace`, on
+  the new `nexus-ai-pro/agent/workspace`, reads, writes, and lists files, and optionally searches
+  them, removes them, and holds bytes, with paths that mean the same in every one. Five ship:
+  `memoryWorkspace()`, `fileWorkspace()`, `storeWorkspace()` on any long-term `Store` (each file its
+  contents and a small tree entry, so listing reads no contents), `readOnlyWorkspace()`, and
+  `compositeWorkspace()`, which mounts several at paths of its own, read-only or not, and searches
+  across them. `workspaceTools()` gives the file tools over any of them, and
+  `runWorkspaceConformance()` holds any workspace to the contract. A `Sandbox` is now a workspace
+  that can also run commands. A deep agent takes `workspace` apart from `sandbox`: its files, skills,
+  instruction files, and offloaded results live in the workspace, and its commands run in the sandbox.
+- `Workspace.writeBytes()`, optional, which the process sandbox now has.
+
+### Changed
+
+- A sandbox's file methods take a leading `/` as its root, as every workspace does: the process
+  sandbox and the container sandbox refused such a path unless it was already under their root.
+- The file tools describe their files as the workspace's, not the sandbox's.
+
+### Proof
+
+- `tests/workspaces.test.ts`: every workspace the package ships passes the workspace conformance
+  suite: in memory, on disk, in the memory, SQLite, Postgres, and Redis stores, the process sandbox,
+  and a composite. A composite's shadowing, read-only mounts, and search across mounts.
+- `tests/deep-agent-workspaces.test.ts`: one deep agent does the same work over every workspace and
+  each ends holding the same files; and an agent whose code is in a sandbox, notes in a store, and
+  docs read-only finds each where it belongs. Without the composite's shadowing, its read-only
+  mounts, the store's directory filter, or the agent taking its files from the workspace, a test
+  fails.
+
 ## [2.10.0] - 2026-10-16
 
 Durable conversations, and a second realtime provider.

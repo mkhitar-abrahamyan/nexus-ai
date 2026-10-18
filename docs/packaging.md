@@ -96,8 +96,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 344 KB | 100% | none |
 | `nexus-ai-pro/config` | 336 KB | 98% | none |
 | `nexus-ai-pro/core` | 332 KB | 97% | none |
+| `nexus-ai-pro/deep-agent` | 213 KB | 62% | none |
 | `nexus-ai-pro/realtime` | 211 KB | 61% | none |
-| `nexus-ai-pro/deep-agent` | 187 KB | 54% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 137 KB | 40% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |
@@ -118,6 +118,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/evaluate/online` | 74 KB | 22% | none |
 | `nexus-ai-pro/images` | 73 KB | 21% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
+| `nexus-ai-pro/agent/sandbox/container` | 60 KB | 17% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
@@ -126,6 +127,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/batch/openai` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
 | `nexus-ai-pro/models/data` | 51 KB | 15% | none |
+| `nexus-ai-pro/agent/sandbox` | 48 KB | 14% | none |
 | `nexus-ai-pro/evaluate` | 46 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
@@ -137,10 +139,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 40 KB | 12% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 12% | none |
+| `nexus-ai-pro/agent/workspace` | 38 KB | 11% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
-| `nexus-ai-pro/agent/sandbox/container` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/video` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 10% | none |
@@ -162,7 +164,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
-| `nexus-ai-pro/agent/sandbox` | 22 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/realtime/openai-server` | 21 KB | 6% | none |

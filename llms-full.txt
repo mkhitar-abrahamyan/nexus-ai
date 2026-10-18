@@ -2882,17 +2882,59 @@ call never runs and the model reads `Permission denied: <reason>`; an `ask` inte
 it asks about. Arguments an approver corrects are decided again, so an edit cannot reach what the
 policy denies.
 
+**A workspace.** An agent's files live in a `Workspace`, on `nexus-ai-pro/agent/workspace`, apart
+from where its code runs. A workspace reads, writes, and lists files, and may search them with
+`glob()` (`WorkspaceGlobOptions`) and `grep()` (`WorkspaceGrepOptions`, returning
+`WorkspaceMatch`es), remove them, and hold bytes. Its paths mean the same everywhere: relative to its
+root, a leading `/` naming the root, and one that would leave it refused with a `WorkspacePathError`;
+`resolveWorkspacePath()` gives a workspace of your own those same paths. A missing file rejects with
+`ENOENT`, and every method rejects rather than throws. The package ships five:
+
+| Workspace | Where the files are |
+| --- | --- |
+| `memoryWorkspace()` | In the process, from `MemoryWorkspaceOptions`, with files to start with. For tests and scratch work. |
+| `fileWorkspace()` | In a directory on disk, from `FileWorkspaceOptions`, on Node. It runs nothing. |
+| `storeWorkspace()` | In a long-term `Store` (memory, Redis, Postgres, or SQLite) under the `StoreWorkspaceOptions` namespace, so files outlive the process and every replica sees them. |
+| `readOnlyWorkspace()` | Another workspace, read and searched, with every write refused as a `WorkspaceReadOnlyError`. |
+| `compositeWorkspace()` | Several workspaces as one, each mounted at a path, as a `WorkspaceMount` that may be read-only, with `CompositeWorkspaceOptions`. |
+
+A store workspace keeps each file as its contents and a small entry in a tree, so listing and
+searching read entries, not contents, and nothing is indexed for semantic search. A composite sends
+a path to the deepest mount it is under, lists the mounts below a directory as directories, and
+searches every mount under the directory searched, through that mount's own search when one mount
+holds it all:
+
+```ts
+import { compositeWorkspace, fileWorkspace, storeWorkspace } from 'nexus-ai-pro/agent/workspace';
+
+const workspace = compositeWorkspace({
+  '/': sandbox,                                                      // the code, where commands run
+  memories: storeWorkspace(store, { namespace: ['agents', tenantId] }), // what outlives the run
+  docs: { workspace: fileWorkspace({ root: './docs' }), readOnly: true },
+});
+```
+
+`workspaceTools()` turns a workspace into `read_file`, `write_file`, and, where it can, `list_files`,
+`glob_files`, `grep_files`, and `read_media`, each declaring the path a policy sees, under the
+`WorkspaceToolsOptions` mount. `runWorkspaceConformance()` checks any workspace against the
+contract, with no test framework, and returns a `WorkspaceConformanceReport` of
+`WorkspaceConformanceCheck`s: files that round-trip and are replaced, missing files and escaping
+paths refused, listings, glob and grep with their limits, bytes, and removal. In the test suite,
+every workspace above passes it, the store workspace on each of the four stores, and so do the
+process sandbox and a composite.
+
 **A sandbox.** Commands and code belong in a sandbox the application provides — a container, a VM,
-a remote interpreter — through the `Sandbox` interface on `nexus-ai-pro/agent/sandbox`: `exec()`
-with `SandboxExecOptions` (a working directory, variables, standard input, a timeout, a signal),
-returning a `SandboxExecResult`; file reads and writes; and its `SandboxIsolation`, what it claims
-to isolate. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and,
+a remote interpreter — through the `Sandbox` interface on `nexus-ai-pro/agent/sandbox`. A sandbox is
+a workspace that can also run commands, `exec()` with `SandboxExecOptions` (a working directory,
+variables, standard input, a timeout, a signal), returning a `SandboxExecResult`, and says what it
+isolates in its `SandboxIsolation`. So a sandbox goes wherever a workspace goes, and its commands see
+its files. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and,
 where the sandbox implements them, `list_files`, `glob_files`, `grep_files`, and `read_media`,
 each declaring exactly what one call does, with files under the `mount` a policy sees
 (`/workspace` by default); `SandboxToolsOptions` chooses them.
 
-**Workspace search and media.** A sandbox may also implement `glob()`, with `SandboxGlobOptions`;
-`grep()`, with `SandboxGrepOptions`, returning `SandboxMatch`es; and `readBytes()`. The tools
+**Workspace search and media.** A sandbox searches and reads bytes as a workspace does, with
+`SandboxGlobOptions`, `SandboxGrepOptions`, and `SandboxMatch`es, the workspace's own types. The tools
 built on them are bounded: `glob_files` lists at most 500 paths and `grep_files` at most 200 lines,
 each cut to 300 characters. `read_media` reads an image, audio, or a PDF as a `ToolOutput` the model
 sees rather than as text: an image part, an audio part, or a `DocumentContent` part, each as base64,
@@ -2904,7 +2946,8 @@ a line saying it is there.
 `runSandboxConformance()` checks any sandbox against the contract, with no test framework, and
 returns a `SandboxConformanceReport` of `SandboxConformanceCheck`s: output, errors, and exit codes;
 standard input and variables, with none of the host's; a timeout that stops the command; files that
-round-trip where commands run; and paths outside the sandbox refused, as `SandboxPathError`.
+round-trip where commands run; and paths outside the sandbox refused, as `SandboxPathError`, a
+`WorkspacePathError` whose code is `SANDBOX_PATH`.
 `SandboxConformanceOptions` names the JavaScript command and the timeout it tests.
 
 `processSandbox()` is a reference for development: commands run as ordinary processes in a
@@ -3307,7 +3350,8 @@ const run = await agent.invoke(agentInput('The test fails. Fix it.'), { threadId
 | Part | What the agent gets | Built from |
 | --- | --- | --- |
 | Planning | `write_todos`: the plan, sent whole each time, each step `pending`, `in_progress`, or `completed`. It lives in the transcript, so it is checkpointed with the run and never cleared by context editing. | A tool |
-| A workspace | `read_file`, `write_file`, `list_files`, and `edit_file` in the sandbox, mounted at `/workspace`; `glob_files`, `grep_files`, and `read_media` where the sandbox can search and read bytes; and `run_command` when `commands` names any. | `sandboxTools()` |
+| A workspace | `read_file`, `write_file`, `list_files`, and `edit_file` in the `workspace`, or the sandbox, mounted at `/workspace`; `glob_files`, `grep_files`, and `read_media` where it can search and read bytes. | `workspaceTools()` |
+| Commands | `run_command` in the `sandbox`, when `commands` names any. | `sandboxTools()` |
 | Helpers | `delegate`: hands a task to a `DeepSubagent`, which runs to an answer in a fresh context, with the tools it was given, for the same principal. | `createAgent()` per helper |
 | Skills | `load_skill`: only each `DeepSkill`'s name and description sit in the prompt until the agent loads one, from its `instructions` or a `file` in the sandbox. | A tool |
 | Instruction files | `AGENTS.md`, or the files `include` names, on every call, after the system prompt. | `filesystemContext()` |
@@ -3327,6 +3371,34 @@ preset composes from `instructions`, plus the parts above. Each part can be turn
 
 A tool of your own in `tools` needs a grant in your policy, because the default policy denies what
 it does not know.
+
+## Where its files live
+
+A deep agent's files and its commands live apart. `workspace` is where its files are: what it reads,
+writes, searches, and edits, its skills' files, its `AGENTS.md`, and the results it offloads. Any
+`Workspace` will do: in memory for a run that keeps nothing, in a `Store` for files every replica
+sees and that outlive the process, on disk, or a composite of several. `sandbox` is where it runs
+commands. Without a `workspace`, the sandbox is both, as before.
+
+With both, its commands see the sandbox's own files. To let a command see the agent's code, mount
+the sandbox in the workspace:
+
+```ts
+const agent = createDeepAgent({
+  client: ai,
+  workspace: compositeWorkspace({
+    '/': sandbox,
+    memories: storeWorkspace(store, { namespace: ['agents', userId] }),
+    policies: { workspace: fileWorkspace({ root: './policies' }), readOnly: true },
+  }),
+  sandbox,
+  commands: ['node', 'npm test'],
+});
+```
+
+The agent edits the code in the sandbox and runs its tests there; what it learns goes to the store,
+where the next run in any process reads it; and the policies are there to read, never to change. A
+write to them reaches the model as a refusal.
 
 ## Helpers and skills
 
@@ -3415,6 +3487,15 @@ Afterwards the test passes when run outside the agent. Along the way:
 - the default policy refuses an unlisted command, a chained command, a write outside the workspace,
   and an ungranted tool of the application's own.
 
+Workspaces have proofs of their own:
+- The same deep agent does the same work over every workspace: in memory, on disk, in each of the
+  four stores, a process sandbox, and a composite of a sandbox, a store, and read-only docs. It reads
+  the `AGENTS.md` it is given, finds files by glob and a TODO by grep, edits the code, loads a skill
+  from a file, looks at an image, has a large result offloaded, and writes its notes; every workspace
+  ends holding the same files.
+- An agent with a composite edits code in the sandbox mounted at its root, and its test command sees
+  the edit; its notes reach the store; and the read-only docs refuse its write, which the model reads.
+
 Helpers have proofs of their own:
 - A background researcher answers only after the agent has written a note, and the agent collects
   the answer; the researcher's tool calls reach the agent's stream under its namespace.
@@ -3437,8 +3518,12 @@ Helpers have proofs of their own:
 - A helper without `remote` runs in the agent's process. A remote helper's events stay on its
   server; they do not reach the agent's stream.
 - Workspace search is bounded: `glob_files` lists at most 500 paths and `grep_files` 200 lines.
-  The reference sandbox skips files over 1 MB, binary files, `.git`, and `node_modules`. A wider
-  search is a command the sandbox runs.
+  Every workspace skips files over 1 MB and binary files when it searches, and those on disk skip
+  `.git` and `node_modules` too. A wider search is a command the sandbox runs.
+- A store workspace writes a file's contents before its entry, so a process that stops between the
+  two leaves a file that reads but is not listed until it is written again. Its search reads every
+  entry under the directory searched.
+- A composite searches a mount only if the mount has `glob`.
 - `read_media` sends a file of at most 10 MB, as the model's provider accepts it: a PDF reaches
   Anthropic, OpenAI, and Google; audio reaches Google and OpenAI's audio models, and any other model
   is told the audio is there.
@@ -12710,8 +12795,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 344 KB | 100% | none |
 | `nexus-ai-pro/config` | 336 KB | 98% | none |
 | `nexus-ai-pro/core` | 332 KB | 97% | none |
+| `nexus-ai-pro/deep-agent` | 213 KB | 62% | none |
 | `nexus-ai-pro/realtime` | 211 KB | 61% | none |
-| `nexus-ai-pro/deep-agent` | 187 KB | 54% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 137 KB | 40% | none |
 | `nexus-ai-pro/server` | 120 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 34% | none |
@@ -12732,6 +12817,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/evaluate/online` | 74 KB | 22% | none |
 | `nexus-ai-pro/images` | 73 KB | 21% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
+| `nexus-ai-pro/agent/sandbox/container` | 60 KB | 17% | none |
 | `nexus-ai-pro/providers/cohere` | 58 KB | 17% | none |
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
@@ -12740,6 +12826,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/batch/openai` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
 | `nexus-ai-pro/models/data` | 51 KB | 15% | none |
+| `nexus-ai-pro/agent/sandbox` | 48 KB | 14% | none |
 | `nexus-ai-pro/evaluate` | 46 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
@@ -12751,10 +12838,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 12% | none |
 | `nexus-ai-pro/ops` | 40 KB | 12% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 12% | none |
+| `nexus-ai-pro/agent/workspace` | 38 KB | 11% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 11% | none |
 | `nexus-ai-pro/models` | 37 KB | 11% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
-| `nexus-ai-pro/agent/sandbox/container` | 35 KB | 10% | none |
 | `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/video` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 10% | none |
@@ -12776,7 +12863,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 7% | none |
-| `nexus-ai-pro/agent/sandbox` | 22 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/realtime/openai-server` | 21 KB | 6% | none |
@@ -13066,7 +13152,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 182 entry points, 146 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 183 entry points, 147 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |
@@ -13113,6 +13199,7 @@ These run anywhere, and load a Node module only when a feature that needs it is 
 | --- | --- |
 | `nexus-ai-pro/images/evals` | `node:zlib`; the `Buffer` global |
 | `nexus-ai-pro/embeddings/batch` | `node:crypto`; the `Buffer` global |
+| `nexus-ai-pro/agent/workspace` | `node:fs/promises`, `node:path` |
 | `nexus-ai-pro/agent/interpreter` | `node:worker_threads` |
 | `nexus-ai-pro/video` | `node:crypto`; the `Buffer` global |
 | `nexus-ai-pro/loaders/text` | `node:fs/promises`, `node:path` |

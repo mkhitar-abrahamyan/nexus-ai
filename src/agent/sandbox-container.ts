@@ -97,7 +97,10 @@ export function containerSandbox(options: ContainerSandboxOptions): Sandbox {
     const unified = file.replace(/\\/g, '/');
     if (unified.includes('\0')) throw new SandboxPathError(file);
     const parts: string[] = [];
-    for (const segment of (unified.startsWith('/') ? unified : `${workdir}/${unified}`).split('/')) {
+    // An absolute path under the workdir is taken as it is; any other leading slash names the
+    // workdir, as it does in every workspace.
+    const rooted = unified === workdir || unified.startsWith(`${workdir}/`);
+    for (const segment of (rooted ? unified : `${workdir}/${unified.replace(/^\/+/, '')}`).split('/')) {
       if (segment === '' || segment === '.') continue;
       if (segment !== '..') parts.push(segment);
       else if (parts.pop() === undefined) throw new SandboxPathError(file);

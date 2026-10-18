@@ -13,6 +13,7 @@ import { type ContextOffloadOptions, filesystemContext } from '../agent/middlewa
 import { toolSelector, type ToolSelectorOptions } from '../agent/middleware/tool-selector.js';
 import { permissionPolicy, type PermissionPolicyLike } from '../agent/permissions.js';
 import { type Sandbox, sandboxTools } from '../agent/sandbox.js';
+import { type Workspace, workspaceTools } from '../agent/workspace.js';
 import { tool } from '../agent/tool.js';
 import type { ToolDefinition } from '../types/messages.js';
 import { type DeepHelperLimits, type DeepRemoteHelper, helperTools } from './helpers.js';
@@ -55,7 +56,7 @@ export interface DeepSkill {
   description: string;
   /** The instructions themselves. */
   instructions?: string;
-  /** A file in the sandbox that holds them, read when the skill is loaded, instead of `instructions`. */
+  /** A file in the workspace that holds them, read when the skill is loaded, instead of `instructions`. */
   file?: string;
 }
 
@@ -64,13 +65,21 @@ export interface DeepAgentOptions extends Omit<CreateAgentOptions, 'systemPrompt
   /** What this agent is for. Placed before the deep agent's own working instructions. */
   instructions?: string;
   /**
-   * The workspace the agent reads, writes, and runs commands in, through `sandboxTools()`, mounted
-   * at `/workspace`. Without one, the agent has no filesystem and no offloading.
+   * Where the agent's files live: what it reads, writes, searches, and edits, its skills' files, its
+   * `include` files, and the results it offloads, mounted at `/workspace`. Any `Workspace`: in
+   * memory, on disk, in a store, a sandbox, or a composite of several. Defaults to the sandbox;
+   * without either, the agent has no files and no offloading.
+   */
+  workspace?: Workspace;
+  /**
+   * Where the agent runs commands, through `run_command`. Without `workspace`, it is also where the
+   * agent's files live, so its commands see them; with both, its commands see the sandbox's own
+   * files, unless the sandbox is mounted in the workspace.
    */
   sandbox?: Sandbox;
   /**
    * Commands the agent may run in the sandbox, as prefixes a permission policy grants: `node`,
-   * `npm test`, `git status`. Without any, there is no `run_command` tool.
+   * `npm test`, `git status`. Without any, or without a sandbox, there is no `run_command` tool.
    */
   commands?: readonly string[];
   /** Records a plan with `write_todos` and keeps it current. Defaults to true. */
@@ -95,10 +104,10 @@ export interface DeepAgentOptions extends Omit<CreateAgentOptions, 'systemPrompt
   maxBackgroundHelpers?: number;
   /** Skills the agent can load through `load_skill`. */
   skills?: readonly DeepSkill[];
-  /** Instruction files from the sandbox the model sees on every call. Defaults to `AGENTS.md`. */
+  /** Instruction files from the workspace the model sees on every call. Defaults to `AGENTS.md`. */
   include?: readonly string[];
   /**
-   * Writes tool results longer than the limit to `.context/` in the sandbox, leaving a preview and the
+   * Writes tool results longer than the limit to `.context/` in the workspace, leaving a preview and the
    * path. Defaults to results over 20,000 characters; `false` keeps them whole.
    */
   offload?: ContextOffloadOptions | false;
@@ -164,6 +173,7 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
   const {
     instructions,
     sandbox,
+    workspace = sandbox,
     commands = [],
     planning = true,
     interpreter,
@@ -181,17 +191,19 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
     ...agentOptions
   } = options;
 
-  const workspace: ToolDefinition[] = sandbox
-    ? [...sandboxTools(sandbox, { shell: commands.length > 0, mount: MOUNT }), editFileTool(sandbox)]
-    : [];
+  // The files are the workspace's, and commands run in the sandbox, which may be the same one.
+  const fileTools: ToolDefinition[] = [
+    ...(sandbox && commands.length > 0 ? sandboxTools(sandbox, { files: false, mount: MOUNT }) : []),
+    ...(workspace ? [...workspaceTools(workspace, { mount: MOUNT }), editFileTool(workspace)] : []),
+  ];
   // A helper has no checkpoints, and code cannot pause, so a tool that needs approval is called only
   // by the agent itself, directly.
   const approved = new Set(Object.keys(agentOptions.interruptOn ?? {}));
   const policy = permissions === false ? undefined : (permissions ?? defaultPolicy(commands, Boolean(interpreter)));
   const direct: ToolDefinition[] = [
     ...(planning ? [writeTodosTool()] : []),
-    ...(skills.length > 0 ? [loadSkillTool(skills, sandbox)] : []),
-    ...workspace,
+    ...(skills.length > 0 ? [loadSkillTool(skills, workspace)] : []),
+    ...fileTools,
     ...extraTools,
   ];
   const own: ToolDefinition[] = [
@@ -224,10 +236,10 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
   const tools = [...own, ...helping];
 
   const kit: AgentMiddleware[] = [
-    ...(sandbox && (include.length > 0 || offload !== false)
+    ...(workspace && (include.length > 0 || offload !== false)
       ? [
           filesystemContext({
-            source: sandbox,
+            source: workspace,
             include,
             ...(offload === false ? {} : { offload: { overChars: 20_000, ...offload } }),
           }),
@@ -252,11 +264,11 @@ export function createDeepAgent(options: DeepAgentOptions): AgentGraph {
     ...agentOptions,
     systemPrompt: systemPrompt(instructions, {
       planning,
-      sandbox: Boolean(sandbox),
-      search: Boolean(sandbox?.glob && sandbox.grep),
-      media: Boolean(sandbox?.readBytes),
+      sandbox: Boolean(workspace),
+      search: Boolean(workspace?.glob && workspace.grep),
+      media: Boolean(workspace?.readBytes),
       code: interpreter?.language,
-      commands,
+      commands: sandbox ? commands : [],
       subagents,
       create: Boolean(createHelpers),
       skills,
@@ -375,7 +387,7 @@ function writeTodosTool(): ToolDefinition {
 }
 
 /** A precise edit: replaces one exact occurrence of a text, so a change never rewrites a whole file. */
-function editFileTool(sandbox: Sandbox): ToolDefinition {
+function editFileTool(workspace: Workspace): ToolDefinition {
   const local = (file: unknown) =>
     String(file ?? '')
       .replace(/\\/g, '/')
@@ -392,12 +404,12 @@ function editFileTool(sandbox: Sandbox): ToolDefinition {
     capabilities: (args) => [`filesystem:write:${MOUNT}/${local(args.path)}`],
     execute: async ({ path, old_text: oldText, new_text: newText }) => {
       const file = local(path);
-      const text = await sandbox.readFile(file);
+      const text = await workspace.readFile(file);
       const count = text.split(String(oldText)).length - 1;
       if (count === 0) throw new Error(`old_text was not found in ${file}`);
       if (count > 1)
         throw new Error(`old_text appears ${count} times in ${file}; include more context so it appears once`);
-      await sandbox.writeFile(
+      await workspace.writeFile(
         file,
         text.replace(String(oldText), () => String(newText)),
       );
@@ -407,7 +419,7 @@ function editFileTool(sandbox: Sandbox): ToolDefinition {
 }
 
 /** Progressive disclosure: only a skill's description is in context until the agent loads it. */
-function loadSkillTool(skills: readonly DeepSkill[], sandbox: Sandbox | undefined): ToolDefinition {
+function loadSkillTool(skills: readonly DeepSkill[], workspace: Workspace | undefined): ToolDefinition {
   const byName = new Map(skills.map((skill) => [skill.name, skill]));
   return tool<{ name: string }>({
     name: 'load_skill',
@@ -422,7 +434,7 @@ function loadSkillTool(skills: readonly DeepSkill[], sandbox: Sandbox | undefine
       const skill = byName.get(String(name));
       if (!skill) throw new Error(`No skill named "${String(name)}"`);
       if (skill.instructions !== undefined) return skill.instructions;
-      if (skill.file && sandbox) return sandbox.readFile(skill.file);
+      if (skill.file && workspace) return workspace.readFile(skill.file);
       throw new Error(`Skill "${skill.name}" has no instructions`);
     },
   });

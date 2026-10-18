@@ -1,22 +1,22 @@
 /**
- * The sandbox contract: where an agent's commands and code run, and where its files live.
+ * The sandbox contract: where an agent's commands and code run. A sandbox is a `Workspace` that can
+ * also run commands, and says how it is isolated, so its files are the files its commands see.
  *
  * The package ships the contract and a conformance suite, not the isolation: a container, a VM, a
  * remote interpreter, or a hosted sandbox fills the `Sandbox` interface. `processSandbox()` is a
  * reference for development, which runs commands as ordinary processes; it says so in its
  * `isolation`, and is never a security boundary.
  */
-import type { ContentPart, ToolDefinition, ToolOutput } from '../types/messages.js';
-import { encodeBase64 } from '../utils/base64.js';
+import type { ToolDefinition } from '../types/messages.js';
+import { directoryFiles } from './files.js';
 import {
-  GREP_FILE_BYTES,
-  GREP_TOTAL_BYTES,
-  globMatcher,
-  MEDIA_TYPES,
-  matchingLines,
-  SKIPPED_DIRECTORIES,
-  WALK_LIMIT,
-} from './glob.js';
+  type Workspace,
+  type WorkspaceGlobOptions,
+  type WorkspaceGrepOptions,
+  type WorkspaceMatch,
+  WorkspacePathError,
+  workspaceTools,
+} from './workspace.js';
 
 /** Options for one command. */
 export interface SandboxExecOptions {
@@ -46,35 +46,14 @@ export interface SandboxExecResult {
   durationMs: number;
 }
 
-/** Options for `Sandbox.glob()`. */
-export interface SandboxGlobOptions {
-  /** The directory to search, inside the sandbox. Defaults to its root. */
-  cwd?: string;
-  /** The most paths returned. Defaults to 1,000. */
-  limit?: number;
-}
+/** Options for `Sandbox.glob()`: a workspace's. */
+export type SandboxGlobOptions = WorkspaceGlobOptions;
 
-/** Options for `Sandbox.grep()`. */
-export interface SandboxGrepOptions {
-  /** The directory to search, inside the sandbox. Defaults to its root. */
-  cwd?: string;
-  /** Searches only the files whose paths, relative to `cwd`, match this glob. */
-  glob?: string;
-  /** Matches without regard to case. */
-  ignoreCase?: boolean;
-  /** The most matching lines returned. Defaults to 200. */
-  limit?: number;
-}
+/** Options for `Sandbox.grep()`: a workspace's. */
+export type SandboxGrepOptions = WorkspaceGrepOptions;
 
-/** One line `Sandbox.grep()` matched. */
-export interface SandboxMatch {
-  /** The file, relative to the sandbox's root. */
-  file: string;
-  /** The line's number, counting from 1. */
-  line: number;
-  /** The line, cut to 300 characters. */
-  text: string;
-}
+/** One line `Sandbox.grep()` matched: a workspace's match. */
+export type SandboxMatch = WorkspaceMatch;
 
 /** What a sandbox claims to isolate. The conformance suite checks the claims it can observe. */
 export interface SandboxIsolation {
@@ -86,49 +65,29 @@ export interface SandboxIsolation {
   processes: boolean;
 }
 
-/** Where an agent's commands, code, and files go. The application provides one. */
-export interface Sandbox {
-  /** Names the sandbox in reports. */
-  readonly name: string;
+/**
+ * Where an agent's commands and code run: a workspace that can also run commands, and says what it
+ * isolates. The application provides one.
+ */
+export interface Sandbox extends Workspace {
   /** What it isolates. */
   readonly isolation: SandboxIsolation;
-  /** Runs a command line in the sandbox. */
+  /** Runs a command line in the sandbox, where its files are. */
   exec(command: string, options?: SandboxExecOptions): Promise<SandboxExecResult>;
-  /** Reads a file, by a path inside the sandbox. */
-  readFile(file: string): Promise<string>;
-  /** Writes a file, creating its directory. */
-  writeFile(file: string, content: string): Promise<void>;
-  /** Lists a directory's entries. */
-  listFiles?(directory?: string): Promise<string[]>;
-  /** Removes a file or directory. */
-  removeFile?(file: string): Promise<void>;
-  /**
-   * The files under a directory whose paths match a glob, such as `src/**\/*.ts`, sorted. The glob
-   * matches paths relative to `cwd`; the paths returned are relative to the root, as `readFile`
-   * takes them. Returns at most `limit`.
-   */
-  glob?(pattern: string, options?: SandboxGlobOptions): Promise<string[]>;
-  /**
-   * The lines matching a regular expression in the files under a directory, at most `limit`. Large
-   * files and binary files are skipped.
-   */
-  grep?(pattern: string, options?: SandboxGrepOptions): Promise<SandboxMatch[]>;
-  /** Reads a file's bytes, for an image, audio, or a document. */
-  readBytes?(file: string): Promise<Uint8Array>;
   /** Releases the sandbox. */
   dispose?(): Promise<void>;
 }
 
-/** Raised when a path would leave the sandbox. */
-export class SandboxPathError extends Error {
+/** Raised when a path would leave the sandbox: a `WorkspacePathError` whose code is `SANDBOX_PATH`. */
+export class SandboxPathError extends WorkspacePathError {
   /** Always `SANDBOX_PATH`. */
-  readonly code = 'SANDBOX_PATH';
+  override readonly code = 'SANDBOX_PATH';
 
   constructor(
     /** The path that was refused. */
-    readonly path: string,
+    path: string,
   ) {
-    super(`"${path}" is outside the sandbox`);
+    super(path, `"${path}" is outside the sandbox`);
     this.name = 'SandboxPathError';
   }
 }
@@ -159,51 +118,13 @@ export interface ProcessSandboxOptions {
 export function processSandbox(options: ProcessSandboxOptions): Sandbox {
   // Node's modules load on first use, so importing this module needs no Node: a deep agent over a
   // container sandbox runs on any runtime, and only a process sandbox needs Node.
+  const files = directoryFiles(options.root, (path) => new SandboxPathError(path));
   const ready = (async () => {
-    const [{ spawn }, fs, { dirname, isAbsolute, join, relative, resolve }] = await Promise.all([
-      import('node:child_process'),
-      import('node:fs/promises'),
-      import('node:path'),
-    ]);
-    const root = resolve(options.root);
-    await fs.mkdir(root, { recursive: true });
-    const inside = (file: string): string => {
-      const resolved = resolve(root, file);
-      const fromRoot = relative(root, resolved);
-      if (fromRoot.startsWith('..') || isAbsolute(fromRoot)) throw new SandboxPathError(file);
-      return resolved;
-    };
-    return { spawn, fs, dirname, join, relative, root, inside };
+    const [{ spawn }, handle] = await Promise.all([import('node:child_process'), files.ready]);
+    return { spawn, root: handle.root, inside: handle.inside };
   })();
-  // A root that cannot be created fails every call; it is never an unhandled rejection on its own.
   ready.catch(() => undefined);
   const maxOutput = options.maxOutputBytes ?? 1_048_576;
-
-  // Workspace search walks the tree itself, breadth first and bounded, and never follows a link, so
-  // it cannot leave the root.
-  const walk = async (directory: string) => {
-    const { fs, join, relative, root, inside } = await ready;
-    const start = inside(directory);
-    const slash = (path: string) => path.replace(/\\/g, '/');
-    const files: Array<{ full: string; fromRoot: string; fromStart: string }> = [];
-    const queue = [start];
-    let walked = 0;
-    while (queue.length > 0 && walked < WALK_LIMIT) {
-      const current = queue.shift() as string;
-      const entries = await fs.readdir(current, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        walked += 1;
-        if (walked > WALK_LIMIT) break;
-        const full = join(current, entry.name);
-        if (entry.isDirectory()) {
-          if (!SKIPPED_DIRECTORIES.has(entry.name)) queue.push(full);
-        } else if (entry.isFile()) {
-          files.push({ full, fromRoot: slash(relative(root, full)), fromStart: slash(relative(start, full)) });
-        }
-      }
-    }
-    return files.sort((a, b) => (a.fromRoot < b.fromRoot ? -1 : a.fromRoot > b.fromRoot ? 1 : 0));
-  };
 
   return {
     name: 'process (development only)',
@@ -263,56 +184,14 @@ export function processSandbox(options: ProcessSandboxOptions): Sandbox {
         else child.stdin?.end();
       });
     },
-    async readFile(file) {
-      const { fs, inside } = await ready;
-      return fs.readFile(inside(file), 'utf8');
-    },
-    async writeFile(file, content) {
-      const { fs, dirname, inside } = await ready;
-      const target = inside(file);
-      await fs.mkdir(dirname(target), { recursive: true });
-      await fs.writeFile(target, content, 'utf8');
-    },
-    async listFiles(directory = '.') {
-      const { fs, inside } = await ready;
-      return (await fs.readdir(inside(directory))).sort();
-    },
-    async removeFile(file) {
-      const { fs, root, inside } = await ready;
-      const target = inside(file);
-      if (target === root) throw new SandboxPathError(file);
-      await fs.rm(target, { recursive: true, force: true });
-    },
-    async glob(pattern, globOptions = {}) {
-      const matches = globMatcher(pattern);
-      return (await walk(globOptions.cwd ?? '.'))
-        .filter((file) => matches(file.fromStart))
-        .slice(0, globOptions.limit ?? 1_000)
-        .map((file) => file.fromRoot);
-    },
-    async grep(pattern, grepOptions = {}) {
-      const { fs } = await ready;
-      const expression = new RegExp(pattern, grepOptions.ignoreCase ? 'i' : '');
-      const only = grepOptions.glob ? globMatcher(grepOptions.glob) : undefined;
-      const limit = grepOptions.limit ?? 200;
-      const found: SandboxMatch[] = [];
-      let scanned = 0;
-      for (const file of await walk(grepOptions.cwd ?? '.')) {
-        if (only && !only(file.fromStart)) continue;
-        const size = (await fs.stat(file.full).catch(() => undefined))?.size;
-        if (size === undefined || size > GREP_FILE_BYTES) continue;
-        scanned += size;
-        if (scanned > GREP_TOTAL_BYTES) break;
-        const lines = matchingLines(await fs.readFile(file.full), expression, limit - found.length);
-        found.push(...lines.map((match) => ({ file: file.fromRoot, ...match })));
-        if (found.length >= limit) break;
-      }
-      return found;
-    },
-    async readBytes(file) {
-      const { fs, inside } = await ready;
-      return fs.readFile(inside(file));
-    },
+    readFile: files.readFile,
+    writeFile: files.writeFile,
+    listFiles: files.listFiles,
+    removeFile: files.removeFile,
+    glob: files.glob,
+    grep: files.grep,
+    readBytes: files.readBytes,
+    writeBytes: files.writeBytes,
   };
 }
 
@@ -358,14 +237,6 @@ export interface SandboxToolsOptions {
  */
 export function sandboxTools(sandbox: Sandbox, options: SandboxToolsOptions = {}): ToolDefinition[] {
   const mount = (options.mount ?? '/workspace').replace(/\/+$/, '');
-  // A model may name a file as `notes.txt` or as `/workspace/notes.txt`; both are the same file.
-  const local = (file: unknown): string => {
-    const unified = String(file ?? '.').replace(/\\/g, '/');
-    const relative =
-      unified === mount ? '.' : unified.startsWith(`${mount}/`) ? unified.slice(mount.length + 1) : unified;
-    return relative.replace(/^\/+/, '') || '.';
-  };
-  const mounted = (file: unknown) => `${mount}/${local(file)}`;
   const tools: ToolDefinition[] = [];
   if (options.shell !== false) {
     tools.push({
@@ -387,133 +258,13 @@ export function sandboxTools(sandbox: Sandbox, options: SandboxToolsOptions = {}
   }
   if (options.files !== false) {
     tools.push(
-      {
-        name: 'read_file',
-        description: `Reads a text file in the sandbox. Paths are relative to ${mount}.`,
-        parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-        capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
-        execute: async (args) => sandbox.readFile(local(args.path)),
-      },
-      {
-        name: 'write_file',
-        description: `Writes a text file in the sandbox, creating its directory. Paths are relative to ${mount}.`,
-        parameters: {
-          type: 'object',
-          properties: { path: { type: 'string' }, content: { type: 'string' } },
-          required: ['path', 'content'],
-        },
-        capabilities: (args) => [`filesystem:write:${mounted(args.path)}`],
-        execute: async (args) => {
-          await sandbox.writeFile(local(args.path), String(args.content ?? ''));
-          return { written: local(args.path) };
-        },
-      },
+      ...workspaceTools(sandbox, {
+        mount,
+        ...(options.maxMediaBytes === undefined ? {} : { maxMediaBytes: options.maxMediaBytes }),
+      }),
     );
-    if (sandbox.listFiles) {
-      const list = sandbox.listFiles.bind(sandbox);
-      tools.push({
-        name: 'list_files',
-        description: 'Lists the entries of a directory in the sandbox.',
-        parameters: { type: 'object', properties: { path: { type: 'string' } } },
-        capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
-        execute: async (args) => list(local(args.path)),
-      });
-    }
-    if (sandbox.glob) {
-      const glob = sandbox.glob.bind(sandbox);
-      tools.push({
-        name: 'glob_files',
-        description: `Finds files by a glob, such as **/*.ts or src/*.{js,json}, and lists their paths relative to ${mount}, at most ${GLOB_LIMIT}.`,
-        parameters: {
-          type: 'object',
-          properties: {
-            pattern: { type: 'string', description: 'The glob the paths must match' },
-            path: { type: 'string', description: 'The directory to search. Defaults to the whole workspace' },
-          },
-          required: ['pattern'],
-        },
-        capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
-        execute: async (args) => {
-          const files = await glob(String(args.pattern ?? '**'), { cwd: local(args.path), limit: GLOB_LIMIT + 1 });
-          if (files.length === 0) return 'No files match.';
-          const shown = files.slice(0, GLOB_LIMIT).join('\n');
-          return files.length > GLOB_LIMIT ? `${shown}\n[more files match: narrow the glob]` : shown;
-        },
-      });
-    }
-    if (sandbox.grep) {
-      const grep = sandbox.grep.bind(sandbox);
-      tools.push({
-        name: 'grep_files',
-        description: `Searches files for lines matching a regular expression and lists each as path:line: text, at most ${GREP_LIMIT}. Large and binary files are skipped.`,
-        parameters: {
-          type: 'object',
-          properties: {
-            pattern: { type: 'string', description: 'The regular expression to find' },
-            path: { type: 'string', description: 'The directory to search. Defaults to the whole workspace' },
-            glob: { type: 'string', description: 'Searches only files matching this glob, such as **/*.ts' },
-            ignore_case: { type: 'boolean', description: 'Matches without regard to case' },
-          },
-          required: ['pattern'],
-        },
-        capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
-        execute: async (args) => {
-          const found = await grep(String(args.pattern ?? ''), {
-            cwd: local(args.path),
-            ...(typeof args.glob === 'string' && args.glob ? { glob: args.glob } : {}),
-            ignoreCase: args.ignore_case === true,
-            limit: GREP_LIMIT + 1,
-          });
-          if (found.length === 0) return 'No lines match.';
-          const shown = found
-            .slice(0, GREP_LIMIT)
-            .map((match) => `${match.file}:${match.line}: ${match.text}`)
-            .join('\n');
-          return found.length > GREP_LIMIT ? `${shown}\n[more lines match: narrow the search]` : shown;
-        },
-      });
-    }
-    if (sandbox.readBytes) {
-      const readBytes = sandbox.readBytes.bind(sandbox);
-      const maxBytes = options.maxMediaBytes ?? 10 * 1_048_576;
-      tools.push({
-        name: 'read_media',
-        description: `Shows you an image (PNG, JPEG, GIF, WebP), audio (WAV, MP3, FLAC, OGG, AAC), or a PDF in the sandbox as content you see or hear, not as text. Paths are relative to ${mount}.`,
-        parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-        capabilities: (args) => [`filesystem:read:${mounted(args.path)}`],
-        execute: async (args) => {
-          const file = local(args.path);
-          const mimeType = MEDIA_TYPES[file.split('.').pop()?.toLowerCase() ?? ''];
-          if (!mimeType) throw new Error(`${file} is not an image, audio, or PDF file; read text with read_file`);
-          const bytes = await readBytes(file);
-          if (bytes.byteLength > maxBytes) {
-            throw new Error(`${file} is ${bytes.byteLength} bytes, over the ${maxBytes}-byte limit for media`);
-          }
-          return mediaOutput(file, mimeType, bytes);
-        },
-      });
-    }
   }
   return tools;
-}
-
-/** The most paths `glob_files` lists. */
-const GLOB_LIMIT = 500;
-/** The most lines `grep_files` lists. */
-const GREP_LIMIT = 200;
-
-/** A media file as content the model sees or hears, after a line naming it. Base64 survives a checkpoint. */
-function mediaOutput(file: string, mimeType: string, bytes: Uint8Array): ToolOutput {
-  const data = encodeBase64(bytes);
-  const part: ContentPart = mimeType.startsWith('image/')
-    ? { type: 'image', source: { base64: data, mimeType } }
-    : mimeType.startsWith('audio/')
-      ? { type: 'audio', source: { base64: data, format: mimeType.slice('audio/'.length) } }
-      : { type: 'document', source: { base64: data, mimeType }, filename: file.split('/').pop() ?? file };
-  return {
-    type: 'tool_output',
-    content: [{ type: 'text', text: `${file} (${mimeType}, ${bytes.byteLength} bytes)` }, part],
-  };
 }
 
 /** One conformance check's result. */

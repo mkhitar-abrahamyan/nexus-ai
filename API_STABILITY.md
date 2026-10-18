@@ -41,6 +41,25 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.11 stage (Unreleased)
+
+Everything 2.11 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- `nexus-ai-pro/agent/workspace`: `Workspace`, `WorkspaceGlobOptions`, `WorkspaceGrepOptions`,
+  `WorkspaceMatch`, `WorkspacePathError`, `WorkspaceReadOnlyError`, `resolveWorkspacePath()`,
+  `memoryWorkspace()`, `fileWorkspace()`, `storeWorkspace()`, `readOnlyWorkspace()`,
+  `compositeWorkspace()` and their options, `WorkspaceMount`, `workspaceTools()` and
+  `WorkspaceToolsOptions`, and `runWorkspaceConformance()` with its report and check;
+- `DeepAgentOptions.workspace`;
+- `Sandbox` extends `Workspace`, so it gains `writeBytes()`, optional; `SandboxGlobOptions`,
+  `SandboxGrepOptions`, and `SandboxMatch` are the workspace's types under their old names, and
+  `SandboxPathError` is a `WorkspacePathError`.
+
+Changed, each to keep a promise the surface already made:
+- A sandbox's file methods take a leading `/` as the sandbox's root, as the workspace contract
+  says; a path that leaves the root is still refused.
+
 ## 2.10 stage (2.10.0)
 
 Everything 2.10 adds is stable from the start and additive, unless this section says otherwise.

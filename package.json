@@ -630,6 +630,16 @@
         "default": "./dist-cjs/agent/sandbox.js"
       }
     },
+    "./agent/workspace": {
+      "import": {
+        "types": "./dist/agent/workspace.d.ts",
+        "default": "./dist/agent/workspace.js"
+      },
+      "require": {
+        "types": "./dist-cjs/agent/workspace.d.ts",
+        "default": "./dist-cjs/agent/workspace.js"
+      }
+    },
     "./agent/sandbox/container": {
       "import": {
         "types": "./dist/agent/sandbox-container.d.ts",
@@ -2237,6 +2247,9 @@
       ],
       "agent/sandbox": [
         "dist-cjs/agent/sandbox.d.ts"
+      ],
+      "agent/workspace": [
+        "dist-cjs/agent/workspace.d.ts"
       ],
       "agent/sandbox/container": [
         "dist-cjs/agent/sandbox-container.d.ts"

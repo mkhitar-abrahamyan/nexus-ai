@@ -1,9 +1,9 @@
 import type { Message } from '../../types/messages.js';
 import type { AgentMiddleware } from '../create-agent.js';
-import type { Sandbox } from '../sandbox.js';
+import type { Workspace } from '../workspace.js';
 
-/** Where `filesystemContext()` reads and writes: a `Sandbox`, or anything with the same file methods. */
-export type FilesystemContextSource = Pick<Sandbox, 'readFile'> & Partial<Pick<Sandbox, 'writeFile' | 'listFiles'>>;
+/** Where `filesystemContext()` reads and writes: a `Workspace` or a `Sandbox`, or anything with the same file methods. */
+export type FilesystemContextSource = Pick<Workspace, 'readFile'> & Partial<Pick<Workspace, 'writeFile' | 'listFiles'>>;
 
 /** Where large tool results go instead of the transcript. */
 export interface ContextOffloadOptions {

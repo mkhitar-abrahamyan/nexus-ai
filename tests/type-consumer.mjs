@@ -327,6 +327,13 @@ import { createRealtimeConversation } from 'nexus-ai-pro/realtime/conversation';
 import { OpenAIWebRTCTransport } from 'nexus-ai-pro/realtime/openai-webrtc';
 import { OpenAIWebSocketTransport } from 'nexus-ai-pro/realtime/openai-websocket';
 import { GeminiLiveTransport } from 'nexus-ai-pro/realtime/gemini-live';
+import {
+  compositeWorkspace,
+  memoryWorkspace,
+  readOnlyWorkspace,
+  storeWorkspace,
+  type Workspace,
+} from 'nexus-ai-pro/agent/workspace';
 import { answerOpenAISipCalls, type OpenAISipCall } from 'nexus-ai-pro/realtime/openai-sip';
 import { createOpenAIRealtimeSessionEndpoint } from 'nexus-ai-pro/realtime/openai-server';
 import { MockRealtimeTransport as DirectMockRealtimeTransport } from 'nexus-ai-pro/realtime/mock';
@@ -1061,6 +1068,13 @@ void realtimeExecutor;
 void realtimeWebRTC;
 void realtimeWebSocket;
 void geminiLive;
+const consumerWorkspace: Workspace = compositeWorkspace({
+  '/': memoryWorkspace({ files: { 'AGENTS.md': 'Be brief.' } }),
+  docs: { workspace: readOnlyWorkspace(memoryWorkspace()), readOnly: true },
+});
+const storedWorkspace: Workspace = storeWorkspace({} as never, { namespace: ['agents', 'ana'] });
+void consumerWorkspace;
+void storedWorkspace;
 const sipCalls = answerOpenAISipCalls({
   apiKey: 'server-only',
   webhookSecret: 'whsec_c2VjcmV0',

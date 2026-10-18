@@ -39,7 +39,8 @@ const run = await agent.invoke(agentInput('The test fails. Fix it.'), { threadId
 | Part | What the agent gets | Built from |
 | --- | --- | --- |
 | Planning | `write_todos`: the plan, sent whole each time, each step `pending`, `in_progress`, or `completed`. It lives in the transcript, so it is checkpointed with the run and never cleared by context editing. | A tool |
-| A workspace | `read_file`, `write_file`, `list_files`, and `edit_file` in the sandbox, mounted at `/workspace`; `glob_files`, `grep_files`, and `read_media` where the sandbox can search and read bytes; and `run_command` when `commands` names any. | `sandboxTools()` |
+| A workspace | `read_file`, `write_file`, `list_files`, and `edit_file` in the `workspace`, or the sandbox, mounted at `/workspace`; `glob_files`, `grep_files`, and `read_media` where it can search and read bytes. | `workspaceTools()` |
+| Commands | `run_command` in the `sandbox`, when `commands` names any. | `sandboxTools()` |
 | Helpers | `delegate`: hands a task to a `DeepSubagent`, which runs to an answer in a fresh context, with the tools it was given, for the same principal. | `createAgent()` per helper |
 | Skills | `load_skill`: only each `DeepSkill`'s name and description sit in the prompt until the agent loads one, from its `instructions` or a `file` in the sandbox. | A tool |
 | Instruction files | `AGENTS.md`, or the files `include` names, on every call, after the system prompt. | `filesystemContext()` |
@@ -59,6 +60,34 @@ preset composes from `instructions`, plus the parts above. Each part can be turn
 
 A tool of your own in `tools` needs a grant in your policy, because the default policy denies what
 it does not know.
+
+## Where its files live
+
+A deep agent's files and its commands live apart. `workspace` is where its files are: what it reads,
+writes, searches, and edits, its skills' files, its `AGENTS.md`, and the results it offloads. Any
+`Workspace` will do: in memory for a run that keeps nothing, in a `Store` for files every replica
+sees and that outlive the process, on disk, or a composite of several. `sandbox` is where it runs
+commands. Without a `workspace`, the sandbox is both, as before.
+
+With both, its commands see the sandbox's own files. To let a command see the agent's code, mount
+the sandbox in the workspace:
+
+```ts
+const agent = createDeepAgent({
+  client: ai,
+  workspace: compositeWorkspace({
+    '/': sandbox,
+    memories: storeWorkspace(store, { namespace: ['agents', userId] }),
+    policies: { workspace: fileWorkspace({ root: './policies' }), readOnly: true },
+  }),
+  sandbox,
+  commands: ['node', 'npm test'],
+});
+```
+
+The agent edits the code in the sandbox and runs its tests there; what it learns goes to the store,
+where the next run in any process reads it; and the policies are there to read, never to change. A
+write to them reaches the model as a refusal.
 
 ## Helpers and skills
 
@@ -147,6 +176,15 @@ Afterwards the test passes when run outside the agent. Along the way:
 - the default policy refuses an unlisted command, a chained command, a write outside the workspace,
   and an ungranted tool of the application's own.
 
+Workspaces have proofs of their own:
+- The same deep agent does the same work over every workspace: in memory, on disk, in each of the
+  four stores, a process sandbox, and a composite of a sandbox, a store, and read-only docs. It reads
+  the `AGENTS.md` it is given, finds files by glob and a TODO by grep, edits the code, loads a skill
+  from a file, looks at an image, has a large result offloaded, and writes its notes; every workspace
+  ends holding the same files.
+- An agent with a composite edits code in the sandbox mounted at its root, and its test command sees
+  the edit; its notes reach the store; and the read-only docs refuse its write, which the model reads.
+
 Helpers have proofs of their own:
 - A background researcher answers only after the agent has written a note, and the agent collects
   the answer; the researcher's tool calls reach the agent's stream under its namespace.
@@ -169,8 +207,12 @@ Helpers have proofs of their own:
 - A helper without `remote` runs in the agent's process. A remote helper's events stay on its
   server; they do not reach the agent's stream.
 - Workspace search is bounded: `glob_files` lists at most 500 paths and `grep_files` 200 lines.
-  The reference sandbox skips files over 1 MB, binary files, `.git`, and `node_modules`. A wider
-  search is a command the sandbox runs.
+  Every workspace skips files over 1 MB and binary files when it searches, and those on disk skip
+  `.git` and `node_modules` too. A wider search is a command the sandbox runs.
+- A store workspace writes a file's contents before its entry, so a process that stops between the
+  two leaves a file that reads but is not listed until it is written again. Its search reads every
+  entry under the directory searched.
+- A composite searches a mount only if the mount has `glob`.
 - `read_media` sends a file of at most 10 MB, as the model's provider accepts it: a PDF reaches
   Anthropic, OpenAI, and Google; audio reaches Google and OpenAI's audio models, and any other model
   is told the audio is there.

@@ -136,6 +136,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/agent/permissions', exports: ['permissionPolicy', 'parseCapability', 'normalizePath'] },
   { specifier: 'nexus-ai-pro/agent/sandbox', exports: ['processSandbox', 'sandboxTools', 'runSandboxConformance'] },
   {
+    specifier: 'nexus-ai-pro/agent/workspace',
+    exports: ['memoryWorkspace', 'fileWorkspace', 'storeWorkspace', 'compositeWorkspace', 'runWorkspaceConformance'],
+  },
+  {
     specifier: 'nexus-ai-pro/agent/middleware',
     exports: [
       'toolSelector',

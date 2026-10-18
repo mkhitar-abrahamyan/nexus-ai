@@ -1,6 +1,6 @@
 # Agents and tools
 
-<!-- covers: ./agent ./agent/middleware ./agent/permissions ./agent/sandbox ./agent/sandbox/container ./agent/interpreter ./connectors -->
+<!-- covers: ./agent ./agent/middleware ./agent/permissions ./agent/workspace ./agent/sandbox ./agent/sandbox/container ./agent/interpreter ./connectors -->
 <!-- sources: src/agent src/connectors -->
 
 Tool-calling agents, from `nexus-ai-pro/agent`. There are two:
@@ -272,17 +272,59 @@ call never runs and the model reads `Permission denied: <reason>`; an `ask` inte
 it asks about. Arguments an approver corrects are decided again, so an edit cannot reach what the
 policy denies.
 
+**A workspace.** An agent's files live in a `Workspace`, on `nexus-ai-pro/agent/workspace`, apart
+from where its code runs. A workspace reads, writes, and lists files, and may search them with
+`glob()` (`WorkspaceGlobOptions`) and `grep()` (`WorkspaceGrepOptions`, returning
+`WorkspaceMatch`es), remove them, and hold bytes. Its paths mean the same everywhere: relative to its
+root, a leading `/` naming the root, and one that would leave it refused with a `WorkspacePathError`;
+`resolveWorkspacePath()` gives a workspace of your own those same paths. A missing file rejects with
+`ENOENT`, and every method rejects rather than throws. The package ships five:
+
+| Workspace | Where the files are |
+| --- | --- |
+| `memoryWorkspace()` | In the process, from `MemoryWorkspaceOptions`, with files to start with. For tests and scratch work. |
+| `fileWorkspace()` | In a directory on disk, from `FileWorkspaceOptions`, on Node. It runs nothing. |
+| `storeWorkspace()` | In a long-term `Store` (memory, Redis, Postgres, or SQLite) under the `StoreWorkspaceOptions` namespace, so files outlive the process and every replica sees them. |
+| `readOnlyWorkspace()` | Another workspace, read and searched, with every write refused as a `WorkspaceReadOnlyError`. |
+| `compositeWorkspace()` | Several workspaces as one, each mounted at a path, as a `WorkspaceMount` that may be read-only, with `CompositeWorkspaceOptions`. |
+
+A store workspace keeps each file as its contents and a small entry in a tree, so listing and
+searching read entries, not contents, and nothing is indexed for semantic search. A composite sends
+a path to the deepest mount it is under, lists the mounts below a directory as directories, and
+searches every mount under the directory searched, through that mount's own search when one mount
+holds it all:
+
+```ts
+import { compositeWorkspace, fileWorkspace, storeWorkspace } from 'nexus-ai-pro/agent/workspace';
+
+const workspace = compositeWorkspace({
+  '/': sandbox,                                                      // the code, where commands run
+  memories: storeWorkspace(store, { namespace: ['agents', tenantId] }), // what outlives the run
+  docs: { workspace: fileWorkspace({ root: './docs' }), readOnly: true },
+});
+```
+
+`workspaceTools()` turns a workspace into `read_file`, `write_file`, and, where it can, `list_files`,
+`glob_files`, `grep_files`, and `read_media`, each declaring the path a policy sees, under the
+`WorkspaceToolsOptions` mount. `runWorkspaceConformance()` checks any workspace against the
+contract, with no test framework, and returns a `WorkspaceConformanceReport` of
+`WorkspaceConformanceCheck`s: files that round-trip and are replaced, missing files and escaping
+paths refused, listings, glob and grep with their limits, bytes, and removal. In the test suite,
+every workspace above passes it, the store workspace on each of the four stores, and so do the
+process sandbox and a composite.
+
 **A sandbox.** Commands and code belong in a sandbox the application provides — a container, a VM,
-a remote interpreter — through the `Sandbox` interface on `nexus-ai-pro/agent/sandbox`: `exec()`
-with `SandboxExecOptions` (a working directory, variables, standard input, a timeout, a signal),
-returning a `SandboxExecResult`; file reads and writes; and its `SandboxIsolation`, what it claims
-to isolate. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and,
+a remote interpreter — through the `Sandbox` interface on `nexus-ai-pro/agent/sandbox`. A sandbox is
+a workspace that can also run commands, `exec()` with `SandboxExecOptions` (a working directory,
+variables, standard input, a timeout, a signal), returning a `SandboxExecResult`, and says what it
+isolates in its `SandboxIsolation`. So a sandbox goes wherever a workspace goes, and its commands see
+its files. `sandboxTools()` turns a sandbox into `run_command`, `read_file`, `write_file`, and,
 where the sandbox implements them, `list_files`, `glob_files`, `grep_files`, and `read_media`,
 each declaring exactly what one call does, with files under the `mount` a policy sees
 (`/workspace` by default); `SandboxToolsOptions` chooses them.
 
-**Workspace search and media.** A sandbox may also implement `glob()`, with `SandboxGlobOptions`;
-`grep()`, with `SandboxGrepOptions`, returning `SandboxMatch`es; and `readBytes()`. The tools
+**Workspace search and media.** A sandbox searches and reads bytes as a workspace does, with
+`SandboxGlobOptions`, `SandboxGrepOptions`, and `SandboxMatch`es, the workspace's own types. The tools
 built on them are bounded: `glob_files` lists at most 500 paths and `grep_files` at most 200 lines,
 each cut to 300 characters. `read_media` reads an image, audio, or a PDF as a `ToolOutput` the model
 sees rather than as text: an image part, an audio part, or a `DocumentContent` part, each as base64,
@@ -294,7 +336,8 @@ a line saying it is there.
 `runSandboxConformance()` checks any sandbox against the contract, with no test framework, and
 returns a `SandboxConformanceReport` of `SandboxConformanceCheck`s: output, errors, and exit codes;
 standard input and variables, with none of the host's; a timeout that stops the command; files that
-round-trip where commands run; and paths outside the sandbox refused, as `SandboxPathError`.
+round-trip where commands run; and paths outside the sandbox refused, as `SandboxPathError`, a
+`WorkspacePathError` whose code is `SANDBOX_PATH`.
 `SandboxConformanceOptions` names the JavaScript command and the timeout it tests.
 
 `processSandbox()` is a reference for development: commands run as ordinary processes in a
@@ -724,7 +767,7 @@ specific entry point that provides it.
 | `estimateRequestTokens` | function | About four characters a token, over the messages, the tool calls, and the tool schemas. |
 | `filesystemContext` | function | The filesystem as the agent's context: files in, large results out. |
 | `FilesystemContextOptions` | interface | Options for `filesystemContext()`. |
-| `FilesystemContextSource` | type | Where `filesystemContext()` reads and writes: a `Sandbox`, or anything with the same file methods. |
+| `FilesystemContextSource` | type | Where `filesystemContext()` reads and writes: a `Workspace` or a `Sandbox`, or anything with the same file methods. |
 | `humanApproval` | function | Asks a person before a tool call runs, decided per call rather than per tool name. |
 | `HumanApprovalOptions` | interface | Options for `humanApproval()`. |
 | `limitToolCalls` | function | Caps how often a tool may be called in one run: one turn, from a user message to the answer. |
@@ -781,17 +824,17 @@ specific entry point that provides it.
 | `processSandbox` | function | A sandbox that runs commands as ordinary processes in a directory, for development and tests only. |
 | `ProcessSandboxOptions` | interface | Options for `processSandbox()`. |
 | `runSandboxConformance` | function | Checks a sandbox against the contract, without a test framework, so any sandbox — a container runner, a VM, a hosted service — can prove itself the same way: |
-| `Sandbox` | interface | Where an agent's commands, code, and files go. |
+| `Sandbox` | interface | Where an agent's commands and code run: a workspace that can also run commands, and says what it isolates. |
 | `SandboxConformanceCheck` | interface | One conformance check's result. |
 | `SandboxConformanceOptions` | interface | Options for `runSandboxConformance()`. |
 | `SandboxConformanceReport` | interface | What `runSandboxConformance()` found. |
 | `SandboxExecOptions` | interface | Options for one command. |
 | `SandboxExecResult` | interface | What a command did. |
-| `SandboxGlobOptions` | interface | Options for `Sandbox.glob()`. |
-| `SandboxGrepOptions` | interface | Options for `Sandbox.grep()`. |
+| `SandboxGlobOptions` | type | Options for `Sandbox.glob()`: a workspace's. |
+| `SandboxGrepOptions` | type | Options for `Sandbox.grep()`: a workspace's. |
 | `SandboxIsolation` | interface | What a sandbox claims to isolate. |
-| `SandboxMatch` | interface | One line `Sandbox.grep()` matched. |
-| `SandboxPathError` | class | Raised when a path would leave the sandbox. |
+| `SandboxMatch` | type | One line `Sandbox.grep()` matched: a workspace's match. |
+| `SandboxPathError` | class | Raised when a path would leave the sandbox: a `WorkspacePathError` whose code is `SANDBOX_PATH`. |
 | `sandboxTools` | function | Tools that act through a sandbox, each declaring exactly what one call does: `run_command` declares `shell:<the command>`, and the file tools declare `filesystem:read` or `filesystem:write` with the path under `mount`. |
 | `SandboxToolsOptions` | interface | Options for `sandboxTools()`. |
 
@@ -801,6 +844,33 @@ specific entry point that provides it.
 | --- | --- | --- |
 | `containerSandbox` | function | A sandbox in a container, for production. |
 | `ContainerSandboxOptions` | interface | Options for `containerSandbox()`. |
+
+### `nexus-ai-pro/agent/workspace`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `compositeWorkspace` | function | Several workspaces as one, each mounted at a path: a sandbox at the root for the code, a store at `memories` for what outlives the run, read-only docs at `docs`. |
+| `CompositeWorkspaceOptions` | interface | Options for `compositeWorkspace()`. |
+| `fileWorkspace` | function | A directory on disk as a workspace, on Node. |
+| `FileWorkspaceOptions` | interface | Options for `fileWorkspace()`. |
+| `memoryWorkspace` | function | A workspace in this process's memory: for tests, for scratch work, and for a run whose files need not outlive it. |
+| `MemoryWorkspaceOptions` | interface | Options for `memoryWorkspace()`. |
+| `readOnlyWorkspace` | function | A workspace that reads another and refuses every write with a `WorkspaceReadOnlyError`. |
+| `resolveWorkspacePath` | function | A path as a workspace holds it: relative to the root, `/` between segments, without `.` or `..`. |
+| `runWorkspaceConformance` | function | Checks a workspace against the contract, without a test framework, so any workspace (a bucket, a database, a hosted file service) can prove itself the same way: |
+| `storeWorkspace` | function | A workspace in a long-term `Store`: the memory, Redis, Postgres, or SQLite store, so an agent's files outlive its process and every replica sees the same ones. |
+| `StoreWorkspaceOptions` | interface | Options for `storeWorkspace()`. |
+| `Workspace` | interface | Where an agent's files live. |
+| `WorkspaceConformanceCheck` | interface | One conformance check's result. |
+| `WorkspaceConformanceReport` | interface | What `runWorkspaceConformance()` found. |
+| `WorkspaceGlobOptions` | interface | Options for `Workspace.glob()`. |
+| `WorkspaceGrepOptions` | interface | Options for `Workspace.grep()`. |
+| `WorkspaceMatch` | interface | One line `Workspace.grep()` matched. |
+| `WorkspaceMount` | interface | One mount of a composite workspace: a workspace, read-only or not. |
+| `WorkspacePathError` | class | Raised when a path would leave the workspace, or lies under no mount of a composite. |
+| `WorkspaceReadOnlyError` | class | Raised when a read-only workspace, or a read-only mount of a composite, is written to. |
+| `workspaceTools` | function | The file tools over a workspace: `read_file` and `write_file`, and, where the workspace can, `list_files`, `glob_files`, `grep_files`, and `read_media`. |
+| `WorkspaceToolsOptions` | interface | Options for `workspaceTools()`. |
 
 ### `nexus-ai-pro/connectors`
 
