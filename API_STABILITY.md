@@ -58,6 +58,9 @@ New and stable:
   `EvaluationContext.trace`;
 - `OnlineEvaluationWorkerOptions.withTrace`, `onScored`, and `onError`, and `OnlineScored`;
 - `traceRetriever()`, `RetrieverLike`, and `Tracer.within()`;
+- `nexus-ai-pro/evaluate/media`: `mediaChecks()`, `mediaJudge()`, `mediaOf()`, `resolveMedia()`,
+  `MediaCheckOptions`, `MediaJudgeOptions`, `MediaResolveOptions`, `MediaSelection`, `MediaRange`,
+  `ResolvedMedia`, and `MediaSubjectKind`;
 - `nexus-ai-pro/tracing/otlp-grpc`: `OtlpGrpcTraceExporter`, `OtlpGrpcTraceExporterOptions`, and
   `OtlpGrpcError`;
 - in `nexus-ai-pro/tracing/otlp`: `OtlpTraceExporterOptions.protocol`, `encodeOtlpTraceRequest()`,

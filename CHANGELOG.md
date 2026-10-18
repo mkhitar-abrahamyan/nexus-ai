@@ -26,6 +26,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - `onlineEvaluationWorker()` takes `withTrace`, which gives evaluators `context.trace`, and
   `onScored`, which hears each run's scores once they are written, with `onError` for its failures.
 - `traceRetriever()`: every retrieval as a `retriever` run, with the query and the documents.
+- **Media you can evaluate.** On the new `nexus-ai-pro/evaluate/media`, `mediaChecks()` reads the
+  media an evaluation is about, from bytes, base64, a data URL, a URL it is allowed to fetch, a path,
+  or an asset store, and scores each check asked: the count, kind, MIME type, size, dimensions,
+  aspect ratio, and a WAV's duration. `mediaJudge()` shows them to a vision or audio model beside a
+  rubric and the brief, a stored asset sent as its bytes, and records the judge in an experiment.
+  `mediaOf()` finds the media in an output, or in what the run's trace says it produced, and
+  `resolveMedia()` reads one.
 - **OTLP over gRPC.** `OtlpGrpcTraceExporter`, on the new `nexus-ai-pro/tracing/otlp-grpc`, sends
   spans to a collector's port 4317 with no gRPC library: the trace service's `Export` call framed by
   hand over Node's HTTP/2 client, gzip-compressed, with metadata, a deadline, TLS options, one
@@ -50,6 +57,11 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   SQLite, Postgres, and Redis operation stores. The bound, dead letters, two replicas on one spool,
   and write-ahead through a process that dies mid-send. Without the spool, its bound, its claim, its
   dead letters, write-ahead, or taking over a lapsed lease, a test fails.
+- `tests/media-evaluation.test.ts`: checks that read PNG, GIF, WAV, and PDF media from a store,
+  base64, a data URL, and a fetch only when allowed; a judge model shown a stored asset as its bytes
+  beside the rubric and the brief; media found through the trace; and an experiment over a target
+  that draws. Without the sniffing, the store, the wildcard, the tolerance, the duration, the size
+  limit, the count, the media shown, the brief, or the trace fallback, a test fails.
 - `tests/otlp-grpc.test.ts`: the OpenTelemetry Collector itself, in a container, takes spans over
   gRPC and sends every one on as it came, ids, times, kinds, attributes, and status. Against a gRPC
   server of the test's, with a protobuf reader written apart from the encoder: compression and

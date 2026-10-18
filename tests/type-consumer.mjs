@@ -313,6 +313,7 @@ import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { TelnyxTelephonyProvider } from 'nexus-ai-pro/telephony/telnyx';
 import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
+import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { encodeOtlpTraceRequest, OtlpPartialSuccessError } from 'nexus-ai-pro/tracing/otlp';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
 import {
@@ -1084,6 +1085,14 @@ void grpcExporter.close();
 const encoded: Uint8Array = encodeOtlpTraceRequest({ resourceSpans: [] });
 void encoded;
 void new OtlpPartialSuccessError(1);
+// Media evaluators are evaluators, for an experiment, online evaluation, or a deployment.
+const mediaEvaluators = [
+  mediaChecks({ kinds: ['image'], width: { min: 1024 }, aspectRatio: { ratio: 16 / 9 } }),
+  mediaJudge({ client: { complete: async () => ({ content: '{"score":1}' }) as never }, model: 'vision', rubric: 'sharp' }),
+];
+void deployments.evaluate('support', { evaluators: mediaEvaluators });
+const resolvedMedia: Promise<ResolvedMedia> = resolveMedia({ type: 'image', source: { url: 'https://x.test/a.png' } });
+void resolvedMedia;
 // A retriever from the package keeps its type through tracing, and a deployment's runs are evaluated
 // from their traces through a worker.
 const tracedRetriever: Retriever = traceRetriever(vectorRetriever(new RagMemoryVectorStore()), new Tracer({ store: new MemoryTraceStore() }));

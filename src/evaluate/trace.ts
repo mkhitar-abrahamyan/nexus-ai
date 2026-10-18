@@ -106,7 +106,8 @@ export function mediaParts(value: unknown): MediaPart[] {
   return found;
 }
 
-function asMediaPart(item: Record<string, unknown>): MediaPart | undefined {
+/** The value as a media part, when it is one: a typed part, or an asset an operation returned. */
+export function asMediaPart(item: Record<string, unknown>): MediaPart | undefined {
   const type = item.type;
   const source = item.source;
   if (

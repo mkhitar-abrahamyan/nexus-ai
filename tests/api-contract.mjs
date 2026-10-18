@@ -140,6 +140,7 @@ const expectedSubpaths = [
   './evaluate/threads',
   './evaluate/generate',
   './evaluate/online',
+  './evaluate/media',
   './postgres',
   './postgres/operations',
   './postgres/store',

@@ -40,6 +40,7 @@
     "./evals/judge": 14,
     "./evaluate": 58,
     "./evaluate/generate": 30,
+    "./evaluate/media": 46,
     "./evaluate/online": 90,
     "./evaluate/threads": 10,
     "./graph": 92,

@@ -1,6 +1,6 @@
 # Evaluation
 
-<!-- covers: ./evaluate ./evaluate/threads ./evaluate/generate ./evaluate/online ./evals ./evals/judge -->
+<!-- covers: ./evaluate ./evaluate/threads ./evaluate/generate ./evaluate/online ./evaluate/media ./evals ./evals/judge -->
 
 Evaluation from `nexus-ai-pro/evaluate`: run any target — a completion, an agent, a graph, an image operation, or plain code — over a dataset versioned by its content, score it, and compare experiments with a verdict rather than a difference of means. `nexus-ai-pro/evals` keeps the eval-case runner and the LLM judge.
 
@@ -487,6 +487,55 @@ A deployment's runs are judged the same way: `Deployments.evaluate()` and
 `Deployments.evaluationWorker()` run this worker over the server's runs, as the
 [deployments guide](./deployments.md#judging-with-confidence-and-on-quality) shows.
 
+## Media you can evaluate
+
+An image, a document, an audio clip, or a video can be what is judged. `nexus-ai-pro/evaluate/media`
+gives two evaluators that read the media themselves, so they score an experiment over a target that
+draws, an online evaluation of runs that make images, or a deployment's runs, like any other.
+
+```ts
+import { mediaChecks, mediaJudge } from 'nexus-ai-pro/evaluate/media';
+
+const evaluators = [
+  // Read from the media: a PNG or WebP, at least 1,024 pixels wide, at 16:9.
+  mediaChecks({ mimeTypes: ['image/png', 'image/webp'], width: { min: 1024 }, aspectRatio: { ratio: 16 / 9 } }),
+  // Shown to a vision model, beside the rubric and the brief.
+  mediaJudge({ client: ai, model: 'gpt-5', rubric: 'On brand, sharp, and legible at a glance.', key: 'banner' }),
+];
+```
+
+**Which media.** `mediaOf()` finds them, as both evaluators do: the media in the output, or, with
+none there, those the run's trace says it produced, such as an image a tool drew; `from: 'input'`
+takes the example's inputs instead, and `from: 'all'` both. `select` picks them from the whole
+`EvaluationContext` instead. They are `MediaSelection` options.
+
+**Reading them.** `resolveMedia()` reads one medium into a `ResolvedMedia`: its `MediaSubjectKind`
+(`image`, `audio`, `video`, `document`, or `other`), its MIME type as its bytes say, its bytes, and
+what its header says: an image's width and height, a WAV's duration. It reads base64, bytes, a data
+URL, and an asset's bytes as they are. `MediaResolveOptions` reach the rest: `assets`, an asset store
+and the tenant, for a stored asset; `fetch`, for a URL, which is otherwise never fetched; `readFile`,
+for a path; and `maxBytes`, 20 MiB of any one medium. A medium that cannot be read says why in
+`unreadable`.
+
+**Checks.** `mediaChecks()` takes `MediaCheckOptions`, each a `MediaRange` or a list, and makes only
+the checks asked: `count` (at least one), `kinds`, `mimeTypes` (with `image/*` for any image),
+`bytes`, `width`, `height`, `aspectRatio` with a `tolerance` (2%), and `durationMs`. Each is a score,
+`media.format` for instance, the share of media that pass it, with a comment naming each that fails;
+`media` is the share that pass every check, and 0 when the count is wrong. A measurement that cannot
+be read fails its check, or passes it with `unknown: 'pass'`. `key` changes the prefix.
+
+**A judge.** `mediaJudge()` takes `MediaJudgeOptions`: a `client` with `complete()`, a `model` that
+can see the media, a `rubric`, and a `key` (`media-judge`). Each medium goes to the model as itself,
+read and sent as base64 where it can be, since a provider cannot read an asset store; the brief beside
+it is the example's inputs as text, with any media in them named rather than spelled out, or what
+`brief` returns. It asks for JSON with a score, a verdict, and a rationale, within `range` (0 to 1)
+and against `passThreshold`, at `temperature` 0, showing at most `maxMedia` (8). With nothing to
+judge it scores 0, or nothing with `whenMissing: 'skip'`, and calls no model. An experiment records
+the judge's model and rubric.
+
+A [canary is rolled back on a media evaluator's score](./deployments.md#automation-rules) when
+those scores fall.
+
 ```ts
 import { onlineEvaluationWorker } from 'nexus-ai-pro/evaluate/online';
 
@@ -631,6 +680,9 @@ regression in a test, not to judging content in production; use a model judge fo
   something, not that the question is a good one: read a sample before trusting a verdict.
 - An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
   or `rephrase`.
+- `mediaChecks()` reads the dimensions of PNG, JPEG, GIF, WebP, and BMP images and the duration
+  of WAV audio. Other audio and video are checked for kind, type, and size; a judge can watch them, on
+  a provider that takes them.
 
 <!-- reference:start -->
 ## Reference
@@ -785,6 +837,22 @@ specific entry point that provides it.
 | `SyntheticDraft` | interface | An example the writer drafts: a question, its answer, and the words of the passage that support it. |
 | `SyntheticModelClient` | interface | A model that writes drafts. |
 | `SyntheticPassage` | interface | One passage of a document, as the writer sees it. |
+
+### `nexus-ai-pro/evaluate/media`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `MediaCheckOptions` | interface | Options for `mediaChecks()`. |
+| `mediaChecks` | function | Checks the media an evaluation is about, reading them: how many there are, and of each its kind, MIME type, size, dimensions, aspect ratio, and duration, as the options ask. |
+| `mediaJudge` | function | Judges the media an evaluation is about with a model that is shown them: each image, document, audio clip, or video goes to the model as itself, read from bytes, base64, a URL, a path, or an asset store, beside the rubric and the brief, and the model answers with a score. |
+| `MediaJudgeOptions` | interface | Options for `mediaJudge()`. |
+| `mediaOf` | function | The media an evaluation is about: those in the output, or, with none there, those the run's trace says it produced; or those it was given. |
+| `MediaRange` | interface | A range a measurement must fall in. |
+| `MediaResolveOptions` | interface | Where media judged by reference are read from. |
+| `MediaSelection` | interface | Which media an evaluator judges. |
+| `MediaSubjectKind` | type | What kind of medium something is. |
+| `ResolvedMedia` | interface | A medium read for judging: what it is, and as much of it as could be read. |
+| `resolveMedia` | function | Reads one medium: its kind, its bytes where it can, and what its header says. |
 
 ### `nexus-ai-pro/evaluate/online`
 
