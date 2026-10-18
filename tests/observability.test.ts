@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -15,7 +15,7 @@ import { GraphStreamOverflowError } from '../src/graph/event-stream.js';
 import { createGraph } from '../src/graph/graph.js';
 import { OperationRunner } from '../src/operations/runner.js';
 import { MemoryOperationStore } from '../src/operations/store.js';
-import { recordingFetch, replayFetch } from '../src/testing/record.js';
+import { type RecordedExchange, recordingFetch, replayFetch } from '../src/testing/record.js';
 import { OtlpTraceExporter, type OtlpSpan, runToOtlpSpan } from '../src/tracing/otlp.js';
 import { MemoryRollupStore, rollupPercentile, rollupTraceStore, sumRollups } from '../src/tracing/rollups.js';
 import { closeAbandonedRuns, JsonlTraceStore, MemoryTraceStore } from '../src/tracing/stores.js';
@@ -447,7 +447,7 @@ test('a stream recorded with timing replays at its pace, scaled, stepped, or at 
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     for (const word of ['one', 'two', 'three']) {
       response.write(`data: ${word}\n\n`);
-      await sleep(60);
+      await sleep(100);
     }
     response.end();
   });
@@ -470,11 +470,24 @@ test('a stream recorded with timing replays at its pace, scaled, stepped, or at 
       return { parts, ms: performance.now() - started };
     };
 
+    // The gaps the recording holds: on a loaded machine the client may read two chunks as one, so
+    // they are read from the recording rather than assumed from the server's sleeps.
+    const [file] = (await readdir(directory)).filter((name) => name.endsWith('.json'));
+    const recorded = JSON.parse(await readFile(path.join(directory, file as string), 'utf8')) as RecordedExchange;
+    const chunks = recorded.response.chunks ?? [];
+    assert.ok(chunks.length >= 2, `the stream was recorded in ${chunks.length} chunks`);
+    const gaps = (chunks.at(-1)?.atMs ?? 0) - (chunks[0]?.atMs ?? 0);
+    assert.ok(gaps >= 50, `the recording holds the gaps: ${gaps} ms`);
+
     const instant = await read('instant');
     assert.equal(instant.parts.join(''), 'data: one\n\ndata: two\n\ndata: three\n\n');
     const original = await read('original');
     assert.equal(original.parts.join(''), instant.parts.join(''));
-    assert.ok(original.ms >= 90, `the original gaps are kept: ${Math.round(original.ms)} ms`);
+    // A timer may fire up to a millisecond early on some platforms, once per gap.
+    assert.ok(
+      original.ms >= gaps - chunks.length,
+      `the original gaps are kept: ${Math.round(original.ms)} ms for ${gaps} ms recorded`,
+    );
     const fast = await read(0.1);
     assert.ok(fast.ms < original.ms, 'a scale of 0.1 is faster');
 
