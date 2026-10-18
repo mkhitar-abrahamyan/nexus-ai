@@ -1,8 +1,9 @@
 /**
  * The experimental families against the live services, each where its secret is set: media
  * understanding through a vision model and through Mistral's OCR, the Gemini embedding batch tier,
- * and video generation on Veo and on Runway, which costs a few seconds of video and so runs only when
- * `NEXUS_LIVE_VIDEO` is set too. Each check is what graduation asks for: the family's conformance
+ * video generation on Veo and on Runway, which costs a few seconds of video and so runs only when
+ * `NEXUS_LIVE_VIDEO` is set too, a Gemini Live session that calls a tool, OpenAI's SIP call control,
+ * and the phone numbers of Twilio and Telnyx, read only. Each check is what graduation asks for: the family's conformance
  * suite, passed against the real service. Writes what it measured to `NEXUS_LIVE_REPORT` when set.
  *
  *   node --import tsx tests/families.live.ts
@@ -16,6 +17,11 @@ import { MistralOcrProvider } from '../src/media/mistral.js';
 import { GoogleProvider } from '../src/providers/google.js';
 import { OpenAIProvider } from '../src/providers/openai.js';
 import { runVideoConformance, type VideoProvider } from '../src/video/index.js';
+import { rejectOpenAIRealtimeCall } from '../src/realtime/openai-server.js';
+import { GeminiLiveProvider } from '../src/realtime/provider.js';
+import { defineTool } from '../src/realtime/tools.js';
+import { TelnyxTelephonyProvider } from '../src/telephony/providers/telnyx.js';
+import { TwilioTelephonyProvider } from '../src/telephony/providers/twilio.js';
 import { GoogleVideoProvider } from '../src/video/google.js';
 import { RunwayVideoProvider } from '../src/video/runway.js';
 
@@ -229,6 +235,89 @@ for (const { name, provider, model } of video) {
     return `${model}: ${report.passed.join(', ')}`;
   });
 }
+
+// ── Realtime ─────────────────────────────────────────────────────────
+
+const within = <T>(promise: Promise<T>, ms: number, what: string) =>
+  Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${what} took over ${ms} ms`)), ms)),
+  ]);
+
+if (env.GOOGLE_API_KEY) {
+  await check('realtime: a Gemini Live session calls a tool and answers with it', async () => {
+    const called: string[] = [];
+    const time = defineTool({
+      name: 'current_time',
+      description: 'The current time, in UTC',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        called.push('current_time');
+        return { utc: '12:34' };
+      },
+    });
+    const model = env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-preview';
+    const session = new GeminiLiveProvider({ apiKey: env.GOOGLE_API_KEY }).createSession({
+      model,
+      modalities: ['text'],
+      instructions: 'When asked the time, call current_time, then say the time it returns.',
+      tools: [time],
+    });
+    const answered = new Promise<string>((resolve) => {
+      session.on('message.text.completed', (event) => {
+        if (event.role === 'assistant' && called.length > 0) resolve(event.text);
+      });
+    });
+    await within(session.connect(), 30_000, 'connecting');
+    try {
+      session.sendText('What time is it?');
+      const text = await within(answered, 90_000, 'the answer');
+      if (!called.length) throw new Error('the model never called the tool');
+      if (!text.includes('12:34') && !text.includes('12.34'))
+        throw new Error(`the answer did not use the tool: ${text}`);
+      const metrics = session.getMetrics();
+      return `${model}: ${metrics.inputTokens ?? 0} tokens in, ${metrics.outputTokens ?? 0} out`;
+    } finally {
+      await session.disconnect();
+    }
+  });
+} else skip('realtime: Gemini Live', 'no GOOGLE_API_KEY');
+
+if (env.OPENAI_API_KEY) {
+  await check("realtime: OpenAI's SIP call control answers for a call it does not know", async () => {
+    // A call id no trunk ever sent: the route and the key are right when OpenAI says it is not found.
+    const refused = await rejectOpenAIRealtimeCall('rtc_nexus_live_probe_0', {
+      apiKey: env.OPENAI_API_KEY as string,
+    }).then(
+      () => undefined,
+      (error: { status?: number; message?: string }) => error,
+    );
+    if (!refused) throw new Error('OpenAI accepted a decline for a call that does not exist');
+    if (refused.status === 401 || refused.status === 403) throw new Error(`the key was refused: ${refused.message}`);
+    if (refused.status !== 404 && refused.status !== 400)
+      throw new Error(`unexpected answer: ${refused.status} ${refused.message}`);
+    return `HTTP ${refused.status} for an unknown call`;
+  });
+} else skip('realtime: OpenAI SIP call control', 'no OPENAI_API_KEY');
+
+// ── Telephony ────────────────────────────────────────────────────────
+
+if (env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN) {
+  await check('telephony: Twilio lists its phone numbers', async () => {
+    const numbers = await new TwilioTelephonyProvider({
+      accountSid: env.TWILIO_ACCOUNT_SID,
+      authToken: env.TWILIO_AUTH_TOKEN,
+    }).listPhoneNumbers({ pageSize: 5 });
+    return `${numbers.length} numbers`;
+  });
+} else skip('telephony: Twilio', 'no TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN');
+
+if (env.TELNYX_API_KEY) {
+  await check('telephony: Telnyx lists its phone numbers', async () => {
+    const numbers = await new TelnyxTelephonyProvider({ apiKey: env.TELNYX_API_KEY }).listPhoneNumbers({ pageSize: 5 });
+    return `${numbers.length} numbers`;
+  });
+} else skip('telephony: Telnyx', 'no TELNYX_API_KEY');
 
 // ── Report ───────────────────────────────────────────────────────────
 

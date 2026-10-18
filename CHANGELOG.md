@@ -33,6 +33,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   `parseMessageWebhook()` on both, running through the client's lifecycle as `messaging` operations.
 - `NexusAI.telephony`, the client's telephony manager; `telnyxRealtimeAudioOptions()`;
   `TelephonyWebhookValidationRequest.publicKey`.
+- The weekly live workflow runs a Gemini Live session that calls a tool, OpenAI's SIP call control,
+  and the phone numbers of Twilio and Telnyx, where the repository's secrets are set.
 
 ### Fixed
 

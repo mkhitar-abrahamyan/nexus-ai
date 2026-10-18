@@ -697,7 +697,8 @@ its category.
 - OpenAI and Gemini Live are the bundled providers. Another provider implements
   `RealtimeTransportProvider`.
 - Gemini Live and SIP calls are verified in the test suite against scripted versions of their
-  protocols, not yet against the live services.
+  protocols. The weekly live workflow also runs a Gemini Live session that calls a tool, and OpenAI's
+  SIP call control, where the repository's secrets are set; a live call over a SIP trunk is not run.
 - Gemini Live is configured once, at connect: `updateSession()` changes nothing there, and neither
   `clearAudio()` nor truncating unheard audio has a counterpart. Gemini stops its own response when
   the person speaks.

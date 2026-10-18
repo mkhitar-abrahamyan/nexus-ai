@@ -412,8 +412,9 @@ again; the day before its 30 days end it is there, and the day after a sweep rem
 - Two calls joining a Telnyx conference that does not exist yet at the same moment may make two.
 - The recording keeper remembers what it kept in its process by default; replicas that take the same
   callback need a shared `claim`.
-- Calls and messages are verified against stand-ins for the providers' APIs, not yet against the live
-  services.
+- Calls and messages are verified against stand-ins for the providers' APIs. The weekly live workflow
+  lists each provider's phone numbers, where the repository's secrets are set; it places no call and
+  sends no message, which would cost money.
 
 <!-- reference:start -->
 ## Reference

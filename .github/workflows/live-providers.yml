@@ -154,6 +154,10 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           RUNWAYML_API_SECRET: ${{ secrets.RUNWAYML_API_SECRET }}
+          GEMINI_LIVE_MODEL: ${{ vars.GEMINI_LIVE_MODEL }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TELNYX_API_KEY: ${{ secrets.TELNYX_API_KEY }}
 
       - name: Keep the measurements
         if: always()
