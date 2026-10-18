@@ -1350,6 +1350,16 @@
         "default": "./dist-cjs/media/mock.js"
       }
     },
+    "./media/catalog": {
+      "import": {
+        "types": "./dist/media/catalog.d.ts",
+        "default": "./dist/media/catalog.js"
+      },
+      "require": {
+        "types": "./dist-cjs/media/catalog.d.ts",
+        "default": "./dist-cjs/media/catalog.js"
+      }
+    },
     "./media/rag": {
       "import": {
         "types": "./dist/media/rag.d.ts",
@@ -2485,6 +2495,9 @@
       ],
       "media/rag": [
         "dist-cjs/media/rag.d.ts"
+      ],
+      "media/catalog": [
+        "dist-cjs/media/catalog.d.ts"
       ],
       "video": [
         "dist-cjs/video/index.d.ts"

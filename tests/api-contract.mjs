@@ -92,6 +92,7 @@ const expectedSubpaths = [
   './media/mistral',
   './media/mock',
   './media/rag',
+  './media/catalog',
   './video',
   './video/google',
   './video/mock',

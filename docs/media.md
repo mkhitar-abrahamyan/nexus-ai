@@ -1,6 +1,6 @@
 # Media understanding
 
-<!-- covers: ./media ./media/mistral ./media/mock ./media/rag -->
+<!-- covers: ./media ./media/mistral ./media/mock ./media/rag ./media/catalog -->
 
 Reading what a document or an image says, describing an image, and answering a question about
 either, from `nexus-ai-pro/media`. One contract covers any vision model, reached through the client,
@@ -168,6 +168,62 @@ themselves, so the model sees what a page or a chart shows, not only what was wr
 the retrieved charts are right on every question, and answers from the same hits' text on none: the
 text says what each chart is, and only the chart shows which bar is tallest.
 
+## A catalog of every stored asset
+
+`mediaCatalog()`, from `nexus-ai-pro/media/catalog`, keeps one record of every stored asset in any
+long-term store: the Postgres, SQLite, Redis, or memory one. `catalogedAssetStore()` wraps an asset
+store, the S3, filesystem, or memory one, so every asset stored through it is recorded and every one
+deleted through it is forgotten; an entry expires with its asset, and the store's `purgeExpired()`
+removes both. Wrap each store an application keeps media in, with a `name` for each, and the catalog
+covers them all. Everything else about each store is its own.
+
+```ts
+import { catalogedAssetStore, mediaCatalog } from 'nexus-ai-pro/media/catalog';
+
+const catalog = mediaCatalog({ store: new PostgresStore(pool) });
+const assets = catalogedAssetStore(new S3AssetStore({ client, bucket: 'media' }), catalog, { name: 's3' });
+
+// Every image a model made this week that a judge scored below 0.5.
+const page = await catalog.list({
+  tenantId: 'acme',
+  kind: 'image',
+  since: '2026-10-12T00:00:00Z',
+  scoreBelow: { key: 'sharpness', below: 0.5 },
+});
+```
+
+A `MediaCatalogEntry` holds what the store knows of the asset (its id, tenant, `CatalogMediaKind`,
+MIME type, URI, size, dimensions, file name, and SHA-256), where it came from (the provider, model,
+operation, request, parent assets, and the run and trace its provenance names as `runId` and
+`traceId`), its tags, its metadata, and a `CatalogScore` per key, the latest each evaluation gave
+it. Each change raises its `version`, and is written by compare-and-set on a store that has
+`putIfVersion()`, as all four included stores do, so ten evaluators scoring one asset at once keep
+all ten scores.
+
+`MediaCatalog` methods:
+
+| Method | What it does |
+| --- | --- |
+| `record()` | Records an asset from its `AssetStat`, with the `MediaCatalogRecordOptions`: tags, metadata, the store's name, and a run and trace. The wrapper calls it. |
+| `forget()`, `get()` | Removes or reads one entry. |
+| `list()` | Entries that match a `MediaCatalogQuery`, newest first, as a `MediaCatalogPage` with a `next` cursor: by tenant, kind, MIME type, provider, model, operation, run, store, tag, time, a score below or at least a value, or no score yet. |
+| `score()`, `tag()` | Records a score, keeping the latest per key, or adds and removes tags. |
+| `attach()` | Records scores on every stored asset a value refers to, such as the images in a run's output. An online evaluation's `onScored` calls it with the run's output. |
+| `stats()` | `MediaCatalogStats`: assets and bytes, per kind. |
+| `purgeExpired()` | Removes the entries of assets that expired, which are never read again. |
+| `reconcile()` | Removes the entries of assets gone from their store, as when they were deleted around the catalog. |
+
+`MediaCatalogOptions` take the `store`, a `namespace` (`['nexus', 'media']`), and a clock.
+`CatalogedAssetStoreOptions` take the store's `name`, the `tags` each asset is recorded with, and an
+`onError`. Without `onError`, an asset the catalog cannot record is deleted again and the `put()`
+rejects, so the catalog and the store always agree; with it, the failure is reported and the asset
+kept.
+
+In the test suite, forty assets of five kinds, two providers, and two tenants are stored, some
+deleted and some expiring, on each of the four long-term stores: every page lists each remaining
+asset once, every filter finds exactly its assets, and the expired ones are never read and are
+purged with their assets.
+
 ## Limitations
 
 - A vision model's reading is only as faithful as the model; an OCR service keeps layout better.
@@ -175,6 +231,10 @@ text says what each chart is, and only the chart shows which bar is tallest.
 - Video and audio are not media here; transcribe audio with the voice family.
 - Without a manifest, a media index does not remember which media it holds: keep the report's chunk
   ids to remove one.
+- The catalog records what is stored through a wrapped asset store, or given to `record()`. Assets
+  stored before it existed are recorded by passing each one's `stat()` to `record()`.
+- A catalog query filters by score, time, and absent scores after reading, so `list()` reads at most
+  `scanLimit` entries (10,000) to fill a page and returns a `next` cursor to carry on from.
 
 <!-- reference:start -->
 ## Reference
@@ -212,6 +272,23 @@ specific entry point that provides it.
 | `modelMediaProvider` | function | Any vision model as a media provider, through a client's own `complete()`: so the call is routed, authorized, budgeted, traced, and priced as every completion is. |
 | `ModelMediaProviderOptions` | interface | Options for `modelMediaProvider()`. |
 | `runMediaConformance` | function | Checks a provider against the media contract: every task it declares returns the right shape, and the text it reads holds what the fixtures say. |
+
+### `nexus-ai-pro/media/catalog`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `catalogedAssetStore` | function | Wraps an asset store so the catalog records every asset stored through it, and forgets every asset deleted through it. |
+| `CatalogedAssetStoreOptions` | interface | Options for `catalogedAssetStore()`. |
+| `CatalogMediaKind` | type | What kind of medium an asset is, from its MIME type. |
+| `CatalogScore` | interface | The latest score of one key an asset was given. |
+| `mediaCatalog` | function | A media catalog in any long-term store. |
+| `MediaCatalog` | interface | One record of every stored asset. |
+| `MediaCatalogEntry` | interface | One stored asset, as the catalog records it. |
+| `MediaCatalogOptions` | interface | Options for `mediaCatalog()`. |
+| `MediaCatalogPage` | interface | A page of entries, newest first. |
+| `MediaCatalogQuery` | interface | What `MediaCatalog.list()` looks for. |
+| `MediaCatalogRecordOptions` | interface | What `record()` adds to what the asset store says. |
+| `MediaCatalogStats` | interface | How much is catalogued, by kind. |
 
 ### `nexus-ai-pro/media/mistral`
 

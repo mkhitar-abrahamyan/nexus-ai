@@ -88,6 +88,7 @@ const imports = [
   { specifier: 'nexus-ai-pro/media/mistral', exports: ['MistralOcrProvider'] },
   { specifier: 'nexus-ai-pro/media/mock', exports: ['MockMediaProvider'] },
   { specifier: 'nexus-ai-pro/media/rag', exports: ['createMediaIndex', 'answerFromMedia'] },
+  { specifier: 'nexus-ai-pro/media/catalog', exports: ['mediaCatalog', 'catalogedAssetStore'] },
   { specifier: 'nexus-ai-pro/video', exports: ['VideoManager', 'runVideoConformance', 'priceVideo', 'VIDEO_PRICES'] },
   { specifier: 'nexus-ai-pro/video/google', exports: ['GoogleVideoProvider'] },
   { specifier: 'nexus-ai-pro/video/mock', exports: ['MockVideoProvider'] },

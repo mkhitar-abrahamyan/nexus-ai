@@ -33,6 +33,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   rubric and the brief, a stored asset sent as its bytes, and records the judge in an experiment.
   `mediaOf()` finds the media in an output, or in what the run's trace says it produced, and
   `resolveMedia()` reads one.
+- **A catalog of every stored asset.** `mediaCatalog()`, on the new `nexus-ai-pro/media/catalog`,
+  keeps one record of each stored asset in any long-term store (Postgres, SQLite, Redis, or memory):
+  what it is, who made it, for which run, its tags, and its latest score per key, written by
+  compare-and-set. `catalogedAssetStore()` wraps any asset store so every asset stored through it is
+  recorded and every one deleted is forgotten, an entry expiring with its asset. `list()` finds
+  entries by kind, type, provider, model, run, store, tag, time, and score, a page at a time;
+  `attach()` scores the assets a run's output refers to; `stats()`, `purgeExpired()`, and
+  `reconcile()` keep account.
 - **OTLP over gRPC.** `OtlpGrpcTraceExporter`, on the new `nexus-ai-pro/tracing/otlp-grpc`, sends
   spans to a collector's port 4317 with no gRPC library: the trace service's `Export` call framed by
   hand over Node's HTTP/2 client, gzip-compressed, with metadata, a deadline, TLS options, one
@@ -62,6 +70,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   beside the rubric and the brief; media found through the trace; and an experiment over a target
   that draws. Without the sniffing, the store, the wildcard, the tolerance, the duration, the size
   limit, the count, the media shown, the brief, or the trace fallback, a test fails.
+- `tests/media-catalog.test.ts`: on the memory, SQLite, Postgres, and Redis stores, forty assets of
+  five kinds, two providers, and two tenants, some deleted and some expiring: every page lists each
+  remaining asset once, every filter finds exactly its assets, expired ones are never read and are
+  purged with their assets, and ten evaluators scoring one asset at once keep all ten scores. An
+  asset deleted around the catalog is reconciled away, and one the catalog cannot record is not left
+  stored. Without the forgetting, the expiry, the purge, compare-and-set, the cursor, the filters,
+  the compensation, or the reconciliation, a test fails.
 - `tests/otlp-grpc.test.ts`: the OpenTelemetry Collector itself, in a container, takes spans over
   gRPC and sends every one on as it came, ids, times, kinds, attributes, and status. Against a gRPC
   server of the test's, with a protobuf reader written apart from the encoder: compression and

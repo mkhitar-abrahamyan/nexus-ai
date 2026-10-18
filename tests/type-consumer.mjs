@@ -314,6 +314,7 @@ import { TelnyxTelephonyProvider } from 'nexus-ai-pro/telephony/telnyx';
 import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
 import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
+import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
 import { encodeOtlpTraceRequest, OtlpPartialSuccessError } from 'nexus-ai-pro/tracing/otlp';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
 import {
@@ -1093,6 +1094,11 @@ const mediaEvaluators = [
 void deployments.evaluate('support', { evaluators: mediaEvaluators });
 const resolvedMedia: Promise<ResolvedMedia> = resolveMedia({ type: 'image', source: { url: 'https://x.test/a.png' } });
 void resolvedMedia;
+const catalog = mediaCatalog({ store: {} as never });
+const catalogued = catalogedAssetStore({} as never, catalog, { name: 's3' });
+void catalogued;
+const blurry: Promise<MediaCatalogPage> = catalog.list({ tenantId: 'acme', kind: 'image', scoreBelow: { key: 'sharpness', below: 0.5 } });
+void blurry;
 // A retriever from the package keeps its type through tracing, and a deployment's runs are evaluated
 // from their traces through a worker.
 const tracedRetriever: Retriever = traceRetriever(vectorRetriever(new RagMemoryVectorStore()), new Tracer({ store: new MemoryTraceStore() }));

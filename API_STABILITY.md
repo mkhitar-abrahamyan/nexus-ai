@@ -61,6 +61,10 @@ New and stable:
 - `nexus-ai-pro/evaluate/media`: `mediaChecks()`, `mediaJudge()`, `mediaOf()`, `resolveMedia()`,
   `MediaCheckOptions`, `MediaJudgeOptions`, `MediaResolveOptions`, `MediaSelection`, `MediaRange`,
   `ResolvedMedia`, and `MediaSubjectKind`;
+- `nexus-ai-pro/media/catalog`: `mediaCatalog()`, `catalogedAssetStore()`, `MediaCatalog`,
+  `MediaCatalogOptions`, `MediaCatalogEntry`, `MediaCatalogQuery`, `MediaCatalogPage`,
+  `MediaCatalogStats`, `MediaCatalogRecordOptions`, `CatalogScore`, `CatalogMediaKind`, and
+  `CatalogedAssetStoreOptions`;
 - `nexus-ai-pro/tracing/otlp-grpc`: `OtlpGrpcTraceExporter`, `OtlpGrpcTraceExporterOptions`, and
   `OtlpGrpcError`;
 - in `nexus-ai-pro/tracing/otlp`: `OtlpTraceExporterOptions.protocol`, `encodeOtlpTraceRequest()`,

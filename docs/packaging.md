@@ -174,6 +174,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/openai-server` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/protocols/acp/editor` | 20 KB | 6% | none |
+| `nexus-ai-pro/media/catalog` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 5% | none |
