@@ -299,14 +299,18 @@ Shipped so far:
   sessions taken over by another worker when theirs dies, each proven killed at every write; realtime
   on the client's lifecycle; Gemini Live behind the same session, with video and images; phone calls
   answered over SIP; helpers on another server whose runs outlive their worker; and realtime over
-  real WebRTC in a browser, with published budgets for turn latency and session load.
+  real WebRTC in a browser, with published budgets for turn latency and session load;
+- 2.11 workspaces, and telephony in full: an agent's files apart from where its code runs, in memory,
+  on disk, in any long-term store, read-only, or a composite of several; and a second phone provider,
+  Telnyx, beside Twilio, both answering, transferring, conferencing, recording under a retention
+  policy, and sending and receiving messages.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.11 separates where an agent's files live from where its code runs, with workspaces, and
-completes telephony: a second provider, messaging, recording, conference, and transfer. Pinecone,
-images, the Gemini embedding batch tier, media understanding, and video graduate once the live
-workflow passes against each. The
+Next, 2.12 makes observability lose nothing, with spans spooled when the collector is down and
+deployment evaluation that reads the whole trace, and makes media something you can evaluate.
+Pinecone, images, the Gemini embedding batch tier, media understanding, video, Gemini Live, SIP, and
+both phone providers graduate once the live workflow passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order
 applications ask for it.
 
