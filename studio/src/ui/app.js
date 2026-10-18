@@ -1799,10 +1799,37 @@ function renderDeployment(deployment, replicas) {
             { label: 'p50', num: true, value: (r) => (r.p50Ms === undefined ? '' : ms(r.p50Ms)) },
             { label: 'p95', num: true, value: (r) => (r.p95Ms === undefined ? '' : ms(r.p95Ms)) },
             { label: 'Mean cost', num: true, value: (r) => (r.meanCost === undefined ? '' : money(r.meanCost)) },
+            {
+              label: 'Health',
+              value: (r) => {
+                const mark = deployment.unhealthy?.[r.revision];
+                return mark
+                  ? h(
+                      'span',
+                      { title: `${mark.reason} (${mark.by ?? 'unknown'}, ${when(mark.at)})` },
+                      badge('unhealthy'),
+                    )
+                  : '';
+              },
+            },
           ],
           deployment.stats,
         )
       : notice('No runs since the last change.'),
+    Object.keys(deployment.unhealthy ?? {}).length
+      ? [
+          h('h2', {}, 'Marked unhealthy'),
+          table(
+            [
+              { label: 'Revision', value: (m) => m.revision },
+              { label: 'When', value: (m) => when(m.at) },
+              { label: 'By', value: (m) => m.by ?? '' },
+              { label: 'Why', value: (m) => m.reason },
+            ],
+            Object.entries(deployment.unhealthy).map(([id, mark]) => ({ revision: id, ...mark })),
+          ),
+        ]
+      : '',
     can('admin')
       ? [
           h('h2', {}, 'Change the split'),
@@ -1823,6 +1850,22 @@ function renderDeployment(deployment, replicas) {
               'Promote',
             ),
             h('button', { type: 'button', onclick: (event) => change({ action: 'rollback' })(event) }, 'Roll back'),
+            h(
+              'button',
+              {
+                type: 'button',
+                onclick: (event) => change({ action: 'health', revision: revision.value, healthy: false })(event),
+              },
+              'Mark unhealthy',
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                onclick: (event) => change({ action: 'health', revision: revision.value, healthy: true })(event),
+              },
+              'Mark healthy',
+            ),
           ),
           output,
         ]
@@ -1833,7 +1876,13 @@ function renderDeployment(deployment, replicas) {
           [
             { label: 'Version', num: true, value: (c) => c.version },
             { label: 'When', value: (c) => when(c.at) },
-            { label: 'Action', value: (c) => badge(c.action) },
+            {
+              label: 'Action',
+              value: (c) =>
+                c.action === 'health'
+                  ? h('span', {}, badge(c.healthy ? 'healthy' : 'unhealthy'), ` ${c.revision ?? ''}`)
+                  : badge(c.action),
+            },
             { label: 'Live', value: (c) => c.live },
             {
               label: 'Split',

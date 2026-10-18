@@ -98,7 +98,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/core` | 337 KB | 97% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 61% | none |
 | `nexus-ai-pro/realtime` | 212 KB | 61% | none |
-| `nexus-ai-pro/server/deployments` | 140 KB | 40% | none |
+| `nexus-ai-pro/server/deployments` | 143 KB | 41% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 138 KB | 40% | none |
 | `nexus-ai-pro/server` | 122 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 33% | none |
@@ -190,6 +190,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/comfyui` | 16 KB | 5% | none |
 | `nexus-ai-pro/testing/record` | 16 KB | 5% | none |
 | `nexus-ai-pro/sqlite/operations` | 15 KB | 4% | none |
+| `nexus-ai-pro/evaluate/automation` | 15 KB | 4% | none |
 | `nexus-ai-pro/grounding` | 15 KB | 4% | none |
 | `nexus-ai-pro/prompts/client` | 15 KB | 4% | none |
 | `nexus-ai-pro/rag/weaviate` | 15 KB | 4% | none |

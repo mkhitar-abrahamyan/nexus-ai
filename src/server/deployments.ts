@@ -17,6 +17,7 @@ import type {
   DeploymentRecord,
   ReplicaReport,
   RevisionChoice,
+  RevisionHealthMark,
   RevisionRequest,
   RunRecord,
   ServerAssistant,
@@ -33,6 +34,7 @@ export type {
   DeploymentRecord,
   ReplicaReport,
   RevisionChoice,
+  RevisionHealthMark,
   RevisionReason,
   RevisionRequest,
   RunRevision,
@@ -197,6 +199,30 @@ export interface RunEvaluationReport {
   failed: number;
   /** Every score given. */
   scores: EvaluationScore[];
+}
+
+/** One score a run was given, as `Deployments.scores()` reads it. */
+export interface RunScore {
+  /** The run. */
+  runId: string;
+  /** Its assistant. */
+  assistant: string;
+  /** The revision that served it. */
+  revision?: string;
+  /** Its tenant. */
+  tenantId?: string;
+  /** The score's key. */
+  key: string;
+  /** The score. */
+  score: number;
+  /** Who gave it: an online evaluation's source, or a person's. */
+  source?: string;
+  /** The comment that came with it. */
+  comment?: string;
+  /** ISO-8601 time it was given. */
+  at: string;
+  /** What the run produced, for a person reviewing it. */
+  output?: unknown;
 }
 
 /** Options for `Deployments.evaluationWorker()`. */
@@ -493,7 +519,24 @@ export class Deployments implements ServerDeployments {
     let live = current.live;
     let traffic: Record<string, number>;
     let strategy = current.bucketStrategy;
+    let unhealthy = current.unhealthy;
     switch (change.action) {
+      case 'health': {
+        check(change.revision);
+        traffic = current.traffic;
+        const { [change.revision]: _cleared, ...rest } = current.unhealthy ?? {};
+        unhealthy = change.healthy
+          ? rest
+          : {
+              ...rest,
+              [change.revision]: {
+                reason: change.reason ?? 'marked unhealthy',
+                at: this.now().toISOString(),
+                ...(by ? { by } : {}),
+              },
+            };
+        break;
+      }
       case 'bucketing':
         strategy = checkStrategy(change.strategy);
         traffic = current.traffic;
@@ -527,7 +570,7 @@ export class Deployments implements ServerDeployments {
         break;
       }
       default:
-        throw new BadRequestError('A change needs an action: split, canary, promote, rollback, or bucketing');
+        throw new BadRequestError('A change needs an action: split, canary, promote, rollback, bucketing, or health');
     }
 
     const at = this.now().toISOString();
@@ -539,6 +582,7 @@ export class Deployments implements ServerDeployments {
       ...(strategy ? { bucketStrategy: strategy } : {}),
       updatedAt: at,
       ...(by ? { updatedBy: by } : {}),
+      ...(unhealthy && Object.keys(unhealthy).length > 0 ? { unhealthy } : {}),
       history: [
         {
           version: current.version + 1,
@@ -547,6 +591,7 @@ export class Deployments implements ServerDeployments {
           live,
           traffic,
           ...(change.action === 'bucketing' ? { bucketStrategy: strategy } : {}),
+          ...(change.action === 'health' ? { revision: change.revision, healthy: change.healthy } : {}),
           ...(by ? { by } : {}),
           ...(change.reason ? { reason: change.reason } : {}),
         },
@@ -561,6 +606,39 @@ export class Deployments implements ServerDeployments {
       next.canarySince = same && current.canarySince ? current.canarySince : at;
     }
     return next;
+  }
+
+  /**
+   * Marks a revision unhealthy, as an automation rule does when a score falls, recorded in the
+   * deployment's history. A canary marked unhealthy is rolled back at once, unless `rollback` is
+   * false; a canary guard also rolls back any canary marked since it began. The live revision is
+   * only marked: there is nothing to roll it back to without a decision.
+   */
+  async markUnhealthy(
+    assistant: string,
+    revision: string,
+    options: { reason: string; by?: string; rollback?: boolean },
+  ): Promise<DeploymentRecord> {
+    const marked = await this.change(
+      assistant,
+      { action: 'health', revision, healthy: false, reason: options.reason },
+      options.by,
+    );
+    if (options.rollback === false || revision === marked.live || !((marked.traffic[revision] ?? 0) > 0)) return marked;
+    return this.change(
+      assistant,
+      { action: 'rollback', reason: `canary ${revision} rolled back: marked unhealthy: ${options.reason}` },
+      options.by,
+    );
+  }
+
+  /** Clears a revision's unhealthy mark. */
+  markHealthy(assistant: string, revision: string, options: { reason?: string; by?: string } = {}) {
+    return this.change(
+      assistant,
+      { action: 'health', revision, healthy: true, ...(options.reason ? { reason: options.reason } : {}) },
+      options.by,
+    );
   }
 
   /** Sets each revision's share of new runs. */
@@ -855,6 +933,39 @@ export class Deployments implements ServerDeployments {
   }
 
   /**
+   * The scores this assistant's runs were given, by people or by online evaluation, from the most
+   * recent runs: what automation rules read through `deploymentScores()`, so every replica judges the
+   * same scores. Narrowed to one `key`, one `source`, runs created from `since`, and `limit` runs read
+   * (2,000).
+   */
+  async scores(
+    assistant: string,
+    options: { key?: string; source?: string; since?: string; limit?: number } = {},
+  ): Promise<RunScore[]> {
+    const scores: RunScore[] = [];
+    for (const run of await this.runs(assistant, options)) {
+      for (const feedback of run.feedback ?? []) {
+        if (feedback.score === undefined) continue;
+        if (options.key !== undefined && feedback.key !== options.key) continue;
+        if (options.source !== undefined && feedback.source !== options.source) continue;
+        scores.push({
+          runId: run.id,
+          assistant: run.assistant,
+          ...(run.revision ? { revision: run.revision.id } : {}),
+          ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+          key: feedback.key,
+          score: feedback.score,
+          ...(feedback.source ? { source: feedback.source } : {}),
+          ...(feedback.comment ? { comment: feedback.comment } : {}),
+          at: feedback.createdAt,
+          ...(run.output === undefined ? {} : { output: run.output }),
+        });
+      }
+    }
+    return scores;
+  }
+
+  /**
    * This assistant's finished runs, as a trace store the online-evaluation worker reads: each run in
    * scope is a run of kind `agent`, with its input and its trace from `traces`, and feedback written
    * to it lands on the run record. `skipped` collects the runs passed over as already scored.
@@ -1106,6 +1217,8 @@ export interface CanaryDecision {
   samples: { live: number; canary: number };
   /** The canary's share after the decision. */
   weight: number;
+  /** The mark it was rolled back on, when it was marked unhealthy rather than measured worse. */
+  unhealthy?: RevisionHealthMark;
 }
 
 /** A running canary guard. */
@@ -1254,8 +1367,31 @@ export function watchCanaries(options: CanaryGuardOptions): CanaryGuard {
   }
 
   async function judge(deployment: DeploymentRecord, canary: string): Promise<CanaryDecision> {
-    const { regressions, counted } = await measure(deployment, canary);
     const weight = deployment.traffic[canary] ?? 0;
+    // Marked unhealthy since it began, by a person or a rule: rolled back, however few its runs.
+    const mark = deployment.unhealthy?.[canary];
+    if (mark && (!deployment.canarySince || mark.at >= deployment.canarySince)) {
+      await deployments.change(
+        deployment.assistant,
+        {
+          action: 'rollback',
+          reason: `canary ${canary} rolled back: marked unhealthy${mark.by ? ` by ${mark.by}` : ''}: ${mark.reason}`,
+          expectedVersion: deployment.version,
+        },
+        by,
+      );
+      return {
+        assistant: deployment.assistant,
+        canary,
+        live: deployment.live,
+        action: 'rollback',
+        regressions: [],
+        samples: { live: 0, canary: 0 },
+        weight: 0,
+        unhealthy: mark,
+      };
+    }
+    const { regressions, counted } = await measure(deployment, canary);
     const decision: CanaryDecision = {
       assistant: deployment.assistant,
       canary,

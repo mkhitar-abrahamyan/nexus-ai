@@ -1,6 +1,6 @@
 # Deployments: revisions, canaries, scaling, and tenants
 
-<!-- covers: ./server/deployments ./server/tenancy -->
+<!-- covers: ./server/deployments ./server/tenancy ./evaluate/automation -->
 
 Run the agent server as a service you operate yourself. This guide covers four things:
 
@@ -128,6 +128,8 @@ Every change is a `DeploymentChange`, applied by `change()` or one of its shortc
 | `promote(assistant, revision)` | Makes a revision live, with all the traffic. |
 | `rollback(assistant, options)` | Pulls a canary. With no canary, undoes the last promotion. `to` names a revision instead. |
 | `bucketing(assistant, strategy)` | Changes how new threads are placed in the split, keeping the split itself. |
+| `markUnhealthy(assistant, revision, options)` | Marks a revision unhealthy with a `reason`, and rolls it back at once when it is a canary, unless `rollback` is false. |
+| `markHealthy(assistant, revision, options)` | Clears a revision's mark. |
 
 Each shortcut takes `by` and `reason`, recorded in the history. `change()` also takes
 `expectedVersion`. It refuses the change with `DEPLOYMENT_CONFLICT` when someone moved the deployment
@@ -148,7 +150,11 @@ await deployments.rollback('support', { reason: 'answers got longer' });
 ```
 
 A `DeploymentRecord` is what gets stored: the live revision, the shares, the version, when a canary
-began, and the last 50 changes. Each change is a `DeploymentChangeRecord`. `get()` reads one record,
+began, the revisions marked unhealthy, and the last 50 changes. Each change is a
+`DeploymentChangeRecord`. A mark is a change of its own, `{ action: 'health', revision, healthy }`,
+recorded in the history with the revision it marked, and kept in `unhealthy` as a
+`RevisionHealthMark` (the reason, when, and by whom) until the revision is marked healthy again. The
+live revision is only marked: rolling it back is a decision for a person. `get()` reads one record,
 `list()` reads them all, and `history()` reads one record's changes.
 
 ### Reading what each revision did
@@ -329,8 +335,94 @@ the samples on each side, and the canary's share afterwards. The action is `roll
 `promote`, or `hold`. A hold means a side is still short of `minRuns`, or the canary holds up without
 steps.
 
+A canary marked unhealthy since it began, by a person or an [automation rule](#automation-rules), is
+rolled back on the guard's next check however few its runs, and its `CanaryDecision` carries the
+`unhealthy` mark it was rolled back on. A mark made before the canary began is ignored, so a revision
+fixed and tried again is judged afresh.
+
 A guard on every replica is safe. Each change carries the version it was judged on, so the first guard
 to act wins and the others find the deployment already moved.
+
+## Automation rules
+
+An automation rule acts when a score falls. `automationRules()`, from
+`nexus-ai-pro/evaluate/automation`, judges each rule's score over the most recent runs and, when it
+falls below a threshold over enough samples, runs its actions: open review items for people, send a
+webhook, or mark the revision unhealthy, which rolls a canary back.
+
+```ts
+import { automationRules, deploymentScores, markUnhealthy, openReview, sendWebhook } from 'nexus-ai-pro/evaluate/automation';
+import { mediaJudge } from 'nexus-ai-pro/evaluate/media';
+
+const rules = automationRules({
+  scores: deploymentScores(deployments, 'designer'),
+  state: store,                  // shared by every replica, so a fall is acted on once
+  rules: [
+    {
+      name: 'banner quality',
+      key: 'banner',
+      below: 0.6,
+      minSamples: 20,
+      actions: [markUnhealthy({ deployments }), openReview(queue), sendWebhook({ url, secret })],
+    },
+  ],
+});
+const worker = deployments.evaluationWorker('designer', {
+  evaluators: [mediaJudge({ client: ai, model: 'gpt-5', rubric: 'A wide, legible launch banner.', key: 'banner' })],
+  operations,
+  traces,
+  onScored: rules.observe,       // judged as the scores arrive
+});
+worker.start();
+```
+
+Each `AutomationRule` takes:
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `name`, `key`, `below` | — | The rule, the score key it judges, and the threshold. |
+| `statistic` | `mean` | A `RuleStatistic`: the mean score, or `pass-rate`, the share that passed, from `passed` or a score of at least 0.5. |
+| `minSamples` | 20 | Runs a scope needs before it is judged. A run scored several times counts once, as its mean. |
+| `window`, `windowMs` | 100 runs | The most recent runs judged per scope, and how old a score may be. |
+| `confidence` | none | Fires only when the upper bound of the interval at this confidence is below, so a few unlucky samples never fire it. |
+| `source`, `where` | all | Narrows the scores, to one source or by a test of your own. |
+| `by` | `revision` | What is judged on its own: each revision of each assistant, so a canary is judged apart from the live revision; each `assistant`; `all` as one; or a function of a `ScoreSample`. |
+| `actions` | — | `AutomationAction` functions, run in order. One that fails goes to `onError`, and the rest still run. |
+| `repeatAfterMs` | never | Fires again after this long while a scope stays below. |
+
+A rule fires once when a scope falls, and again only after it recovers, or after `repeatAfterMs`.
+Each `AutomationEvent` is `fired` or `recovered`, for one scope, with the statistic's value, its
+interval, the samples, the assistant and revision, the five lowest samples, and a summary sentence.
+Recovery runs no action.
+
+**Where scores come from.** A `ScoreSource` gives a key's most recent scores. `deploymentScores()`
+reads them from a deployment's run records, where online evaluation and people leave them, through
+`Deployments.scores()`, which returns each as a `RunScore`: the run, its revision, the key and score,
+the source, and when. `traceScores()` reads the feedback on a trace store's runs. Both are shared by
+every replica, so every replica judges the same scores. `memoryScores()` keeps them in one process,
+a `MemoryScoreSource` fed by `record()` or `observe()`, and is the default.
+
+**Acting once.** `AutomationRulesOptions.state`, a long-term store with `putIfVersion()`, holds each
+rule's firing per scope. A replica claims a firing before it acts, so of several replicas judging
+the same fall at once, one acts. `namespace`, `scanLimit` (5,000 samples read per rule), `onEvent`,
+`onError`, and a clock are the rest.
+
+**Actions.** `markUnhealthy()` calls `Deployments.markUnhealthy()` for the event's revision, by
+`rule:<name>`, with the summary as the reason; `rollback: false` leaves the rollback to a canary
+guard. `openReview()` opens an item in a `ReviewOpener`, such as an `AnnotationQueue`, for each of the
+lowest-scoring runs, `limit` (5) of them, with its input and output. `sendWebhook()` posts the event
+as JSON, signed with HMAC-SHA256 in `x-nexus-signature` when given a `secret`, by its
+`AutomationWebhookOptions`; a refusal goes to `onError`.
+
+`AutomationRules` methods: `check()` judges every rule now; `observe()` hears an online
+evaluation's scores and judges the rules on their keys at once; `status()` returns an
+`AutomationStatus` per rule and scope; `start()` and `stop()` judge on a timer.
+
+In the test suite, a designer assistant draws banners and its canary draws them square. Two replicas
+score the runs through the evaluation worker with a media judge shown each banner, and a rule on the
+judge's score marks the canary unhealthy: it is rolled back, the five worst banners go to people,
+and one signed webhook is sent, once between the replicas. The live revision is never marked, new
+runs go to it, and the media catalog finds every one of the canary's banners by its low score.
 
 ## Queues and autoscaling
 
@@ -484,7 +576,7 @@ has, and any `replicaMetadata` you add, such as the host. `replicas()` returns t
 | --- | --- | --- |
 | `GET /deployments` | admin | Every deployment. |
 | `GET /deployments/:assistant` | admin | One deployment, with each revision's stats since the last change, from rollups when replicas keep them. |
-| `POST /deployments/:assistant` | admin | A `DeploymentChange`, with `expectedVersion` if you like. |
+| `POST /deployments/:assistant` | admin | A `DeploymentChange`, with `expectedVersion` if you like. A `health` change marks a revision. |
 | `GET /replicas` | admin | Fresh replica reports. |
 | `GET /scaling`, `GET /metrics` | read, or public | The queue and this replica. |
 | `GET /usage` | read | The caller's tenant usage. |
@@ -517,6 +609,10 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   reads the latest 2,000, so judge a very busy assistant with `from: 'rollups'`.
 - One rollup record is kept per replica per deployment version. They are small, and nothing deletes
   them.
+- Automation rules given a `state` store without `putIfVersion()`, or none, claim a firing per
+  process: two replicas judging the same fall at once can both act. Give them a shared store with it.
+- A rule judges the most recent `scanLimit` scores of its key, 5,000 by default, across every scope.
+  Raise it for a key many assistants share.
 - The Redis operation store reads every record to find queued work unless it is given `index: true`.
   Postgres and SQLite always use an index. The [operations guide](./operations.md) says when to turn it
   on.

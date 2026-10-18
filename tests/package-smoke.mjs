@@ -208,6 +208,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/evaluate/online', exports: ['onlineEvaluationWorker'] },
   { specifier: 'nexus-ai-pro/evaluate/media', exports: ['mediaChecks', 'mediaJudge', 'mediaOf', 'resolveMedia'] },
   {
+    specifier: 'nexus-ai-pro/evaluate/automation',
+    exports: ['automationRules', 'deploymentScores', 'markUnhealthy', 'openReview', 'sendWebhook'],
+  },
+  {
     specifier: 'nexus-ai-pro/postgres',
     exports: [
       'PostgresOperationStore',

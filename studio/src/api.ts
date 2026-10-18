@@ -708,7 +708,9 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     '/api/deployments/:assistant',
     async ({ request, params, user }) => {
       const change = await readJson<DeploymentChange & { expectedVersion?: number }>(request);
-      if (!change.action) throw badRequest('A change needs an "action": split, canary, promote, or rollback');
+      if (!change.action) {
+        throw badRequest('A change needs an "action": split, canary, promote, rollback, bucketing, or health');
+      }
       return {
         deployment: await need(sources.deployments, 'deployments').change(params.assistant as string, change, user.id),
       };

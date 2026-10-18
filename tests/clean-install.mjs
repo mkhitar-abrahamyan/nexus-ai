@@ -264,6 +264,7 @@ const imports = [
   ['nexus-ai-pro/tracing/otlp-grpc', ['OtlpGrpcTraceExporter', 'OtlpGrpcError']],
   ['nexus-ai-pro/evaluate/media', ['mediaChecks', 'mediaJudge']],
   ['nexus-ai-pro/media/catalog', ['mediaCatalog', 'catalogedAssetStore']],
+  ['nexus-ai-pro/evaluate/automation', ['automationRules', 'markUnhealthy']],
   ['nexus-ai-pro/realtime/openai-sip', ['answerOpenAISipCalls']],
   ['nexus-ai-pro/jobs/batch', ['runBatch']],
   ['nexus-ai-pro/workflows', ['ragAnswer']],

@@ -840,6 +840,16 @@
         "default": "./dist-cjs/evaluate/generate.js"
       }
     },
+    "./evaluate/automation": {
+      "import": {
+        "types": "./dist/evaluate/automation.d.ts",
+        "default": "./dist/evaluate/automation.js"
+      },
+      "require": {
+        "types": "./dist-cjs/evaluate/automation.d.ts",
+        "default": "./dist-cjs/evaluate/automation.js"
+      }
+    },
     "./evaluate/media": {
       "import": {
         "types": "./dist/evaluate/media.d.ts",
@@ -2351,6 +2361,9 @@
       ],
       "evaluate/media": [
         "dist-cjs/evaluate/media.d.ts"
+      ],
+      "evaluate/automation": [
+        "dist-cjs/evaluate/automation.d.ts"
       ],
       "postgres": [
         "dist-cjs/postgres/index.d.ts"

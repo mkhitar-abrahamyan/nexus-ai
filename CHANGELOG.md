@@ -33,6 +33,19 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   rubric and the brief, a stored asset sent as its bytes, and records the judge in an experiment.
   `mediaOf()` finds the media in an output, or in what the run's trace says it produced, and
   `resolveMedia()` reads one.
+- **Automation rules.** On the new `nexus-ai-pro/evaluate/automation`, `automationRules()` judges
+  a score over each revision's most recent runs, and when it falls below a threshold over enough
+  samples (optionally by the upper bound of a confidence interval), acts once, across every replica
+  sharing its `state`: `openReview()` sends the worst runs to people, `sendWebhook()` posts a signed
+  event, and `markUnhealthy()` marks the revision unhealthy, which rolls a canary back. Rules read
+  scores a deployment's run records hold (`deploymentScores()`), a trace store's
+  (`traceScores()`), or this process's (`memoryScores()`), and `observe()` judges them as an online
+  evaluation writes them. A rule fires once per fall, recovers, and can repeat.
+- **A revision's health.** `Deployments.markUnhealthy()` and `markHealthy()`: a `health` change in
+  the deployment's history, kept in `DeploymentRecord.unhealthy`. A canary marked unhealthy is rolled
+  back at once, and a canary guard rolls back any canary marked since it began, its `CanaryDecision`
+  carrying the mark. The studio shows each revision's health and marks one from the deployment view.
+  `Deployments.scores()` reads the scores of an assistant's runs.
 - **A catalog of every stored asset.** `mediaCatalog()`, on the new `nexus-ai-pro/media/catalog`,
   keeps one record of each stored asset in any long-term store (Postgres, SQLite, Redis, or memory):
   what it is, who made it, for which run, its tags, and its latest score per key, written by
@@ -70,6 +83,16 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   beside the rubric and the brief; media found through the trace; and an experiment over a target
   that draws. Without the sniffing, the store, the wildcard, the tolerance, the duration, the size
   limit, the count, the media shown, the brief, or the trace fallback, a test fails.
+- `tests/automation-rules.test.ts`: the proof that a canary is rolled back on a media evaluator's
+  score. A designer assistant's canary draws its banners square; two replicas score 80 runs with a
+  media judge shown each banner, and a rule on the judge's score marks the canary unhealthy, rolling
+  it back, opening review items for the five worst banners, and sending one signed webhook, once
+  between the replicas. The live revision is untouched, new runs go to it, and the media catalog
+  finds each of the canary's banners by its score. Then minimum samples, scopes, windows, the
+  confidence bound, the pass rate, recovery, repeats, filters, sources, failing actions, and a guard
+  rolling back a canary a rule only marked. Without the rollback, the guard's mark, the stale-mark
+  check, the claim, the minimum, the window, recovery, the bound, counting each run once, the
+  revision scope, the signature, or the repeat, a test fails.
 - `tests/media-catalog.test.ts`: on the memory, SQLite, Postgres, and Redis stores, forty assets of
   five kinds, two providers, and two tenants, some deleted and some expiring: every page lists each
   remaining asset once, every filter finds exactly its assets, expired ones are never read and are

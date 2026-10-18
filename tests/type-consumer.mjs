@@ -315,6 +315,14 @@ import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
 import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
+import {
+  automationRules,
+  deploymentScores,
+  markUnhealthy,
+  openReview,
+  sendWebhook,
+  type AutomationEvent,
+} from 'nexus-ai-pro/evaluate/automation';
 import { encodeOtlpTraceRequest, OtlpPartialSuccessError } from 'nexus-ai-pro/tracing/otlp';
 import { LLMJudge as SubpathLLMJudge } from 'nexus-ai-pro/evals/judge';
 import {
@@ -1099,6 +1107,24 @@ const catalogued = catalogedAssetStore({} as never, catalog, { name: 's3' });
 void catalogued;
 const blurry: Promise<MediaCatalogPage> = catalog.list({ tenantId: 'acme', kind: 'image', scoreBelow: { key: 'sharpness', below: 0.5 } });
 void blurry;
+// A rule on a deployment's scores marks its canary unhealthy, opens reviews, and posts a webhook.
+const automation = automationRules({
+  scores: deploymentScores(deployments, 'support'),
+  rules: [
+    {
+      name: 'quality',
+      key: 'helpfulness',
+      below: 0.6,
+      minSamples: 20,
+      confidence: 0.95,
+      actions: [markUnhealthy({ deployments }), openReview({ enqueue: () => undefined }), sendWebhook({ url: 'https://hooks.test' })],
+    },
+  ],
+});
+const automationEvents: Promise<AutomationEvent[]> = automation.check();
+void automationEvents;
+void deployments.evaluationWorker('support', { evaluators: [], operations: new MemoryOperationStore(), onScored: automation.observe });
+void deployments.markUnhealthy('support', 'v2', { reason: 'a score fell', rollback: false });
 // A retriever from the package keeps its type through tracing, and a deployment's runs are evaluated
 // from their traces through a worker.
 const tracedRetriever: Retriever = traceRetriever(vectorRetriever(new RagMemoryVectorStore()), new Tracer({ store: new MemoryTraceStore() }));

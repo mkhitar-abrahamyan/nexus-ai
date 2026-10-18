@@ -258,6 +258,7 @@ button:disabled {
 .badge.succeeded,
 .badge.completed,
 .badge.closed,
+.badge.healthy,
 .badge.better {
   color: var(--good);
   border-color: var(--good);
@@ -266,6 +267,7 @@ button:disabled {
 .badge.failed,
 .badge.open,
 .badge.worse,
+.badge.unhealthy,
 .badge.cancelled,
 .badge.expired {
   color: var(--bad);

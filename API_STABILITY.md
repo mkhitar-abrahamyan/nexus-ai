@@ -58,6 +58,14 @@ New and stable:
   `EvaluationContext.trace`;
 - `OnlineEvaluationWorkerOptions.withTrace`, `onScored`, and `onError`, and `OnlineScored`;
 - `traceRetriever()`, `RetrieverLike`, and `Tracer.within()`;
+- `nexus-ai-pro/evaluate/automation`: `automationRules()`, `deploymentScores()`, `traceScores()`,
+  `memoryScores()`, `openReview()`, `sendWebhook()`, `markUnhealthy()`, `AutomationRule`,
+  `AutomationRules`, `AutomationRulesOptions`, `AutomationEvent`, `AutomationAction`,
+  `AutomationStatus`, `AutomationWebhookOptions`, `ScoreSample`, `ScoreSource`, `MemoryScoreSource`,
+  `ReviewOpener`, and `RuleStatistic`;
+- `Deployments.markUnhealthy()`, `markHealthy()`, and `scores()`, `RunScore`, the `health`
+  `DeploymentChange`, `DeploymentRecord.unhealthy`, `RevisionHealthMark`,
+  `DeploymentChangeRecord.revision` and `healthy`, and `CanaryDecision.unhealthy`;
 - `nexus-ai-pro/evaluate/media`: `mediaChecks()`, `mediaJudge()`, `mediaOf()`, `resolveMedia()`,
   `MediaCheckOptions`, `MediaJudgeOptions`, `MediaResolveOptions`, `MediaSelection`, `MediaRange`,
   `ResolvedMedia`, and `MediaSubjectKind`;
@@ -70,6 +78,9 @@ New and stable:
 - in `nexus-ai-pro/tracing/otlp`: `OtlpTraceExporterOptions.protocol`, `encodeOtlpTraceRequest()`,
   `decodeOtlpTraceResponse()`, `OtlpExportRequest`, `OtlpKeyValue`, `OtlpAttributeValue`,
   `OtlpPartialSuccess`, and `OtlpPartialSuccessError`.
+
+Changed: `DeploymentChange` gains a `health` action, so a `switch` over its actions that must be
+exhaustive needs a case for it.
 
 Changed: `Deployments.evaluate()` runs through the online-evaluation worker, scoring up to 4 runs at
 once rather than one, so evaluators that are not safe to call concurrently need `concurrency: 1`.

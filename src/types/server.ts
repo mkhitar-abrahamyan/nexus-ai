@@ -238,8 +238,23 @@ export interface DeploymentRecord {
   updatedAt: string;
   /** Who made the last change. */
   updatedBy?: string;
+  /**
+   * Revisions marked unhealthy, by id, until marked healthy again: by a person, or by an automation
+   * rule when a score fell. A canary guard rolls back a canary marked since it began.
+   */
+  unhealthy?: Record<string, RevisionHealthMark>;
   /** Changes, newest first, up to the last 50. */
   history: DeploymentChangeRecord[];
+}
+
+/** Why a revision was marked unhealthy, by whom, and when. */
+export interface RevisionHealthMark {
+  /** Why, such as the score that fell. */
+  reason: string;
+  /** ISO-8601 time it was marked. */
+  at: string;
+  /** Who marked it: a person, or a rule as `rule:<name>`. */
+  by?: string;
 }
 
 /**
@@ -259,7 +274,8 @@ export type DeploymentChange =
   | { action: 'canary'; revision: string; weight: number; reason?: string }
   | { action: 'promote'; revision: string; reason?: string }
   | { action: 'rollback'; to?: string; reason?: string }
-  | { action: 'bucketing'; strategy: BucketStrategy; reason?: string };
+  | { action: 'bucketing'; strategy: BucketStrategy; reason?: string }
+  | { action: 'health'; revision: string; healthy: boolean; reason?: string };
 
 /** One entry in a deployment's history. */
 export interface DeploymentChangeRecord {
@@ -275,6 +291,10 @@ export interface DeploymentChangeRecord {
   traffic: Record<string, number>;
   /** The bucket strategy a `bucketing` change chose. */
   bucketStrategy?: BucketStrategy;
+  /** The revision a `health` change marked. */
+  revision?: string;
+  /** Whether a `health` change marked it healthy or unhealthy. */
+  healthy?: boolean;
   /** Who did it: a person, or `guard` when a canary guard acted. */
   by?: string;
   /** Why, such as the regression that triggered a rollback. */
