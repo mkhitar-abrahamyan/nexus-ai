@@ -128,6 +128,8 @@ export class Tracer {
   private readonly pending = new Map<string, Run[]>();
   /** Each trace's writes, in order, so a run's end can never land before its start. */
   private readonly writes = new Map<string, Promise<void>>();
+  /** What each handle puts in scope for `within()`. */
+  private readonly scopes = new WeakMap<RunHandle, ActiveContext>();
   private readonly now: () => Date;
 
   constructor(private readonly options: TracerOptions) {
@@ -201,6 +203,16 @@ export class Tracer {
     }
   }
 
+  /**
+   * Runs `fn` with a run in scope, so every run started inside it, such as a model call through a
+   * traced client, nests beneath that run. Unlike `trace()`, it neither starts nor finishes the run:
+   * a run started with `startRun()` is finished by its handle, when its owner decides.
+   */
+  within<T>(handle: RunHandle, fn: () => T): T {
+    const scope = this.scopes.get(handle);
+    return scope ? this.context.run(scope, fn) : fn();
+  }
+
   /** Wraps any function so every call to it becomes a run. */
   traceable<A extends unknown[], R>(
     options: StartRunOptions | ((...args: A) => StartRunOptions),
@@ -270,13 +282,15 @@ export class Tracer {
       await this.close(finished, sampled);
     };
 
-    return {
+    const handle: RunHandle = {
       id: run.id,
       traceId: run.traceId,
       finish,
       child: (options) => this.startRun({ ...options, traceId: run.traceId, parentId: run.id }),
       traceparent: () => formatTraceparent(run.traceId, run.id, sampled),
     };
+    this.scopes.set(handle, { traceId: run.traceId, runId: run.id, sampled });
+    return handle;
   }
 
   private async close(run: Run, sampled: boolean): Promise<void> {

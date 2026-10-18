@@ -448,7 +448,44 @@ the evaluation goes back to the queue, not to failure, and the workers stop unti
 `drain()` schedules and scores until nothing is left, `start()` and `stop()` keep it going, and
 `report()` returns an `OnlineEvaluationWorkerReport`: queued, scored, already scored, missing,
 failed, and why it last stopped. `schedule()` and `work()` run one step each; a scheduling pass
-returns an `OnlineSchedulePass`. `OnlineEvaluationWorkerOptions` holds the rest.
+returns an `OnlineSchedulePass`. `OnlineEvaluationWorkerOptions` holds the rest, among them:
+- `withTrace`, which gives each evaluator what the run did as `context.trace`, for one `tree()` read
+  per evaluation, as below;
+- `onScored`, which hears each run's scores once they are written, as an `OnlineScored`: the run,
+  its scores, the source, and the operation that wrote them. `automationRules()` acts on them. A
+  failure of it goes to `onError` and never fails the evaluation.
+
+### Judging a run by its trace
+
+An evaluator given a trace judges more than the answer. `context.trace` is an `EvaluationTrace`,
+read by `traceEvidence()` from the run and everything beneath it:
+
+| Field | What it holds |
+| --- | --- |
+| `root` | The trace, as a `RunTree` from the run judged. |
+| `inputs`, `outputs` | What the run received and produced. |
+| `toolCalls` | Every `TraceToolCall`: the tool's name, its arguments, its result or error, and how long it took. |
+| `retrievals` | Every `TraceRetrieval`: the query and the `TraceDocument` values that came back, best first. |
+| `modelCalls` | Every `TraceModelCall`: the model and provider, the request and response, usage, and cost. |
+| `media` | Every `TraceMedia`: an image, audio, video, document, or asset part the run received or produced, each once, with the run that carried it. |
+
+`mediaParts()` finds the same media, each a `MediaPart`, in any value: a message's content, a tool's output, or an asset
+an image or video operation returned, which comes back as an asset part. A retrieval is read from a
+`retriever` run, as `traceRetriever()` records one, whose outputs are the documents or
+`{ documents }`.
+
+```ts
+// Grounded: the answer quotes what the tool returned, and rests on a retrieved policy.
+const grounded: Evaluator = ({ output, trace }) => {
+  const order = trace?.toolCalls.find((call) => call.name === 'lookup_order')?.outputs as Order;
+  const cited = trace?.retrievals.some((retrieval) => retrieval.documents.length > 0) ?? false;
+  return { key: 'grounded', score: cited && String(output).includes(order.ships) ? 1 : 0 };
+};
+```
+
+A deployment's runs are judged the same way: `Deployments.evaluate()` and
+`Deployments.evaluationWorker()` run this worker over the server's runs, as the
+[deployments guide](./deployments.md#judging-with-confidence-and-on-quality) shows.
 
 ```ts
 import { onlineEvaluationWorker } from 'nexus-ai-pro/evaluate/online';
@@ -675,6 +712,7 @@ specific entry point that provides it.
 | `EvaluationContext` | interface | What an evaluator receives for one example. |
 | `EvaluationScore` | interface | What an evaluator says about one output. |
 | `EvaluationTarget` | type | Turns one example into an output. |
+| `EvaluationTrace` | interface | What a run did, read from its trace by `traceEvidence()`. |
 | `Evaluator` | type | Scores one output: a number, a pass or fail, one named score, or several. |
 | `exactMatch` | function | Exact equality against the example's expected output. |
 | `ExampleComparison` | interface | How one example's score moved. |
@@ -688,6 +726,8 @@ specific entry point that provides it.
 | `fingerprintOf` | function | A fingerprint for whatever decides a target's output — a model name, a prompt version, a temperature, a context bundle version — as `f` and 16 hex digits of a SHA-256 over its canonical JSON, so the same settings always give the same fingerprint, whatever the key order. |
 | `formatComparison` | function | A comparison as text, for a pull-request comment or a CI log. |
 | `FromTracesOptions` | interface | Options for `datasetFromTraces()`. |
+| `MediaPart` | type | A medium an evaluator can judge: an image, audio, video, document, or asset part. |
+| `mediaParts` | function | Every image, audio, video, document, and asset part inside a value, in the order they appear: a message's content, a tool's output, a list of them, or an asset an image or video operation returned, which comes back as an asset part. |
 | `MemoryDatasetStore` | class | Datasets in memory, keyed by name and version. |
 | `MemoryEvaluationCache` | class | Target outputs in process memory, least recently used dropped first. |
 | `MemoryEvaluationCacheOptions` | interface | Options for a `MemoryEvaluationCache`. |
@@ -712,6 +752,12 @@ specific entry point that provides it.
 | `summarize` | function | Mean, spread, and an interval per metric, so one lucky run is not mistaken for an improvement. |
 | `SummaryEvaluator` | type | Scores an experiment as a whole: pass rate, distribution, anything per-example scores cannot say. |
 | `totalCost` | function | Total cost of the experiment, so a quality gain that tripled the bill is visible. |
+| `TraceDocument` | interface | One document a retrieval returned. |
+| `traceEvidence` | function | Reads a trace into what evaluators judge: its root's inputs and outputs, every tool call, retrieval, and model call beneath it in the order they started, and the media they carried, each medium once. |
+| `TraceMedia` | interface | A medium a run received or produced, and the trace run that carried it. |
+| `TraceModelCall` | interface | A model call a run made, as its trace recorded it. |
+| `TraceRetrieval` | interface | A retrieval a run made: what it asked, and the documents that came back, best first. |
+| `TraceToolCall` | interface | A tool a run called, as its trace recorded it. |
 | `trajectory` | function | Scores how an answer was reached, not just what it said. |
 | `TrajectoryOptions` | interface | Options for `trajectory()`. |
 | `underCost` | function | Cost as a pass or fail, per example. |
@@ -749,6 +795,7 @@ specific entry point that provides it.
 | `OnlineEvaluationWorkerOptions` | interface | Options for `onlineEvaluationWorker()`. |
 | `OnlineEvaluationWorkerReport` | interface | What a worker has done since it was created. |
 | `OnlineSchedulePass` | interface | What one scheduling pass did. |
+| `OnlineScored` | interface | One run's scores, as `onScored` hears them. |
 
 ### `nexus-ai-pro/evaluate/threads`
 

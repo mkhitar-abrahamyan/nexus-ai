@@ -98,8 +98,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/core` | 337 KB | 97% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 61% | none |
 | `nexus-ai-pro/realtime` | 212 KB | 61% | none |
+| `nexus-ai-pro/server/deployments` | 140 KB | 40% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 138 KB | 40% | none |
-| `nexus-ai-pro/server` | 120 KB | 34% | none |
+| `nexus-ai-pro/server` | 122 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 33% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
 | `nexus-ai-pro/realtime/session` | 108 KB | 31% | none |
@@ -113,9 +114,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
 | `nexus-ai-pro/graph` | 82 KB | 23% | none |
+| `nexus-ai-pro/evaluate/online` | 81 KB | 23% | none |
 | `nexus-ai-pro/router` | 81 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
-| `nexus-ai-pro/evaluate/online` | 74 KB | 21% | none |
 | `nexus-ai-pro/images` | 73 KB | 21% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 17% | none |
@@ -123,12 +124,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 16% | none |
-| `nexus-ai-pro/server/deployments` | 54 KB | 15% | none |
+| `nexus-ai-pro/evaluate` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
 | `nexus-ai-pro/models/data` | 51 KB | 15% | none |
 | `nexus-ai-pro/agent/sandbox` | 48 KB | 14% | none |
-| `nexus-ai-pro/evaluate` | 46 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 13% | none |
@@ -150,8 +150,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/voice` | 33 KB | 9% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
+| `nexus-ai-pro/tracing` | 32 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
-| `nexus-ai-pro/tracing` | 31 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
 | `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |

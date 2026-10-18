@@ -12,7 +12,8 @@ import { BudgetExceededError } from '../core/lifecycle.js';
 import { operationStats } from '../operations/store.js';
 import { OperationRunner } from '../operations/runner.js';
 import type { AnnotationQueue } from './review.js';
-import type { EvaluationContext, EvaluationScore, Evaluator } from '../types/evaluate.js';
+import { traceEvidence } from './trace.js';
+import type { EvaluationContext, EvaluationScore, EvaluationTrace, Evaluator } from '../types/evaluate.js';
 import type {
   BudgetLedger,
   BudgetReservation,
@@ -21,7 +22,7 @@ import type {
 } from '../types/lifecycle.js';
 import type { OperationContext, OperationStore } from '../types/operations.js';
 import { isAfterCursor, runCursor } from '../tracing/query.js';
-import type { Run, RunCursor, RunQuery, TraceStore } from '../types/tracing.js';
+import type { Run, RunCursor, RunQuery, RunTree, TraceStore } from '../types/tracing.js';
 
 /** Options for `onlineEvaluationWorker()`. */
 export interface OnlineEvaluationWorkerOptions {
@@ -65,10 +66,36 @@ export interface OnlineEvaluationWorkerOptions {
   reviewQueue?: AnnotationQueue;
   /** Decides whether a run's scores are uncertain enough to send it to people. */
   reviewWhen?: (scores: EvaluationScore[], run: Run) => boolean;
+  /**
+   * Gives each evaluator what the run did, read from its trace, as `context.trace`: the run and
+   * everything beneath it, with its tool calls, retrievals, model calls, and media. Costs one
+   * `tree()` read per evaluation. Defaults to false.
+   */
+  withTrace?: boolean;
+  /**
+   * Hears each run's scores once they are written, on the worker that wrote them, such as
+   * `automationRules().observe` acting when a score falls. A failure goes to `onError` and never
+   * fails the evaluation, whose scores are already written.
+   */
+  onScored?: (scored: OnlineScored) => Promise<void> | void;
+  /** Receives failures of `onScored`. */
+  onError?: (error: unknown) => void;
   /** Identifies this worker in leases. Defaults to a generated id. */
   owner?: string;
   /** Replaces the clock, for tests. */
   now?: () => Date;
+}
+
+/** One run's scores, as `onScored` hears them. */
+export interface OnlineScored {
+  /** The run scored. */
+  run: Run;
+  /** Its scores, from every evaluator. */
+  scores: EvaluationScore[];
+  /** The source they were recorded under. */
+  source: string;
+  /** The evaluation operation that wrote them. */
+  operationId: string;
 }
 
 /** What one scheduling pass did. */
@@ -264,7 +291,8 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
       if (reservation?.id) {
         await context.heartbeat({ reservation: reservation.id, evaluating: true } satisfies EvaluationCheckpoint);
       }
-      const scores = await scoreRun(run, options.evaluators);
+      const tree = options.withTrace ? await options.traces.tree(run.traceId) : undefined;
+      const scores = await scoreRun(run, options.evaluators, tree ? traceEvidence(subtree(tree, run.id)) : undefined);
       const missing = scores.filter((score) => !written.has(score.key));
       if (missing.length === 0 && written.size > 0) {
         if (reservation) {
@@ -298,6 +326,13 @@ export function onlineEvaluationWorker(options: OnlineEvaluationWorkerOptions): 
         );
       }
       tally.scored += 1;
+      if (options.onScored) {
+        try {
+          await options.onScored({ run, scores, source: options.source, operationId: context.operationId });
+        } catch (error) {
+          options.onError?.(error);
+        }
+      }
       return { status: 'scored', runId, scores: scores.map(({ key, score }) => ({ key, score })) };
     } finally {
       if (reservation) await options.budget?.release(reservation);
@@ -480,14 +515,35 @@ function scoresWritten(run: Run, source: string, operationId: string): Evaluatio
     }));
 }
 
+/** The run judged and everything beneath it, or the whole trace when the run is not in it by id. */
+function subtree(tree: RunTree, runId: string): RunTree {
+  const stack = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    if (node.id === runId) return node;
+    stack.push(...node.children);
+  }
+  return tree;
+}
+
 /** A run's scores from every evaluator, as `evaluateOnline()` gives them. */
-async function scoreRun(run: Run, evaluators: readonly Evaluator[]): Promise<EvaluationScore[]> {
+async function scoreRun(
+  run: Run,
+  evaluators: readonly Evaluator[],
+  trace?: EvaluationTrace,
+): Promise<EvaluationScore[]> {
   const context: EvaluationContext = {
-    example: { id: run.id, inputs: run.inputs, expected: undefined },
+    example: {
+      id: run.id,
+      inputs: run.inputs ?? trace?.inputs,
+      expected: undefined,
+      ...(run.metadata ? { metadata: run.metadata } : {}),
+    },
     output: run.outputs,
+    ...(run.error ? { error: run.error } : {}),
     latencyMs: run.latencyMs ?? 0,
     ...(run.cost === undefined ? {} : { cost: run.cost }),
     run: 0,
+    ...(trace ? { trace } : {}),
   };
   const scores: EvaluationScore[] = [];
   for (const evaluator of evaluators) {

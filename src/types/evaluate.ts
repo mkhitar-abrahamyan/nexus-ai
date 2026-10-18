@@ -8,6 +8,9 @@
  * that turns an example into an output, evaluators that score it, and a stored experiment.
  */
 
+import type { AssetContent, AudioContent, DocumentContent, ImageContent, VideoContent } from './messages.js';
+import type { RunKind, RunTree } from './tracing.js';
+
 /** One case to evaluate: what the target receives and, optionally, what a correct answer looks like. */
 export interface DatasetExample<I = unknown, O = unknown> {
   /**
@@ -83,6 +86,108 @@ export interface EvaluationContext<I = unknown, O = unknown> {
   cost?: number;
   /** Repetition index, for a target that is not deterministic. */
   run: number;
+  /**
+   * What the run did, read from its trace, when the evaluation reads traces: online evaluation with
+   * `withTrace`, and a deployment's evaluation of a server that traces its runs.
+   */
+  trace?: EvaluationTrace;
+}
+
+/** A medium an evaluator can judge: an image, audio, video, document, or asset part. */
+export type MediaPart = ImageContent | AudioContent | VideoContent | DocumentContent | AssetContent;
+
+/** A tool a run called, as its trace recorded it. */
+export interface TraceToolCall {
+  /** The tool's name. */
+  name: string;
+  /** What it was called with. */
+  inputs?: unknown;
+  /** What it returned. */
+  outputs?: unknown;
+  /** Why it failed, when it did. */
+  error?: { name: string; message: string };
+  /** How long it took, in milliseconds. */
+  latencyMs?: number;
+  /** The trace run that recorded it. */
+  runId: string;
+}
+
+/** A model call a run made, as its trace recorded it. */
+export interface TraceModelCall {
+  /** The model that answered. */
+  model?: string;
+  /** The provider that answered. */
+  provider?: string;
+  /** The request. */
+  inputs?: unknown;
+  /** The response's content and tool calls. */
+  outputs?: unknown;
+  /** Why it failed, when it did. */
+  error?: { name: string; message: string };
+  /** Token counts. */
+  usage?: Record<string, number>;
+  /** What it cost. */
+  cost?: number;
+  /** How long it took, in milliseconds. */
+  latencyMs?: number;
+  /** The trace run that recorded it. */
+  runId: string;
+}
+
+/** One document a retrieval returned. */
+export interface TraceDocument {
+  /** The document's id, when it has one. */
+  id?: string;
+  /** Its text. */
+  content: string;
+  /** Its retrieval score. */
+  score?: number;
+  /** Where it came from. */
+  source?: string;
+  /** Its metadata. */
+  metadata?: Record<string, unknown>;
+}
+
+/** A retrieval a run made: what it asked, and the documents that came back, best first. */
+export interface TraceRetrieval {
+  /** The query, when the trace recorded one. */
+  query?: string;
+  /** The documents. */
+  documents: TraceDocument[];
+  /** Why it failed, when it did. */
+  error?: { name: string; message: string };
+  /** The trace run that recorded it. */
+  runId: string;
+}
+
+/** A medium a run received or produced, and the trace run that carried it. */
+export interface TraceMedia {
+  /** The medium. */
+  part: MediaPart;
+  /** Whether it was among the run's inputs or its outputs. */
+  direction: 'input' | 'output';
+  /** The trace run that carried it first. */
+  runId: string;
+  /** That run's kind. */
+  kind: RunKind;
+}
+
+/** What a run did, read from its trace by `traceEvidence()`. */
+export interface EvaluationTrace {
+  /** The trace, as a tree from the run judged. */
+  root: RunTree;
+  /** What the run received. */
+  inputs?: unknown;
+  /** What it produced. */
+  outputs?: unknown;
+  /** Every tool it called, in the order they started. */
+  toolCalls: TraceToolCall[];
+  /** Every retrieval it made. */
+  retrievals: TraceRetrieval[];
+  /** Every model call it made. */
+  modelCalls: TraceModelCall[];
+  /** Every medium it received or produced, each once, in the order the trace carried them. */
+  media: TraceMedia[];
 }
 
 /** Scores one output: a number, a pass or fail, one named score, or several. */

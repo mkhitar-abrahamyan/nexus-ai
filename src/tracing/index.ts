@@ -13,8 +13,10 @@ export {
   type GraphTracing,
   type GraphTracingOptions,
   type ModelClientLike,
+  type RetrieverLike,
   traceGraph,
   traceModelClient,
+  traceRetriever,
 } from './instrument.js';
 export {
   applyQuery,

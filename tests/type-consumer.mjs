@@ -195,7 +195,8 @@ import { createAgent, agentInput, type AgentMiddleware, type AgentState } from '
 import { MemoryStore, type Store, type StoreItem } from 'nexus-ai-pro/store';
 import { RedisStore } from 'nexus-ai-pro/store/redis';
 import { McpClient, McpServer, type McpTransport } from 'nexus-ai-pro/mcp';
-import { Tracer, MemoryTraceStore, traceGraph, AlertEvaluator, type Run, type TraceStore } from 'nexus-ai-pro/tracing';
+import { Tracer, MemoryTraceStore, traceGraph, AlertEvaluator, traceRetriever, type Run, type TraceStore } from 'nexus-ai-pro/tracing';
+import { traceEvidence, type EvaluationTrace } from 'nexus-ai-pro/evaluate';
 import {
   evaluate,
   createDataset,
@@ -1073,6 +1074,18 @@ void geminiLive;
 const spooled = spoolingExporter({ sender: { send: async () => undefined }, store: {} as never, drainEveryMs: 0 });
 const spoolStats: Promise<SpoolStats> = spooled.stats();
 void spoolStats;
+// A retriever from the package keeps its type through tracing, and a deployment's runs are evaluated
+// from their traces through a worker.
+const tracedRetriever: Retriever = traceRetriever(vectorRetriever(new RagMemoryVectorStore()), new Tracer({ store: new MemoryTraceStore() }));
+void tracedRetriever;
+const deploymentWorker = deployments.evaluationWorker('support', {
+  evaluators: [({ trace }) => trace?.toolCalls.length ?? 0],
+  operations: new MemoryOperationStore(),
+  traces: new MemoryTraceStore(),
+});
+void deploymentWorker.drain();
+const evidence: EvaluationTrace = traceEvidence({ id: 'r', traceId: 't', name: 'n', kind: 'agent', status: 'ok', startedAt: '', children: [] });
+void evidence;
 const telnyxProvider = new TelnyxTelephonyProvider({ apiKey: 'server-only', connectionId: 'app' });
 void telnyxProvider.sendMessage({ to: '+15550001', from: '+15559999', body: 'hi' });
 const consumerWorkspace: Workspace = compositeWorkspace({

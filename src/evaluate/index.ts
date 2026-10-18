@@ -71,11 +71,19 @@ export type {
   DatasetStore,
   EvaluationContext,
   EvaluationScore,
+  EvaluationTrace,
   Evaluator,
   ExampleResult,
   Experiment,
   ExperimentStore,
+  MediaPart,
   MetricSummary,
   SummaryEvaluator,
+  TraceDocument,
+  TraceMedia,
+  TraceModelCall,
+  TraceRetrieval,
+  TraceToolCall,
 } from '../types/evaluate.js';
+export { mediaParts, traceEvidence } from './trace.js';
 export { withProvenance } from './provenance.js';

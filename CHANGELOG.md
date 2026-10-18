@@ -15,6 +15,26 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   waiting.
 - `OtlpTraceExporter.send()`: sends runs as one batch now, and rejects when the collector refuses
   them.
+- **A deployment judged by what its runs did.** An agent server given a `tracer` makes each run the
+  root of a trace, with its input and output, and everything the assistant traces through the same
+  tracer beneath it; the run records the trace as `RunRecord.traceId`. `Deployments.evaluate()`
+  given those `traces` hands each evaluator the run's input and an `EvaluationTrace` of its tool
+  calls, retrievals, model calls, and media, read by the new `traceEvidence()`, which `mediaParts()`
+  backs. An assistant that traces itself is found by the run id it records.
+- `Deployments.evaluationWorker()`: the online-evaluation worker over a deployment's runs, to start
+  on every replica, scoring each run once between them as it finishes.
+- `onlineEvaluationWorker()` takes `withTrace`, which gives evaluators `context.trace`, and
+  `onScored`, which hears each run's scores once they are written, with `onError` for its failures.
+- `traceRetriever()`: every retrieval as a `retriever` run, with the query and the documents.
+- `Tracer.within()`: runs a function with a run started by `startRun()` in scope.
+
+### Changed
+
+- `Deployments.evaluate()` runs through the online-evaluation worker, drained once, instead of beside
+  it. Replicas given one `operations` store score each run once between them, even calling at the
+  same moment, where before two calls could score a run twice; it takes the worker's budget, review
+  queue, and concurrency (4 at a time by default, one before), and `RunEvaluationReport` counts
+  `failed` evaluations. Which runs a `sampleRate` picks is unchanged.
 
 ### Proof
 
@@ -23,6 +43,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   SQLite, Postgres, and Redis operation stores. The bound, dead letters, two replicas on one spool,
   and write-ahead through a process that dies mid-send. Without the spool, its bound, its claim, its
   dead letters, write-ahead, or taking over a lapsed lease, a test fails.
+- `tests/deployment-trace-evaluation.test.ts`: a traced server whose assistant retrieves a policy,
+  calls a tool, and asks a model about a photo; its evaluators see the input, the tool call, the
+  documents, the model call, and the photo once. Two replicas evaluating at once over one operation
+  store score each of 40 runs once, where queues of their own score runs twice. A worker scores runs
+  as they finish and hears each score once, and an assistant tracing itself is found. Without the
+  trace, the input, the run scope, the shared queue, the fallback, the media deduplication, or the
+  trace written before the run settles, a test fails.
 
 ## [2.11.0] - 2026-10-18
 

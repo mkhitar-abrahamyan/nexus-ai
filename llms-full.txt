@@ -4466,6 +4466,7 @@ The current run travels through `AsyncLocalStorage`, which is created only when 
 | `handle.child()` | Starts a run beneath it, without relying on the ambient context. |
 | `trace()` | Runs a function inside a new run, and finishes it with the result or error. |
 | `traceable()` | Wraps a function so every call becomes a run, with its arguments as inputs. |
+| `within()` | Runs a function with a run started by `startRun()` in scope, so what it traces nests beneath that run, which its handle still finishes. |
 | `current()` | The run in scope. |
 
 `StartRunOptions` give the name, kind (`chain` by default), inputs, tags, metadata, model, and
@@ -4544,6 +4545,19 @@ nests it inside the node that made it.
 
 A tool call an agent reports — `createAgent()` reports every one — becomes a `tool` run inside the
 node that made it, with the arguments as inputs and the result or the error.
+
+`traceRetriever()` wraps anything with a `retrieve()` method — the `RetrieverLike` contract, which
+every retriever in `nexus-ai-pro/rag` meets — so every retrieval becomes a `retriever` run, holding
+the query and the options asked as inputs and `{ documents }` as outputs. Every other member of the
+retriever is its own, so a wrapped keyword index still takes writes. It takes `parent` and `name`, as
+`traceModelClient()` does.
+
+An agent server given a `tracer` traces each run itself: each attempt is the root of a trace, an
+`agent` run named after the assistant, with the input as inputs and the output as outputs, and
+`metadata.nexus` naming the run, the assistant, the attempt, the revision, and the thread, queryable
+as `{ metadata: { 'nexus.run': runId } }`. Whatever the assistant traces through the same tracer, a
+model call or a retrieval, lands beneath it. The run records the trace's id as `traceId`, which
+[a deployment's evaluation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md#judging-with-confidence-and-on-quality) reads.
 
 ## Exporting to OpenTelemetry
 
@@ -5207,7 +5221,44 @@ the evaluation goes back to the queue, not to failure, and the workers stop unti
 `drain()` schedules and scores until nothing is left, `start()` and `stop()` keep it going, and
 `report()` returns an `OnlineEvaluationWorkerReport`: queued, scored, already scored, missing,
 failed, and why it last stopped. `schedule()` and `work()` run one step each; a scheduling pass
-returns an `OnlineSchedulePass`. `OnlineEvaluationWorkerOptions` holds the rest.
+returns an `OnlineSchedulePass`. `OnlineEvaluationWorkerOptions` holds the rest, among them:
+- `withTrace`, which gives each evaluator what the run did as `context.trace`, for one `tree()` read
+  per evaluation, as below;
+- `onScored`, which hears each run's scores once they are written, as an `OnlineScored`: the run,
+  its scores, the source, and the operation that wrote them. `automationRules()` acts on them. A
+  failure of it goes to `onError` and never fails the evaluation.
+
+### Judging a run by its trace
+
+An evaluator given a trace judges more than the answer. `context.trace` is an `EvaluationTrace`,
+read by `traceEvidence()` from the run and everything beneath it:
+
+| Field | What it holds |
+| --- | --- |
+| `root` | The trace, as a `RunTree` from the run judged. |
+| `inputs`, `outputs` | What the run received and produced. |
+| `toolCalls` | Every `TraceToolCall`: the tool's name, its arguments, its result or error, and how long it took. |
+| `retrievals` | Every `TraceRetrieval`: the query and the `TraceDocument` values that came back, best first. |
+| `modelCalls` | Every `TraceModelCall`: the model and provider, the request and response, usage, and cost. |
+| `media` | Every `TraceMedia`: an image, audio, video, document, or asset part the run received or produced, each once, with the run that carried it. |
+
+`mediaParts()` finds the same media, each a `MediaPart`, in any value: a message's content, a tool's output, or an asset
+an image or video operation returned, which comes back as an asset part. A retrieval is read from a
+`retriever` run, as `traceRetriever()` records one, whose outputs are the documents or
+`{ documents }`.
+
+```ts
+// Grounded: the answer quotes what the tool returned, and rests on a retrieved policy.
+const grounded: Evaluator = ({ output, trace }) => {
+  const order = trace?.toolCalls.find((call) => call.name === 'lookup_order')?.outputs as Order;
+  const cited = trace?.retrievals.some((retrieval) => retrieval.documents.length > 0) ?? false;
+  return { key: 'grounded', score: cited && String(output).includes(order.ships) ? 1 : 0 };
+};
+```
+
+A deployment's runs are judged the same way: `Deployments.evaluate()` and
+`Deployments.evaluationWorker()` run this worker over the server's runs, as the
+[deployments guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md#judging-with-confidence-and-on-quality) shows.
 
 ```ts
 import { onlineEvaluationWorker } from 'nexus-ai-pro/evaluate/online';
@@ -11573,7 +11624,15 @@ createServer(toNodeListener(server)).listen(8080);
 - the HTTP settings: `basePath`, `authenticate`, `allowAnonymous`, `scopes`, `cron` with the jobs that
   exist from startup, and `heartbeatMs` for live streams;
 - `metrics`, which controls `GET /metrics` and `GET /scaling`;
-- `deployments` and `replicaMetadata`, for revisions and replica reports.
+- `deployments` and `replicaMetadata`, for revisions and replica reports;
+- `tracer`, which makes each run the root of a trace, as below.
+
+With a `tracer` from `nexus-ai-pro/tracing`, each attempt of a run is an `agent` run of its own trace,
+holding the run's input and output, with everything the assistant traces through the same tracer
+beneath it: give the server the tracer its clients use, through `traceModelClient()` and
+`traceRetriever()`. The trace is written before the run reads as finished, and the run records it as
+`traceId`, so a deployment's evaluation judges the run by what it did. The
+[tracing guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tracing.md#graphs-and-model-calls) says what the root records.
 
 ## The HTTP surface
 
@@ -11667,6 +11726,7 @@ A `RunRecord` also records how the run went:
 | `durationMs` | Time from the first start to the finish, across every attempt. |
 | `cost` | US dollars recorded through `recordCost()`, across every attempt. |
 | `worker`, `attempt` | The worker that ran its latest attempt, and which attempt that was. |
+| `traceId` | The trace of its latest attempt, when the server has a `tracer`. |
 
 ## Workers and the queue
 
@@ -12230,22 +12290,57 @@ as the run's feedback. Name those keys in `feedback`, and a canary that answers 
 like one that fails more. A person can leave feedback on a run too, through
 `POST /runs/:runId/feedback`.
 
+It runs through the [online-evaluation worker](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md#on-workers), drained once, so it
+keeps the worker's guarantees: each run is one operation in `operations`, and replicas that share
+that store score each run once between them, even calling at the same moment. An evaluation is
+reserved from a `budget` before its evaluators run, and an uncertain one goes to a `reviewQueue`.
+Given the server's `traces`, from a server with a [`tracer`](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md#a-server-in-fifteen-lines),
+each evaluator sees the run's input as `context.example.inputs` and what it did as `context.trace`:
+its tool calls, the documents it retrieved, its model calls, and the media it received or produced,
+as the [evaluation guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md#judging-a-run-by-its-trace) describes. An assistant that
+traces itself is found by the run id it records, as `metadata: { nexus: { run: context.runId } }`.
+
 ```ts
 // Every few minutes: score new runs, then judge the canary on quality as well as errors and speed.
-await deployments.evaluate('support', { evaluators: [helpfulnessJudge], sampleRate: 0.2 });
-watchCanaries({ deployments, confidence: 0.95, minRuns: 50, feedback: ['helpfulness'] });
+await deployments.evaluate('support', {
+  evaluators: [helpfulnessJudge, grounded],
+  traces: traceStore,
+  operations,
+  sampleRate: 0.2,
+});
+watchCanaries({ deployments, confidence: 0.95, minRuns: 50, feedback: ['helpfulness', 'grounded'] });
 ```
 
 `RunEvaluationOptions` sets:
 - the `evaluators`;
+- the `traces` the server writes, and the `operations` store evaluations queue in (memory, for one
+  process, by default);
 - `since`, the start of a canary for instance;
 - one `revision`;
 - a `sampleRate`, chosen by run id so every replica scores the same runs;
 - how many runs are read (`limit`);
-- the `source` the scores are recorded under. A run already scored by that source is skipped.
+- the `source` the scores are recorded under. A run already scored by that source is skipped;
+- what the worker takes as it is: `concurrency`, `leaseMs`, `budget`, `estimate`, `costOf`,
+  `tenantId`, `reviewQueue`, `reviewWhen`, `onScored`, `onError`, `owner`, and a clock, with
+  `pollMs` for how long a drain waits on an evaluation another replica holds.
 
-`RunEvaluationReport` counts the runs scored and skipped, and lists every score. Evaluators judge a run
-by its output, since a run record does not keep its input.
+`RunEvaluationReport` counts the runs scored, skipped, and failed, and lists every score.
+
+For scoring as runs finish rather than on a schedule, `Deployments.evaluationWorker()` returns the
+worker itself, an `OnlineEvaluationWorker` to `start()` on every replica, over one shared
+`operations` store. `DeploymentEvaluationWorkerOptions` are the same options, with `operations`
+required and `maxQueued`. A worker reads the server's runs again each `cacheMs`.
+
+```ts
+const worker = deployments.evaluationWorker('support', {
+  evaluators: [helpfulnessJudge],
+  traces: traceStore,
+  operations: new PostgresOperationStore(pool, { table: 'evaluations' }),
+  budget: budgetLedger({ limit: 50 }),
+  estimate: 0.002,
+});
+worker.start();
+```
 
 `CanaryGuardOptions`:
 
@@ -12973,8 +13068,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/core` | 337 KB | 97% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 61% | none |
 | `nexus-ai-pro/realtime` | 212 KB | 61% | none |
+| `nexus-ai-pro/server/deployments` | 140 KB | 40% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 138 KB | 40% | none |
-| `nexus-ai-pro/server` | 120 KB | 34% | none |
+| `nexus-ai-pro/server` | 122 KB | 35% | none |
 | `nexus-ai-pro/batch` | 116 KB | 33% | none |
 | `nexus-ai-pro/agent` | 114 KB | 33% | none |
 | `nexus-ai-pro/realtime/session` | 108 KB | 31% | none |
@@ -12988,9 +13084,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/deepseek` | 86 KB | 25% | none |
 | `nexus-ai-pro/providers/openai` | 86 KB | 25% | none |
 | `nexus-ai-pro/graph` | 82 KB | 23% | none |
+| `nexus-ai-pro/evaluate/online` | 81 KB | 23% | none |
 | `nexus-ai-pro/router` | 81 KB | 23% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 23% | none |
-| `nexus-ai-pro/evaluate/online` | 74 KB | 21% | none |
 | `nexus-ai-pro/images` | 73 KB | 21% | none |
 | `nexus-ai-pro/providers/google` | 72 KB | 21% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 17% | none |
@@ -12998,12 +13094,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/ollama` | 58 KB | 17% | none |
 | `nexus-ai-pro/security` | 58 KB | 17% | none |
 | `nexus-ai-pro/operations` | 56 KB | 16% | none |
-| `nexus-ai-pro/server/deployments` | 54 KB | 15% | none |
+| `nexus-ai-pro/evaluate` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 15% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 15% | none |
 | `nexus-ai-pro/models/data` | 51 KB | 15% | none |
 | `nexus-ai-pro/agent/sandbox` | 48 KB | 14% | none |
-| `nexus-ai-pro/evaluate` | 46 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 13% | none |
@@ -13025,8 +13120,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/voice` | 33 KB | 9% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
+| `nexus-ai-pro/tracing` | 32 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
-| `nexus-ai-pro/tracing` | 31 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
 | `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |
@@ -13330,7 +13425,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 185 entry points, 149 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 185 entry points, 148 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |
@@ -13358,6 +13453,7 @@ Of 185 entry points, 149 run on any runtime. These need Node.js, or a runtime wi
 | `nexus-ai-pro/insights` | the `process` global |
 | `nexus-ai-pro/connectors` | `node:dns/promises`, `node:http`, `node:https`, `node:net`; the `Buffer` global |
 | `nexus-ai-pro/server` | `node:crypto`; the `Buffer` global |
+| `nexus-ai-pro/server/deployments` | `node:crypto`; the `Buffer` global |
 | `nexus-ai-pro/doctor` | `node:module`, `node:path`; the `process` global |
 | `nexus-ai-pro/prompts/registry` | `node:crypto`; the `Buffer` global |
 | `nexus-ai-pro/prompts/file` | `node:fs/promises`, `node:path`; the `process` global |

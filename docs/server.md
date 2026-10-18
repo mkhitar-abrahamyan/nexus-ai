@@ -45,7 +45,15 @@ createServer(toNodeListener(server)).listen(8080);
 - the HTTP settings: `basePath`, `authenticate`, `allowAnonymous`, `scopes`, `cron` with the jobs that
   exist from startup, and `heartbeatMs` for live streams;
 - `metrics`, which controls `GET /metrics` and `GET /scaling`;
-- `deployments` and `replicaMetadata`, for revisions and replica reports.
+- `deployments` and `replicaMetadata`, for revisions and replica reports;
+- `tracer`, which makes each run the root of a trace, as below.
+
+With a `tracer` from `nexus-ai-pro/tracing`, each attempt of a run is an `agent` run of its own trace,
+holding the run's input and output, with everything the assistant traces through the same tracer
+beneath it: give the server the tracer its clients use, through `traceModelClient()` and
+`traceRetriever()`. The trace is written before the run reads as finished, and the run records it as
+`traceId`, so a deployment's evaluation judges the run by what it did. The
+[tracing guide](./tracing.md#graphs-and-model-calls) says what the root records.
 
 ## The HTTP surface
 
@@ -139,6 +147,7 @@ A `RunRecord` also records how the run went:
 | `durationMs` | Time from the first start to the finish, across every attempt. |
 | `cost` | US dollars recorded through `recordCost()`, across every attempt. |
 | `worker`, `attempt` | The worker that ran its latest attempt, and which attempt that was. |
+| `traceId` | The trace of its latest attempt, when the server has a `tracer`. |
 
 ## Workers and the queue
 

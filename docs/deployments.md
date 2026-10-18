@@ -252,22 +252,57 @@ as the run's feedback. Name those keys in `feedback`, and a canary that answers 
 like one that fails more. A person can leave feedback on a run too, through
 `POST /runs/:runId/feedback`.
 
+It runs through the [online-evaluation worker](./evaluation.md#on-workers), drained once, so it
+keeps the worker's guarantees: each run is one operation in `operations`, and replicas that share
+that store score each run once between them, even calling at the same moment. An evaluation is
+reserved from a `budget` before its evaluators run, and an uncertain one goes to a `reviewQueue`.
+Given the server's `traces`, from a server with a [`tracer`](./server.md#a-server-in-fifteen-lines),
+each evaluator sees the run's input as `context.example.inputs` and what it did as `context.trace`:
+its tool calls, the documents it retrieved, its model calls, and the media it received or produced,
+as the [evaluation guide](./evaluation.md#judging-a-run-by-its-trace) describes. An assistant that
+traces itself is found by the run id it records, as `metadata: { nexus: { run: context.runId } }`.
+
 ```ts
 // Every few minutes: score new runs, then judge the canary on quality as well as errors and speed.
-await deployments.evaluate('support', { evaluators: [helpfulnessJudge], sampleRate: 0.2 });
-watchCanaries({ deployments, confidence: 0.95, minRuns: 50, feedback: ['helpfulness'] });
+await deployments.evaluate('support', {
+  evaluators: [helpfulnessJudge, grounded],
+  traces: traceStore,
+  operations,
+  sampleRate: 0.2,
+});
+watchCanaries({ deployments, confidence: 0.95, minRuns: 50, feedback: ['helpfulness', 'grounded'] });
 ```
 
 `RunEvaluationOptions` sets:
 - the `evaluators`;
+- the `traces` the server writes, and the `operations` store evaluations queue in (memory, for one
+  process, by default);
 - `since`, the start of a canary for instance;
 - one `revision`;
 - a `sampleRate`, chosen by run id so every replica scores the same runs;
 - how many runs are read (`limit`);
-- the `source` the scores are recorded under. A run already scored by that source is skipped.
+- the `source` the scores are recorded under. A run already scored by that source is skipped;
+- what the worker takes as it is: `concurrency`, `leaseMs`, `budget`, `estimate`, `costOf`,
+  `tenantId`, `reviewQueue`, `reviewWhen`, `onScored`, `onError`, `owner`, and a clock, with
+  `pollMs` for how long a drain waits on an evaluation another replica holds.
 
-`RunEvaluationReport` counts the runs scored and skipped, and lists every score. Evaluators judge a run
-by its output, since a run record does not keep its input.
+`RunEvaluationReport` counts the runs scored, skipped, and failed, and lists every score.
+
+For scoring as runs finish rather than on a schedule, `Deployments.evaluationWorker()` returns the
+worker itself, an `OnlineEvaluationWorker` to `start()` on every replica, over one shared
+`operations` store. `DeploymentEvaluationWorkerOptions` are the same options, with `operations`
+required and `maxQueued`. A worker reads the server's runs again each `cacheMs`.
+
+```ts
+const worker = deployments.evaluationWorker('support', {
+  evaluators: [helpfulnessJudge],
+  traces: traceStore,
+  operations: new PostgresOperationStore(pool, { table: 'evaluations' }),
+  budget: budgetLedger({ limit: 50 }),
+  estimate: 0.002,
+});
+worker.start();
+```
 
 `CanaryGuardOptions`:
 

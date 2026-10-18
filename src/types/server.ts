@@ -74,6 +74,12 @@ export interface RunRecord {
   durationMs?: number;
   /** US dollars the assistant recorded through `recordCost()`, across every attempt. */
   cost?: number;
+  /**
+   * The trace of its latest attempt, when the server has a `tracer`: the assistant's run is the root,
+   * with everything it did through the same tracer beneath it, such as model calls, tools, and
+   * retrievals. `Deployments.evaluate()` reads it, so evaluators see the run's input and its steps.
+   */
+  traceId?: string;
   /** The worker that ran its latest attempt. */
   worker?: string;
   /** Its latest attempt, starting at 1. */

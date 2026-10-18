@@ -240,3 +240,48 @@ export function traceModelClient<T extends ModelClientLike>(
     },
   } as T;
 }
+
+/** Anything with a `retrieve()` method, such as every retriever in `nexus-ai-pro/rag`. */
+export interface RetrieverLike {
+  /** The documents that best answer a query, best first. Its options are recorded, all but a `signal`. */
+  retrieve(query: string, options?: object): Promise<readonly unknown[]>;
+}
+
+/**
+ * Wraps a retriever so every retrieval becomes a run of kind `retriever`, holding the query and the
+ * documents that came back, so an evaluator reading the trace sees what an answer rested on. Every
+ * other member of the retriever is its own.
+ *
+ * `parent` decides where the retrieval hangs; without it, under the run in scope.
+ */
+export function traceRetriever<T extends RetrieverLike>(
+  retriever: T,
+  tracer: Tracer,
+  options: { parent?: () => RunHandle | undefined; name?: string } = {},
+): T {
+  const retrieve = async (query: string, retrieveOptions?: object): Promise<readonly unknown[]> => {
+    const parent = options.parent?.();
+    const { signal: _signal, ...asked } = (retrieveOptions ?? {}) as { signal?: AbortSignal };
+    const start = {
+      name: options.name ?? 'retrieve',
+      kind: 'retriever' as const,
+      inputs: { query, ...asked },
+    };
+    const handle = parent ? parent.child(start) : tracer.startRun(start);
+    try {
+      const documents = await retriever.retrieve(query, retrieveOptions);
+      await handle.finish({ outputs: { documents }, metadata: { documents: documents.length } });
+      return documents;
+    } catch (error) {
+      await handle.finish({ error });
+      throw error;
+    }
+  };
+  return new Proxy(retriever, {
+    get(target, property) {
+      if (property === 'retrieve') return retrieve;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}

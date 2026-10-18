@@ -48,7 +48,19 @@ Everything 2.12 adds is stable from the start and additive, unless this section 
 New and stable:
 - `nexus-ai-pro/tracing/spool`: `spoolingExporter()`, `SpoolingExporter`, `SpoolingExporterOptions`,
   `TraceBatchSender`, `SpoolStats`, and `SpoolDrainReport`;
-- `OtlpTraceExporter.send()`.
+- `OtlpTraceExporter.send()`;
+- `RunManagerOptions.tracer` and `AgentServerOptions.tracer`, and `RunRecord.traceId`;
+- `Deployments.evaluationWorker()` and `DeploymentEvaluationWorkerOptions`; `RunEvaluationOptions`
+  gains `traces`, `operations`, `pollMs`, and the worker's options, and `RunEvaluationReport` gains
+  `failed`;
+- in `nexus-ai-pro/evaluate`: `traceEvidence()`, `mediaParts()`, `EvaluationTrace`, `MediaPart`,
+  `TraceToolCall`, `TraceRetrieval`, `TraceDocument`, `TraceModelCall`, `TraceMedia`, and
+  `EvaluationContext.trace`;
+- `OnlineEvaluationWorkerOptions.withTrace`, `onScored`, and `onError`, and `OnlineScored`;
+- `traceRetriever()`, `RetrieverLike`, and `Tracer.within()`.
+
+Changed: `Deployments.evaluate()` runs through the online-evaluation worker, scoring up to 4 runs at
+once rather than one, so evaluators that are not safe to call concurrently need `concurrency: 1`.
 
 ## 2.11 stage (2.11.0)
 

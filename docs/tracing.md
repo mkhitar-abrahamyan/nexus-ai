@@ -121,6 +121,7 @@ The current run travels through `AsyncLocalStorage`, which is created only when 
 | `handle.child()` | Starts a run beneath it, without relying on the ambient context. |
 | `trace()` | Runs a function inside a new run, and finishes it with the result or error. |
 | `traceable()` | Wraps a function so every call becomes a run, with its arguments as inputs. |
+| `within()` | Runs a function with a run started by `startRun()` in scope, so what it traces nests beneath that run, which its handle still finishes. |
 | `current()` | The run in scope. |
 
 `StartRunOptions` give the name, kind (`chain` by default), inputs, tags, metadata, model, and
@@ -199,6 +200,19 @@ nests it inside the node that made it.
 
 A tool call an agent reports — `createAgent()` reports every one — becomes a `tool` run inside the
 node that made it, with the arguments as inputs and the result or the error.
+
+`traceRetriever()` wraps anything with a `retrieve()` method — the `RetrieverLike` contract, which
+every retriever in `nexus-ai-pro/rag` meets — so every retrieval becomes a `retriever` run, holding
+the query and the options asked as inputs and `{ documents }` as outputs. Every other member of the
+retriever is its own, so a wrapped keyword index still takes writes. It takes `parent` and `name`, as
+`traceModelClient()` does.
+
+An agent server given a `tracer` traces each run itself: each attempt is the root of a trace, an
+`agent` run named after the assistant, with the input as inputs and the output as outputs, and
+`metadata.nexus` naming the run, the assistant, the attempt, the revision, and the thread, queryable
+as `{ metadata: { 'nexus.run': runId } }`. Whatever the assistant traces through the same tracer, a
+model call or a retrieval, lands beneath it. The run records the trace's id as `traceId`, which
+[a deployment's evaluation](./deployments.md#judging-with-confidence-and-on-quality) reads.
 
 ## Exporting to OpenTelemetry
 
@@ -442,6 +456,7 @@ specific entry point that provides it.
 | `MemoryTraceStoreOptions` | interface | Options for the in-memory trace store. |
 | `ModelClientLike` | interface | Any client with a `complete()` method. |
 | `RedactionPolicy` | interface | What is removed from runs before they are stored, so a hidden field is never written anywhere. |
+| `RetrieverLike` | interface | Anything with a `retrieve()` method, such as every retriever in `nexus-ai-pro/rag`. |
 | `Run` | interface | One unit of work in a trace: a model call, a tool call, a graph node, or anything else worth timing. |
 | `runCursor` | function | A run's place in query order, for `RunQuery.after`: the next page starts after it. |
 | `RunCursor` | interface | A run's place in query order, newest first and then by id from last to first: what a page resumes after. |
@@ -460,6 +475,7 @@ specific entry point that provides it.
 | `traceGraph` | function | Records a graph or agent run as a trace. |
 | `traceModelClient` | function | Wraps a model client so every call becomes a run, with its tokens and cost. |
 | `Tracer` | class | Records run trees. |
+| `traceRetriever` | function | Wraps a retriever so every retrieval becomes a run of kind `retriever`, holding the query and the documents that came back, so an evaluator reading the trace sees what an answer rested on. |
 | `TracerOptions` | interface | Configuration for a tracer. |
 | `TraceStore` | interface | Where runs are kept, for querying, trees, and feedback. |
 | `w3cSpanId` | function | A run id as the 16 hex digits of a W3C span id. |

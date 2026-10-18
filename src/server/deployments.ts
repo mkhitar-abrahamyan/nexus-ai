@@ -1,5 +1,14 @@
+import {
+  type OnlineEvaluationWorker,
+  type OnlineEvaluationWorkerOptions,
+  onlineEvaluationWorker,
+} from '../evaluate/online.js';
 import { compareRuns, type Regression, type RegressionMetric, type RunSample } from '../insights/regressions.js';
+import { MemoryOperationStore } from '../operations/store.js';
+import { applyQuery } from '../tracing/query.js';
 import type { EvaluationScore, Evaluator } from '../types/evaluate.js';
+import type { OperationStore } from '../types/operations.js';
+import type { Run, RunTree, TraceStore } from '../types/tracing.js';
 import type {
   AssistantRunContext,
   BucketStrategy,
@@ -135,9 +144,37 @@ export interface RevisionStats {
 }
 
 /** Options for `Deployments.evaluate()`. */
-export interface RunEvaluationOptions {
+export interface RunEvaluationOptions
+  extends Pick<
+    OnlineEvaluationWorkerOptions,
+    | 'concurrency'
+    | 'leaseMs'
+    | 'budget'
+    | 'estimate'
+    | 'costOf'
+    | 'tenantId'
+    | 'reviewQueue'
+    | 'reviewWhen'
+    | 'onScored'
+    | 'onError'
+    | 'owner'
+    | 'now'
+  > {
   /** What each run is scored by: evaluators from `nexus-ai-pro/evaluate`, such as an LLM judge. */
   evaluators: ReadonlyArray<Evaluator>;
+  /**
+   * Where the server's traces are: the store of the `tracer` given to the server. Each evaluator
+   * then sees the run's input as `context.example.inputs`, and what it did as `context.trace`: its
+   * tool calls, retrievals, model calls, and media. Without it, evaluators see the run's output.
+   */
+  traces?: TraceStore;
+  /**
+   * The operation store evaluations are queued in, one operation per run and source. Share one
+   * between replicas, and a run is scored once between them. Defaults to memory, for one process.
+   */
+  operations?: OperationStore;
+  /** How long a drain waits for an evaluation another worker holds. Defaults to 50 milliseconds. */
+  pollMs?: number;
   /** Only runs created from this time, such as the start of a canary. */
   since?: string;
   /** Only this revision's runs. Defaults to every revision's. */
@@ -156,8 +193,42 @@ export interface RunEvaluationReport {
   evaluated: number;
   /** Runs passed over because this source had already scored them. */
   skipped: number;
+  /** Evaluations that failed, each tried again on a later call. */
+  failed: number;
   /** Every score given. */
   scores: EvaluationScore[];
+}
+
+/** Options for `Deployments.evaluationWorker()`. */
+export interface DeploymentEvaluationWorkerOptions extends RunEvaluationOptions {
+  /** The durable queue every replica's worker shares, such as the Redis or Postgres operation store. */
+  operations: OperationStore;
+  /** Stops queuing while this many evaluations are queued or running. Defaults to 1,000. */
+  maxQueued?: number;
+}
+
+/** The worker options a deployment's evaluation passes through as they are. */
+function workerOptions(options: RunEvaluationOptions) {
+  const source = options.source ?? 'online-evaluation';
+  return {
+    source,
+    evaluators: [...options.evaluators],
+    // The deployment samples runs itself, by run id, as it always has.
+    sampleRate: 1,
+    query: { kind: 'agent' as const, status: 'ok' as const },
+    withTrace: options.traces !== undefined,
+    ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+    ...(options.leaseMs === undefined ? {} : { leaseMs: options.leaseMs }),
+    ...(options.budget ? { budget: options.budget } : {}),
+    ...(options.estimate === undefined ? {} : { estimate: options.estimate }),
+    ...(options.costOf ? { costOf: options.costOf } : {}),
+    ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
+    ...(options.reviewQueue ? { reviewQueue: options.reviewQueue } : {}),
+    ...(options.reviewWhen ? { reviewWhen: options.reviewWhen } : {}),
+    ...(options.onError ? { onError: options.onError } : {}),
+    ...(options.owner ? { owner: options.owner } : {}),
+    ...(options.now ? { now: options.now } : {}),
+  };
 }
 
 const DEPLOYMENTS = ['nexus', 'server', 'deployments'];
@@ -724,60 +795,172 @@ export class Deployments implements ServerDeployments {
   }
 
   /**
-   * Online evaluation of the server's own runs: scores each finished run's output with evaluators
-   * from `nexus-ai-pro/evaluate`, and records the scores as the run's feedback. A canary guard given
+   * Online evaluation of the server's own runs: scores each finished run with evaluators from
+   * `nexus-ai-pro/evaluate`, and records the scores as the run's feedback. A canary guard given
    * those keys in `feedback` then compares quality between revisions, beside errors, latency, and
    * cost.
    *
+   * It runs through an online-evaluation worker, as `evaluationWorker()` does, drained once: each
+   * run is one operation in `operations`, so replicas sharing that store score each run once between
+   * them, within a budget, and send uncertain ones to people. Given the server's `traces`, evaluators
+   * see what each run received and did: its input, tool calls, retrievals, model calls, and media.
+   *
    * A run is scored once per `source`, so calling this on a schedule never counts a run twice.
-   * Sampling is stable: the same run is always in or out of a sample, on every replica. Evaluators
-   * judge a run by its output, since a run record does not keep its input.
+   * Sampling is stable: the same run is always in or out of a sample, on every replica.
    */
   async evaluate(assistant: string, options: RunEvaluationOptions): Promise<RunEvaluationReport> {
+    const scores: EvaluationScore[] = [];
+    const scored = new Set<string>();
+    const view = this.evaluationRuns(assistant, options, 'once');
+    const worker = onlineEvaluationWorker({
+      ...workerOptions(options),
+      operations: options.operations ?? new MemoryOperationStore(),
+      traces: view.traces,
+      maxQueued: Number.POSITIVE_INFINITY,
+      pollMs: options.pollMs ?? 50,
+      onScored: async (event) => {
+        scored.add(event.run.id);
+        scores.push(...event.scores);
+        await options.onScored?.(event);
+      },
+    });
+    const report = await worker.drain();
+    let skipped = 0;
+    for (const id of view.skipped) if (!scored.has(id)) skipped += 1;
+    return { evaluated: report.scored, skipped, failed: report.failed, scores };
+  }
+
+  /**
+   * A worker that scores this assistant's finished runs as they come, for as long as it runs: the
+   * online-evaluation worker of `nexus-ai-pro/evaluate/online`, reading the server's runs instead of
+   * a trace store's. Run one on every replica, over one shared `operations` store, and between them
+   * each sampled run is scored once per source, across restarts, within the budget.
+   *
+   * ```ts
+   * const worker = deployments.evaluationWorker('support', {
+   *   evaluators: [helpfulnessJudge], operations, traces: traceStore, sampleRate: 0.2,
+   * });
+   * worker.start();
+   * ```
+   */
+  evaluationWorker(assistant: string, options: DeploymentEvaluationWorkerOptions): OnlineEvaluationWorker {
+    return onlineEvaluationWorker({
+      ...workerOptions(options),
+      operations: options.operations,
+      traces: this.evaluationRuns(assistant, options, 'cached').traces,
+      ...(options.maxQueued === undefined ? {} : { maxQueued: options.maxQueued }),
+      ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
+      ...(options.onScored ? { onScored: options.onScored } : {}),
+    });
+  }
+
+  /**
+   * This assistant's finished runs, as a trace store the online-evaluation worker reads: each run in
+   * scope is a run of kind `agent`, with its input and its trace from `traces`, and feedback written
+   * to it lands on the run record. `skipped` collects the runs passed over as already scored.
+   */
+  private evaluationRuns(
+    assistant: string,
+    options: RunEvaluationOptions,
+    listing: 'once' | 'cached',
+  ): { traces: TraceStore; skipped: Set<string> } {
     const source = options.source ?? 'online-evaluation';
     const rate = options.sampleRate ?? 1;
-    const report: RunEvaluationReport = { evaluated: 0, skipped: 0, scores: [] };
-    for (const run of await this.runs(assistant, options)) {
-      if (run.status !== 'succeeded') continue;
-      if (options.revision !== undefined && (run.revision?.id ?? '') !== options.revision) continue;
-      if (rate < 1 && bucket(`evaluate:${run.id}`) >= rate) continue;
-      if (run.feedback?.some((item) => item.source === source)) {
-        report.skipped += 1;
-        continue;
+    const traces = options.traces;
+    const skipped = new Set<string>();
+    // A drain reads the runs once; a long-running worker again every `cacheMs`, so each scheduling
+    // pass costs no read of every run.
+    let listed: { at: number; runs: RunRecord[] } | undefined;
+    const list = async (): Promise<RunRecord[]> => {
+      if (listed && (listing === 'once' || Date.now() - listed.at < (this.options.cacheMs ?? 2_000))) {
+        return listed.runs;
       }
-      const scores: EvaluationScore[] = [];
-      for (const evaluator of options.evaluators) {
-        const value = await evaluator({
-          example: { id: run.id, inputs: undefined, ...(run.metadata ? { metadata: run.metadata } : {}) },
-          output: run.output,
-          latencyMs: run.durationMs ?? 0,
-          ...(run.cost === undefined ? {} : { cost: run.cost }),
-          run: 0,
+      listed = { at: Date.now(), runs: await this.runs(assistant, options) };
+      return listed.runs;
+    };
+    // The trace of the run being judged is read twice, for its input and for its evaluators.
+    const trees = new Map<string, Promise<RunTree | undefined>>();
+    const tree = (traceId: string): Promise<RunTree | undefined> => {
+      let read = trees.get(traceId);
+      if (!read) {
+        read = Promise.resolve(traces?.tree(traceId));
+        trees.set(traceId, read);
+        if (trees.size > 32) trees.delete(trees.keys().next().value as string);
+      }
+      return read;
+    };
+    // A run's trace: the one the server recorded, or one an assistant tracing itself marked with
+    // the run's id, as `metadata: { nexus: { run: context.runId } }`.
+    const traceOf = async (record: RunRecord): Promise<string | undefined> => {
+      if (record.traceId !== undefined || !traces) return record.traceId;
+      const [root] = await traces.query({ metadata: { 'nexus.run': record.id }, limit: 1 });
+      return root?.traceId;
+    };
+    const asRun = (record: RunRecord, traceId: string | undefined, inputs: unknown): Run => ({
+      id: record.id,
+      traceId: traceId ?? record.id,
+      name: record.assistant,
+      kind: 'agent',
+      status: 'ok',
+      startedAt: record.startedAt ?? record.createdAt,
+      ...(record.finishedAt ? { endedAt: record.finishedAt } : {}),
+      ...(record.durationMs === undefined ? {} : { latencyMs: record.durationMs }),
+      ...(inputs === undefined ? {} : { inputs }),
+      ...(record.output === undefined ? {} : { outputs: record.output }),
+      ...(record.cost === undefined ? {} : { cost: record.cost }),
+      metadata: {
+        ...record.metadata,
+        nexus: {
+          run: record.id,
+          assistant: record.assistant,
+          ...(record.revision ? { revision: record.revision.id } : {}),
+          ...(record.threadId ? { thread: record.threadId } : {}),
+        },
+      },
+      ...(record.feedback ? { feedback: record.feedback } : {}),
+    });
+    const inScope = (record: RunRecord | undefined): record is RunRecord =>
+      record !== undefined &&
+      record.assistant === assistant &&
+      record.status === 'succeeded' &&
+      (options.revision === undefined || (record.revision?.id ?? '') === options.revision) &&
+      (rate >= 1 || bucket(`evaluate:${record.id}`) < rate);
+
+    const store: TraceStore = {
+      save: () => {
+        throw new BadRequestError("A deployment's runs are written by the server, not by its evaluation");
+      },
+      query: async (query) => {
+        const runs: Run[] = [];
+        for (const record of await list()) {
+          if (!inScope(record)) continue;
+          if (record.feedback?.some((item) => item.source === source)) {
+            skipped.add(record.id);
+            continue;
+          }
+          runs.push(asRun(record, record.traceId, undefined));
+        }
+        return applyQuery(runs, query);
+      },
+      get: async (runId) => {
+        const record = await this.state.get<RunRecord>(RUNS_NAMESPACE, runId);
+        if (!inScope(record)) return undefined;
+        const traceId = await traceOf(record);
+        const root = traceId === undefined ? undefined : await tree(traceId);
+        return asRun(record, traceId, root?.inputs);
+      },
+      tree: (traceId) => tree(traceId),
+      addFeedback: async (runId, feedback) => {
+        // Read again just before writing, so feedback a person left meanwhile is kept.
+        const latest = await this.state.get<RunRecord>(RUNS_NAMESPACE, runId);
+        if (!latest) return;
+        await this.state.put(RUNS_NAMESPACE, runId, {
+          ...latest,
+          feedback: [...(latest.feedback ?? []), feedback].slice(-100),
         });
-        if (typeof value === 'number') scores.push({ key: 'score', score: value });
-        else if (typeof value === 'boolean') scores.push({ key: 'score', score: value ? 1 : 0, passed: value });
-        else scores.push(...(Array.isArray(value) ? value : [value]));
-      }
-      const at = new Date().toISOString();
-      // Read again just before writing, so feedback a person left meanwhile is kept.
-      const latest = (await this.state.get<RunRecord>(RUNS_NAMESPACE, run.id)) ?? run;
-      await this.state.put(RUNS_NAMESPACE, run.id, {
-        ...latest,
-        feedback: [
-          ...(latest.feedback ?? []),
-          ...scores.map((score) => ({
-            key: score.key,
-            score: score.score,
-            ...(score.comment ? { comment: score.comment } : {}),
-            source,
-            createdAt: at,
-          })),
-        ].slice(-100),
-      });
-      report.evaluated += 1;
-      report.scores.push(...scores);
-    }
-    return report;
+      },
+    };
+    return { traces: store, skipped };
   }
 
   /** The deployment the router uses, reusing a recent read. */

@@ -8,6 +8,7 @@ import type {
   OperationRunnerConfig,
   OperationStore,
 } from '../types/operations.js';
+import type { FinishRunOptions, Tracer } from '../tracing/tracer.js';
 import type { RunFeedback } from '../types/tracing.js';
 import type {
   AssistantRunContext,
@@ -99,6 +100,13 @@ export interface RunManagerOptions {
   tenants?: TenantGate;
   /** The deployments registry, which counts each finished run in this replica's rollups. */
   deployments?: Pick<ServerDeployments, 'recordRun'>;
+  /**
+   * Traces every run: each attempt is the root of a trace, named after the assistant, holding its
+   * input and output, and everything the assistant does through the same tracer nests beneath it,
+   * such as a model call through `traceModelClient()`. The run records the trace's id as `traceId`,
+   * which `Deployments.evaluate()` reads. Give it the tracer the assistants' clients use.
+   */
+  tracer?: Pick<Tracer, 'startRun' | 'within'>;
   /** What to do when a thread is already running something. Defaults to `reject`. */
   onBusy?: ThreadBusyPolicy;
   /** How long a run may take before it expires, in milliseconds. */
@@ -766,11 +774,37 @@ export class RunManager {
     };
 
     const labels = { assistant: plan.assistantId, revision: plan.revision?.id ?? '' };
+    // Each attempt is the root of a trace, with the input it ran on, so what the run did can be read
+    // back, and judged, step by step.
+    const tracer = this.options.tracer;
+    const traced = tracer?.startRun({
+      name: plan.assistantId,
+      kind: 'agent',
+      ...(plan.resume !== undefined
+        ? { inputs: { resume: plan.resume } }
+        : plan.input === undefined
+          ? {}
+          : { inputs: plan.input }),
+      // Queryable by dot path, as `{ metadata: { 'nexus.run': runId } }`.
+      metadata: {
+        nexus: {
+          run: runId,
+          assistant: plan.assistantId,
+          attempt: context.attempt,
+          ...(plan.revision ? { revision: plan.revision.id } : {}),
+          ...(plan.threadId ? { thread: plan.threadId } : {}),
+        },
+      },
+    });
+    const finishTrace = async (options: FinishRunOptions): Promise<void> => {
+      await traced?.finish(options).catch((error: unknown) => this.report(error, { runId }));
+    };
     await this.record(runId, 'status', { status: 'running' });
     const started = await this.settle(runId, 'running', {
       startedAt: this.now().toISOString(),
       worker: this.workerId,
       attempt: context.attempt,
+      ...(traced ? { traceId: traced.traceId } : {}),
     });
     this.metrics.count('nexus_server_runs_started_total', labels);
     if (context.attempt === 1 && started.startedAt) {
@@ -781,36 +815,41 @@ export class RunManager {
       );
     }
 
-    // A later attempt continues from the run's own last checkpoint when the assistant can, so only the
-    // step in flight when the worker died runs again.
-    const recovered =
-      context.attempt > 1 && plan.threadId && plan.assistant.recover
-        ? await plan.assistant.recover(plan.threadId, runContext)
-        : undefined;
-    const stream =
-      recovered ??
-      (plan.resume !== undefined && plan.assistant.resume
-        ? plan.assistant.resume(plan.threadId as string, plan.resume, runContext)
-        : plan.assistant.stream(plan.input, runContext));
-
     let last: unknown;
-    this.controls.set(runId, control);
-    try {
+    const consume = async (): Promise<void> => {
+      // A later attempt continues from the run's own last checkpoint when the assistant can, so only
+      // the step in flight when the worker died runs again.
+      const recovered =
+        context.attempt > 1 && plan.threadId && plan.assistant.recover
+          ? await plan.assistant.recover(plan.threadId, runContext)
+          : undefined;
+      const stream =
+        recovered ??
+        (plan.resume !== undefined && plan.assistant.resume
+          ? plan.assistant.resume(plan.threadId as string, plan.resume, runContext)
+          : plan.assistant.stream(plan.input, runContext));
       for await (const event of stream) {
         last = event;
         await this.record(runId, typeOf(event), event);
         context.report({ message: typeOf(event) });
       }
+    };
+    this.controls.set(runId, control);
+    try {
+      // Inside the trace's root, so whatever the assistant traces lands beneath it.
+      await (traced && tracer ? tracer.within(traced, consume) : consume());
     } catch (error) {
       // A graph that drained stopped cleanly at a superstep boundary; releasing it makes the stop a
       // hand-off, so the next worker continues from the checkpoint it just wrote.
       if (control.draining && isDrained(error) && this.runner.release(runId)) this.drainedRuns.add(runId);
       if (context.signal.aborted && context.signal.reason instanceof OperationReleasedError) {
         // A hand-off, not a failure: the thread stays with this run, and another worker continues it.
+        await finishTrace({ metadata: { handedOff: true } });
         await this.record(runId, 'status', { status: 'queued', reason: 'handed to another worker' });
         await this.settle(runId, 'queued', { addCost: cost });
         throw error;
       }
+      await finishTrace({ error });
       await this.record(runId, 'error', { message: error instanceof Error ? error.message : String(error) });
       const failed = await this.settle(runId, 'failed', {
         error: {
@@ -831,6 +870,8 @@ export class RunManager {
     const interrupt = interruptOf(last);
     const status: RunStatus = interrupt ? 'awaiting_input' : 'succeeded';
     const output = outputOf(last);
+    // Written before the run settles, so a run that reads as finished has its trace in the store.
+    await finishTrace({ outputs: output, ...(interrupt ? { metadata: { status } } : {}) });
     await this.record(runId, 'status', { status, output, interrupt });
     const settled = await this.settle(runId, status, {
       output,
@@ -1080,7 +1121,7 @@ export class RunManager {
     runId: string,
     status: RunStatus,
     fields: Partial<
-      Pick<RunRecord, 'output' | 'error' | 'interrupt' | 'startedAt' | 'finishedAt' | 'worker' | 'attempt'>
+      Pick<RunRecord, 'output' | 'error' | 'interrupt' | 'startedAt' | 'finishedAt' | 'worker' | 'attempt' | 'traceId'>
     > & { addCost?: number } = {},
   ): Promise<RunRecord> {
     const current = await this.state.get<RunRecord>(RUNS, runId);
