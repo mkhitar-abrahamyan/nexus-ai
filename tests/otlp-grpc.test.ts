@@ -13,12 +13,9 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import http2 from 'node:http2';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { after, test } from 'node:test';
 import { MemoryOperationStore } from '../src/operations/store.js';
@@ -479,60 +476,46 @@ test('the OpenTelemetry Collector takes the spans over gRPC, and sends on every 
   });
   await new Promise<void>((resolve) => sink.listen(0, '0.0.0.0', resolve));
   const sinkPort = (sink.address() as AddressInfo).port;
-  const directory = mkdtempSync(path.join(tmpdir(), 'nexus-otelcol-'));
-  writeFileSync(
-    path.join(directory, 'config.yaml'),
-    [
-      'receivers:',
-      '  otlp:',
-      '    protocols:',
-      '      grpc:',
-      '        endpoint: 0.0.0.0:4317',
-      'exporters:',
-      '  otlphttp:',
-      `    endpoint: http://host.docker.internal:${sinkPort}`,
-      '    encoding: json',
-      '    compression: none',
-      '    sending_queue:',
-      '      enabled: false',
-      '    retry_on_failure:',
-      '      enabled: false',
-      'service:',
-      '  telemetry:',
-      '    logs:',
-      '      level: warn',
-      '  pipelines:',
-      '    traces:',
-      '      receivers: [otlp]',
-      '      exporters: [otlphttp]',
-      '',
-    ].join('\n'),
-  );
+  // The configuration goes on the command line, so nothing is mounted: any daemon, local or not,
+  // runs it as it is.
+  const config = [
+    'receivers::otlp::protocols::grpc::endpoint: 0.0.0.0:4317',
+    `exporters::otlphttp::endpoint: http://host.docker.internal:${sinkPort}`,
+    'exporters::otlphttp::encoding: json',
+    'exporters::otlphttp::compression: none',
+    'exporters::otlphttp::sending_queue::enabled: false',
+    'exporters::otlphttp::retry_on_failure::enabled: false',
+    'service::telemetry::logs::level: warn',
+    'service::pipelines::traces::receivers: [otlp]',
+    'service::pipelines::traces::exporters: [otlphttp]',
+  ].map((line) => `--config=yaml:${line}`);
   const started = spawnSync(
     binary,
     [
       'run',
       '--detach',
-      '--rm',
       '--publish',
       '127.0.0.1::4317',
       '--add-host',
       'host.docker.internal:host-gateway',
-      '--volume',
-      `${directory}:/etc/otelcol-test:ro`,
       image,
-      '--config=/etc/otelcol-test/config.yaml',
+      ...config,
     ],
     { encoding: 'utf8', timeout: 240_000, windowsHide: true },
   );
   assert.equal(started.status, 0, started.stderr);
   const container = started.stdout.trim();
+  const logs = () => {
+    const read = spawnSync(binary, ['logs', container], { encoding: 'utf8', windowsHide: true });
+    return `${read.stdout}${read.stderr}`;
+  };
   try {
     const port = spawnSync(binary, ['port', container, '4317/tcp'], { encoding: 'utf8', windowsHide: true })
       .stdout.trim()
       .split('\n')[0]
       ?.split(':')
       .at(-1);
+    assert.match(port ?? '', /^\d+$/, `the collector published no port; it said:\n${logs()}`);
     const exporter = open({ endpoint: `http://127.0.0.1:${port}`, timeoutMs: 5_000 });
     const batch = [...runs, ...Array.from({ length: 20 }, (_, n) => span({ kind: n % 2 ? 'tool' : 'node' }, n + 10))];
     // The collector takes a moment to start; until then the call is refused.
@@ -542,10 +525,7 @@ test('the OpenTelemetry Collector takes the spans over gRPC, and sends on every 
         await exporter.send(batch);
         break;
       } catch (error) {
-        if (Date.now() > deadline) {
-          const logs = spawnSync(binary, ['logs', container], { encoding: 'utf8', windowsHide: true });
-          throw new Error(`the collector never took the spans: ${String(error)}\n${logs.stdout}${logs.stderr}`);
-        }
+        if (Date.now() > deadline) throw new Error(`the collector never took the spans: ${String(error)}\n${logs()}`);
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
@@ -590,6 +570,5 @@ test('the OpenTelemetry Collector takes the spans over gRPC, and sends on every 
   } finally {
     spawnSync(binary, ['rm', '--force', container], { windowsHide: true, timeout: 60_000 });
     sink.close();
-    rmSync(directory, { recursive: true, force: true });
   }
 });

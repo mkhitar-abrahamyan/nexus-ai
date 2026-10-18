@@ -81,7 +81,19 @@ export class OtlpGrpcTraceExporter extends OtlpTraceExporter {
     await this.flush();
     const session = this.session;
     this.session = undefined;
-    if (session && !session.closed) await new Promise<void>((resolve) => session.close(() => resolve()));
+    if (!session || session.closed || session.destroyed) return;
+    // Held open while it closes, and destroyed when the collector never acknowledges.
+    session.ref();
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        session.destroy();
+        resolve();
+      }, 2_000);
+      session.close(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   protected override async post(spans: OtlpSpan[]): Promise<void> {
@@ -162,7 +174,8 @@ export class OtlpGrpcTraceExporter extends OtlpTraceExporter {
         settled = true;
         clearTimeout(timer);
         // Failed before any answer: the connection, not the collector, failed it.
-        if (error && status === undefined && !(error instanceof OtlpGrpcError)) reject(new Unanswered(error));
+        if (error instanceof Unanswered) reject(error);
+        else if (error && status === undefined && !(error instanceof OtlpGrpcError)) reject(new Unanswered(error));
         else if (error) reject(error);
         else resolve(body ?? new Uint8Array(0));
       };
@@ -195,7 +208,13 @@ export class OtlpGrpcTraceExporter extends OtlpTraceExporter {
       stream.on('close', () => {
         session.off('error', onSessionError);
         if (settled) return;
-        if (status !== undefined && status !== 200) {
+        if (status === undefined) {
+          // Closed before the collector answered, as a connection that dropped without a word is on
+          // some systems, where on others it is an error: either way, the call was never answered.
+          finish(new Unanswered(new OtlpGrpcError(14, 'the connection closed before the collector answered')));
+          return;
+        }
+        if (status !== 200) {
           finish(new OtlpGrpcError(statusToGrpc(status), `HTTP ${status}`));
           return;
         }
