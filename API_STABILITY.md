@@ -68,7 +68,8 @@ New and stable:
 
 Changed, each to keep a promise the surface already made:
 - A sandbox's file methods take a leading `/` as the sandbox's root, as the workspace contract
-  says; a path that leaves the root is still refused.
+  says; a path that leaves the root is still refused. The container sandbox rejects reading a
+  missing file with `ENOENT`.
 
 ## 2.10 stage (2.10.0)
 

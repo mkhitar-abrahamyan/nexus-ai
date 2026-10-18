@@ -237,8 +237,10 @@ export function containerSandbox(options: ContainerSandboxOptions): Sandbox {
 
   const readBytes = async (file: string): Promise<Uint8Array> => {
     const result = await shell('cat "$1"', [inside(file)]);
-    if (result.code !== 0) throw failed(`Reading ${file}`, result);
-    return result.stdout;
+    if (result.code === 0) return result.stdout;
+    const error = failed(`Reading ${file}`, result);
+    // A missing file is refused as on every workspace, with ENOENT.
+    throw /no such file/i.test(result.stderr) ? Object.assign(error, { code: 'ENOENT', path: file }) : error;
   };
 
   return {

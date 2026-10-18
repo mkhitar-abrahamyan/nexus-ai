@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { runSandboxConformance, SandboxPathError, sandboxTools } from '../src/agent/sandbox.js';
+import { runWorkspaceConformance } from '../src/agent/workspace.js';
 import { type ContainerSandboxOptions, containerSandbox } from '../src/agent/sandbox-container.js';
 import type { ToolOutput } from '../src/types/messages.js';
 
@@ -54,6 +55,22 @@ test('the container sandbox passes the sandbox conformance suite', { skip, timeo
   assert.equal(report.checks.length, 7);
   assert.deepEqual(open().isolation, { filesystem: true, network: true, processes: true });
   assert.equal(open({ network: true }).isolation.network, false, 'a container with a network does not claim it');
+});
+
+test('the container sandbox passes the workspace conformance suite too, as every sandbox is a workspace', {
+  skip,
+  timeout,
+}, async () => {
+  const report = await runWorkspaceConformance(() => open());
+  assert.equal(
+    report.passed,
+    true,
+    report.checks
+      .filter((check) => !check.ok)
+      .map((check) => `${check.name}: ${check.detail}`)
+      .join('\n'),
+  );
+  assert.equal(report.checks.length, 7);
 });
 
 test('a command in the container sees none of the host’s files', { skip, timeout }, async () => {
@@ -149,9 +166,19 @@ test('the workspace lives in the container: files, search, media, and paths that
   await sandbox.removeFile?.('notes.md');
   assert.deepEqual(await sandbox.glob?.('*.md'), []);
 
-  for (const outside of ['../etc/passwd', '/etc/passwd', 'src/../../etc/passwd']) {
+  for (const outside of ['../etc/passwd', 'src/../../etc/passwd', '/../etc/passwd']) {
     await assert.rejects(sandbox.readFile(outside), SandboxPathError, outside);
   }
+  // A leading slash names the workspace's root, as in every workspace: `/etc/passwd` is the
+  // workspace's own file, never the container's.
+  await assert.rejects(
+    sandbox.readFile('/etc/passwd'),
+    (error) => !(error instanceof SandboxPathError),
+    'not there yet',
+  );
+  await sandbox.writeFile('/etc/passwd', 'the workspace file');
+  assert.equal(await sandbox.readFile('etc/passwd'), 'the workspace file');
+  assert.match((await sandbox.exec('cat /etc/passwd')).stdout, /^root:/m, "the container's own file is untouched");
   await assert.rejects(sandbox.removeFile?.('.') as Promise<void>, SandboxPathError);
 
   const tools = sandboxTools(sandbox);

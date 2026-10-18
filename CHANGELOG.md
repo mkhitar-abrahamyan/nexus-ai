@@ -50,6 +50,9 @@ Workspaces, and telephony in full.
 
 - A sandbox's file methods take a leading `/` as its root, as every workspace does: the process
   sandbox and the container sandbox refused such a path unless it was already under their root.
+  `/etc/passwd` is now the workspace's own file, never the container's or the host's.
+- The container sandbox rejects reading a missing file with `ENOENT`, as every workspace does, and
+  passes the workspace conformance suite.
 - The file tools describe their files as the workspace's, not the sandbox's.
 
 ### Proof

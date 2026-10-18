@@ -311,7 +311,7 @@ contract, with no test framework, and returns a `WorkspaceConformanceReport` of
 `WorkspaceConformanceCheck`s: files that round-trip and are replaced, missing files and escaping
 paths refused, listings, glob and grep with their limits, bytes, and removal. In the test suite,
 every workspace above passes it, the store workspace on each of the four stores, and so do the
-process sandbox and a composite.
+process sandbox, the container sandbox on a real container runtime, and a composite.
 
 **A sandbox.** Commands and code belong in a sandbox the application provides — a container, a VM,
 a remote interpreter — through the `Sandbox` interface on `nexus-ai-pro/agent/sandbox`. A sandbox is
