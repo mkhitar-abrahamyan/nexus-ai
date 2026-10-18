@@ -295,7 +295,10 @@ export function mediaCatalog(options: MediaCatalogOptions): MediaCatalog {
       const traceId = recordOptions.traceId ?? (typeof from.traceId === 'string' ? from.traceId : undefined);
       const tags = [...new Set(recordOptions.tags ?? [])];
       const location = descriptor.location as { uri?: string };
-      const previous = await get(stat.assetId, stat.tenantId);
+      // The stored entry as it is, expired or not, since a write is compared with its version; only
+      // one still live hands on its scores.
+      const stored = (await store.get<MediaCatalogEntry>(space(stat.tenantId), stat.assetId))?.value;
+      const previous = stored && !expired(stored) ? stored : undefined;
       const entry: MediaCatalogEntry = {
         assetId: stat.assetId,
         tenantId: stat.tenantId,
@@ -321,10 +324,10 @@ export function mediaCatalog(options: MediaCatalogOptions): MediaCatalog {
         scores: previous?.scores ?? {},
         createdAt: stat.createdAt,
         ...(stat.expiresAt ? { expiresAt: stat.expiresAt } : {}),
-        version: (previous?.version ?? 0) + 1,
+        version: (stored?.version ?? 0) + 1,
         tagged: Object.fromEntries(tags.map((tag) => [tag, true as const])),
       };
-      if (!(await write(entry, previous ? previous.version : null))) {
+      if (!(await write(entry, stored ? stored.version : null))) {
         // Recorded by another process meanwhile: this record replaces it, keeping its scores.
         return (
           (await change(stat.assetId, stat.tenantId, (current) => ({ ...entry, scores: current.scores }))) ?? entry

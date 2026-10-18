@@ -315,6 +315,24 @@ test('an asset the catalog cannot record is not left stored, unless failures are
   assert.equal(reported.length, 1);
 });
 
+test('an asset id stored again after its entry expired is recorded afresh', async () => {
+  for (const [name, store] of await stores()) {
+    let clock = Date.parse('2026-10-18T12:00:00.000Z');
+    const now = () => new Date(clock);
+    const catalog = mediaCatalog({ store, namespace: ['again', name], now });
+    const assets = catalogedAssetStore(new MemoryAssetStore({ now, createAssetId: () => 'banner-1' }), catalog);
+    await put(assets, { ...plan(0), ttlSeconds: 30 }, 0);
+    await catalog.score('banner-1', 'acme', { key: 'sharpness', score: 0.1 });
+    clock += 31_000;
+    assert.equal(await catalog.get('banner-1', 'acme'), undefined, `${name}: expired`);
+    // The same id, stored again before anything purged the old entry.
+    await put(assets, plan(1), 1);
+    const entry = await catalog.get('banner-1', 'acme');
+    assert.ok(entry, `${name}: recorded again`);
+    assert.deepEqual([entry.requestId, entry.scores, entry.expiresAt], ['request-1', {}, undefined], `${name}: afresh`);
+  }
+});
+
 test('a store without compare-and-set expires entries itself, with the asset', async () => {
   let clock = Date.parse('2026-10-18T12:00:00.000Z');
   const now = () => new Date(clock);
