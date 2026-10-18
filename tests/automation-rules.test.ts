@@ -330,6 +330,17 @@ test('a rule fires below its threshold only with enough samples, per scope, with
   for (let n = 81; n < 101; n += 1) source.record(sample({ score: 0.05, revision: 'v2' }, n));
   assert.equal((await rules.check())[0]?.type, 'fired');
   assert.equal(fired.length, 2);
+
+  // Scores that age out of a window leave too few to judge, which is not a recovery.
+  let clock = Date.parse('2026-10-18T12:01:41.000Z');
+  const aging = automationRules({
+    scores: source,
+    now: () => new Date(clock),
+    rules: [{ name: 'aging', key: 'q', below: 0.5, minSamples: 10, windowMs: 30_000, by: 'all', actions: [] }],
+  });
+  assert.equal((await aging.check())[0]?.type, 'fired');
+  clock += 25_000;
+  assert.deepEqual(await aging.check(), [], 'still below, and too few left to say otherwise');
 });
 
 test('a confidence bound, the pass rate, repeats, filters, scopes, and each run counted once', async () => {

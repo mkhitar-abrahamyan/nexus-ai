@@ -390,7 +390,8 @@ Each `AutomationRule` takes:
 | `actions` | — | `AutomationAction` functions, run in order. One that fails goes to `onError`, and the rest still run. |
 | `repeatAfterMs` | never | Fires again after this long while a scope stays below. |
 
-A rule fires once when a scope falls, and again only after it recovers, or after `repeatAfterMs`.
+A rule fires once when a scope falls, and again only after it recovers, back at the threshold or
+above over `minSamples` runs, or after `repeatAfterMs`; too few runs to judge is not a recovery.
 Each `AutomationEvent` is `fired` or `recovered`, for one scope, with the statistic's value, its
 interval, the samples, the assistant and revision, the five lowest samples, and a summary sentence.
 Recovery runs no action.

@@ -167,7 +167,8 @@ export interface AutomationRule {
   actions: AutomationAction[];
   /**
    * Fires again after this long while a scope stays below, in milliseconds. Defaults to never: once
-   * per fall, again only after it recovers.
+   * per fall, again only after it recovers, which takes `minSamples` runs back at the threshold or
+   * above.
    */
   repeatAfterMs?: number;
 }
@@ -349,6 +350,7 @@ export function automationRules(options: AutomationRulesOptions): AutomationRule
       value: number;
       samples: number;
       breached: boolean;
+      recovered: boolean;
       interval?: [number, number];
       runs: ScoreSample[];
     }> = [];
@@ -366,7 +368,8 @@ export function automationRules(options: AutomationRulesOptions): AutomationRule
       const n = values.length;
       const mean = n === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / n;
       let interval: [number, number] | undefined;
-      let breached = n >= (rule.minSamples ?? 20) && mean < rule.below;
+      const enough = n >= (rule.minSamples ?? 20);
+      let breached = enough && mean < rule.below;
       if (rule.confidence !== undefined && n > 1) {
         const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (n - 1);
         const half = normalQuantile(1 - (1 - rule.confidence) / 2) * Math.sqrt(variance / n);
@@ -378,6 +381,8 @@ export function automationRules(options: AutomationRulesOptions): AutomationRule
         value: mean,
         samples: n,
         breached,
+        // Back above on enough samples: too few to judge is not a recovery.
+        recovered: enough && mean >= rule.below,
         ...(interval ? { interval } : {}),
         runs: representatives,
       });
@@ -418,7 +423,7 @@ export function automationRules(options: AutomationRulesOptions): AutomationRule
           (!firing ||
             (rule.repeatAfterMs !== undefined &&
               now().getTime() - Date.parse(current?.firedAt ?? at) >= rule.repeatAfterMs));
-        const recovered = !scope.breached && firing;
+        const recovered = scope.recovered && firing;
         if (!due && !recovered) continue;
         const next = due ? { since: current?.since ?? at, firedAt: at } : {};
         if (!(await claim(id, current, next))) continue;
