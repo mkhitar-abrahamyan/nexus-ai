@@ -4,7 +4,7 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.15.0**. 194 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.15.1**. 194 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 completion batch providers and 2 embedding batch tiers, 3 image
 providers plus a mock, 2 media providers plus a mock, 2 video providers plus a mock, 2 realtime
 providers plus a mock, 2 telephony providers, 5 workspaces, 6 secret sources, OTLP over HTTP and

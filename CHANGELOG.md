@@ -4,6 +4,15 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.15.1] - 2026-10-19
+
+A test that could fail by chance, made exact. The package is unchanged from 2.15.0.
+
+### Fixed
+
+- The canary-split test checks each run's placement against its bucket exactly, and holds the share
+  within five standard deviations, so CI no longer fails it about once in 800 runs.
+
 ## [2.15.0] - 2026-10-19
 
 A compatibility record for community adapters, and realtime sessions minted with the tenant's key.
@@ -3012,7 +3021,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.15.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.15.1...HEAD
+[2.15.1]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.12.0...v2.13.0
