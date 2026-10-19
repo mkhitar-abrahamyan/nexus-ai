@@ -4,6 +4,10 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-10-19
+
+Policy you can review, evaluation without side effects, and credentials per tenant in every family.
+
 ### Added
 
 - **Policy you can review.** `nexus-ai-pro/policy` reads guardrails, routing, budgets, residency, and
@@ -2984,7 +2988,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.13.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.14.0...HEAD
+[2.14.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.10.0...v2.11.0

@@ -4,13 +4,13 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.13.0**. 192 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.14.0**. 194 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 completion batch providers and 2 embedding batch tiers, 3 image
 providers plus a mock, 2 media providers plus a mock, 2 video providers plus a mock, 2 realtime
 providers plus a mock, 2 telephony providers, 5 workspaces, 6 secret sources, OTLP over HTTP and
 gRPC, and 98 completion registry models plus 60 aliases, verified against each provider's
-documentation on 2026-10-02. 1,236 unit tests and 30 studio tests pass; coverage sits at **96.1%
-lines / 82.2% branches / 92.0% functions** against gates of 82/67/73. CI verifies lint,
+documentation on 2026-10-02. 1,260 unit tests and 30 studio tests pass; coverage sits at **96.2%
+lines / 82.5% branches / 92.2% functions** against gates of 82/67/73. CI verifies lint,
 format, build, tests, coverage, registry drift, `llms.txt` drift, per-subpath size, documentation
 and guide coverage, the root import, a graph benchmark with a durability budget, runtime and
 memory-retention budgets, turn-latency and session-load budgets for realtime, load and soak budgets
@@ -32,7 +32,10 @@ WebRTC in headless Chromium, one phone agent on two telephony providers whose re
 schedule from every asset store, a collector stopped for an hour losing no span on every operation
 store, the OpenTelemetry Collector taking spans over gRPC, a media catalog on every long-term store,
 a canary rolled back on a media evaluator's score across two replicas, a tenant held to its regions
-across a regional failover with its key rotated in the middle of a run, ten online-evaluation workers
+across a regional failover with its key rotated in the middle of a run, a policy change that would let
+a tenant leave its regions caught by the command line, an agent reaching the same verdict over emulated
+tools as over the real ones with nothing sent, a tenant's key on every family's calls and on every
+later call by a job's ref, ten online-evaluation workers
 through a crash and through 4,000 runs started in one millisecond on every trace store, a worker killed holding a budget reservation at
 each point of its call on every usage store, an adversarial dataset against an unguarded and a
 guarded agent, the agent protocols driven from the other side of the wire and against the published
@@ -71,8 +74,8 @@ the grouping holds, the version each lands in does not.
 
 **What every release protects:**
 
-- No required dependency, and a size budget on every entry point. Today the root import is 359 KB, and
-  an entry point costs a fraction of it: `/agent` 32%, `/graph` 23%, `/operations` 16%, `/evaluate`
+- No required dependency, and a size budget on every entry point. Today the root import is 362 KB, and
+  an entry point costs a fraction of it: `/agent` 31%, `/graph` 23%, `/operations` 15%, `/evaluate`
   14%, `/tracing` 9%, `/mcp` 5%, `/store` 2%. `npm run size:check` fails the build when an entry point
   grows past its budget or picks up a dependency.
 - A runtime and memory budget. `npm run bench:runtime` fails the release gate when a measured path
@@ -95,23 +98,23 @@ it passes its conformance suite against the live service every week.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release: 2.14, or
+Each gap is written down in a guide's limitations today, and each is closed by one release: 2.15, or
 the theme after it that owns it.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.14 |
-| Images have not recorded live conformance on all three backends | API stability | 2.14 |
-| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.14 |
-| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.14 |
-| Video generation has not passed its conformance suite against Veo and Runway | Video guide | 2.14 |
-| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.14 |
-| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.14 |
-| Realtime, telephony, video, voice, media understanding, and batches send the configured key, not the tenant's | Regions guide | 2.14 |
+| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.15 |
+| Images have not recorded live conformance on all three backends | API stability | 2.15 |
+| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.15 |
+| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.15 |
+| Video generation has not passed its conformance suite against Veo and Runway | Video guide | 2.15 |
+| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.15 |
+| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.15 |
+| The realtime client-secret helpers and the WebRTC transport take the key they are given, not the tenant's | Regions guide | 2.15 |
 
 ---
 
-## 2.14.0: Policy you can review, and evaluation without side effects
+## 2.15.0: A compatibility record for community adapters
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
 understanding, video, Gemini Live, SIP call control, and both phone providers graduate when the
@@ -119,17 +122,16 @@ scheduled live workflow passes against each, published with their checklists. Ev
 there now; what stands in the way is the repository's live credentials, and for video, the variable
 that lets it spend seconds of video.
 
-**Policy you can review.** Guardrail, routing, budget, residency, and credential policy as one
-versioned file the application supplies: validated when the client starts, compared and checked by the
-command line in CI, and recorded on every operation it decided, so a change to what a tenant may reach
-is reviewed like code. Per-tenant credentials reach the families that still send the configured key:
-realtime sessions, telephony, video, voice, media understanding, and batches.
+**A compatibility record for community adapters.** An adapter built with the adapter kit, in this
+repository or another, runs its family's contract suite and benchmark and records the result: which
+suite it passed, against which version of the package, and how fast. One page lists every record, so
+an application choosing a store or a provider adapter sees what was verified, against what, and when,
+and a release that would break a listed adapter is caught by its record before it ships. Ephemeral
+realtime tokens are minted with each tenant's key, through the same resolver as every other call.
 
-**Evaluation without side effects.** Tools emulated by a model, so an evaluation suite runs an agent
-that would call a payment provider or a production database without calling either, the emulator's
-answers recorded and replayed. Proof: a policy change that would let a tenant leave its regions is
-caught by the command line before it ships, and an agent evaluated over emulated tools reaches the
-same verdict as against the real ones, with nothing sent.
+**Proof.** A community adapter's record is built from its own repository by the published command,
+and a change to a contract that adapter does not meet turns its record red before the release that
+makes it.
 
 ---
 
@@ -137,13 +139,13 @@ same verdict as against the real ones, with nothing sent.
 
 Not yet placed, roughly in order of what applications ask for:
 
-1. A compatibility record for community adapters: the contract suite an adapter passed, against which
-   version, with its benchmark, listed on one page.
-2. A2A over its other bindings, and a webhook that receives each piece of streamed text.
-3. ACP's editor MCP servers over SSE, with their tools' capabilities declared.
-4. Video extension and video as an input, and Gemini Omni Flash on Google's own Interactions API.
-5. Span events and links, and media checks that read the duration of compressed audio and video.
-6. A gateway that lists a tenant's threads and runs across all of its regions.
+1. A2A over its other bindings, and a webhook that receives each piece of streamed text.
+2. ACP's editor MCP servers over SSE, with their tools' capabilities declared.
+3. Video extension and video as an input, and Gemini Omni Flash on Google's own Interactions API.
+4. Span events and links, and media checks that read the duration of compressed audio and video.
+5. A gateway that lists a tenant's threads and runs across all of its regions.
+6. Tools emulated from a service's own API description, and an emulator that holds state across a
+   whole evaluation, not only one run.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:

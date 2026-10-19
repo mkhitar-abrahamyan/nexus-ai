@@ -313,14 +313,18 @@ Shipped so far:
 - 2.13 regions and residency, and credentials per tenant: agent servers across regions behind a
   gateway that fails over only within a tenant's regions, residency rules that keep each tenant's
   provider calls, traces, and assets in its regions, and each tenant's provider keys from a secret
-  manager, rotated without a restart and kept out of every error.
+  manager, rotated without a restart and kept out of every error;
+- 2.14 policy you can review, and evaluation without side effects: guardrails, routing, budgets,
+  residency, and credentials as one versioned file that `nexus policy check` compares with the version
+  before it in CI and every operation records, tools emulated by a model so an evaluation sends
+  nothing, and each tenant's key in every family.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.14 makes policy a reviewed file, checked by the command line before it ships, brings
-per-tenant keys to every family, and lets an evaluation run an agent over emulated tools with nothing
-sent. Pinecone, images, the Gemini embedding batch tier, media understanding, video, Gemini Live, SIP,
-and both phone providers graduate once the live workflow passes against each. The
+Next, 2.15 publishes a compatibility record for community adapters: the contract suite each passed,
+against which version, with its benchmark, on one page. Pinecone, images, the Gemini embedding batch
+tier, media understanding, video, Gemini Live, SIP, and both phone providers graduate once the live
+workflow passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order
 applications ask for it.
 
