@@ -4,6 +4,10 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-10-19
+
+Regions and residency, and credentials per tenant.
+
 ### Added
 
 - **Agent servers across regions.** `regionalGateway()`, on the new `nexus-ai-pro/server/regions`, sits
@@ -2942,7 +2946,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.12.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.13.0...HEAD
+[2.13.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.9.0...v2.10.0

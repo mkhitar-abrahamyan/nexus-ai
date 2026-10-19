@@ -308,14 +308,18 @@ Shipped so far:
 - 2.12 observability that loses nothing, and media you can evaluate: spans spooled through a collector
   outage, OTLP over gRPC, deployment evaluation that reads each run's whole trace, evaluators that
   read and judge images, documents, audio, and video, a catalog of every stored asset, and automation
-  rules that roll a canary back when a score falls.
+  rules that roll a canary back when a score falls;
+- 2.13 regions and residency, and credentials per tenant: agent servers across regions behind a
+  gateway that fails over only within a tenant's regions, residency rules that keep each tenant's
+  provider calls, traces, and assets in its regions, and each tenant's provider keys from a secret
+  manager, rotated without a restart and kept out of every error.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.13 runs agents across regions, keeps each tenant's requests and data in the region they
-require, and resolves provider keys per tenant from a secret manager. Pinecone, images, the Gemini
-embedding batch tier, media understanding, video, Gemini Live, SIP, and both phone providers graduate
-once the live workflow passes against each. The
+Next, 2.14 makes policy a reviewed file, checked by the command line before it ships, brings
+per-tenant keys to every family, and lets an evaluation run an agent over emulated tools with nothing
+sent. Pinecone, images, the Gemini embedding batch tier, media understanding, video, Gemini Live, SIP,
+and both phone providers graduate once the live workflow passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order
 applications ask for it.
 
