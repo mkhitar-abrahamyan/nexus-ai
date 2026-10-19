@@ -38,6 +38,8 @@ export interface ThreadRecord {
   revision?: string;
   /** Application data supplied when it was created. */
   metadata?: Record<string, unknown>;
+  /** The region it was created in, when the server has one. Its runs and their data stay there. */
+  region?: string;
 }
 
 /** A run of an assistant, whether or not it belongs to a thread. */
@@ -74,6 +76,8 @@ export interface RunRecord {
   durationMs?: number;
   /** US dollars the assistant recorded through `recordCost()`, across every attempt. */
   cost?: number;
+  /** The region it was accepted in, when the server has one. */
+  region?: string;
   /**
    * The trace of its latest attempt, when the server has a `tracer`: the assistant's run is the root,
    * with everything it did through the same tracer beneath it, such as model calls, tools, and
@@ -184,6 +188,8 @@ export interface ReplicaReport {
   assistants: Record<string, readonly string[]>;
   /** What the deployment added, such as the host, the image tag, or the zone. */
   metadata?: Record<string, unknown>;
+  /** The region it runs in, when the server has one. */
+  region?: string;
 }
 
 /**

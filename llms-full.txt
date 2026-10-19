@@ -179,7 +179,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Agent server](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md) | Self-hosted HTTP server for assistants: threads, durable runs, resumable streams, cron, a worker queue, and metrics |
 | [Deployments](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md) | Revisions and canaries with automatic rollback, autoscaling on Kubernetes and Helm, and per-tenant limits |
 | [Tenancy](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tenancy.md) | One tenant model: a tenant's view of every store, tenant graph runs, and the isolation suite |
-| [Regions and credentials](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/regions.md) | Residency rules that keep each tenant's requests, traces, and assets in its regions, and each tenant's provider keys from a secret manager |
+| [Regions and credentials](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/regions.md) | Agent servers across regions behind a gateway, residency rules that keep each tenant's requests, traces, and assets in its regions, and each tenant's provider keys from a secret manager |
 | [Workflows](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md) | Ready-made chains and domain workflows |
 | [Command line](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) | The `nexus` command |
 | [Packaging and install weight](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md) | Every entry point and what it costs |
@@ -11792,7 +11792,9 @@ createServer(toNodeListener(server)).listen(8080);
   exist from startup, and `heartbeatMs` for live streams;
 - `metrics`, which controls `GET /metrics` and `GET /scaling`;
 - `deployments` and `replicaMetadata`, for revisions and replica reports;
-- `tracer`, which makes each run the root of a trace, as below.
+- `tracer`, which makes each run the root of a trace, as below;
+- `region` and `residency`, which place the server in a region and refuse tenants that may not reach
+  it, as the [regions guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/regions.md#agent-servers-across-regions) describes.
 
 With a `tracer` from `nexus-ai-pro/tracing`, each attempt of a run is an `agent` run of its own trace,
 holding the run's input and output, with everything the assistant traces through the same tracer
@@ -11894,6 +11896,7 @@ A `RunRecord` also records how the run went:
 | `cost` | US dollars recorded through `recordCost()`, across every attempt. |
 | `worker`, `attempt` | The worker that ran its latest attempt, and which attempt that was. |
 | `traceId` | The trace of its latest attempt, when the server has a `tracer`. |
+| `region` | The region it was accepted in, when the server has one. |
 
 ## Workers and the queue
 
@@ -13020,6 +13023,63 @@ const ai = new NexusAI({
 await ai.complete({ model: 'gpt-5', tenantId: 'acme', messages: [{ role: 'user', content: 'Hello' }] });
 ```
 
+## Agent servers across regions
+
+Run one agent server per region, each with its own state store, queue, traces, and assets, and put
+`regionalGateway()`, from `nexus-ai-pro/server/regions`, in front of them. A server given
+`AgentServerOptions.region` records it on every `ThreadRecord`, `RunRecord`, and `ReplicaReport`, says
+it in `GET /health`, and starts every thread and run id with it, as `eu-west~thread-…`, so the gateway
+sends every later request for one to the region that holds its data. Given `residency` as well, it
+refuses a thread or a run for a tenant that may not reach its region with a 403, `RESIDENCY_DENIED`,
+whoever sends it.
+
+```ts
+import { createAgentServer } from 'nexus-ai-pro/server';
+import { regionalGateway } from 'nexus-ai-pro/server/regions';
+
+// In each region:
+const server = createAgentServer({ assistants, state, region: 'eu-west', residency: policy, authenticate });
+
+// In front of them:
+const gateway = regionalGateway({
+  regions: {
+    'eu-west': { url: 'https://eu-west.agents.internal' },
+    'eu-central': { url: 'https://eu-central.agents.internal' },
+    'us-east': { url: 'https://us-east.agents.internal' },
+  },
+  residency: policy,
+  tenantOf: async (request) => (await verify(request)).tenantId,
+});
+gateway.start();
+```
+
+The gateway answers each request by `RegionalGatewayOptions`: the `regions`, each a `RegionTarget`
+with the server's `url` or a `handle` in this process; the `residency` policy; `tenantOf`, which
+reads a request's tenant, such as from a verified token; `health`; a `fetch`; and an `onError`.
+
+- **A thread or a run** is sent to the region its id names, and only there. A tenant that may not reach
+  that region is refused with a 403; while the region is down, the request is answered 503,
+  `REGION_DOWN`, with a `Retry-After`, since the thread's data is there and nowhere else.
+- **New work**, a thread, a stateless run, or any other request, goes to the tenant's home region, the
+  first one its rule names, and, when that is down or answers 502 or 504, to the next region the rule
+  names, with the same body; never to another. A tenant every region of which is down is answered 503;
+  one that may reach no region the gateway serves is refused with a 403 naming the rule.
+- Every answer carries `x-nexus-region`, the region that gave it.
+
+A region is down after `failuresToDown` (1) failures in a row, of the checks `start()` runs every
+`everyMs` (10 seconds) against `path` (`/health`, which a draining server answers with 503) within
+`timeoutMs` (2 seconds), or of the requests it forwards; a check that passes brings it back. These are
+the `RegionHealthOptions`. A `RegionalGateway` also has `check()`, `status()`, which returns each
+region's `RegionHealth`, and `markDown()` and `markUp()`, for an operator taking a region out: a
+region marked down is neither probed nor brought back until it is marked up.
+
+In the test suite, three regions each run an agent server with its own state, traces, and provider,
+behind a gateway, every tenant's key from one secret manager. A run of four model calls has its key
+rotated and revoked after the second, and the third and fourth are answered on the new key. Then the
+EU tenant's home region goes down: its new threads and stateless runs go to the other EU region, its
+existing thread waits for its own region, a tenant held to that region waits too, a US tenant never
+notices, and nothing of either EU tenant reaches the US: no thread, run, trace, or provider call.
+
 ## Credentials per tenant
 
 `LifecycleConfig.credentials` takes a `CredentialResolver`: something that turns a
@@ -13091,6 +13151,10 @@ its refusal is found in no error, stack, cause, audit event, log, trace, or heal
 ## Limitations
 
 - `ai.plan()` shows the route before placement: the provider routing chose, not its twin.
+- A list of threads or runs through the gateway lists the tenant's home region's, the first region of
+  its rule that is up.
+- The gateway decides by its own health checks and the requests it forwards; a region that answers but
+  cannot do the work behind it is up until a check or a request says otherwise.
 - A cache, a checkpointer, or any other store the application gives the client is wherever the
   application put it. The response cache keeps each tenant's entries apart; to keep them in a region,
   give the region its own cache.
@@ -13517,7 +13581,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime` | 212 KB | 59% | none |
 | `nexus-ai-pro/server/deployments` | 149 KB | 42% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 138 KB | 38% | none |
-| `nexus-ai-pro/server` | 122 KB | 34% | none |
+| `nexus-ai-pro/server` | 123 KB | 34% | none |
 | `nexus-ai-pro/batch` | 116 KB | 32% | none |
 | `nexus-ai-pro/agent` | 114 KB | 32% | none |
 | `nexus-ai-pro/realtime/session` | 108 KB | 30% | none |
@@ -13650,6 +13714,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/migrations` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/lint` | 9 KB | 3% | none |
+| `nexus-ai-pro/server/regions` | 9 KB | 3% | none |
 | `nexus-ai-pro/tracing/spool` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/batch/openai` | 8 KB | 2% | none |
@@ -13878,7 +13943,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 191 entry points, 153 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 192 entry points, 154 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

@@ -6,6 +6,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Agent servers across regions.** `regionalGateway()`, on the new `nexus-ai-pro/server/regions`, sits
+  in front of one agent server per region. A thread or run goes to the region its id names and waits
+  there while that region is down, since its data is there and nowhere else; new work goes to the
+  tenant's home region and fails over only to another region the tenant may reach; a tenant that may
+  reach no region served is refused with a 403 naming the rule. Regions are checked through their
+  `/health`, marked down by failed requests, and taken out by an operator with `markDown()`. An agent
+  server given `region` stamps it on its threads, runs, ids, replica report, and health, and, given
+  `residency`, refuses tenants that may not reach it.
 - **Residency: each tenant's requests and data kept in its regions.** `residency()`, on the new
   `nexus-ai-pro/residency`, says which regions each tenant may reach (a map, or a function over the
   tenant's record), which providers run in each region, and each provider's twin inside a region.
@@ -36,6 +44,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Proof
 
+- `tests/regions.test.ts`: the proof that closes 2.13. Three regions, each an agent server with its own
+  state, traces, and provider, behind a gateway, with every tenant's key from one secret manager. A run
+  of four model calls has its key rotated and revoked after the second; the third and fourth are
+  answered on the new key. Then the EU tenant's home region goes down: its new work fails over to the
+  other EU region, its thread waits for its own, a tenant held to that region waits too, and nothing
+  of either reaches the US: no thread, run, trace, or provider call. Without region ids, the server's
+  check, a thread's region kept, new work held to the tenant's regions, failover, checks, the
+  operator's mark, or the gateway's own refusal, a test fails.
 - `tests/residency.test.ts`: against a provider server per region, a tenant pinned to the EU is
   answered by the EU twin of the provider routing chose, completions and streams alike, and nothing
   of it reaches the US; a provider with no twin there is refused with the rule, nothing sent; an

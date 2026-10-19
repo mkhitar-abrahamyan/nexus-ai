@@ -58,6 +58,10 @@ export function json(value: unknown, status = 200, headers: Record<string, strin
 
 /** The error response for any thrown value: a `ServerError` keeps its status, anything else is a 500. */
 export function errorResponse(error: unknown): Response {
+  // A tenant's request for a region it may not reach.
+  if (error instanceof Error && error.name === 'ResidencyError') {
+    return json({ error: { code: 'RESIDENCY_DENIED', message: error.message } }, 403);
+  }
   if (error instanceof ServerError) {
     const headers: Record<string, string> =
       error.retryAfterSeconds === undefined ? {} : { 'retry-after': String(error.retryAfterSeconds) };

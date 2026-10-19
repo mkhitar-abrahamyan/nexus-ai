@@ -167,7 +167,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Agent server](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md) | Self-hosted HTTP server for assistants: threads, durable runs, resumable streams, cron, a worker queue, and metrics |
 | [Deployments](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md) | Revisions and canaries with automatic rollback, autoscaling on Kubernetes and Helm, and per-tenant limits |
 | [Tenancy](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tenancy.md) | One tenant model: a tenant's view of every store, tenant graph runs, and the isolation suite |
-| [Regions and credentials](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/regions.md) | Residency rules that keep each tenant's requests, traces, and assets in its regions, and each tenant's provider keys from a secret manager |
+| [Regions and credentials](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/regions.md) | Agent servers across regions behind a gateway, residency rules that keep each tenant's requests, traces, and assets in its regions, and each tenant's provider keys from a secret manager |
 | [Workflows](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/workflows.md) | Ready-made chains and domain workflows |
 | [Command line](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md) | The `nexus` command |
 | [Packaging and install weight](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/packaging.md) | Every entry point and what it costs |

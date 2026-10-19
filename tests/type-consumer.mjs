@@ -314,6 +314,7 @@ import { TelnyxTelephonyProvider } from 'nexus-ai-pro/telephony/telnyx';
 import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
 import { awsSecrets, memorySecrets, tenantCredentials, type TenantCredentialStats } from 'nexus-ai-pro/credentials';
 import { regionalTraceStore, residency, ResidencyError, type ResidencyDecision } from 'nexus-ai-pro/residency';
+import { regionalGateway, type RegionHealth } from 'nexus-ai-pro/server/regions';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
 import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
@@ -1107,6 +1108,15 @@ const acmeRegions: Promise<ResidencyDecision> = Promise.resolve(regions.regionsF
 void acmeRegions;
 void regionalTraceStore({ stores: { 'eu-west': new MemoryTraceStore(), 'us-east': new MemoryTraceStore() }, residency: regions });
 void ResidencyError;
+// A gateway in front of an agent server per region.
+const gateway = regionalGateway({
+  regions: { 'eu-west': { url: 'https://eu-west.agents.internal' }, 'us-east': { handle: async () => new Response('{}') } },
+  residency: regions,
+  tenantOf: (request: Request) => request.headers.get('x-tenant') ?? undefined,
+  health: { everyMs: 5_000, failuresToDown: 2 },
+});
+const regionHealth: Record<string, RegionHealth> = gateway.status();
+void regionHealth;
 const grpcOptions: OtlpGrpcTraceExporterOptions = { endpoint: 'http://localhost:4317', gzip: true, timeoutMs: 5_000 };
 const grpcExporter = new OtlpGrpcTraceExporter(grpcOptions);
 const spooledGrpc = spoolingExporter({ sender: grpcExporter, store: {} as never, drainEveryMs: 0 });

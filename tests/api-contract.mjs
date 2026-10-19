@@ -137,6 +137,7 @@ const expectedSubpaths = [
   './tracing/spool',
   './credentials',
   './residency',
+  './server/regions',
   './tracing/otlp-grpc',
   './tracing/rollups',
   './evaluate',

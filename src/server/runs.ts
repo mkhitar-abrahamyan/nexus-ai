@@ -9,6 +9,7 @@ import type {
   OperationStore,
 } from '../types/operations.js';
 import type { FinishRunOptions, Tracer } from '../tracing/tracer.js';
+import type { ResidencyPolicy } from '../types/residency.js';
 import type { RunFeedback } from '../types/tracing.js';
 import type {
   AssistantRunContext,
@@ -107,6 +108,17 @@ export interface RunManagerOptions {
    * which `Deployments.evaluate()` reads. Give it the tracer the assistants' clients use.
    */
   tracer?: Pick<Tracer, 'startRun' | 'within'>;
+  /**
+   * The region this server runs in. Its threads and runs record it, and their ids start with it, as
+   * `eu-west~thread-…`, so `regionalGateway()` sends every later request for one to the region that
+   * holds its data.
+   */
+  region?: string;
+  /**
+   * Which regions each tenant may reach: a thread or run for a tenant that may not reach this
+   * server's region is refused with a `ResidencyError`, as a 403, and nothing is recorded.
+   */
+  residency?: ResidencyPolicy;
   /** What to do when a thread is already running something. Defaults to `reject`. */
   onBusy?: ThreadBusyPolicy;
   /** How long a run may take before it expires, in milliseconds. */
@@ -279,18 +291,38 @@ export class RunManager {
     metadata?: Record<string, unknown>;
   }): Promise<ThreadRecord> {
     this.assistant(options.assistant);
+    await this.checkResidency(options.principal);
     const at = this.now().toISOString();
     const thread: ThreadRecord = {
-      id: options.threadId?.trim() || `thread-${randomId()}`,
+      id: options.threadId?.trim() || this.regionalId('thread'),
       assistant: options.assistant,
       tenantId: options.principal?.tenantId,
       createdBy: options.principal?.userId,
       createdAt: at,
       updatedAt: at,
       metadata: options.metadata,
+      ...(this.options.region ? { region: this.options.region } : {}),
     };
     await this.state.put(THREADS, thread.id, thread);
     return thread;
+  }
+
+  /** A new id, starting with this server's region when it has one, so a gateway can route by it. */
+  private regionalId(kind: 'thread' | 'run'): string {
+    return this.options.region ? `${this.options.region}~${kind}-${randomId()}` : `${kind}-${randomId()}`;
+  }
+
+  /** Refuses work for a tenant that may not reach this server's region. */
+  private async checkResidency(principal: Principal | undefined): Promise<void> {
+    const policy = this.options.residency;
+    if (!policy || this.options.region === undefined) return;
+    const decision = await policy.regionsFor(principal?.tenantId);
+    policy.check({ kind: 'replica', name: this.workerId, region: this.options.region }, decision);
+  }
+
+  /** The region this server runs in, when it has one. */
+  get region(): string | undefined {
+    return this.options.region;
   }
 
   /** Reads a thread, refusing one that belongs to another tenant. */
@@ -347,7 +379,8 @@ export class RunManager {
    */
   async start(options: StartRunOptions): Promise<RunRecord> {
     const base = this.assistant(options.assistant);
-    const runId = `run-${randomId()}`;
+    await this.checkResidency(options.principal);
+    const runId = this.regionalId('run');
     let thread: ThreadRecord | undefined;
 
     if (options.threadId) {
@@ -574,6 +607,7 @@ export class RunManager {
       draining: this.draining,
       assistants,
       ...(metadata ? { metadata } : {}),
+      ...(this.options.region ? { region: this.options.region } : {}),
     };
   }
 
@@ -660,6 +694,7 @@ export class RunManager {
       updatedAt: at,
       metadata: startedAtStep === undefined ? options.metadata : { ...options.metadata, startedAtStep },
       ...(revision ? { revision } : {}),
+      ...(this.options.region ? { region: this.options.region } : {}),
     };
     await this.state.put(RUNS, runId, run);
 

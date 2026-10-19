@@ -46,6 +46,10 @@ one of its explicit subpaths.
 Everything 2.13 adds is stable from the start and additive, unless this section says otherwise.
 
 New and stable:
+- `nexus-ai-pro/server/regions`: `regionalGateway()`, `RegionalGateway`, `RegionalGatewayOptions`,
+  `RegionTarget`, `RegionHealth`, and `RegionHealthOptions`;
+- `RunManagerOptions.region` and `residency`, as `AgentServerOptions` carries them; `ThreadRecord.region`,
+  `RunRecord.region`, and `ReplicaReport.region`; a regional server's ids start with its region;
 - `nexus-ai-pro/residency`: `residency()`, `Residency`, `ResidencyOptions`, `RegionRule`,
   `RegionDefinition`, `ResidencyPolicy`, `ResidencyDecision`, `ResidencyTarget`, `ResidencyPlacement`,
   `CallResidency`, `ResidencyError`, `regionalTraceStore()`, `RegionalTraceStore`,

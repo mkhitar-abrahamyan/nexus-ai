@@ -267,6 +267,7 @@ const imports = [
   ['nexus-ai-pro/tracing/spool', ['spoolingExporter']],
   ['nexus-ai-pro/credentials', ['tenantCredentials', 'awsSecrets']],
   ['nexus-ai-pro/residency', ['residency', 'ResidencyError']],
+  ['nexus-ai-pro/server/regions', ['regionalGateway']],
   ['nexus-ai-pro/tracing/otlp-grpc', ['OtlpGrpcTraceExporter', 'OtlpGrpcError']],
   ['nexus-ai-pro/evaluate/media', ['mediaChecks', 'mediaJudge']],
   ['nexus-ai-pro/media/catalog', ['mediaCatalog', 'catalogedAssetStore']],

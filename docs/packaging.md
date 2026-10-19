@@ -100,7 +100,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime` | 212 KB | 59% | none |
 | `nexus-ai-pro/server/deployments` | 149 KB | 42% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 138 KB | 38% | none |
-| `nexus-ai-pro/server` | 122 KB | 34% | none |
+| `nexus-ai-pro/server` | 123 KB | 34% | none |
 | `nexus-ai-pro/batch` | 116 KB | 32% | none |
 | `nexus-ai-pro/agent` | 114 KB | 32% | none |
 | `nexus-ai-pro/realtime/session` | 108 KB | 30% | none |
@@ -233,6 +233,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/migrations` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 3% | none |
 | `nexus-ai-pro/graph/lint` | 9 KB | 3% | none |
+| `nexus-ai-pro/server/regions` | 9 KB | 3% | none |
 | `nexus-ai-pro/tracing/spool` | 9 KB | 3% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 3% | none |
 | `nexus-ai-pro/embeddings/batch/openai` | 8 KB | 2% | none |

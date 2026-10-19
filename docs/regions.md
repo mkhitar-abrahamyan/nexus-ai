@@ -1,6 +1,6 @@
 # Regions and credentials
 
-<!-- covers: ./residency ./credentials -->
+<!-- covers: ./residency ./server/regions ./credentials -->
 
 Each tenant's requests and data kept in the regions it requires, and each tenant's provider keys,
 resolved when a call is made from the secret manager you already run, rotated there without a
@@ -98,6 +98,63 @@ const ai = new NexusAI({
 await ai.complete({ model: 'gpt-5', tenantId: 'acme', messages: [{ role: 'user', content: 'Hello' }] });
 ```
 
+## Agent servers across regions
+
+Run one agent server per region, each with its own state store, queue, traces, and assets, and put
+`regionalGateway()`, from `nexus-ai-pro/server/regions`, in front of them. A server given
+`AgentServerOptions.region` records it on every `ThreadRecord`, `RunRecord`, and `ReplicaReport`, says
+it in `GET /health`, and starts every thread and run id with it, as `eu-west~thread-…`, so the gateway
+sends every later request for one to the region that holds its data. Given `residency` as well, it
+refuses a thread or a run for a tenant that may not reach its region with a 403, `RESIDENCY_DENIED`,
+whoever sends it.
+
+```ts
+import { createAgentServer } from 'nexus-ai-pro/server';
+import { regionalGateway } from 'nexus-ai-pro/server/regions';
+
+// In each region:
+const server = createAgentServer({ assistants, state, region: 'eu-west', residency: policy, authenticate });
+
+// In front of them:
+const gateway = regionalGateway({
+  regions: {
+    'eu-west': { url: 'https://eu-west.agents.internal' },
+    'eu-central': { url: 'https://eu-central.agents.internal' },
+    'us-east': { url: 'https://us-east.agents.internal' },
+  },
+  residency: policy,
+  tenantOf: async (request) => (await verify(request)).tenantId,
+});
+gateway.start();
+```
+
+The gateway answers each request by `RegionalGatewayOptions`: the `regions`, each a `RegionTarget`
+with the server's `url` or a `handle` in this process; the `residency` policy; `tenantOf`, which
+reads a request's tenant, such as from a verified token; `health`; a `fetch`; and an `onError`.
+
+- **A thread or a run** is sent to the region its id names, and only there. A tenant that may not reach
+  that region is refused with a 403; while the region is down, the request is answered 503,
+  `REGION_DOWN`, with a `Retry-After`, since the thread's data is there and nowhere else.
+- **New work**, a thread, a stateless run, or any other request, goes to the tenant's home region, the
+  first one its rule names, and, when that is down or answers 502 or 504, to the next region the rule
+  names, with the same body; never to another. A tenant every region of which is down is answered 503;
+  one that may reach no region the gateway serves is refused with a 403 naming the rule.
+- Every answer carries `x-nexus-region`, the region that gave it.
+
+A region is down after `failuresToDown` (1) failures in a row, of the checks `start()` runs every
+`everyMs` (10 seconds) against `path` (`/health`, which a draining server answers with 503) within
+`timeoutMs` (2 seconds), or of the requests it forwards; a check that passes brings it back. These are
+the `RegionHealthOptions`. A `RegionalGateway` also has `check()`, `status()`, which returns each
+region's `RegionHealth`, and `markDown()` and `markUp()`, for an operator taking a region out: a
+region marked down is neither probed nor brought back until it is marked up.
+
+In the test suite, three regions each run an agent server with its own state, traces, and provider,
+behind a gateway, every tenant's key from one secret manager. A run of four model calls has its key
+rotated and revoked after the second, and the third and fourth are answered on the new key. Then the
+EU tenant's home region goes down: its new threads and stateless runs go to the other EU region, its
+existing thread waits for its own region, a tenant held to that region waits too, a US tenant never
+notices, and nothing of either EU tenant reaches the US: no thread, run, trace, or provider call.
+
 ## Credentials per tenant
 
 `LifecycleConfig.credentials` takes a `CredentialResolver`: something that turns a
@@ -169,6 +226,10 @@ its refusal is found in no error, stack, cause, audit event, log, trace, or heal
 ## Limitations
 
 - `ai.plan()` shows the route before placement: the provider routing chose, not its twin.
+- A list of threads or runs through the gateway lists the tenant's home region's, the first region of
+  its rule that is up.
+- The gateway decides by its own health checks and the requests it forwards; a region that answers but
+  cannot do the work behind it is up until a check or a request says otherwise.
 - A cache, a checkpointer, or any other store the application gives the client is wherever the
   application put it. The response cache keeps each tenant's entries apart; to keep them in a region,
   give the region its own cache.

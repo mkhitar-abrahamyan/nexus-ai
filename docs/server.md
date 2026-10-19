@@ -46,7 +46,9 @@ createServer(toNodeListener(server)).listen(8080);
   exist from startup, and `heartbeatMs` for live streams;
 - `metrics`, which controls `GET /metrics` and `GET /scaling`;
 - `deployments` and `replicaMetadata`, for revisions and replica reports;
-- `tracer`, which makes each run the root of a trace, as below.
+- `tracer`, which makes each run the root of a trace, as below;
+- `region` and `residency`, which place the server in a region and refuse tenants that may not reach
+  it, as the [regions guide](./regions.md#agent-servers-across-regions) describes.
 
 With a `tracer` from `nexus-ai-pro/tracing`, each attempt of a run is an `agent` run of its own trace,
 holding the run's input and output, with everything the assistant traces through the same tracer
@@ -148,6 +150,7 @@ A `RunRecord` also records how the run went:
 | `cost` | US dollars recorded through `recordCost()`, across every attempt. |
 | `worker`, `attempt` | The worker that ran its latest attempt, and which attempt that was. |
 | `traceId` | The trace of its latest attempt, when the server has a `tracer`. |
+| `region` | The region it was accepted in, when the server has one. |
 
 ## Workers and the queue
 

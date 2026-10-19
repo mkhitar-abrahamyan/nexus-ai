@@ -162,6 +162,7 @@
     "./server": 136,
     "./server/auth": 20,
     "./server/deployments": 164,
+    "./server/regions": 10,
     "./server/remote": 8,
     "./server/tenancy": 30,
     "./sqlite": 48,

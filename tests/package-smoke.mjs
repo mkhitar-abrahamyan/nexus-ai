@@ -328,6 +328,7 @@ const imports = [
     specifier: 'nexus-ai-pro/residency',
     exports: ['residency', 'regionalTraceStore', 'regionalAssetStore', 'ResidencyError'],
   },
+  { specifier: 'nexus-ai-pro/server/regions', exports: ['regionalGateway'] },
   { specifier: 'nexus-ai-pro/tracing/otlp-grpc', exports: ['OtlpGrpcTraceExporter', 'OtlpGrpcError'] },
   {
     specifier: 'nexus-ai-pro/tracing/rollups',

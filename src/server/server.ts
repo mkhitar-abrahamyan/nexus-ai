@@ -125,10 +125,11 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
   const admin = route('admin');
 
   // Answered without authentication: a load balancer's or Kubernetes' probe carries no credentials.
+  const region = runs.region ? { region: runs.region } : {};
   open('GET', '/health', async () =>
     runs.isDraining
-      ? json({ status: 'draining', worker: runs.workerId }, 503)
-      : json({ status: 'ok', worker: runs.workerId }),
+      ? json({ status: 'draining', worker: runs.workerId, ...region }, 503)
+      : json({ status: 'ok', worker: runs.workerId, ...region }),
   );
 
   if (options.metrics !== false) {
