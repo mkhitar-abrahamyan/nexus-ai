@@ -437,7 +437,13 @@ delivery that is unsigned, signed with another secret, altered, or older than
 
 They share `OpenAIRealtimeServerOptions`: the key, the model, session settings, a base URL, a
 `safetyIdentifier` for the end user, a `fetch`, and a `formDataFactory` for runtimes without
-`FormData`. The injected `fetch` is an `OpenAIRealtimeServerFetch` returning an
+`FormData`. With `credentials`, the resolver the client's lifecycle uses, such as
+`tenantCredentials()`, and a `tenantId`, the session an SDP exchange makes and the client secret a
+browser connects with are minted with that tenant's key, read for `provider` (`openai`); a tenant the
+resolver refuses is refused before anything is sent, and the key is cleaned from every error. The
+endpoint `createOpenAIRealtimeSessionEndpoint()` returns takes the tenant per call, as its third
+argument, such as the one your route authenticated. Controlling a call OpenAI carries always uses
+`apiKey`, the key of the project that received the call. The injected `fetch` is an `OpenAIRealtimeServerFetch` returning an
 `OpenAIRealtimeServerFetchResponse`, and the form data a `FormDataLike`.
 
 ### The mock

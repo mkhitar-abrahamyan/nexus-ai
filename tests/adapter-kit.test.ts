@@ -165,7 +165,13 @@ test('a broken store fails exactly the checks it breaks, and a missing capabilit
     'narrows a search by metadata',
     'replaces a passage added again under its id',
     'deletes by id, ignoring ids it does not hold',
+    'adds a passage again under an id it deleted',
   ]);
+  assert.equal(
+    checks.find((check) => check.name === 'adds a passage again under an id it deleted')?.detail,
+    'found 2 copies',
+    'a store that keeps duplicates finds the re-added passage twice',
+  );
   assert.equal(checks.find((check) => check.name === 'searches by a precomputed vector')?.skipped, true);
   const throwing = await runVectorStoreContract(
     {

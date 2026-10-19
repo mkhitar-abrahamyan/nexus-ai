@@ -1,0 +1,90 @@
+{
+  "format": "nexus-compatibility/1",
+  "adapter": {
+    "name": "nexus-ai-pro/store MemoryStore",
+    "version": "2.x",
+    "kind": "store",
+    "nexus": ">=2.4.0 <3",
+    "capabilities": {},
+    "budgets": {
+      "search": 100
+    },
+    "repository": "https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/src/store/memory.ts",
+    "verify": "../adapters/memory-store.mjs"
+  },
+  "contract": {
+    "kind": "store",
+    "version": 1
+  },
+  "nexusVersion": "2.14.0",
+  "verifiedAt": "2026-10-19T11:53:47.371Z",
+  "runtime": "node 22.16.0 win32 x64",
+  "compatible": true,
+  "passed": true,
+  "checks": [
+    {
+      "name": "declares support for nexus-ai-pro 2.14.0",
+      "ok": true
+    },
+    {
+      "name": "round-trips a value",
+      "ok": true
+    },
+    {
+      "name": "keeps the creation time when an item is replaced",
+      "ok": true
+    },
+    {
+      "name": "reads a missing key as nothing",
+      "ok": true
+    },
+    {
+      "name": "deletes an item",
+      "ok": true
+    },
+    {
+      "name": "lists a namespace prefix, with paging",
+      "ok": true
+    },
+    {
+      "name": "filters by a value field",
+      "ok": true
+    },
+    {
+      "name": "lists namespaces under a prefix",
+      "ok": true
+    },
+    {
+      "name": "search stays within 100 ms at p95",
+      "ok": true
+    }
+  ],
+  "benchmark": {
+    "put": {
+      "calls": 5,
+      "p50Ms": 0.01,
+      "p95Ms": 0.67
+    },
+    "get": {
+      "calls": 5,
+      "p50Ms": 0,
+      "p95Ms": 0.04
+    },
+    "delete": {
+      "calls": 1,
+      "p50Ms": 0.01,
+      "p95Ms": 0.01
+    },
+    "search": {
+      "calls": 3,
+      "p50Ms": 0.1,
+      "p95Ms": 0.13
+    },
+    "listNamespaces": {
+      "calls": 1,
+      "p50Ms": 0.04,
+      "p95Ms": 0.04
+    }
+  },
+  "digest": "d8ed0ecd01fac5caaba97e207ff15b164776fc7476ca817022ae5e555fd53a96"
+}

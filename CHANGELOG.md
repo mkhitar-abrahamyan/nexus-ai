@@ -4,6 +4,26 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **A compatibility record for community adapters.** `adapter.record()` and `compatibilityRecord()`
+  seal what an adapter kit adapter's `verify()` proved: the contract version it passed, against which
+  release, its benchmark, its runtime, and a digest. `nexus adapters verify` makes one from the
+  adapter's own repository, `nexus adapters page` lists records on one page, and
+  `nexus adapters recheck` verifies each listed adapter again against the installed release and exits
+  1 when one that passed no longer does, naming the check. `recordStatus()` tells a passing record
+  from a failing, incompatible, or stale one, and `compareRecords()` what broke between two.
+  [COMPATIBILITY.md](./COMPATIBILITY.md) lists the adapters this repository ships, verified again by
+  every build.
+- **Contracts, versioned.** `ADAPTER_CONTRACTS` gives each kind's contract version and what each
+  version added. The vector-store contract is at version 2: “adds a passage again under an id it
+  deleted”. An `AdapterReport` carries its `contractVersion`, `nexusRange`, `capabilities`, and
+  `budgets`.
+- **Realtime sessions minted with the tenant's key.** The OpenAI realtime server helpers take the
+  client's `credentials` resolver and a `tenantId`: the session an SDP exchange makes and the client
+  secret a browser connects with use the tenant's key, a tenant without one is refused before anything
+  is sent, and the key is cleaned from every error. The session endpoint takes the tenant per call.
+
 ## [2.14.0] - 2026-10-19
 
 Policy you can review, evaluation without side effects, and credentials per tenant in every family.

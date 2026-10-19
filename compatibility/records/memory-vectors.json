@@ -1,0 +1,103 @@
+{
+  "format": "nexus-compatibility/1",
+  "adapter": {
+    "name": "nexus-ai-pro/rag MemoryVectorStore",
+    "version": "2.x",
+    "kind": "vector-store",
+    "nexus": ">=2.4.0 <3",
+    "capabilities": {
+      "filters": "typed"
+    },
+    "budgets": {
+      "search": 250
+    },
+    "repository": "https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/src/hallucination/retrieval.ts",
+    "verify": "../adapters/memory-vectors.mjs"
+  },
+  "contract": {
+    "kind": "vector-store",
+    "version": 2
+  },
+  "nexusVersion": "2.14.0",
+  "verifiedAt": "2026-10-19T11:53:47.495Z",
+  "runtime": "node 22.16.0 win32 x64",
+  "compatible": true,
+  "passed": true,
+  "checks": [
+    {
+      "name": "declares support for nexus-ai-pro 2.14.0",
+      "ok": true
+    },
+    {
+      "name": "adds passages",
+      "ok": true
+    },
+    {
+      "name": "ranks the closest passage first, best first, within topK",
+      "ok": true
+    },
+    {
+      "name": "returns a passage source and its metadata whole",
+      "ok": true
+    },
+    {
+      "name": "narrows a search by metadata",
+      "ok": true
+    },
+    {
+      "name": "tells a number from the same digits as text in a filter",
+      "ok": true
+    },
+    {
+      "name": "drops matches under minScore",
+      "ok": true
+    },
+    {
+      "name": "searches by a precomputed vector",
+      "ok": true
+    },
+    {
+      "name": "replaces a passage added again under its id",
+      "ok": true
+    },
+    {
+      "name": "deletes by id, ignoring ids it does not hold",
+      "ok": true
+    },
+    {
+      "name": "adds a passage again under an id it deleted",
+      "ok": true
+    },
+    {
+      "name": "accepts empty writes",
+      "ok": true
+    },
+    {
+      "name": "search stays within 250 ms at p95",
+      "ok": true
+    }
+  ],
+  "benchmark": {
+    "add": {
+      "calls": 4,
+      "p50Ms": 0.04,
+      "p95Ms": 0.29
+    },
+    "search": {
+      "calls": 9,
+      "p50Ms": 0.05,
+      "p95Ms": 0.18
+    },
+    "searchVector": {
+      "calls": 1,
+      "p50Ms": 0.05,
+      "p95Ms": 0.05
+    },
+    "delete": {
+      "calls": 2,
+      "p50Ms": 0,
+      "p95Ms": 0.02
+    }
+  },
+  "digest": "24a52b28925f205c13c603c1785961f07a92eda600b2686439aa837341fa7783"
+}

@@ -41,6 +41,27 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.15 stage (Unreleased)
+
+Everything 2.15 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- in `nexus-ai-pro/adapter-kit`: `Adapter.record()`, `compatibilityRecord()`, `readCompatibilityRecord()`,
+  `recordDigest()`, `recordStatus()`, `compareRecords()`, `compatibilityPage()`,
+  `CompatibilityRecordError`, `COMPATIBILITY_RECORD_FORMAT`, `CompatibilityRecord`,
+  `CompatibilityRecordAdapter`, `CompatibilityRecordOptions`, `CompatibilityStatus`,
+  `CompatibilityState`, `CompatibilityComparison`, `CheckChange`, `CompatibilityPageOptions`,
+  `ADAPTER_CONTRACTS`, `AdapterContract`, and `AdapterContractVersion`; `AdapterReport.contractVersion`,
+  `nexusRange`, `capabilities`, and `budgets`;
+- the `nexus-compatibility/1` record format: a reader of one format version reads every record of it;
+  a new field may be added, and a record that needs it declares a new format;
+- the `nexus adapters verify`, `page`, and `recheck` commands, their flags, and their exit codes;
+- `OpenAIRealtimeServerOptions.credentials`, `tenantId`, and `provider`, the optional `apiKey`, and the
+  tenant the session endpoint takes per call.
+
+A contract's version rises when a minor release adds a check, by the rule above; its history keeps
+every version.
+
 ## 2.14 stage (2.14.0)
 
 Everything 2.14 adds is stable from the start and additive, unless this section says otherwise.

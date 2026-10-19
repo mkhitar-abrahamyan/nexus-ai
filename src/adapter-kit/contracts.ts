@@ -7,6 +7,7 @@ import type { RagChunk } from '../hallucination/rag.js';
 import type { EmbeddingProvider, VectorStore } from '../hallucination/retrieval.js';
 import type { Retriever, SparseRetriever } from '../rag/retrievers.js';
 import type { Store } from '../types/store.js';
+import type { AdapterKind } from './index.js';
 
 /** One check of a contract suite. */
 export interface AdapterCheck {
@@ -19,6 +20,46 @@ export interface AdapterCheck {
   /** True when the adapter does not declare the capability the check needs. */
   skipped?: boolean;
 }
+
+/** One version of a kind's contract: the release it arrived in, and the checks it added. */
+export interface AdapterContractVersion {
+  /** The contract's version, counted from 1. */
+  version: number;
+  /** The release of `nexus-ai-pro` it arrived in. */
+  nexus: string;
+  /** The checks it added, by name. */
+  added: readonly string[];
+}
+
+/** A kind's contract: its current version, and what each version added. */
+export interface AdapterContract {
+  /** The adapter kind it is for. */
+  kind: AdapterKind;
+  /** Its current version, which every record names. */
+  version: number;
+  /** Each version, oldest first, so a record verified against an older one says what it was not checked for. */
+  history: readonly AdapterContractVersion[];
+}
+
+/**
+ * Every kind's contract, versioned: a version is added when a release adds a check, so a record of
+ * an adapter verified against an older version is known to be stale, and the checks it has not run are
+ * named.
+ */
+export const ADAPTER_CONTRACTS: Readonly<Record<AdapterKind, AdapterContract>> = {
+  provider: { kind: 'provider', version: 1, history: [{ version: 1, nexus: '2.4.0', added: [] }] },
+  embeddings: { kind: 'embeddings', version: 1, history: [{ version: 1, nexus: '2.4.0', added: [] }] },
+  'vector-store': {
+    kind: 'vector-store',
+    version: 2,
+    history: [
+      { version: 1, nexus: '2.4.0', added: [] },
+      { version: 2, nexus: '2.15.0', added: ['adds a passage again under an id it deleted'] },
+    ],
+  },
+  retriever: { kind: 'retriever', version: 1, history: [{ version: 1, nexus: '2.4.0', added: [] }] },
+  store: { kind: 'store', version: 1, history: [{ version: 1, nexus: '2.4.0', added: [] }] },
+};
 
 /** The passages every retrieval contract runs on, and that benchmarks reuse. */
 export const ADAPTER_FIXTURE_PASSAGES: readonly RagChunk[] = [
@@ -88,7 +129,8 @@ export interface VectorStoreContractOptions {
 
 /**
  * The `VectorStore` contract: ranking, `topK`, sources and metadata round-tripped, filters,
- * `minScore`, vector search, replacement by id, deletes, and empty writes. The store should be empty
+ * `minScore`, vector search, replacement by id, deletes, an id added again after its delete, and
+ * empty writes. The store should be empty
  * when it starts.
  */
 export async function runVectorStoreContract(
@@ -169,6 +211,13 @@ export async function runVectorStoreContract(
     await settle();
     const results = await store.search('how long do refunds take', { topK: 10 });
     return !results.some((result) => result.id === 'refunds#0') || 'the deleted passage is still found';
+  });
+  await suite.check('adds a passage again under an id it deleted', async () => {
+    await store.add([fixturePassages()[0] as RagChunk]);
+    await settle();
+    const results = await store.search('how long do refunds take', { topK: 10 });
+    const copies = results.filter((result) => result.id === 'refunds#0').length;
+    return copies === 1 || (copies === 0 ? 'the passage stays deleted' : `found ${copies} copies`);
   });
   await suite.check('accepts empty writes', async () => {
     await store.add([]);

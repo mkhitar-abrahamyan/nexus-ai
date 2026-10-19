@@ -96,10 +96,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 362 KB | 100% | none |
 | `nexus-ai-pro/config` | 355 KB | 98% | none |
 | `nexus-ai-pro/core` | 351 KB | 97% | none |
+| `nexus-ai-pro/realtime` | 216 KB | 60% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 59% | none |
-| `nexus-ai-pro/realtime` | 213 KB | 59% | none |
 | `nexus-ai-pro/server/deployments` | 151 KB | 42% | none |
-| `nexus-ai-pro/realtime/openai-sip` | 139 KB | 38% | none |
+| `nexus-ai-pro/realtime/openai-sip` | 142 KB | 39% | none |
 | `nexus-ai-pro/server` | 123 KB | 34% | none |
 | `nexus-ai-pro/batch` | 118 KB | 33% | none |
 | `nexus-ai-pro/agent` | 114 KB | 31% | none |
@@ -126,6 +126,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/security` | 58 KB | 16% | none |
 | `nexus-ai-pro/operations` | 56 KB | 15% | none |
 | `nexus-ai-pro/evaluate` | 52 KB | 14% | none |
+| `nexus-ai-pro/adapter-kit` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 14% | none |
 | `nexus-ai-pro/models/data` | 51 KB | 14% | none |
@@ -148,7 +149,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/video` | 37 KB | 10% | none |
 | `nexus-ai-pro/models` | 37 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
-| `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/lifecycle` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 9% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
@@ -168,11 +168,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/protocols/acp` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/tracing/otlp` | 24 KB | 7% | none |
+| `nexus-ai-pro/realtime/openai-server` | 24 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
-| `nexus-ai-pro/realtime/openai-server` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/protocols/acp/editor` | 20 KB | 6% | none |
 | `nexus-ai-pro/media/catalog` | 20 KB | 6% | none |

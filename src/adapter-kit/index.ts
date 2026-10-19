@@ -20,6 +20,7 @@ import type { EmbeddingsProvider } from '../types/embeddings.js';
 import type { Store } from '../types/store.js';
 import { NEXUS_VERSION } from '../version.js';
 import {
+  ADAPTER_CONTRACTS,
   type AdapterCheck,
   type RetrieverCapabilities,
   type RetrieverContractOptions,
@@ -30,11 +31,15 @@ import {
   type VectorStoreCapabilities,
 } from './contracts.js';
 import { AdapterError, type AdapterErrorClass, classifyAdapterError } from './errors.js';
+import { type CompatibilityRecord, type CompatibilityRecordOptions, compatibilityRecord } from './record.js';
 import { satisfiesRange } from './semver.js';
 
 export {
+  ADAPTER_CONTRACTS,
   ADAPTER_FIXTURE_PASSAGES,
   type AdapterCheck,
+  type AdapterContract,
+  type AdapterContractVersion,
   type RetrieverCapabilities,
   type RetrieverContractOptions,
   runRetrieverContract,
@@ -45,6 +50,24 @@ export {
   type VectorStoreContractOptions,
 } from './contracts.js';
 export { AdapterError, type AdapterErrorClass, type AdapterErrorCode, classifyAdapterError } from './errors.js';
+export {
+  type CheckChange,
+  COMPATIBILITY_RECORD_FORMAT,
+  type CompatibilityComparison,
+  type CompatibilityPageOptions,
+  type CompatibilityRecord,
+  type CompatibilityRecordAdapter,
+  CompatibilityRecordError,
+  type CompatibilityRecordOptions,
+  type CompatibilityState,
+  type CompatibilityStatus,
+  compareRecords,
+  compatibilityPage,
+  compatibilityRecord,
+  readCompatibilityRecord,
+  recordDigest,
+  recordStatus,
+} from './record.js';
 export { parseVersion, satisfiesRange } from './semver.js';
 
 /** The kinds of adapter the kit builds. */
@@ -121,6 +144,14 @@ export interface AdapterReport {
   checks: AdapterCheck[];
   /** Latency per operation over the contract's calls. */
   benchmark: Record<string, AdapterBenchmarkEntry>;
+  /** The releases the adapter declares support for. */
+  nexusRange: string;
+  /** What it declares it can do. */
+  capabilities: unknown;
+  /** The p95 budgets it declares. */
+  budgets?: Readonly<Record<string, number>>;
+  /** The version of its kind's contract it was verified against, from `ADAPTER_CONTRACTS`. */
+  contractVersion: number;
 }
 
 /** An adapter built with the kit. */
@@ -134,6 +165,11 @@ export interface Adapter<Config, Instance, Capabilities, VerifyOptions>
   compatible(nexusVersion?: string): boolean;
   /** Runs the contract suite for its kind against a fresh instance, with a benchmark. */
   verify(config: Config, options: VerifyOptions): Promise<AdapterReport>;
+  /**
+   * Verifies it and seals the report as a `CompatibilityRecord`: what a page lists, and what a release
+   * is checked against.
+   */
+  record(config: Config, options: VerifyOptions, record?: CompatibilityRecordOptions): Promise<CompatibilityRecord>;
 }
 
 /** The methods each kind's instances are instrumented on. */
@@ -158,7 +194,7 @@ function build<Config, Instance extends object, Capabilities, VerifyOptions>(
   const create = async (config: Config, options: AdapterCreateOptions = {}): Promise<Instance> =>
     instrument(kind, definition, await definition.create(config), options);
 
-  return {
+  const adapter: Adapter<Config, Instance, Capabilities, VerifyOptions> = {
     kind,
     name: definition.name,
     version: definition.version,
@@ -168,6 +204,9 @@ function build<Config, Instance extends object, Capabilities, VerifyOptions>(
     ...(definition.budgets ? { budgets: definition.budgets } : {}),
     create,
     compatible: (nexusVersion = NEXUS_VERSION) => satisfiesRange(nexusVersion, definition.nexus),
+    async record(config, options, record) {
+      return compatibilityRecord(await adapter.verify(config, options), record);
+    },
     async verify(config, options) {
       const durations = new Map<string, number[]>();
       const instance = await create(config, {
@@ -216,9 +255,14 @@ function build<Config, Instance extends object, Capabilities, VerifyOptions>(
         passed: checks.every((check) => check.ok),
         checks,
         benchmark,
+        nexusRange: definition.nexus,
+        capabilities: definition.capabilities,
+        ...(definition.budgets ? { budgets: definition.budgets } : {}),
+        contractVersion: ADAPTER_CONTRACTS[kind].version,
       };
     },
   };
+  return adapter;
 }
 
 /**

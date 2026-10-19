@@ -1,3 +1,5 @@
+import type { CredentialResolver } from '../types/lifecycle.js';
+import { scrubSecrets } from '../utils/scrub.js';
 import { RealtimeError } from './errors.js';
 import { decodeBase64, encodeBase64 } from './transport-utils.js';
 
@@ -34,8 +36,18 @@ export interface FormDataLike {
 
 /** Server-side options for creating OpenAI realtime sessions, where the API key lives. */
 export interface OpenAIRealtimeServerOptions {
-  /** OpenAI API key. Never send it to a browser. */
-  apiKey: string;
+  /** OpenAI API key. Never send it to a browser. Optional when `credentials` resolves one for the tenant. */
+  apiKey?: string;
+  /**
+   * Resolves the key per tenant, as the client's `lifecycle.credentials` does, such as
+   * `tenantCredentials()`: the tenant's key replaces `apiKey` in the session or the secret minted for
+   * it, so a browser's token is minted with its tenant's key. A resolver that throws refuses it.
+   */
+  credentials?: CredentialResolver;
+  /** The tenant the session or the secret is for, whose key `credentials` resolves. */
+  tenantId?: string;
+  /** The provider's name, as `credentials` reads it. Defaults to `openai`. */
+  provider?: string;
   /** Realtime model. */
   model: string;
   /** Session settings sent to OpenAI, such as instructions or voice. */
@@ -70,20 +82,17 @@ export async function createOpenAIRealtimeCall(
   signal?: AbortSignal,
 ): Promise<string> {
   if (!sdp.trim()) throw configurationError('An SDP offer is required');
-  const form = resolveFormData(options);
-  form.set('sdp', sdp);
-  form.set('session', JSON.stringify(sessionConfig(options)));
-  const response = await request(
-    `${baseUrl(options)}/realtime/calls`,
-    {
-      method: 'POST',
-      headers: authorizationHeaders(options),
-      body: form,
-      signal,
-    },
-    options,
-  );
-  return response.text();
+  return withKey(options, 'realtime.call', async (headers) => {
+    const form = resolveFormData(options);
+    form.set('sdp', sdp);
+    form.set('session', JSON.stringify(sessionConfig(options)));
+    const response = await request(
+      `${baseUrl(options)}/realtime/calls`,
+      { method: 'POST', headers, body: form, signal },
+      options,
+    );
+    return response.text();
+  });
 }
 
 /**
@@ -94,15 +103,17 @@ export async function createOpenAIRealtimeClientSecret(
   options: OpenAIRealtimeServerOptions,
   signal?: AbortSignal,
 ): Promise<OpenAIRealtimeClientSecret> {
-  const response = await request(
-    `${baseUrl(options)}/realtime/client_secrets`,
-    {
-      method: 'POST',
-      headers: { ...authorizationHeaders(options), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: sessionConfig(options) }),
-      signal,
-    },
-    options,
+  const response = await withKey(options, 'realtime.client_secret', (headers) =>
+    request(
+      `${baseUrl(options)}/realtime/client_secrets`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: sessionConfig(options) }),
+        signal,
+      },
+      options,
+    ),
   );
   const rawText = await response.text();
   let raw: unknown;
@@ -278,9 +289,18 @@ export async function verifyOpenAIWebhook(
   } as OpenAIWebhookEvent;
 }
 
-/** Returns a function that exchanges an SDP offer, ready to put behind your own HTTP route. */
+/**
+ * Returns a function that exchanges an SDP offer, ready to put behind your own HTTP route. Give each
+ * call its `tenantId`, such as the one your route authenticated, and with `credentials` the session
+ * is made with that tenant's key.
+ */
 export function createOpenAIRealtimeSessionEndpoint(options: OpenAIRealtimeServerOptions) {
-  return (sdp: string, signal?: AbortSignal) => createOpenAIRealtimeCall(sdp, options, signal);
+  return (sdp: string, signal?: AbortSignal, call: { tenantId?: string } = {}) =>
+    createOpenAIRealtimeCall(
+      sdp,
+      call.tenantId !== undefined ? { ...options, tenantId: call.tenantId } : options,
+      signal,
+    );
 }
 
 async function request(
@@ -288,7 +308,6 @@ async function request(
   init: Parameters<OpenAIRealtimeServerFetch>[1],
   options: OpenAIRealtimeCallOptions,
 ): Promise<OpenAIRealtimeServerFetchResponse> {
-  if (!options.apiKey.trim()) throw configurationError('A server-side OpenAI API key is required');
   let response: OpenAIRealtimeServerFetchResponse;
   try {
     response = await resolveFetch(options)(input, init);
@@ -326,11 +345,15 @@ async function callRequest(
   signal?: AbortSignal,
 ): Promise<void> {
   if (!callId.trim()) throw configurationError('A call id is required');
+  // A call OpenAI carries belongs to the project that received it: it is controlled with that project's key.
   const response = await request(
     `${baseUrl(options)}/realtime/calls/${encodeURIComponent(callId)}/${action}`,
     {
       method: 'POST',
-      headers: { ...authorizationHeaders(options), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: {
+        ...authorizationHeaders(options.apiKey, options),
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
       ...(body ? { body: JSON.stringify(body) } : {}),
       signal,
     },
@@ -387,11 +410,42 @@ function sessionConfig(options: OpenAIRealtimeServerOptions): Record<string, unk
   };
 }
 
-function authorizationHeaders(options: OpenAIRealtimeCallOptions): Record<string, string> {
+function authorizationHeaders(apiKey: string | undefined, options: OpenAIRealtimeCallOptions): Record<string, string> {
+  if (!apiKey?.trim()) throw configurationError('A server-side OpenAI API key is required');
   return {
-    Authorization: `Bearer ${options.apiKey}`,
+    Authorization: `Bearer ${apiKey}`,
     ...(options.safetyIdentifier ? { 'OpenAI-Safety-Identifier': options.safetyIdentifier } : {}),
   };
+}
+
+/**
+ * Runs a request with the key it is made with: the tenant's, when `credentials` resolves one, or the
+ * configured one. Its errors are cleaned of whatever the resolver returned.
+ */
+async function withKey<T>(
+  options: OpenAIRealtimeServerOptions,
+  operation: string,
+  run: (headers: Record<string, string>) => Promise<T>,
+): Promise<T> {
+  const credential = options.credentials
+    ? await options.credentials.resolve({
+        provider: options.provider ?? 'openai',
+        ...(options.tenantId !== undefined ? { tenantId: options.tenantId } : {}),
+        family: 'realtime',
+        operation,
+      })
+    : undefined;
+  const secrets = [credential?.apiKey, ...Object.values(credential?.headers ?? {})].filter(
+    (value): value is string => typeof value === 'string',
+  );
+  try {
+    return await run({
+      ...authorizationHeaders(credential?.apiKey ?? options.apiKey, options),
+      ...credential?.headers,
+    });
+  } catch (error) {
+    throw scrubSecrets(error, secrets);
+  }
 }
 
 function baseUrl(options: OpenAIRealtimeCallOptions): string {

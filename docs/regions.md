@@ -269,7 +269,8 @@ its refusal is found in no error, stack, cause, audit event, log, trace, or heal
   give the region its own cache.
 - A credential is resolved for the adapter's own name in the families that took it in 2.14, such as
   `runway` or `twilio`: name each tenant's secret after it, as `acme/runway`.
-- The OpenAI realtime client-secret helpers and the WebRTC transport take the key or token they are
-  given: mint a tenant's ephemeral token with its key, read from the same resolver.
+- A Gemini Live ephemeral token is minted by the application, with the key it chooses; the OpenAI
+  realtime server helpers mint with the tenant's, as the
+  [realtime guide](./realtime.md#server-helpers) describes.
 - A resolved key is removed from errors when it is at least four characters long, and only where it
   appears whole.

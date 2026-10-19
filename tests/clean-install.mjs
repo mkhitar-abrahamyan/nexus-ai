@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -371,7 +372,7 @@ class ArrayVectorStore {
   async delete(ids) { for (const id of ids) this.rows.delete(id); }
 }
 
-const adapter = defineVectorStoreAdapter({
+export const adapter = defineVectorStoreAdapter({
   name: '@community/array-vectors',
   version: '0.1.0',
   nexus: '^2.3.0',
@@ -379,16 +380,56 @@ const adapter = defineVectorStoreAdapter({
   create: () => new ArrayVectorStore(),
   budgets: { search: 250 },
 });
-const report = await adapter.verify(undefined, { embed });
+export const options = { embed };
+`;
+  writeFileSync(path.join(consumerDir, 'community-adapter.mjs'), communityAdapter);
+  const communityCheck = `
+import { adapter, options } from './community-adapter.mjs';
+const report = await adapter.verify(undefined, options);
 if (!report.passed) {
   console.error(JSON.stringify(report.checks.filter((check) => !check.ok), null, 2));
   process.exit(1);
 }
 console.log(\`community adapter passed \${report.checks.length} checks against nexus-ai-pro \${report.nexusVersion}\`);
 `;
-  const communityPath = path.join(consumerDir, 'community-adapter.mjs');
-  writeFileSync(communityPath, communityAdapter);
+  const communityPath = path.join(consumerDir, 'community-check.mjs');
+  writeFileSync(communityPath, communityCheck);
   run(process.execPath, [communityPath], consumerDir);
+
+  // Its compatibility record, made by the published command from the adapter's own project, verified
+  // again against this release, and listed on a page.
+  runNpm(
+    [
+      'exec',
+      '--offline',
+      '--',
+      'nexus',
+      'adapters',
+      'verify',
+      './community-adapter.mjs',
+      '--out',
+      'records/array-vectors.json',
+      '--package',
+      '@community/array-vectors@0.1.0',
+    ],
+    consumerDir,
+  );
+  const record = JSON.parse(readFileSync(path.join(consumerDir, 'records', 'array-vectors.json'), 'utf8'));
+  assert.equal(record.format, 'nexus-compatibility/1');
+  assert.equal(record.passed, true, 'the community adapter’s record passes');
+  assert.equal(record.nexusVersion, JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version);
+  assert.equal(record.adapter.verify, '../community-adapter.mjs');
+  assert.equal(record.contract.kind, 'vector-store');
+  runNpm(['exec', '--offline', '--', 'nexus', 'adapters', 'recheck', 'records'], consumerDir);
+  runNpm(
+    ['exec', '--offline', '--', 'nexus', 'adapters', 'page', 'records', '--out', 'COMPATIBILITY.md', '--check'],
+    consumerDir,
+  );
+  assert.match(
+    readFileSync(path.join(consumerDir, 'COMPATIBILITY.md'), 'utf8'),
+    /\| @community\/array-vectors \| vector-store \| 0\.1\.0 \| [\d.]+ \| v\d+ \| passing \|/,
+    'the page lists the record',
+  );
 
   runNpm(['exec', '--offline', '--', 'nexus', 'help'], consumerDir);
   for (const optional of ['zod', 'ajv', 'ajv-formats', '@types/node']) {

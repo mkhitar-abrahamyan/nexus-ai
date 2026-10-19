@@ -174,7 +174,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Realtime voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/realtime.md) | Browser and server realtime sessions with barge-in, tools, and exports |
 | [Telephony](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/telephony.md) | Calls, webhooks, phone numbers, and phone agents on realtime sessions |
 | [Testing](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/testing.md) | Recording and replaying provider traffic, and conformance suites |
-| [Adapter kit](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/adapter-kit.md) | Building a provider, store, or retriever outside this repository, and verifying it against the same contracts |
+| [Adapter kit](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/adapter-kit.md) | Building a provider, store, or retriever outside this repository, verifying it against the same contracts, and its compatibility record on the [compatibility page](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/COMPATIBILITY.md) |
 | [Studio](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md) | A shared UI for traces, threads, approvals, experiments, prompts, deployments, costs, and health, as a separate package |
 | [Agent server](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/server.md) | Self-hosted HTTP server for assistants: threads, durable runs, resumable streams, cron, a worker queue, and metrics |
 | [Deployments](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/deployments.md) | Revisions and canaries with automatic rollback, autoscaling on Kubernetes and Helm, and per-tenant limits |
@@ -10587,7 +10587,13 @@ delivery that is unsigned, signed with another secret, altered, or older than
 
 They share `OpenAIRealtimeServerOptions`: the key, the model, session settings, a base URL, a
 `safetyIdentifier` for the end user, a `fetch`, and a `formDataFactory` for runtimes without
-`FormData`. The injected `fetch` is an `OpenAIRealtimeServerFetch` returning an
+`FormData`. With `credentials`, the resolver the client's lifecycle uses, such as
+`tenantCredentials()`, and a `tenantId`, the session an SDP exchange makes and the client secret a
+browser connects with are minted with that tenant's key, read for `provider` (`openai`); a tenant the
+resolver refuses is refused before anything is sent, and the key is cleaned from every error. The
+endpoint `createOpenAIRealtimeSessionEndpoint()` returns takes the tenant per call, as its third
+argument, such as the one your route authenticated. Controlling a call OpenAI carries always uses
+`apiKey`, the key of the project that received the call. The injected `fetch` is an `OpenAIRealtimeServerFetch` returning an
 `OpenAIRealtimeServerFetchResponse`, and the form data a `FormDataLike`.
 
 ### The mock
@@ -11546,7 +11552,7 @@ own test framework:
   - filters and typed filters;
   - `minScore`;
   - vector search;
-  - replacement by id, deletes, and empty writes.
+  - replacement by id, deletes, an id added again after its delete, and empty writes.
 - `runRetrieverContract()` checks exact terms, ranking, `topK`, filters, and an empty query, plus
   replacement and deletes for a `SparseRetriever`. `RetrieverContractOptions` gives the
   capabilities, the `load` that fills what a retriever without `add()` reads from, and a `settle`.
@@ -11558,9 +11564,78 @@ own test framework:
   - prefix search with filters and paging;
   - namespace listing.
 
-Every contract runs on `ADAPTER_FIXTURE_PASSAGES`, so results compare across adapters.
+Every contract runs on `ADAPTER_FIXTURE_PASSAGES`, so results compare across adapters. An
+`AdapterReport` also carries what the adapter declared, its `nexusRange`, `capabilities`, and
+`budgets`, and the `contractVersion` it ran.
+
+## Compatibility records
+
+A compatibility record is what `verify()` proved, kept as a document: which contract version the
+adapter passed, against which release, how fast, on what runtime, sealed with a digest. An adapter's
+own CI makes one; one page lists them; and before a release ships, every listed adapter is verified
+against it again, so a contract change that would break one is caught first.
+
+Each kind's contract is versioned in `ADAPTER_CONTRACTS`: an `AdapterContract` with its current
+`version` and its `history`, each `AdapterContractVersion` naming the release it arrived in and the
+checks it `added`. The vector-store contract is at version 2, which 2.15 made by adding “adds a
+passage again under an id it deleted”, a check a store that marks deletes and never clears the mark
+fails. Contract checks are added in a minor release only when they test something the contract
+already promised.
+
+The command line makes records from the adapter's own repository, against the installed package:
+
+```bash
+# verify.mjs exports { adapter, config, options, record, close }: the adapter, what its verify() takes,
+# record options such as its repository, and anything to close after.
+npx nexus adapters verify ./verify.mjs --out records/milvus.json --package @acme/nexus-milvus@0.3.0
+npx nexus adapters page records --out COMPATIBILITY.md --check
+npx nexus adapters recheck records
+```
+
+- `nexus adapters verify` loads the module, runs the adapter's `record()`, prints each check, writes
+  the record, and exits 1 when the adapter does not pass. `config` and `options` may be functions,
+  for a server started first. The record names the module as `verify`, relative to the record, or as
+  `--verify` says, such as a package export `@acme/nexus-milvus/verify`, so it can be run again.
+- `nexus adapters page` lists records, files or directories of them, as Markdown, or HTML with
+  `--html`. `--check` exits 1 on a record that is failing or outside the installed release's range,
+  `--strict` on a stale one too, and `--expect` on a page that does not list the records as they are.
+- `nexus adapters recheck` verifies each listed adapter again against the installed release, prints
+  what it finds, and exits 1 when an adapter that passed its record no longer does, naming each check
+  that broke and each new check it fails. `--out` writes the new records; `--update` writes them over
+  the listed ones.
+
+In code, `adapter.record()` verifies and seals in one step, and `compatibilityRecord()` seals an
+`AdapterReport` with `CompatibilityRecordOptions`: the `package`, the `repository`, the `verify`
+module, a `runtime`, and a clock. A `CompatibilityRecord` of format `COMPATIBILITY_RECORD_FORMAT`
+(`nexus-compatibility/1`) holds its `CompatibilityRecordAdapter` (name, version, kind, range,
+capabilities, budgets, and where it lives), the contract, the release, when, where, its checks, its
+benchmark, and its `digest`, which `recordDigest()` computes over everything else.
+`readCompatibilityRecord()` reads one back and throws a `CompatibilityRecordError` listing its
+`issues`: an unknown format, a missing field, or a digest that does not match an edit.
+
+`recordStatus()` returns a record's `CompatibilityStatus` against a release: its
+`CompatibilityState`, `passing`, `failing`, `incompatible` (the release is outside the declared
+range), or `stale` (verified against an older contract version), the reasons, and the checks it has
+not been verified for. `compareRecords()` returns a `CompatibilityComparison` of a listed record and a
+new one: each `CheckChange` that broke, the checks added since, those fixed, the operations whose p95
+more than doubled, and whether the new record `regressed`. `compatibilityPage()` writes the page, by
+kind and name, with `CompatibilityPageOptions`: a `title`, an `intro`, the release to judge by, and
+`markdown` or `html`. The same records make the same page.
+
+This repository's own page, [COMPATIBILITY.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/COMPATIBILITY.md), lists records of the adapters it
+ships, made the same way from `compatibility/adapters`, and every build verifies each one again. To
+list an adapter of your own, open a pull request adding its record to `compatibility/records`, its
+`verify` naming a module published in its package.
 
 ## Proof
+
+A community adapter in a directory of its own, a vector store that marks a deleted id as gone and
+never clears the mark, listed with a record that passed contract v1 when 2.14 was current. Verified
+again by `nexus adapters recheck` against this release, whose contract v2 adds a check it does not
+meet, its record turns red, naming the check, and the command exits 1; fixed, it passes, and its
+new record replaces the old. The page shows the old record as stale, and refuses one edited after it
+was sealed. In the clean-install test, the installed command records a community adapter from the
+consumer project, verifies it again, and lists it.
 
 The clean-install test builds an adapter the way an outside package would. It is a vector store
 written in plain JavaScript inside the consumer project, importing nothing but
@@ -13437,8 +13512,9 @@ its refusal is found in no error, stack, cause, audit event, log, trace, or heal
   give the region its own cache.
 - A credential is resolved for the adapter's own name in the families that took it in 2.14, such as
   `runway` or `twilio`: name each tenant's secret after it, as `acme/runway`.
-- The OpenAI realtime client-secret helpers and the WebRTC transport take the key or token they are
-  given: mint a tenant's ephemeral token with its key, read from the same resolver.
+- A Gemini Live ephemeral token is minted by the application, with the key it chooses; the OpenAI
+  realtime server helpers mint with the tenant's, as the
+  [realtime guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/realtime.md#server-helpers) describes.
 - A resolved key is removed from errors when it is at least four characters long, and only where it
   appears whole.
 
@@ -13566,6 +13642,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
 | `nexus migrate` | Moves imports to the subpaths the 2.0 root import keeps them on. |
 | `nexus graph lint` | Checks a compiled graph's shape for designs that fail in production. |
+| `nexus adapters verify`, `page`, `recheck` | Record an adapter's contract suite and benchmark, list records on one page, and verify each listed adapter again against the installed release. |
 | `nexus policy check` | Validates a policy file, and fails a build on a change that widens what a tenant may reach without an acknowledgment. |
 | `nexus doctor` | Checks a deployment: runtime, credentials, database and migrations, Redis, the queue, the registry, health, and settings that only work in one process. |
 
@@ -13744,6 +13821,15 @@ It prints each finding and its fix, and exits 1 when a finding is an error. `--s
 warnings too, `--deployed` treats the in-process checkpointer as an error, and `--ignore` skips codes,
 such as `--ignore DYNAMIC_ROUTE`. The [graph guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/graphs.md#linting-a-graph) lists every rule.
 
+## Adapter compatibility records
+
+`nexus adapters verify ./verify.mjs --out records/x.json` runs an adapter's contract suite and
+benchmark from its own repository and writes its compatibility record; `nexus adapters page records`
+lists records on one page; `nexus adapters recheck records` verifies each listed adapter again against
+the installed release and exits 1 when one that passed no longer does. The
+[adapter kit guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/adapter-kit.md#compatibility-records) describes the module each takes and the
+record each writes.
+
 ## Checking a policy
 
 `nexus policy check` validates a policy file, and with `--base`, a file or `git:<ref>`, compares it
@@ -13869,10 +13955,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro` | 362 KB | 100% | none |
 | `nexus-ai-pro/config` | 355 KB | 98% | none |
 | `nexus-ai-pro/core` | 351 KB | 97% | none |
+| `nexus-ai-pro/realtime` | 216 KB | 60% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 59% | none |
-| `nexus-ai-pro/realtime` | 213 KB | 59% | none |
 | `nexus-ai-pro/server/deployments` | 151 KB | 42% | none |
-| `nexus-ai-pro/realtime/openai-sip` | 139 KB | 38% | none |
+| `nexus-ai-pro/realtime/openai-sip` | 142 KB | 39% | none |
 | `nexus-ai-pro/server` | 123 KB | 34% | none |
 | `nexus-ai-pro/batch` | 118 KB | 33% | none |
 | `nexus-ai-pro/agent` | 114 KB | 31% | none |
@@ -13899,6 +13985,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/security` | 58 KB | 16% | none |
 | `nexus-ai-pro/operations` | 56 KB | 15% | none |
 | `nexus-ai-pro/evaluate` | 52 KB | 14% | none |
+| `nexus-ai-pro/adapter-kit` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 14% | none |
 | `nexus-ai-pro/models/data` | 51 KB | 14% | none |
@@ -13921,7 +14008,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/video` | 37 KB | 10% | none |
 | `nexus-ai-pro/models` | 37 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
-| `nexus-ai-pro/adapter-kit` | 35 KB | 10% | none |
 | `nexus-ai-pro/lifecycle` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 9% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
@@ -13941,11 +14027,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/protocols/acp` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
 | `nexus-ai-pro/tracing/otlp` | 24 KB | 7% | none |
+| `nexus-ai-pro/realtime/openai-server` | 24 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
-| `nexus-ai-pro/realtime/openai-server` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/protocols/acp/editor` | 20 KB | 6% | none |
 | `nexus-ai-pro/media/catalog` | 20 KB | 6% | none |

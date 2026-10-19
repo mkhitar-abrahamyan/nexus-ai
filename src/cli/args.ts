@@ -23,11 +23,13 @@ export const BOOLEAN_FLAGS = new Set([
   'fail',
   'fail-on-regression',
   'help',
+  'html',
   'json',
   'print',
   'record',
   'reveal-values',
   'strict',
+  'update',
   'write',
 ]);
 

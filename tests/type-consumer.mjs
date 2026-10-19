@@ -316,6 +316,15 @@ import { awsSecrets, memorySecrets, tenantCredentials, type TenantCredentialStat
 import { regionalTraceStore, residency, ResidencyError, type ResidencyDecision } from 'nexus-ai-pro/residency';
 import { regionalGateway, type RegionHealth } from 'nexus-ai-pro/server/regions';
 import { applyPolicy, checkPolicyChange, parsePolicy, type PolicyCheck, type PolicyDocument } from 'nexus-ai-pro/policy';
+import {
+  ADAPTER_CONTRACTS,
+  type CompatibilityRecord,
+  type CompatibilityStatus,
+  compatibilityPage,
+  defineStoreAdapter,
+  readCompatibilityRecord,
+  recordStatus,
+} from 'nexus-ai-pro/adapter-kit';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
 import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { emulatedTools, MemoryEmulationStore, type EmulatedToolCall } from 'nexus-ai-pro/evaluate/emulate';
@@ -1131,6 +1140,21 @@ const appliedPolicy = applyPolicy({ providers: {} }, parsePolicy(JSON.stringify(
 const policyCheck: PolicyCheck = checkPolicyChange({ ...policyDocument, version: '3' }, policyDocument, { accept: ['routing'] });
 const policyOk: boolean = policyCheck.ok && appliedPolicy.lifecycle?.policy?.version === '4';
 void policyOk;
+// A store adapter's compatibility record, its state, and the page that lists it.
+const recordedStore = defineStoreAdapter({
+  name: '@acme/nexus-store',
+  version: '1.0.0',
+  nexus: '^2.4.0',
+  capabilities: { search: true },
+  create: () => ({}) as never,
+});
+const storeRecord: Promise<CompatibilityRecord> = recordedStore.record(undefined, {}, { repository: 'https://example.com/acme' });
+void storeRecord.then((record) => {
+  const status: CompatibilityStatus = recordStatus(readCompatibilityRecord(JSON.stringify(record)));
+  const page: string = compatibilityPage([record], { format: 'html', title: 'Adapters' });
+  const contractVersion: number = ADAPTER_CONTRACTS[record.adapter.kind].version;
+  return [status.state, page, contractVersion];
+});
 const grpcOptions: OtlpGrpcTraceExporterOptions = { endpoint: 'http://localhost:4317', gzip: true, timeoutMs: 5_000 };
 const grpcExporter = new OtlpGrpcTraceExporter(grpcOptions);
 const spooledGrpc = spoolingExporter({ sender: grpcExporter, store: {} as never, drainEveryMs: 0 });

@@ -97,7 +97,7 @@ own test framework:
   - filters and typed filters;
   - `minScore`;
   - vector search;
-  - replacement by id, deletes, and empty writes.
+  - replacement by id, deletes, an id added again after its delete, and empty writes.
 - `runRetrieverContract()` checks exact terms, ranking, `topK`, filters, and an empty query, plus
   replacement and deletes for a `SparseRetriever`. `RetrieverContractOptions` gives the
   capabilities, the `load` that fills what a retriever without `add()` reads from, and a `settle`.
@@ -109,9 +109,78 @@ own test framework:
   - prefix search with filters and paging;
   - namespace listing.
 
-Every contract runs on `ADAPTER_FIXTURE_PASSAGES`, so results compare across adapters.
+Every contract runs on `ADAPTER_FIXTURE_PASSAGES`, so results compare across adapters. An
+`AdapterReport` also carries what the adapter declared, its `nexusRange`, `capabilities`, and
+`budgets`, and the `contractVersion` it ran.
+
+## Compatibility records
+
+A compatibility record is what `verify()` proved, kept as a document: which contract version the
+adapter passed, against which release, how fast, on what runtime, sealed with a digest. An adapter's
+own CI makes one; one page lists them; and before a release ships, every listed adapter is verified
+against it again, so a contract change that would break one is caught first.
+
+Each kind's contract is versioned in `ADAPTER_CONTRACTS`: an `AdapterContract` with its current
+`version` and its `history`, each `AdapterContractVersion` naming the release it arrived in and the
+checks it `added`. The vector-store contract is at version 2, which 2.15 made by adding “adds a
+passage again under an id it deleted”, a check a store that marks deletes and never clears the mark
+fails. Contract checks are added in a minor release only when they test something the contract
+already promised.
+
+The command line makes records from the adapter's own repository, against the installed package:
+
+```bash
+# verify.mjs exports { adapter, config, options, record, close }: the adapter, what its verify() takes,
+# record options such as its repository, and anything to close after.
+npx nexus adapters verify ./verify.mjs --out records/milvus.json --package @acme/nexus-milvus@0.3.0
+npx nexus adapters page records --out COMPATIBILITY.md --check
+npx nexus adapters recheck records
+```
+
+- `nexus adapters verify` loads the module, runs the adapter's `record()`, prints each check, writes
+  the record, and exits 1 when the adapter does not pass. `config` and `options` may be functions,
+  for a server started first. The record names the module as `verify`, relative to the record, or as
+  `--verify` says, such as a package export `@acme/nexus-milvus/verify`, so it can be run again.
+- `nexus adapters page` lists records, files or directories of them, as Markdown, or HTML with
+  `--html`. `--check` exits 1 on a record that is failing or outside the installed release's range,
+  `--strict` on a stale one too, and `--expect` on a page that does not list the records as they are.
+- `nexus adapters recheck` verifies each listed adapter again against the installed release, prints
+  what it finds, and exits 1 when an adapter that passed its record no longer does, naming each check
+  that broke and each new check it fails. `--out` writes the new records; `--update` writes them over
+  the listed ones.
+
+In code, `adapter.record()` verifies and seals in one step, and `compatibilityRecord()` seals an
+`AdapterReport` with `CompatibilityRecordOptions`: the `package`, the `repository`, the `verify`
+module, a `runtime`, and a clock. A `CompatibilityRecord` of format `COMPATIBILITY_RECORD_FORMAT`
+(`nexus-compatibility/1`) holds its `CompatibilityRecordAdapter` (name, version, kind, range,
+capabilities, budgets, and where it lives), the contract, the release, when, where, its checks, its
+benchmark, and its `digest`, which `recordDigest()` computes over everything else.
+`readCompatibilityRecord()` reads one back and throws a `CompatibilityRecordError` listing its
+`issues`: an unknown format, a missing field, or a digest that does not match an edit.
+
+`recordStatus()` returns a record's `CompatibilityStatus` against a release: its
+`CompatibilityState`, `passing`, `failing`, `incompatible` (the release is outside the declared
+range), or `stale` (verified against an older contract version), the reasons, and the checks it has
+not been verified for. `compareRecords()` returns a `CompatibilityComparison` of a listed record and a
+new one: each `CheckChange` that broke, the checks added since, those fixed, the operations whose p95
+more than doubled, and whether the new record `regressed`. `compatibilityPage()` writes the page, by
+kind and name, with `CompatibilityPageOptions`: a `title`, an `intro`, the release to judge by, and
+`markdown` or `html`. The same records make the same page.
+
+This repository's own page, [COMPATIBILITY.md](../COMPATIBILITY.md), lists records of the adapters it
+ships, made the same way from `compatibility/adapters`, and every build verifies each one again. To
+list an adapter of your own, open a pull request adding its record to `compatibility/records`, its
+`verify` naming a module published in its package.
 
 ## Proof
+
+A community adapter in a directory of its own, a vector store that marks a deleted id as gone and
+never clears the mark, listed with a record that passed contract v1 when 2.14 was current. Verified
+again by `nexus adapters recheck` against this release, whose contract v2 adds a check it does not
+meet, its record turns red, naming the check, and the command exits 1; fixed, it passes, and its
+new record replaces the old. The page shows the old record as stale, and refuses one edited after it
+was sealed. In the clean-install test, the installed command records a community adapter from the
+consumer project, verifies it again, and lists it.
 
 The clean-install test builds an adapter the way an outside package would. It is a vector store
 written in plain JavaScript inside the consumer project, importing nothing but

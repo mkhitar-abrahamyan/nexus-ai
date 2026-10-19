@@ -107,6 +107,12 @@ async function main(): Promise<void> {
       await runDeployCommand(subcommand, { positionals: args, flags: parsed.flags });
       return;
     }
+    case 'adapters': {
+      const [subcommand, ...args] = parsed.positionals;
+      const { runAdaptersCommand } = await import('./cli/adapters.js');
+      await runAdaptersCommand(subcommand, { positionals: args, flags: parsed.flags });
+      return;
+    }
     case 'policy': {
       const [subcommand, ...args] = parsed.positionals;
       const { runPolicyCommand } = await import('./cli/policy.js');
@@ -487,6 +493,9 @@ Usage:
   nexus deploy canary <assistant> <revision> <percent> --url <server> [--reason r] [--version n]
   nexus deploy promote <assistant> <revision> --url <server> [--reason r] [--version n]
   nexus deploy rollback <assistant> [--to revision] --url <server> [--reason r] [--version n]
+  nexus adapters verify <module>[#export] [--out record.json] [--package name@version] [--repository url] [--verify spec] [--json]
+  nexus adapters page <records|dir...> [--out page.md] [--html] [--title t] [--intro text] [--expect page.md] [--check] [--strict]
+  nexus adapters recheck <records|dir...> [--out dir] [--update] [--json]
   nexus policy check <policy.json> [--base <policy.json>|git:<ref>] [--accept path,path] [--json]
   nexus optimize [request.json|prompt.txt] [--model gpt-5-mini] [--max-input-tokens 4000] [--densify] [--json]
 
@@ -500,6 +509,8 @@ Database modules for "db status" and "db migrate" export { client }, and optiona
 "deploy" reads NEXUS_SERVER_URL and NEXUS_SERVER_TOKEN when --url and --token are not given.
 "migrate" moves 1.x root imports to their 2.0 subpaths and reports removed options; --check exits 1 while any remain.
 "graph lint" reads a compiled graph's shape and exits 1 on an error finding, or on a warning with --strict.
+"adapters verify" exits 1 when the adapter does not pass; its module exports { adapter, config, options, record, close }.
+"adapters recheck" verifies each listed adapter again and exits 1 when one that passed no longer does; "adapters page --check" exits 1 on a failing or incompatible record, --strict on a stale one too.
 "policy check" exits 1 when the policy is not valid, or, against --base, when a change that widens what a tenant may reach is not acknowledged.`);
 }
 

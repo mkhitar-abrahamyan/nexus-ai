@@ -1,0 +1,82 @@
+{
+  "format": "nexus-compatibility/1",
+  "adapter": {
+    "name": "nexus-ai-pro/rag/retrievers KeywordIndex",
+    "version": "2.x",
+    "kind": "retriever",
+    "nexus": ">=2.4.0 <3",
+    "capabilities": {
+      "writes": true
+    },
+    "budgets": {
+      "retrieve": 100
+    },
+    "repository": "https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/src/rag/retrievers.ts",
+    "verify": "../adapters/keyword-index.mjs"
+  },
+  "contract": {
+    "kind": "retriever",
+    "version": 1
+  },
+  "nexusVersion": "2.14.0",
+  "verifiedAt": "2026-10-19T11:53:47.240Z",
+  "runtime": "node 22.16.0 win32 x64",
+  "compatible": true,
+  "passed": true,
+  "checks": [
+    {
+      "name": "declares support for nexus-ai-pro 2.14.0",
+      "ok": true
+    },
+    {
+      "name": "loads the fixture passages",
+      "ok": true
+    },
+    {
+      "name": "finds the passage holding the query terms first",
+      "ok": true
+    },
+    {
+      "name": "returns at most topK results, best first",
+      "ok": true
+    },
+    {
+      "name": "narrows by metadata",
+      "ok": true
+    },
+    {
+      "name": "replaces a passage added again under its id",
+      "ok": true
+    },
+    {
+      "name": "deletes by id, ignoring ids it does not hold",
+      "ok": true
+    },
+    {
+      "name": "answers an empty query without failing",
+      "ok": true
+    },
+    {
+      "name": "retrieve stays within 100 ms at p95",
+      "ok": true
+    }
+  ],
+  "benchmark": {
+    "add": {
+      "calls": 2,
+      "p50Ms": 0.02,
+      "p95Ms": 0.55
+    },
+    "retrieve": {
+      "calls": 6,
+      "p50Ms": 0.01,
+      "p95Ms": 0.13
+    },
+    "delete": {
+      "calls": 1,
+      "p50Ms": 0.02,
+      "p95Ms": 0.02
+    }
+  },
+  "digest": "713e08a49a9e513f6a5da458938b0dbf367913573e43d9ed880f520ffc7a6583"
+}
