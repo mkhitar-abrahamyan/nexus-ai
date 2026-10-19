@@ -4,13 +4,13 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.14.0**. 194 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.15.0**. 194 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 completion batch providers and 2 embedding batch tiers, 3 image
 providers plus a mock, 2 media providers plus a mock, 2 video providers plus a mock, 2 realtime
 providers plus a mock, 2 telephony providers, 5 workspaces, 6 secret sources, OTLP over HTTP and
 gRPC, and 98 completion registry models plus 60 aliases, verified against each provider's
-documentation on 2026-10-02. 1,260 unit tests and 30 studio tests pass; coverage sits at **96.2%
-lines / 82.5% branches / 92.2% functions** against gates of 82/67/73. CI verifies lint,
+documentation on 2026-10-02. 1,268 unit tests and 30 studio tests pass; coverage sits at **96.2%
+lines / 82.6% branches / 92.2% functions** against gates of 82/67/73. CI verifies lint,
 format, build, tests, coverage, registry drift, `llms.txt` drift, per-subpath size, documentation
 and guide coverage, the root import, a graph benchmark with a durability budget, runtime and
 memory-retention budgets, turn-latency and session-load budgets for realtime, load and soak budgets
@@ -35,7 +35,9 @@ a canary rolled back on a media evaluator's score across two replicas, a tenant 
 across a regional failover with its key rotated in the middle of a run, a policy change that would let
 a tenant leave its regions caught by the command line, an agent reaching the same verdict over emulated
 tools as over the real ones with nothing sent, a tenant's key on every family's calls and on every
-later call by a job's ref, ten online-evaluation workers
+later call by a job's ref, a community adapter's record turned red by a contract change it does not
+meet before the release that makes it, the adapters this repository ships verified again against
+every build, ten online-evaluation workers
 through a crash and through 4,000 runs started in one millisecond on every trace store, a worker killed holding a budget reservation at
 each point of its call on every usage store, an adversarial dataset against an unguarded and a
 guarded agent, the agent protocols driven from the other side of the wire and against the published
@@ -98,23 +100,23 @@ it passes its conformance suite against the live service every week.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release: 2.15, or
+Each gap is written down in a guide's limitations today, and each is closed by one release: 2.16, or
 the theme after it that owns it.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.15 |
-| Images have not recorded live conformance on all three backends | API stability | 2.15 |
-| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.15 |
-| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.15 |
-| Video generation has not passed its conformance suite against Veo and Runway | Video guide | 2.15 |
-| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.15 |
-| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.15 |
-| The realtime client-secret helpers and the WebRTC transport take the key they are given, not the tenant's | Regions guide | 2.15 |
+| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.16 |
+| Images have not recorded live conformance on all three backends | API stability | 2.16 |
+| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.16 |
+| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.16 |
+| Video generation has not passed its conformance suite against Veo and Runway | Video guide | 2.16 |
+| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.16 |
+| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.16 |
+| A2A is served over its JSON-RPC binding only, and a webhook receives state changes, not each piece of text | Protocols guide | 2.16 |
 
 ---
 
-## 2.15.0: A compatibility record for community adapters
+## 2.16.0: A2A over every binding
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
 understanding, video, Gemini Live, SIP call control, and both phone providers graduate when the
@@ -122,16 +124,15 @@ scheduled live workflow passes against each, published with their checklists. Ev
 there now; what stands in the way is the repository's live credentials, and for video, the variable
 that lets it spend seconds of video.
 
-**A compatibility record for community adapters.** An adapter built with the adapter kit, in this
-repository or another, runs its family's contract suite and benchmark and records the result: which
-suite it passed, against which version of the package, and how fast. One page lists every record, so
-an application choosing a store or a provider adapter sees what was verified, against what, and when,
-and a release that would break a listed adapter is caught by its record before it ships. Ephemeral
-realtime tokens are minted with each tenant's key, through the same resolver as every other call.
+**A2A over its other bindings.** The A2A server and client speak the protocol's JSON-RPC binding
+today. 2.16 serves the same agent over its HTTP+JSON and gRPC bindings too, each named on the agent
+card, with one task store behind all three, so a caller on any binding continues a task another
+started. A push webhook can receive each piece of streamed text as it is written, not only each change
+of state, so an agent that cannot hold a stream open still sees an answer arrive.
 
-**Proof.** A community adapter's record is built from its own repository by the published command,
-and a change to a contract that adapter does not meet turns its record red before the release that
-makes it.
+**Proof.** One agent served over all three bindings is driven by the protocol's reference client on
+each, and reaches the same task, with the same history, from any of them; a push webhook receives,
+piece by piece, the same text a stream does.
 
 ---
 
@@ -139,13 +140,14 @@ makes it.
 
 Not yet placed, roughly in order of what applications ask for:
 
-1. A2A over its other bindings, and a webhook that receives each piece of streamed text.
-2. ACP's editor MCP servers over SSE, with their tools' capabilities declared.
-3. Video extension and video as an input, and Gemini Omni Flash on Google's own Interactions API.
-4. Span events and links, and media checks that read the duration of compressed audio and video.
-5. A gateway that lists a tenant's threads and runs across all of its regions.
-6. Tools emulated from a service's own API description, and an emulator that holds state across a
+1. ACP's editor MCP servers over SSE, with their tools' capabilities declared.
+2. Video extension and video as an input, and Gemini Omni Flash on Google's own Interactions API.
+3. Span events and links, and media checks that read the duration of compressed audio and video.
+4. A gateway that lists a tenant's threads and runs across all of its regions.
+5. Tools emulated from a service's own API description, and an emulator that holds state across a
    whole evaluation, not only one run.
+6. Compatibility records published from community adapters' own CI, gathered onto the page by a
+   scheduled workflow rather than by pull request.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:
