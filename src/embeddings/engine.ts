@@ -441,7 +441,7 @@ export class EmbeddingEngine {
       // for this request.
       if (
         provider &&
-        (callContext.residency?.allows(providerName) ?? true) &&
+        (callContext.residency?.allows(providerName, model) ?? true) &&
         takesMedia(resolveEmbeddingModel(model, this.config.models).capabilities, provider, inputs)
       ) {
         attempts.push({ providerName, provider, model });

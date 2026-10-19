@@ -315,6 +315,7 @@ import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
 import { awsSecrets, memorySecrets, tenantCredentials, type TenantCredentialStats } from 'nexus-ai-pro/credentials';
 import { regionalTraceStore, residency, ResidencyError, type ResidencyDecision } from 'nexus-ai-pro/residency';
 import { regionalGateway, type RegionHealth } from 'nexus-ai-pro/server/regions';
+import { applyPolicy, checkPolicyChange, parsePolicy, type PolicyCheck, type PolicyDocument } from 'nexus-ai-pro/policy';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
 import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
@@ -1117,6 +1118,18 @@ const gateway = regionalGateway({
 });
 const regionHealth: Record<string, RegionHealth> = gateway.status();
 void regionHealth;
+// One versioned policy: validated as the client starts, checked against the version before it.
+const policyDocument: PolicyDocument = {
+  name: 'production',
+  version: '4',
+  routing: { tenants: { acme: { allowProviders: ['openai*'] } } },
+  budgets: { period: 'month', default: 100, tenants: { acme: 500 } },
+  acknowledged: ['budgets.tenants.acme'],
+};
+const appliedPolicy = applyPolicy({ providers: {} }, parsePolicy(JSON.stringify(policyDocument)), { secrets: memorySecrets() });
+const policyCheck: PolicyCheck = checkPolicyChange({ ...policyDocument, version: '3' }, policyDocument, { accept: ['routing'] });
+const policyOk: boolean = policyCheck.ok && appliedPolicy.lifecycle?.policy?.version === '4';
+void policyOk;
 const grpcOptions: OtlpGrpcTraceExporterOptions = { endpoint: 'http://localhost:4317', gzip: true, timeoutMs: 5_000 };
 const grpcExporter = new OtlpGrpcTraceExporter(grpcOptions);
 const spooledGrpc = spoolingExporter({ sender: grpcExporter, store: {} as never, drainEveryMs: 0 });

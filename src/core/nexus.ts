@@ -1,22 +1,42 @@
-import type { CacheNamespace, NexusAIConfig } from '../types/config.js';
-import type { CompletionRequest } from '../types/messages.js';
-import type { ContextSummaryInput, ContextWindowResult } from '../types/context-window.js';
-import type { CostEstimate, NexusPlan } from '../types/planning.js';
-import type { CacheOutcome, NexusResponse, NexusStream, ResponseMeta, StreamChunk } from '../types/response.js';
+import { createCacheKey, MemoryCache } from '../cache/memory-cache.js';
+import type { SemanticCache } from '../cache/semantic-cache.js';
+import { negotiateCompletionRequest } from '../capabilities/negotiate.js';
+import { ContextWindowManager } from '../context/index.js';
+import { EmbeddingManager } from '../embeddings/manager.js';
+import type { EvalCase, EvalRunResult } from '../evals/runner.js';
+import type { SelfConsistencyOptions } from '../hallucination/consistency.js';
+import type { VerificationOptions } from '../hallucination/verification.js';
+import { ImageManager } from '../images/manager.js';
+import { type BatchItemResult, type BatchOptions, runBatch } from '../jobs/batch.js';
+import { JobQueue, type QueueOptions } from '../jobs/queue.js';
+import { resolveModel } from '../models/registry.js';
+import { AuditLogger } from '../ops/audit-logger.js';
+import { CircuitBreaker } from '../ops/circuit-breaker.js';
+import { ProviderHealthMonitor } from '../ops/health.js';
+import { MetricsCollector } from '../ops/metrics.js';
+import { RateLimiter } from '../ops/rate-limiter.js';
+import { assertWithinCostBudget, estimateCost } from '../optimizer/cost.js';
+import { TokenOptimizer } from '../optimizer/index.js';
+import { createPipelineContext, PipelineRunner } from '../pipeline/pipeline.js';
+import type { PipelineContext, PipelineStep, PipelineStepName } from '../pipeline/types.js';
+import type { BaseProvider } from '../providers/base.js';
+import { configuredProviders } from '../providers/lazy.js';
+import { ResidencyError } from '../residency/errors.js';
+import type { ExecutionOptions } from '../router/failover.js';
+import { FailoverExecutor, Router } from '../router/index.js';
+import type { RouteAttempt, RouteDecision } from '../router/types.js';
+import { SecurityPipeline } from '../security/index.js';
+import { TelephonyManager } from '../telephony/manager.js';
 import type { AgentConfig, AgentResult } from '../types/agent.js';
-import type { OperationDescriptor, OperationStartOptions, OperationTicket } from '../types/lifecycle.js';
-import type {
-  SpeechRequest,
-  SpeechResponse,
-  TranscriptionRequest,
-  TranscriptionResponse,
-  VoiceProvider,
-  VoiceSessionConfig,
-  VoiceTurnRequest,
-  VoiceTurnResponse,
-} from '../types/voice.js';
-import type { ImageProvider } from '../types/images.js';
+import type { CacheNamespace, NexusAIConfig } from '../types/config.js';
+import type { ContextSummaryInput, ContextWindowResult } from '../types/context-window.js';
 import type { EmbeddingRequest, EmbeddingResponse, EmbeddingsProvider } from '../types/embeddings.js';
+import type { ImageProvider } from '../types/images.js';
+import type { OperationDescriptor, OperationStartOptions, OperationTicket } from '../types/lifecycle.js';
+import type { CompletionRequest } from '../types/messages.js';
+import type { CostEstimate, NexusPlan } from '../types/planning.js';
+import type { CallResidency } from '../types/residency.js';
+import type { CacheOutcome, NexusResponse, NexusStream, ResponseMeta, StreamChunk } from '../types/response.js';
 import type {
   CreateCallRequest,
   CreateCallResponse,
@@ -34,44 +54,24 @@ import type {
   TelephonyWebhookValidationRequest,
   UpdatePhoneNumberRequest,
 } from '../types/telephony.js';
-import type { PipelineContext, PipelineStep, PipelineStepName } from '../pipeline/types.js';
-import type { BaseProvider } from '../providers/base.js';
-import { configuredProviders } from '../providers/lazy.js';
-import type { RouteAttempt, RouteDecision } from '../router/types.js';
-import { ResidencyError } from '../residency/errors.js';
-import type { CallResidency } from '../types/residency.js';
-import { Router, FailoverExecutor } from '../router/index.js';
-import type { ExecutionOptions } from '../router/failover.js';
+import type {
+  SpeechRequest,
+  SpeechResponse,
+  TranscriptionRequest,
+  TranscriptionResponse,
+  VoiceProvider,
+  VoiceSessionConfig,
+  VoiceTurnRequest,
+  VoiceTurnResponse,
+} from '../types/voice.js';
 import { Logger } from '../utils/logger.js';
-import { SecurityPipeline } from '../security/index.js';
-import { ContextWindowManager } from '../context/index.js';
 import { VoiceManager } from '../voice/manager.js';
 import type { VoiceSession } from '../voice/session.js';
-import { ImageManager } from '../images/manager.js';
-import { EmbeddingManager } from '../embeddings/manager.js';
-import { TelephonyManager } from '../telephony/manager.js';
-import { TokenOptimizer } from '../optimizer/index.js';
-import { resolveModel } from '../models/registry.js';
-import { createCacheKey, MemoryCache } from '../cache/memory-cache.js';
-import type { SemanticCache } from '../cache/semantic-cache.js';
+import type { SummarizeVerifyFormatOptions, WorkflowResult } from '../workflow/chains.js';
+import { OperationLifecycle } from './lifecycle.js';
 import { applyResponseFormat, withResponseFormat } from './response-format.js';
 import { protectStreamOutput } from './secure-stream.js';
-import { AuditLogger } from '../ops/audit-logger.js';
-import { RateLimiter } from '../ops/rate-limiter.js';
-import type { VerificationOptions } from '../hallucination/verification.js';
-import type { SelfConsistencyOptions } from '../hallucination/consistency.js';
-import { assertWithinCostBudget, estimateCost } from '../optimizer/cost.js';
-import { negotiateCompletionRequest } from '../capabilities/negotiate.js';
 import { buildUsage, costAmount, priceUsage } from './usage.js';
-import { PipelineRunner, createPipelineContext } from '../pipeline/pipeline.js';
-import { MetricsCollector } from '../ops/metrics.js';
-import { ProviderHealthMonitor } from '../ops/health.js';
-import { CircuitBreaker } from '../ops/circuit-breaker.js';
-import { runBatch, type BatchOptions, type BatchItemResult } from '../jobs/batch.js';
-import { JobQueue, type QueueOptions } from '../jobs/queue.js';
-import type { EvalCase, EvalRunResult } from '../evals/runner.js';
-import type { SummarizeVerifyFormatOptions, WorkflowResult } from '../workflow/chains.js';
-import { callResidency, OperationLifecycle } from './lifecycle.js';
 
 /**
  * Main runtime facade for provider routing, security, optimization, evals, voice, jobs, and observability.
@@ -1021,7 +1021,7 @@ export class NexusAI {
     const placed: RouteAttempt[] = [];
     const seen = new Set<string>();
     for (const attempt of attempts) {
-      const where = residency.place(attempt.providerName);
+      const where = residency.place(attempt.providerName, attempt.model);
       if (!where || !this.providers.has(where.provider)) continue;
       const key = `${where.provider}\u0000${attempt.model}`;
       if (seen.has(key)) continue;
@@ -1030,8 +1030,11 @@ export class NexusAI {
     }
     const [first, ...rest] = placed;
     if (!first) {
-      // Throws, naming the rule, for a provider outside the tenant's regions.
-      residency.check(decision.providerName);
+      // Throws, naming the rule, for a provider outside the tenant's regions or refused by its policy,
+      // its twin's refusal for one placed on a twin.
+      const refused = residency.refusal?.(decision.providerName, decision.model);
+      if (refused) throw refused;
+      residency.check(decision.providerName, decision.model);
       throw new ResidencyError(
         { kind: 'provider', name: decision.providerName },
         residency.decision,
@@ -1259,12 +1262,9 @@ export class NexusAI {
         contextWindowSummary: true,
       },
     };
-    const policy = this.config.lifecycle?.residency;
     const routed = this.router.route(summaryRequest, this.config, this.providers, this.health.snapshot());
-    // The summary stays in the tenant's regions too.
-    const decision = policy
-      ? this.placeRoute(routed, callResidency(policy, await policy.regionsFor(summaryRequest.tenantId)))
-      : routed;
+    // The summary stays in the tenant's regions too, and on what its policy admits.
+    const decision = this.placeRoute(routed, await this.lifecycle.access(this.describe(summaryRequest, 'summarize')));
     const routedRequest = { ...summaryRequest, model: resolveModel(decision.model, this.config).model };
     const response = await this.lifecycle.run(
       { ...this.describe(routedRequest, 'summarize'), provider: decision.providerName },

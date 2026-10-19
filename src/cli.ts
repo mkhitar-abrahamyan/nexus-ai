@@ -1,18 +1,8 @@
 #!/usr/bin/env node
-import process from 'node:process';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { EvalRunner, type EvalCase, type EvalClient } from './evals/runner.js';
-import { NexusAI } from './core/nexus.js';
-import { listKnownModels, listModelsForProvider, getModelCapabilities } from './models/registry.js';
-import { SecurityPipeline } from './security/index.js';
-import { redactSensitiveText } from './security/output-guard.js';
-import { UploadScanner, type UploadScanFinding } from './security/upload-scanner.js';
-import { TokenOptimizer } from './optimizer/index.js';
-import type { CompletionRequest } from './types/messages.js';
-import type { NexusAIConfig } from './types/config.js';
-import type { SecurityFinding } from './types/security.js';
+import path from 'node:path';
+import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import {
   CliUsageError,
   type Flags,
@@ -25,6 +15,16 @@ import {
   stringFlag,
   writeJson,
 } from './cli/args.js';
+import { NexusAI } from './core/nexus.js';
+import { type EvalCase, type EvalClient, EvalRunner } from './evals/runner.js';
+import { getModelCapabilities, listKnownModels, listModelsForProvider } from './models/registry.js';
+import { TokenOptimizer } from './optimizer/index.js';
+import { SecurityPipeline } from './security/index.js';
+import { redactSensitiveText } from './security/output-guard.js';
+import { type UploadScanFinding, UploadScanner } from './security/upload-scanner.js';
+import type { NexusAIConfig } from './types/config.js';
+import type { CompletionRequest } from './types/messages.js';
+import type { SecurityFinding } from './types/security.js';
 
 interface CliFinding {
   file: string;
@@ -105,6 +105,12 @@ async function main(): Promise<void> {
       const [subcommand, ...args] = parsed.positionals;
       const { runDeployCommand } = await import('./cli/deploy.js');
       await runDeployCommand(subcommand, { positionals: args, flags: parsed.flags });
+      return;
+    }
+    case 'policy': {
+      const [subcommand, ...args] = parsed.positionals;
+      const { runPolicyCommand } = await import('./cli/policy.js');
+      await runPolicyCommand(subcommand, { positionals: args, flags: parsed.flags });
       return;
     }
     case 'optimize':
@@ -481,6 +487,7 @@ Usage:
   nexus deploy canary <assistant> <revision> <percent> --url <server> [--reason r] [--version n]
   nexus deploy promote <assistant> <revision> --url <server> [--reason r] [--version n]
   nexus deploy rollback <assistant> [--to revision] --url <server> [--reason r] [--version n]
+  nexus policy check <policy.json> [--base <policy.json>|git:<ref>] [--accept path,path] [--json]
   nexus optimize [request.json|prompt.txt] [--model gpt-5-mini] [--max-input-tokens 4000] [--densify] [--json]
 
 Eval files can export { cases, client } or { cases, config }. JSON cases may use "expected", "contains", and "match": "includes" | "exact" | "regex".
@@ -492,7 +499,8 @@ Database modules for "db status" and "db migrate" export { client }, and optiona
 "doctor" exits 1 when a check fails, or with --strict when one warns. Its module exports any of { database, client, redis, operations, ai, deployment, close }.
 "deploy" reads NEXUS_SERVER_URL and NEXUS_SERVER_TOKEN when --url and --token are not given.
 "migrate" moves 1.x root imports to their 2.0 subpaths and reports removed options; --check exits 1 while any remain.
-"graph lint" reads a compiled graph's shape and exits 1 on an error finding, or on a warning with --strict.`);
+"graph lint" reads a compiled graph's shape and exits 1 on an error finding, or on a warning with --strict.
+"policy check" exits 1 when the policy is not valid, or, against --base, when a change that widens what a tenant may reach is not acknowledged.`);
 }
 
 main().catch((error) => {

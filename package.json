@@ -810,6 +810,16 @@
         "default": "./dist-cjs/residency/index.js"
       }
     },
+    "./policy": {
+      "import": {
+        "types": "./dist/policy/index.d.ts",
+        "default": "./dist/policy/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/policy/index.d.ts",
+        "default": "./dist-cjs/policy/index.js"
+      }
+    },
     "./credentials": {
       "import": {
         "types": "./dist/credentials/index.d.ts",
@@ -2376,6 +2386,9 @@
       ],
       "residency": [
         "dist-cjs/residency/index.d.ts"
+      ],
+      "policy": [
+        "dist-cjs/policy/index.d.ts"
       ],
       "server/regions": [
         "dist-cjs/server/regions.d.ts"

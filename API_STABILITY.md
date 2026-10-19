@@ -41,6 +41,25 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.14 stage (Unreleased)
+
+Everything 2.14 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- `nexus-ai-pro/policy`: `parsePolicy()`, `applyPolicy()`, `comparePolicies()`, `checkPolicyChange()`,
+  `providerGate()`, `policyHash()`, `PolicyError`, `Policy`, `PolicyDocument`, `PolicyAccess`,
+  `PolicyRouting`, `PolicyBudgets`, `PolicyResidency`, `PolicyCredentials`, `PolicyIssue`,
+  `ApplyPolicyOptions`, `PolicyChange`, `PolicyChangeKind`, and `PolicyCheck`;
+- `LifecycleConfig.providers` and `policy`, `ProviderGate`, `PolicyReference`,
+  `OperationDescriptor.policy`, `AuditLogEvent.policy`, and `OperationLifecycle.access()`;
+- the `nexus policy check` command, its flags, its exit codes, and its `--json` output;
+- `CallResidency.refusal()`, optional, and the optional `model` its `allows()`, `place()`, and
+  `check()` take.
+
+The kinds `comparePolicies()` gives a change may be refined in a minor release: a change found to widen
+what a tenant may reach is reported as `widened` from then on, so a check may start to ask for an
+acknowledgment it did not ask for before. A check never stops asking for one it asked for.
+
 ## 2.13 stage (2.13.0)
 
 Everything 2.13 adds is stable from the start and additive, unless this section says otherwise.

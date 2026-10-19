@@ -1,6 +1,8 @@
+import type { AuditLogger } from '../ops/audit-logger.js';
+import type { MetricsCollector } from '../ops/metrics.js';
+import { NexusRateLimitError, type RateLimiter } from '../ops/rate-limiter.js';
 import type { AuditLogEvent, RateLimitConfig } from '../types/config.js';
 import type {
-  ProviderHealthOutcome,
   BudgetReservation,
   LifecycleConfig,
   LifecycleStage,
@@ -12,11 +14,10 @@ import type {
   OperationTicket,
   ProviderCallContext,
   ProviderCredential,
+  ProviderGate,
+  ProviderHealthOutcome,
 } from '../types/lifecycle.js';
-import type { AuditLogger } from '../ops/audit-logger.js';
-import type { MetricsCollector } from '../ops/metrics.js';
-import { NexusRateLimitError, type RateLimiter } from '../ops/rate-limiter.js';
-import type { CallResidency, ResidencyPolicy } from '../types/residency.js';
+import type { CallResidency, ResidencyDecision, ResidencyPolicy } from '../types/residency.js';
 import { generateRequestId } from '../utils/ids.js';
 import { scrubSecrets } from '../utils/scrub.js';
 import { linkSignals } from '../utils/signals.js';
@@ -131,7 +132,12 @@ export class OperationLifecycle implements OperationLifecycleLike {
     input: Omit<OperationDescriptor, 'requestId'> & { requestId?: string },
     options: OperationStartOptions & { audit?: Record<string, unknown> } = {},
   ): Promise<OperationTicket> {
-    const descriptor: OperationDescriptor = { ...input, requestId: input.requestId?.trim() || generateRequestId() };
+    const policyReference = this.runtime.config?.policy;
+    const descriptor: OperationDescriptor = {
+      ...input,
+      requestId: input.requestId?.trim() || generateRequestId(),
+      ...(policyReference && !input.policy ? { policy: policyReference } : {}),
+    };
     const startedAt = Date.now();
     const timeoutMs = options.timeoutMs ?? this.runtime.timeoutMs;
     const deadline =
@@ -155,10 +161,10 @@ export class OperationLifecycle implements OperationLifecycleLike {
       await this.runtime.metrics?.recordRequest(labelsOf(descriptor));
       await this.checkRateLimit(descriptor);
       await this.authorize(descriptor);
-      const policy = this.runtime.config?.residency;
-      if (policy) {
-        context.residency = callResidency(policy, await policy.regionsFor(descriptor.tenantId));
-        if (descriptor.provider) context.residency.check(descriptor.provider);
+      const access = await this.access(descriptor);
+      if (access) {
+        context.residency = access;
+        if (descriptor.provider) access.check(descriptor.provider, descriptor.model);
       }
     } catch (error) {
       await ticket.fail(error);
@@ -183,8 +189,8 @@ export class OperationLifecycle implements OperationLifecycleLike {
       await plan.resolveAssets?.(ticket.context);
       const routed = await plan.route?.();
       if (routed?.provider) {
-        // Nothing is sent to a provider outside the regions the tenant may reach.
-        ticket.context.residency?.check(routed.provider);
+        // Nothing is sent to a provider outside the regions the tenant may reach, or that its policy refuses.
+        ticket.context.residency?.check(routed.provider, routed.model ?? ticket.descriptor.model);
         ticket.descriptor.provider = routed.provider;
       }
       if (routed?.model) ticket.descriptor.model = routed.model;
@@ -199,6 +205,25 @@ export class OperationLifecycle implements OperationLifecycleLike {
       await ticket.fail(error);
       throw error;
     }
+  }
+
+  /**
+   * Which providers and models an operation may reach, under the residency policy and the provider
+   * gate, or `undefined` when there is neither: what `start()` gives each operation's context, for
+   * code that decides outside one.
+   */
+  async access(
+    descriptor: Pick<OperationDescriptor, 'tenantId'> & Partial<OperationDescriptor>,
+  ): Promise<CallResidency | undefined> {
+    const policy = this.runtime.config?.residency;
+    const gate = this.runtime.config?.providers;
+    if (!policy && !gate) return undefined;
+    return callAccess(
+      descriptor as OperationDescriptor,
+      policy,
+      policy ? await policy.regionsFor(descriptor.tenantId) : undefined,
+      gate,
+    );
   }
 
   /**
@@ -223,7 +248,9 @@ export class OperationLifecycle implements OperationLifecycleLike {
       !config?.budget &&
       !config?.hooks &&
       !config?.credentials &&
-      !config?.residency
+      !config?.residency &&
+      !config?.providers &&
+      !config?.policy
     );
   }
 
@@ -257,13 +284,54 @@ export class OperationLifecycle implements OperationLifecycleLike {
 
 /** An operation's residency, as the families that call providers check it. */
 export function callResidency(policy: ResidencyPolicy, decision: CallResidency['decision']): CallResidency {
+  return callAccess(undefined, policy, decision, undefined);
+}
+
+/**
+ * What an operation may reach: the providers its residency policy allows, and among them those the
+ * provider gate admits, model by model.
+ */
+export function callAccess(
+  descriptor: OperationDescriptor | undefined,
+  policy: ResidencyPolicy | undefined,
+  decision: ResidencyDecision | undefined,
+  gate: ProviderGate | undefined,
+): CallResidency {
+  const resolved: ResidencyDecision = decision ?? { rule: 'any region' };
+  const admits = (provider: string, model?: string) =>
+    !gate || !descriptor || gate.check(descriptor, provider, model) === true;
+  const resident = (provider: string) => !policy || policy.allows(policy.regionOf(provider), resolved);
+  const checkResidency = (provider: string) => {
+    if (!policy) return;
+    const region = policy.regionOf(provider);
+    policy.check({ kind: 'provider', name: provider, ...(region ? { region } : {}) }, resolved);
+  };
+  const checkGate = (provider: string, model: string | undefined) => {
+    if (!gate || !descriptor) return;
+    const verdict = gate.check(descriptor, provider, model);
+    if (verdict !== true) throw new OperationDeniedError(descriptor, verdict);
+  };
   return {
-    decision,
-    allows: (provider) => policy.allows(policy.regionOf(provider), decision),
-    place: (provider) => policy.place(provider, decision),
-    check: (provider) => {
-      const region = policy.regionOf(provider);
-      policy.check({ kind: 'provider', name: provider, ...(region ? { region } : {}) }, decision);
+    decision: resolved,
+    allows: (provider, model) => resident(provider) && admits(provider, model),
+    place: (provider, model) => {
+      const placed = policy ? policy.place(provider, resolved) : { provider };
+      return placed && admits(placed.provider, model) ? placed : undefined;
+    },
+    check: (provider, model) => {
+      checkResidency(provider);
+      checkGate(provider, model);
+    },
+    refusal: (provider, model) => {
+      try {
+        const placed = policy ? policy.place(provider, resolved) : { provider };
+        // Placed nowhere: the provider is outside the regions, and so is its twin, if it has one.
+        if (!placed) checkResidency(provider);
+        else checkGate(placed.provider, model);
+        return undefined;
+      } catch (error) {
+        return error as Error;
+      }
     },
   };
 }
@@ -429,6 +497,7 @@ class Ticket implements OperationTicket {
       model: this.descriptor.model,
       provider: this.descriptor.provider,
       timestamp: new Date().toISOString(),
+      ...(this.descriptor.policy ? { policy: this.descriptor.policy } : {}),
       ...(this.descriptor.metadata || metadata ? { metadata: { ...this.descriptor.metadata, ...metadata } } : {}),
     });
   }

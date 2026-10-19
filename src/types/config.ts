@@ -14,7 +14,7 @@ import type {
   RoutingModelPreference,
 } from './providers.js';
 import type { CapabilityConfig } from './capabilities.js';
-import type { LifecycleConfig, OperationFamily } from './lifecycle.js';
+import type { LifecycleConfig, OperationFamily, PolicyReference } from './lifecycle.js';
 import type { CompletionRequest } from './messages.js';
 import type { PipelineConfig } from '../pipeline/types.js';
 import type { CacheAdapter } from '../cache/adapters.js';
@@ -387,6 +387,8 @@ export interface AuditLogEvent {
   provider?: string;
   /** ISO-8601 time the event was written. */
   timestamp: string;
+  /** The policy the operation ran under, when the client has one. */
+  policy?: PolicyReference;
   /**
    * Details: the request or response when `includeInput` or `includeOutput` is set, a refused
    * operation's findings, and a failed one's error. Redacted unless `includeSensitiveData` is set.

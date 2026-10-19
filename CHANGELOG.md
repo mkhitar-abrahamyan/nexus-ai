@@ -4,6 +4,24 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Policy you can review.** `nexus-ai-pro/policy` reads guardrails, routing, budgets, residency, and
+  credentials from one versioned file. `parsePolicy()` validates it as the client starts, naming every
+  issue; `applyPolicy()` turns it into the client's configuration; and every operation and audit event
+  records the policy's name, version, and content hash. `nexus policy check` compares a version with
+  the one before it, a file or `git:<ref>`, and fails the build on a change that widens what a tenant
+  may reach (a region, a provider, a model, a budget, lowered guardrails, a shared key) until it is
+  acknowledged in the file or with `--accept`, and on content changed without a new version.
+- **Per-tenant routing rules.** `LifecycleConfig.providers` takes a `ProviderGate` that admits or
+  refuses each provider and model an operation would reach, checked wherever residency is: a refused
+  provider is refused with an `OperationDeniedError` naming the rule before anything is sent, a
+  completion's refused attempt is dropped from its route, and an embedding never falls back to a
+  refused model. `providerGate()` builds one from a policy's routing rules, with `*` wildcards.
+- `ai.lifecycle.access()` returns the `CallResidency` an operation would get, and
+  `CallResidency.refusal()` says why a provider would be refused once placed on its twin; `allows()`,
+  `place()`, and `check()` take the model as well.
+
 ## [2.13.0] - 2026-10-19
 
 Regions and residency, and credentials per tenant.

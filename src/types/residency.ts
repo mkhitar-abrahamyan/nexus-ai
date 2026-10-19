@@ -59,14 +59,26 @@ export interface ResidencyPolicy {
   check(target: ResidencyTarget, decision: ResidencyDecision): void;
 }
 
-/** What an operation's residency gives the families that call providers: its decision, and a check per provider. */
+/**
+ * What an operation's residency, and its client's provider gate, give the families that call
+ * providers: its decision, and a check per provider and model.
+ */
 export interface CallResidency {
-  /** The operation's decision. */
+  /** The operation's decision; one that allows every region when there is no residency policy. */
   decision: ResidencyDecision;
-  /** Whether a provider may be called: it, not a twin, runs in an allowed region. */
-  allows(provider: string): boolean;
+  /** Whether a provider, and the model when named, may be called: it, not a twin, is allowed. */
+  allows(provider: string, model?: string): boolean;
   /** Where a call to a provider is placed: itself, its twin, or nowhere. */
-  place(provider: string): ResidencyPlacement | undefined;
-  /** Throws a `ResidencyError` for a provider outside the decision's regions. */
-  check(provider: string): void;
+  place(provider: string, model?: string): ResidencyPlacement | undefined;
+  /**
+   * Throws for a provider the operation may not reach: a `ResidencyError` for one outside its
+   * regions, an `OperationDeniedError` for one the gate refuses.
+   */
+  check(provider: string, model?: string): void;
+  /**
+   * Why a call to a provider is refused once placed, as `check` would throw it for the provider the
+   * call would go to, its twin included; `undefined` when it may be placed. Absent on contexts made
+   * before 2.14, where `check` serves.
+   */
+  refusal?(provider: string, model?: string): Error | undefined;
 }

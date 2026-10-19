@@ -128,6 +128,27 @@ export interface OperationDescriptor {
   tenantId?: string;
   /** Application data. Never include raw media or credentials: the audit log records it. */
   metadata?: Record<string, unknown>;
+  /** The policy it runs under, when the client has one, as its audit events record it. */
+  policy?: PolicyReference;
+}
+
+/** A policy, as each operation it decides records it: its name, its version, and its content hash. */
+export interface PolicyReference {
+  /** The policy's name, such as `production`. */
+  name: string;
+  /** Its version, as its file numbers it. */
+  version: string;
+  /** The SHA-256 of its content, hex-encoded, so two files with one version are told apart. */
+  hash: string;
+}
+
+/**
+ * Which providers and models an operation may reach, beside residency: a policy's routing rules,
+ * per tenant. Checked wherever residency is.
+ */
+export interface ProviderGate {
+  /** `true` when the operation may reach the provider, and the model when one is named; else why not. */
+  check(operation: OperationDescriptor, provider: string, model?: string): true | string;
 }
 
 /** How an operation ended, as `onFinish` receives it. */
@@ -306,6 +327,14 @@ export interface LifecycleConfig {
    * first sent to the provider's twin inside them, when there is one.
    */
   residency?: ResidencyPolicy;
+  /**
+   * Which providers and models each operation may reach, beside residency, such as a policy's
+   * per-tenant routing rules: a provider it refuses is refused with an `OperationDeniedError` naming
+   * why, and dropped from a completion's fallbacks.
+   */
+  providers?: ProviderGate;
+  /** The policy every operation runs under, recorded on its descriptor and its audit events. */
+  policy?: PolicyReference;
 }
 
 /** Options for admitting one operation. */

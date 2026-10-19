@@ -197,7 +197,10 @@ observability can never fail a call.
 `LifecycleConfig` is the whole setting: `authorize`, `budget`, `hooks`, `credentials`, a
 `CredentialResolver` that gives each provider call its tenant's own key, and `residency`, a
 `ResidencyPolicy` that keeps each tenant's provider calls in its regions, as the
-[regions and credentials guide](./regions.md) describes.
+[regions and credentials guide](./regions.md) describes; `providers`, a `ProviderGate` that says which
+providers and models each operation may reach, and `policy`, the `PolicyReference` every operation and
+audit event records, as the [policy guide](./policy.md) describes. `applyPolicy()` sets them all from
+one file.
 
 ## Graphs, agents, sessions, queues, and batches
 

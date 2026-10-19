@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
@@ -138,6 +138,7 @@ const expectedSubpaths = [
   './credentials',
   './residency',
   './server/regions',
+  './policy',
   './tracing/otlp-grpc',
   './tracing/rollups',
   './evaluate',
