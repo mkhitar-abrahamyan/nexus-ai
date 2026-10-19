@@ -83,8 +83,18 @@ test('a canary takes a tenth of new traffic, and every run records the revision 
     await call(app, 'POST', '/runs', { assistant: 'support', input: { index } });
   }
   const runs = await allSettled(state, 1_000);
+  // Each run is placed by its own id, exactly where `bucket()` puts it: the canary holds [0, 0.1).
+  for (const run of runs) {
+    assert.equal(
+      run.revision?.id,
+      bucket(`support:${run.id}`) < 0.1 ? 'canary' : 'stable',
+      `${run.id} lands by its bucket`,
+    );
+  }
+  // Over 1,000 random ids that is about a tenth: within five standard deviations of a hundred (9.5 each),
+  // which a fair split leaves about once in two million runs of this test.
   const onCanary = runs.filter((run) => run.revision?.id === 'canary');
-  assert.ok(onCanary.length > 70 && onCanary.length < 130, `about a tenth: ${onCanary.length}`);
+  assert.ok(onCanary.length > 52 && onCanary.length < 148, `about a tenth: ${onCanary.length}`);
   for (const run of runs) {
     assert.equal(run.revision?.deployment, 1);
     assert.equal(run.revision?.reason, 'split');
