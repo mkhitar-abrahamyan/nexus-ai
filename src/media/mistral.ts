@@ -73,14 +73,17 @@ export class MistralOcrProvider implements MediaProvider {
       ...(this.options.tableFormat ? { table_format: this.options.tableFormat } : {}),
     };
     const fetchImpl = this.options.fetch ?? fetch;
+    // A credential resolved for the call's tenant replaces the configured key.
+    const credential = await context.credential?.(this.info.name);
     const response = await fetchImpl(
       `${(this.options.baseUrl ?? 'https://api.mistral.ai/v1').replace(/\/+$/, '')}/ocr`,
       {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: `Bearer ${this.options.apiKey}`,
+          authorization: `Bearer ${credential?.apiKey ?? this.options.apiKey}`,
           ...this.options.headers,
+          ...credential?.headers,
         },
         body: JSON.stringify(body),
         signal: context.signal,

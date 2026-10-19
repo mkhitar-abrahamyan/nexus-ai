@@ -4,6 +4,7 @@
  * with Ed25519. Media streams carry 8 kHz G.711 µ-law, as Twilio's do, so a realtime bridge runs on
  * either. Messaging sends and receives SMS and MMS. Portable: it needs `fetch` and Web Crypto only.
  */
+import type { ProviderCallContext } from '../../types/lifecycle.js';
 import type {
   AnswerCallRequest,
   CreateCallRequest,
@@ -99,13 +100,14 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   constructor(private readonly config: TelnyxTelephonyProviderConfig = {}) {}
 
   /** Places an outbound call through the configured Call Control application. */
-  async createCall(request: CreateCallRequest): Promise<CreateCallResponse> {
+  async createCall(request: CreateCallRequest, context?: ProviderCallContext): Promise<CreateCallResponse> {
     if (request.twiml || request.applicationSid) {
       throw new TelephonyProviderError('Telnyx calls take webhookUrl or mediaStreamUrl, not TwiML', 'telnyx');
     }
     const connection = this.config.connectionId;
     if (!connection) throw new TelephonyProviderError('Telnyx calls require connectionId', 'telnyx');
     const data = await this.request('/calls', {
+      context,
       method: 'POST',
       body: {
         connection_id: connection,
@@ -139,7 +141,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
    * asks, each as a command on the call. Resolves to the empty response the webhook returns.
    * Telnyx gathers keypad digits, not speech, and has no redirect to another webhook.
    */
-  async answerCall(request: AnswerCallRequest): Promise<TelephonyWebhookResponse> {
+  async answerCall(request: AnswerCallRequest, context?: ProviderCallContext): Promise<TelephonyWebhookResponse> {
     if (request.redirectUrl) {
       throw new TelephonyProviderError('Telnyx calls are controlled by command, not redirected to a webhook', 'telnyx');
     }
@@ -149,7 +151,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
     const sent: Array<{ action: string; body: Payload }> = [];
     const run = async (action: string, body: Payload) => {
       sent.push({ action, body });
-      await this.command(request.callId, action, body, request.signal);
+      await this.command(request.callId, action, body, request.signal, context);
     };
     const voice = {
       voice: this.config.voice ?? 'female',
@@ -229,8 +231,9 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   }
 
   /** Reads a call's details. Telnyx says whether the call is alive, and for how long it ran. */
-  async getCall(request: GetCallRequest): Promise<TelephonyCallDetails> {
+  async getCall(request: GetCallRequest, context?: ProviderCallContext): Promise<TelephonyCallDetails> {
     const data = await this.request(`/calls/${encodeURIComponent(request.callId)}`, {
+      context,
       method: 'GET',
       signal: request.signal,
       errorPrefix: 'Telnyx call lookup failed',
@@ -245,8 +248,8 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   }
 
   /** Hangs a call up. */
-  async endCall(request: EndCallRequest): Promise<TelephonyCallDetails> {
-    const raw = await this.command(request.callId, 'hangup', {}, request.signal);
+  async endCall(request: EndCallRequest, context?: ProviderCallContext): Promise<TelephonyCallDetails> {
+    const raw = await this.command(request.callId, 'hangup', {}, request.signal, context);
     return {
       callId: request.callId,
       providerUsed: 'telnyx',
@@ -286,11 +289,15 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   }
 
   /** Lists your phone numbers. */
-  async listPhoneNumbers(request: ListPhoneNumbersRequest = {}): Promise<TelephonyPhoneNumber[]> {
+  async listPhoneNumbers(
+    request: ListPhoneNumbersRequest = {},
+    context?: ProviderCallContext,
+  ): Promise<TelephonyPhoneNumber[]> {
     const query = new URLSearchParams();
     if (request.phoneNumber) query.set('filter[phone_number]', request.phoneNumber);
     if (request.pageSize !== undefined) query.set('page[size]', String(request.pageSize));
     const list = await this.request(`/phone_numbers${query.size ? `?${query.toString()}` : ''}`, {
+      context,
       method: 'GET',
       signal: request.signal,
       errorPrefix: 'Telnyx phone number lookup failed',
@@ -304,15 +311,20 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
    * Control application and its messages to its messaging profile, so `voiceUrl` changes that
    * application's webhook and `smsUrl` that profile's: for every number that shares them.
    */
-  async updatePhoneNumber(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber> {
+  async updatePhoneNumber(
+    request: UpdatePhoneNumberRequest,
+    context?: ProviderCallContext,
+  ): Promise<TelephonyPhoneNumber> {
     const id = encodeURIComponent(request.id);
     let number = await this.request(`/phone_numbers/${id}`, {
+      context,
       method: 'GET',
       signal: request.signal,
       errorPrefix: 'Telnyx phone number lookup failed',
     });
     if (request.friendlyName !== undefined) {
       number = await this.request(`/phone_numbers/${id}`, {
+        context,
         method: 'PATCH',
         body: { customer_reference: request.friendlyName },
         signal: request.signal,
@@ -324,6 +336,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
       const connection = stringValue(number.connection_id);
       if (!connection) throw new TelephonyProviderError('This Telnyx number has no Call Control application', 'telnyx');
       await this.request(`/call_control_applications/${encodeURIComponent(connection)}`, {
+        context,
         method: 'PATCH',
         body: { webhook_event_url: voice },
         signal: request.signal,
@@ -334,6 +347,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
       const profile = stringValue(number.messaging_profile_id);
       if (!profile) throw new TelephonyProviderError('This Telnyx number has no messaging profile', 'telnyx');
       await this.request(`/messaging_profiles/${encodeURIComponent(profile)}`, {
+        context,
         method: 'PATCH',
         body: {
           ...(request.smsUrl !== undefined ? { webhook_url: request.smsUrl } : {}),
@@ -437,7 +451,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   }
 
   /** Moves a call to another number or SIP address. */
-  async transferCall(request: TransferCallRequest): Promise<TelephonyTransfer> {
+  async transferCall(request: TransferCallRequest, context?: ProviderCallContext): Promise<TelephonyTransfer> {
     const raw = await this.command(
       request.callId,
       'transfer',
@@ -447,6 +461,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
         ...(request.timeoutSeconds !== undefined ? { timeout_secs: request.timeoutSeconds } : {}),
       },
       request.signal,
+      context,
     );
     return { callId: request.callId, providerUsed: 'telnyx', to: request.to, raw };
   }
@@ -456,9 +471,13 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
    * call when none does. Two calls joining a conference that does not exist yet at the same moment
    * may make two.
    */
-  async joinConference(request: JoinConferenceRequest): Promise<TelephonyConferenceJoin> {
+  async joinConference(
+    request: JoinConferenceRequest,
+    context?: ProviderCallContext,
+  ): Promise<TelephonyConferenceJoin> {
     const query = new URLSearchParams({ 'filter[name]': request.name });
     const found = await this.request(`/conferences?${query.toString()}`, {
+      context,
       method: 'GET',
       signal: request.signal,
       errorPrefix: 'Telnyx conference lookup failed',
@@ -471,6 +490,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
     if (running) {
       const conferenceId = stringValue(running.id) ?? '';
       const raw = await this.request(`/conferences/${encodeURIComponent(conferenceId)}/actions/join`, {
+        context,
         method: 'POST',
         body: {
           call_control_id: request.callId,
@@ -485,6 +505,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
       return { callId: request.callId, conference: request.name, conferenceId, providerUsed: 'telnyx', raw };
     }
     const created = await this.request('/conferences', {
+      context,
       method: 'POST',
       body: {
         call_control_id: request.callId,
@@ -505,19 +526,23 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   }
 
   /** Starts recording a call, as MP3. Telnyx reports it with a `call.recording.saved` webhook. */
-  async startRecording(request: StartRecordingRequest): Promise<TelephonyRecordingStarted> {
+  async startRecording(
+    request: StartRecordingRequest,
+    context?: ProviderCallContext,
+  ): Promise<TelephonyRecordingStarted> {
     const raw = await this.command(
       request.callId,
       'record_start',
       { format: 'mp3', channels: request.channels === 'single' ? 'single' : 'dual' },
       request.signal,
+      context,
     );
     return { callId: request.callId, providerUsed: 'telnyx', raw };
   }
 
   /** Stops recording a call. */
-  async stopRecording(request: StopRecordingRequest): Promise<void> {
-    await this.command(request.callId, 'record_stop', {}, request.signal);
+  async stopRecording(request: StopRecordingRequest, context?: ProviderCallContext): Promise<void> {
+    await this.command(request.callId, 'record_stop', {}, request.signal, context);
   }
 
   /** Parses a `call.recording.saved` webhook. */
@@ -549,11 +574,15 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
    * Fetches a recording's audio. Telnyx's links are presigned and expire after ten minutes: an
    * expired one is renewed through the recording's own record.
    */
-  async downloadRecording(request: DownloadRecordingRequest): Promise<TelephonyRecordingAudio> {
+  async downloadRecording(
+    request: DownloadRecordingRequest,
+    context?: ProviderCallContext,
+  ): Promise<TelephonyRecordingAudio> {
     const mimeType = request.recording.format === 'wav' ? 'audio/wav' : 'audio/mpeg';
     let response = await this.fetchImpl()(request.recording.url, { method: 'GET', signal: request.signal });
     if (!response.ok && request.recording.recordingId) {
       const record = await this.request(`/recordings/${encodeURIComponent(request.recording.recordingId)}`, {
+        context,
         method: 'GET',
         signal: request.signal,
         errorPrefix: 'Telnyx recording lookup failed',
@@ -571,8 +600,9 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   }
 
   /** Deletes a recording at Telnyx. */
-  async deleteRecording(request: DeleteRecordingRequest): Promise<void> {
+  async deleteRecording(request: DeleteRecordingRequest, context?: ProviderCallContext): Promise<void> {
     await this.request(`/recordings/${encodeURIComponent(request.recordingId)}`, {
+      context,
       method: 'DELETE',
       signal: request.signal,
       errorPrefix: 'Telnyx recording delete failed',
@@ -580,11 +610,12 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   }
 
   /** Sends an SMS, or an MMS with `mediaUrls`. */
-  async sendMessage(request: SendMessageRequest): Promise<TelephonyMessage> {
+  async sendMessage(request: SendMessageRequest, context?: ProviderCallContext): Promise<TelephonyMessage> {
     if (!request.body && !request.mediaUrls?.length) {
       throw new TelephonyProviderError('A message needs a body, media, or both', 'telnyx');
     }
     const data = await this.request('/messages', {
+      context,
       method: 'POST',
       body: {
         from: request.from,
@@ -644,8 +675,15 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
     };
   }
 
-  private command(callId: string, action: string, body: Payload, signal?: AbortSignal): Promise<Payload> {
+  private command(
+    callId: string,
+    action: string,
+    body: Payload,
+    signal?: AbortSignal,
+    context?: ProviderCallContext,
+  ): Promise<Payload> {
     return this.request(`/calls/${encodeURIComponent(callId)}/actions/${action}`, {
+      context,
       method: 'POST',
       body,
       signal,
@@ -656,6 +694,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   private async request(
     path: string,
     options: {
+      context?: ProviderCallContext;
       method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
       body?: Payload;
       signal?: AbortSignal;
@@ -665,11 +704,18 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   ): Promise<unknown[]>;
   private async request(
     path: string,
-    options: { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: Payload; signal?: AbortSignal; errorPrefix: string },
+    options: {
+      context?: ProviderCallContext;
+      method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+      body?: Payload;
+      signal?: AbortSignal;
+      errorPrefix: string;
+    },
   ): Promise<Payload>;
   private async request(
     path: string,
     options: {
+      context?: ProviderCallContext;
       method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
       body?: Payload;
       signal?: AbortSignal;
@@ -677,7 +723,9 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
       list?: boolean;
     },
   ): Promise<Payload | unknown[]> {
-    const apiKey = this.config.apiKey;
+    // A credential resolved for the call's tenant replaces the configured key.
+    const credential = await options.context?.credential?.(this.info.name);
+    const apiKey = credential?.apiKey ?? this.config.apiKey;
     if (!apiKey) throw new TelephonyProviderError('Telnyx requests require apiKey', 'telnyx');
     const response = await this.fetchImpl()(
       `${(this.config.baseUrl ?? 'https://api.telnyx.com/v2').replace(/\/$/, '')}${path}`,
@@ -687,6 +735,7 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
           authorization: `Bearer ${apiKey}`,
           accept: 'application/json',
           ...(options.body ? { 'content-type': 'application/json' } : {}),
+          ...credential?.headers,
         },
         ...(options.body ? { body: JSON.stringify(options.body) } : {}),
         ...(options.signal ? { signal: options.signal } : {}),

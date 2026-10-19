@@ -1,3 +1,4 @@
+import type { ProviderCallContext } from '../../types/lifecycle.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type {
   CreateCallRequest,
@@ -78,7 +79,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   constructor(private config: TwilioTelephonyProviderConfig = {}) {}
 
   /** Places an outbound call. */
-  async createCall(request: CreateCallRequest): Promise<CreateCallResponse> {
+  async createCall(request: CreateCallRequest, context?: ProviderCallContext): Promise<CreateCallResponse> {
     const body = new URLSearchParams();
 
     body.set('To', request.to);
@@ -109,6 +110,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     }
 
     const raw = await this.request('/Calls.json', {
+      context,
       method: 'POST',
       body,
       signal: request.signal,
@@ -159,8 +161,9 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Reads a call's details. */
-  async getCall(request: GetCallRequest): Promise<TelephonyCallDetails> {
+  async getCall(request: GetCallRequest, context?: ProviderCallContext): Promise<TelephonyCallDetails> {
     const raw = await this.request(`/Calls/${encodeURIComponent(request.callId)}.json`, {
+      context,
       method: 'GET',
       signal: request.signal,
       errorPrefix: 'Twilio call lookup failed',
@@ -169,11 +172,12 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Ends a call in progress. */
-  async endCall(request: EndCallRequest): Promise<TelephonyCallDetails> {
+  async endCall(request: EndCallRequest, context?: ProviderCallContext): Promise<TelephonyCallDetails> {
     const body = new URLSearchParams();
     body.set('Status', request.status || 'completed');
 
     const raw = await this.request(`/Calls/${encodeURIComponent(request.callId)}.json`, {
+      context,
       method: 'POST',
       body,
       signal: request.signal,
@@ -208,13 +212,17 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Lists the account's phone numbers. */
-  async listPhoneNumbers(request: ListPhoneNumbersRequest = {}): Promise<TelephonyPhoneNumber[]> {
+  async listPhoneNumbers(
+    request: ListPhoneNumbersRequest = {},
+    context?: ProviderCallContext,
+  ): Promise<TelephonyPhoneNumber[]> {
     const query = new URLSearchParams();
     if (request.phoneNumber) query.set('PhoneNumber', request.phoneNumber);
     if (request.pageSize !== undefined) query.set('PageSize', String(request.pageSize));
     const suffix = query.size ? `?${query.toString()}` : '';
 
     const raw = await this.request(`/IncomingPhoneNumbers.json${suffix}`, {
+      context,
       method: 'GET',
       signal: request.signal,
       errorPrefix: 'Twilio phone number lookup failed',
@@ -226,7 +234,10 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Changes where a phone number sends its calls and status callbacks. */
-  async updatePhoneNumber(request: UpdatePhoneNumberRequest): Promise<TelephonyPhoneNumber> {
+  async updatePhoneNumber(
+    request: UpdatePhoneNumberRequest,
+    context?: ProviderCallContext,
+  ): Promise<TelephonyPhoneNumber> {
     const body = new URLSearchParams();
     if (request.friendlyName !== undefined) body.set('FriendlyName', request.friendlyName);
     if (request.voiceUrl !== undefined) body.set('VoiceUrl', request.voiceUrl);
@@ -243,6 +254,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     }
 
     const raw = await this.request(`/IncomingPhoneNumbers/${encodeURIComponent(request.id)}.json`, {
+      context,
       method: 'POST',
       body,
       signal: request.signal,
@@ -354,7 +366,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Moves a live call to another number or SIP address, with `<Dial>` TwiML. */
-  async transferCall(request: TransferCallRequest): Promise<TelephonyTransfer> {
+  async transferCall(request: TransferCallRequest, context?: ProviderCallContext): Promise<TelephonyTransfer> {
     const raw = await this.redirect(
       request.callId,
       createVoiceTwiML({
@@ -366,24 +378,32 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       }),
       request.signal,
       'Twilio call transfer failed',
+      context,
     );
     return { callId: request.callId, providerUsed: 'twilio', to: request.to, raw };
   }
 
   /** Puts a live call into a conference, with `<Dial><Conference>` TwiML. Twilio names conferences. */
-  async joinConference(request: JoinConferenceRequest): Promise<TelephonyConferenceJoin> {
+  async joinConference(
+    request: JoinConferenceRequest,
+    context?: ProviderCallContext,
+  ): Promise<TelephonyConferenceJoin> {
     const { provider: _provider, callId, signal, ...conference } = request;
     const raw = await this.redirect(
       callId,
       createVoiceTwiML({ dial: { conference } }),
       signal,
       'Twilio conference join failed',
+      context,
     );
     return { callId, conference: request.name, providerUsed: 'twilio', raw };
   }
 
   /** Starts recording a call, reporting the recording to `statusCallbackUrl` once it is ready. */
-  async startRecording(request: StartRecordingRequest): Promise<TelephonyRecordingStarted> {
+  async startRecording(
+    request: StartRecordingRequest,
+    context?: ProviderCallContext,
+  ): Promise<TelephonyRecordingStarted> {
     const body = new URLSearchParams();
     body.set('RecordingChannels', request.channels === 'single' ? 'mono' : 'dual');
     if (request.statusCallbackUrl) {
@@ -391,6 +411,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       body.set('RecordingStatusCallbackEvent', 'completed');
     }
     const raw = await this.request(`/Calls/${encodeURIComponent(request.callId)}/Recordings.json`, {
+      context,
       method: 'POST',
       body,
       signal: request.signal,
@@ -400,11 +421,12 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Stops a call's recording: the one named, or the call's current one. */
-  async stopRecording(request: StopRecordingRequest): Promise<void> {
+  async stopRecording(request: StopRecordingRequest, context?: ProviderCallContext): Promise<void> {
     const body = new URLSearchParams();
     body.set('Status', 'stopped');
     const recording = encodeURIComponent(request.recordingId ?? 'Twilio.CURRENT');
     await this.request(`/Calls/${encodeURIComponent(request.callId)}/Recordings/${recording}.json`, {
+      context,
       method: 'POST',
       body,
       signal: request.signal,
@@ -431,10 +453,13 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Fetches a recording's audio, with the account's credentials. */
-  async downloadRecording(request: DownloadRecordingRequest): Promise<TelephonyRecordingAudio> {
+  async downloadRecording(
+    request: DownloadRecordingRequest,
+    context?: ProviderCallContext,
+  ): Promise<TelephonyRecordingAudio> {
     const response = await this.fetchImpl()(request.recording.url, {
       method: 'GET',
-      headers: { authorization: this.authorization() },
+      headers: (await this.account(context)).headers,
       signal: request.signal,
     });
     if (!response.ok) {
@@ -448,8 +473,9 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Deletes a recording at Twilio. */
-  async deleteRecording(request: DeleteRecordingRequest): Promise<void> {
+  async deleteRecording(request: DeleteRecordingRequest, context?: ProviderCallContext): Promise<void> {
     await this.request(`/Recordings/${encodeURIComponent(request.recordingId)}.json`, {
+      context,
       method: 'DELETE',
       signal: request.signal,
       errorPrefix: 'Twilio recording delete failed',
@@ -457,7 +483,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Sends an SMS, or an MMS with `mediaUrls`. */
-  async sendMessage(request: SendMessageRequest): Promise<TelephonyMessage> {
+  async sendMessage(request: SendMessageRequest, context?: ProviderCallContext): Promise<TelephonyMessage> {
     if (!request.body && !request.mediaUrls?.length) {
       throw new TelephonyProviderError('A message needs a body, media, or both', 'twilio');
     }
@@ -468,6 +494,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     for (const url of request.mediaUrls ?? []) body.append('MediaUrl', url);
     if (request.statusCallbackUrl) body.set('StatusCallback', request.statusCallbackUrl);
     const raw = await this.request('/Messages.json', {
+      context,
       method: 'POST',
       body,
       signal: request.signal,
@@ -514,30 +541,63 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   /** Replaces a live call's instructions with TwiML. */
-  private redirect(callId: string, twiml: string, signal: AbortSignal | undefined, errorPrefix: string) {
+  private redirect(
+    callId: string,
+    twiml: string,
+    signal: AbortSignal | undefined,
+    errorPrefix: string,
+    context?: ProviderCallContext,
+  ) {
     const body = new URLSearchParams();
     body.set('Twiml', twiml);
-    return this.request(`/Calls/${encodeURIComponent(callId)}.json`, { method: 'POST', body, signal, errorPrefix });
+    return this.request(`/Calls/${encodeURIComponent(callId)}.json`, {
+      context,
+      method: 'POST',
+      body,
+      signal,
+      errorPrefix,
+    });
   }
 
-  private authorization(): string {
-    const accountSid = this.requireConfig('accountSid');
-    const authToken = this.requireConfig('authToken');
-    return `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`;
+  /**
+   * The account a call acts as, and its headers: the tenant's, when a credential is resolved for it,
+   * as `<accountSid>:<authToken>` of its subaccount or an auth token for the configured account.
+   */
+  private async account(
+    context?: ProviderCallContext,
+  ): Promise<{ accountSid: string; headers: Record<string, string> }> {
+    const credential = await context?.credential?.(this.info.name);
+    const [sid, token] = credential?.apiKey?.includes(':')
+      ? (credential.apiKey.split(':', 2) as [string, string])
+      : [undefined, credential?.apiKey];
+    const accountSid = sid ?? this.requireConfig('accountSid');
+    const authToken = token ?? this.requireConfig('authToken');
+    return {
+      accountSid,
+      headers: {
+        authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+        ...credential?.headers,
+      },
+    };
   }
 
   private async request(
     path: string,
-    options: { method: 'GET' | 'POST' | 'DELETE'; body?: URLSearchParams; signal?: AbortSignal; errorPrefix: string },
+    options: {
+      context?: ProviderCallContext;
+      method: 'GET' | 'POST' | 'DELETE';
+      body?: URLSearchParams;
+      signal?: AbortSignal;
+      errorPrefix: string;
+    },
   ): Promise<TwilioPayload> {
-    const accountSid = this.requireConfig('accountSid');
-    const authToken = this.requireConfig('authToken');
+    const { accountSid, headers } = await this.account(options.context);
 
     const response = await this.fetchImpl()(`${this.baseUrl()}/Accounts/${accountSid}${path}`, {
       method: options.method,
       body: options.body,
       headers: {
-        authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+        ...headers,
         ...(options.body ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
       },
       signal: options.signal,

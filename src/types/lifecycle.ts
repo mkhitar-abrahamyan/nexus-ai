@@ -405,4 +405,18 @@ export interface OperationLifecycleLike {
     operation: Omit<OperationDescriptor, 'requestId'> & { requestId?: string },
     options?: OperationStartOptions,
   ): Promise<OperationTicket>;
+  /**
+   * What a provider call that continues an operation admitted earlier is given, such as a video job
+   * polled after a restart: its tenant's credentials and its residency, without admitting another
+   * operation. Optional; a family without it sends the configured key.
+   */
+  callContext?(
+    operation: Omit<OperationDescriptor, 'requestId'> & { requestId?: string },
+  ): Promise<ContinuedCallContext>;
+}
+
+/** What `callContext()` gives a provider call that continues an operation. */
+export interface ContinuedCallContext extends Pick<ProviderCallContext, 'tenantId' | 'credential' | 'residency'> {
+  /** Removes every credential it resolved from an error, in place, and returns it. */
+  scrub<E>(error: E): E;
 }

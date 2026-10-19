@@ -822,6 +822,9 @@ export class GeminiLiveTransport implements RealtimeTransport {
       return { kind: 'token', value: await this.options.ephemeralTokenProvider(config, signal) };
     }
     if (this.options.ephemeralToken) return { kind: 'token', value: this.options.ephemeralToken };
+    // A credential resolved for the session's tenant replaces the configured key.
+    const credential = await config.credential?.();
+    if (credential?.apiKey) return { kind: 'key', value: credential.apiKey };
     if (this.options.apiKey) return { kind: 'key', value: this.options.apiKey };
     throw new RealtimeError({
       message: 'Gemini Live needs an apiKey, an ephemeralToken, or an ephemeralTokenProvider',

@@ -58,7 +58,14 @@ New and stable:
   `emulationKey()`. What the emulator is told may be reworded in a minor release; a store's keys never
   change within a major;
 - `CallResidency.refusal()`, optional, and the optional `model` its `allows()`, `place()`, and
-  `check()` take.
+  `check()` take;
+- `OperationLifecycle.callContext()`, the optional `OperationLifecycleLike.callContext`, and
+  `ContinuedCallContext`;
+- `tenantId` on `BatchSubmitRequest`, `EmbeddingBatchSubmitRequest`, `MediaReadRequest`,
+  `MediaDescribeRequest`, `MediaAnswerRequest`, `TranscriptionRequest`, `SpeechRequest`, and every
+  telephony request that takes a `signal`; `MediaCallContext.tenantId` and `credential`;
+  `RealtimeSessionConfig.credential`; the optional context the OpenAI voice adapter and the Twilio and
+  Telnyx adapters take on each method that calls their API.
 
 The kinds `comparePolicies()` gives a change may be refined in a minor release: a change found to widen
 what a tenant may reach is reported as `widened` from then on, so a check may start to ask for an

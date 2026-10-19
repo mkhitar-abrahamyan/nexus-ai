@@ -1,3 +1,4 @@
+import type { ProviderCallContext } from '../../types/lifecycle.js';
 import type {
   SpeechRequest,
   SpeechResponse,
@@ -56,7 +57,7 @@ export class OpenAIVoiceProvider implements VoiceProvider {
   constructor(private config: OpenAIVoiceProviderConfig) {}
 
   /** Transcribes audio. */
-  async transcribe(request: TranscriptionRequest): Promise<TranscriptionResponse> {
+  async transcribe(request: TranscriptionRequest, context?: ProviderCallContext): Promise<TranscriptionResponse> {
     const model = request.model || this.config.transcriptionModel || DEFAULT_TRANSCRIPTION_MODEL;
     const form = new FormData();
     const audio = await this.prepareAudio(request.audio, request.signal);
@@ -71,11 +72,11 @@ export class OpenAIVoiceProvider implements VoiceProvider {
       form.append('timestamp_granularities[]', granularity);
     }
 
-    const response = await this.request('/audio/transcriptions', {
-      method: 'POST',
-      body: form,
-      signal: request.signal,
-    });
+    const response = await this.request(
+      '/audio/transcriptions',
+      { method: 'POST', body: form, signal: context?.signal ?? request.signal },
+      context,
+    );
 
     if (request.responseFormat === 'text' || request.responseFormat === 'srt' || request.responseFormat === 'vtt') {
       const text = await response.text();
@@ -107,7 +108,7 @@ export class OpenAIVoiceProvider implements VoiceProvider {
   }
 
   /** Synthesizes speech. */
-  async speak(request: SpeechRequest): Promise<SpeechResponse> {
+  async speak(request: SpeechRequest, context?: ProviderCallContext): Promise<SpeechResponse> {
     const model = request.model || this.config.speechModel || DEFAULT_SPEECH_MODEL;
     const format = request.format || 'mp3';
     const voice = request.voice || this.config.defaultVoice || DEFAULT_VOICE;
@@ -121,12 +122,16 @@ export class OpenAIVoiceProvider implements VoiceProvider {
     if (request.speed !== undefined) body.speed = request.speed;
     if (request.instructions) body.instructions = request.instructions;
 
-    const response = await this.request('/audio/speech', {
-      method: 'POST',
-      body: JSON.stringify(body),
-      headers: { 'content-type': 'application/json' },
-      signal: request.signal,
-    });
+    const response = await this.request(
+      '/audio/speech',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { 'content-type': 'application/json' },
+        signal: context?.signal ?? request.signal,
+      },
+      context,
+    );
     const data = new Uint8Array(await response.arrayBuffer());
     const mimeType = response.headers.get('content-type') || this.mimeType(format);
 
@@ -144,12 +149,16 @@ export class OpenAIVoiceProvider implements VoiceProvider {
     };
   }
 
-  private async request(path: string, init: RequestInit): Promise<Response> {
+  private async request(path: string, init: RequestInit, context?: ProviderCallContext): Promise<Response> {
     const fetchImpl = this.config.fetch || fetch;
+    // A credential resolved for the call's tenant replaces the configured key.
+    const credential = await context?.credential?.(this.info.name);
     const response = await fetchImpl(`${this.baseUrl()}${path}`, {
       ...init,
       headers: {
         ...this.authHeaders(),
+        ...(credential?.apiKey ? { authorization: `Bearer ${credential.apiKey}` } : {}),
+        ...credential?.headers,
         ...init.headers,
       },
     });

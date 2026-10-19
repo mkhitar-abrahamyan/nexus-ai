@@ -163,8 +163,8 @@ the operation) into a `ProviderCredential`, an `apiKey` and any `headers`. Every
 the lifecycle, so the resolver is asked for each provider a call reaches. An adapter sends what it
 returns in place of the key it was configured with: OpenAI and every OpenAI-compatible provider as a
 bearer token (in `api-key` for Azure, as its `credentialHeader` says), Anthropic in `x-api-key`,
-Gemini in the URL, Cohere, embeddings, and images in their own headers. A resolver that returns
-nothing leaves the configured key; one that throws refuses the call.
+Gemini in the URL, Cohere, embeddings, and images in their own headers, and every other family as
+below. A resolver that returns nothing leaves the configured key; one that throws refuses the call.
 
 `tenantCredentials()` is the resolver over a `SecretSource`, any object with `get(name)`. It reads
 the secret named `<tenant>/<provider>`, or `<provider>` for a call with no tenant, or whatever `name`
@@ -199,6 +199,36 @@ so a provider that says which key it refused is quoted with `[redacted]` in its 
 the logs, traces, and the provider health report see the cleaned error, and a credential is never
 part of a request, so it never reaches a trace or a cache.
 
+### In every family
+
+Each family takes the tenant as its requests do elsewhere, `tenantId`, and sends the tenant's key in
+place of the configured one:
+
+| Family | Requests that take `tenantId` | Sent as |
+| --- | --- | --- |
+| Video | `VideoGenerateRequest`, as before | Runway's bearer token; Veo's `x-goog-api-key`, in place of a configured key or access token |
+| Media understanding | `MediaReadRequest`, `MediaDescribeRequest`, `MediaAnswerRequest` | Mistral OCR's bearer token; a vision model through `modelMediaProvider()` is asked through the client with the tenant, so the client resolves its key |
+| Batches | `BatchSubmitRequest`, `EmbeddingBatchSubmitRequest` | Anthropic's `x-api-key`, OpenAI's bearer token, Gemini's `x-goog-api-key` |
+| Voice | `TranscriptionRequest`, `SpeechRequest` | OpenAI's bearer token |
+| Telephony | Every call, number, recording, and message request | Telnyx's bearer token; for Twilio, `<accountSid>:<authToken>` of the tenant's subaccount, which is used in the request's path too, or an auth token for the configured account |
+| Realtime | `RealtimeSessionConfig.tenantId`, as before | The OpenAI WebSocket's bearer token, Gemini Live's `key` |
+
+A video job or a batch outlives its operation: it is polled, collected, or cancelled later, by its
+ref, from any process. Its ref records the tenant it was started for, so every later call on it,
+`status()`, `resume()`, `cancel()`, `download()`, uses the tenant's key and is held to the tenant's
+regions; a ref recorded before 2.14 is resumed as the `tenantId` `resume()` names. These calls run
+outside an operation, through `OperationLifecycle.callContext()`: it gives a `ContinuedCallContext`,
+the tenant's credentials and residency and a `scrub()` for the call's errors, without authorizing,
+budgeting, or auditing another operation. `OperationLifecycleLike.callContext` is optional, so a
+lifecycle of your own without it leaves those calls on the configured key.
+
+A realtime session resolves its tenant's key for its provider when it connects and reconnects, as
+`RealtimeSessionConfig.credential`, which an application can also set itself. A key the application
+mints into an ephemeral token is the application's to choose, and an OpenAI SIP call is attached
+with the key of the project that received it, since the call belongs to that project. Every error the
+connection raises is cleaned of the key before the session reports it: to its listeners, its span,
+and the provider health report.
+
 ### Secret sources
 
 Each source reads a secret that does not exist as none, and throws when the store cannot be read.
@@ -218,7 +248,11 @@ methods it already has.
 outside a call.
 
 In the test suite, a provider of the test's own takes only the keys it is told are live. Each tenant's
-calls carry its own key through completions, streams, and embeddings. In a run of five calls whose
+calls carry its own key through completions, streams, and embeddings, and, against a stand-in for each
+provider's API, through video, media understanding, completion and embedding batches, voice,
+telephony, and realtime: a video job and a batch keep the tenant's key on every later call by their
+ref, from a manager built after a restart, a Twilio call goes out on the tenant's subaccount, and a
+SIP call keeps its project's key. In a run of five calls whose
 key is rotated after the second, and revoked by the provider, the third is refused, resolved again,
 and answered on the new key, and every call after it uses that key. A key the provider quotes back in
 its refusal is found in no error, stack, cause, audit event, log, trace, or health report.
@@ -233,8 +267,9 @@ its refusal is found in no error, stack, cause, audit event, log, trace, or heal
 - A cache, a checkpointer, or any other store the application gives the client is wherever the
   application put it. The response cache keeps each tenant's entries apart; to keep them in a region,
   give the region its own cache.
-- Realtime sessions, telephony, video, voice, media understanding, and batches send the key each
-  provider was configured with; per-tenant credentials reach completions, streams, embeddings, and
-  images.
+- A credential is resolved for the adapter's own name in the families that took it in 2.14, such as
+  `runway` or `twilio`: name each tenant's secret after it, as `acme/runway`.
+- The OpenAI realtime client-secret helpers and the WebRTC transport take the key or token they are
+  given: mint a tenant's ephemeral token with its key, read from the same resolver.
 - A resolved key is removed from errors when it is at least four characters long, and only where it
   appears whole.

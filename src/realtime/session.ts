@@ -297,7 +297,9 @@ export class RealtimeSession {
         this.flushOutbox();
         this.startSessionLimit();
         this.runTelemetry(() => this.connectionSpan?.end());
-      } catch (error) {
+      } catch (caught) {
+        // Cleaned of the tenant's key before the span, the health report, or an event sees it.
+        const error = this.ticket?.scrub ? this.ticket.scrub(caught) : caught;
         const normalized = toRealtimeError(error, {
           code: 'realtime_connect_failed',
           category: this.controller.signal.aborted ? 'abort' : 'network',
@@ -533,6 +535,8 @@ export class RealtimeSession {
       this.config.transport.on('audio', (event) => this.handleTransportAudio(event)),
       this.config.transport.on('error', (error) => {
         if (this.manualDisconnect && error.category === 'abort') return;
+        // Cleaned of the tenant's key, in place, before a listener sees it.
+        this.ticket?.scrub?.(error);
         this.applyEvent({ type: 'error', error, timestamp: this.clock.now() });
       }),
       this.config.transport.on('disconnected', (event) => this.handleTransportDisconnected(event)),
@@ -771,7 +775,8 @@ export class RealtimeSession {
           this.completeConnection(this.pendingConnectedEvent);
           this.flushOutbox();
           return;
-        } catch (error) {
+        } catch (caught) {
+          const error = this.ticket?.scrub ? this.ticket.scrub(caught) : caught;
           lastError = error;
           if (error instanceof RealtimeError && !error.retryable && error.category !== 'abort') break;
           if (this.controller.signal.aborted) break;
@@ -998,8 +1003,14 @@ export class RealtimeSession {
 
   private effectiveSessionConfig(config: RealtimeSessionConfig): RealtimeSessionConfig {
     const allowedTools = intersectAllowlists(config.toolExecution?.allowedTools, config.security?.toolAllowlist);
+    // The tenant's credential, read from the session's operation when the transport connects: the
+    // operation is admitted after this config is built.
+    const credential =
+      config.credential ??
+      (config.lifecycle ? async () => this.ticket?.context.credential?.(this.provider) : undefined);
     return {
       ...config,
+      ...(credential ? { credential } : {}),
       tools: allowedTools ? config.tools?.filter((tool) => allowedTools.includes(tool.name)) : config.tools,
       toolExecution: { ...config.toolExecution, allowedTools },
     };

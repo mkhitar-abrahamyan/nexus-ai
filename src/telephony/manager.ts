@@ -99,7 +99,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('createCall', request.provider || this.config.defaultProvider);
     const createCall = provider.createCall;
     if (!createCall) throw new TelephonyCapabilityError(provider.info.name, 'outbound calls');
-    return this.call('createCall', provider, request.signal, 'Telephony call creation', (context) =>
+    return this.call('createCall', provider, request, 'Telephony call creation', (context) =>
       createCall.call(provider, request, context),
     );
   }
@@ -133,7 +133,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('getCall', request.provider || this.config.defaultProvider);
     const getCall = provider.getCall;
     if (!getCall) throw new TelephonyCapabilityError(provider.info.name, 'call lookup');
-    return this.call('getCall', provider, request.signal, 'Telephony call lookup', (context) =>
+    return this.call('getCall', provider, request, 'Telephony call lookup', (context) =>
       getCall.call(provider, request, context),
     );
   }
@@ -143,7 +143,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('endCall', request.provider || this.config.defaultProvider);
     const endCall = provider.endCall;
     if (!endCall) throw new TelephonyCapabilityError(provider.info.name, 'call control');
-    return this.call('endCall', provider, request.signal, 'Telephony call hangup', (context) =>
+    return this.call('endCall', provider, request, 'Telephony call hangup', (context) =>
       endCall.call(provider, request, context),
     );
   }
@@ -165,7 +165,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('listPhoneNumbers', request.provider || this.config.defaultProvider);
     const listPhoneNumbers = provider.listPhoneNumbers;
     if (!listPhoneNumbers) throw new TelephonyCapabilityError(provider.info.name, 'phone number listing');
-    return this.call('listPhoneNumbers', provider, request.signal, 'Telephony phone number listing', (context) =>
+    return this.call('listPhoneNumbers', provider, request, 'Telephony phone number listing', (context) =>
       listPhoneNumbers.call(provider, request, context),
     );
   }
@@ -175,7 +175,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('updatePhoneNumber', request.provider || this.config.defaultProvider);
     const updatePhoneNumber = provider.updatePhoneNumber;
     if (!updatePhoneNumber) throw new TelephonyCapabilityError(provider.info.name, 'phone number updates');
-    return this.call('updatePhoneNumber', provider, request.signal, 'Telephony phone number update', (context) =>
+    return this.call('updatePhoneNumber', provider, request, 'Telephony phone number update', (context) =>
       updatePhoneNumber.call(provider, request, context),
     );
   }
@@ -190,7 +190,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('createWebhookResponse', request.provider || this.config.defaultProvider);
     const answerCall = provider.answerCall;
     if (answerCall) {
-      return this.call('answerCall', provider, request.signal, 'Telephony call answer', (context) =>
+      return this.call('answerCall', provider, request, 'Telephony call answer', (context) =>
         answerCall.call(provider, request, context),
       );
     }
@@ -202,7 +202,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('transferCall', request.provider || this.config.defaultProvider);
     const transferCall = provider.transferCall;
     if (!transferCall) throw new TelephonyCapabilityError(provider.info.name, 'call transfer');
-    return this.call('transferCall', provider, request.signal, 'Telephony call transfer', (context) =>
+    return this.call('transferCall', provider, request, 'Telephony call transfer', (context) =>
       transferCall.call(provider, request, context),
     );
   }
@@ -212,7 +212,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('joinConference', request.provider || this.config.defaultProvider);
     const joinConference = provider.joinConference;
     if (!joinConference) throw new TelephonyCapabilityError(provider.info.name, 'conferences');
-    return this.call('joinConference', provider, request.signal, 'Telephony conference join', (context) =>
+    return this.call('joinConference', provider, request, 'Telephony conference join', (context) =>
       joinConference.call(provider, request, context),
     );
   }
@@ -222,7 +222,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('startRecording', request.provider || this.config.defaultProvider);
     const startRecording = provider.startRecording;
     if (!startRecording) throw new TelephonyCapabilityError(provider.info.name, 'call recording');
-    return this.call('startRecording', provider, request.signal, 'Telephony recording start', (context) =>
+    return this.call('startRecording', provider, request, 'Telephony recording start', (context) =>
       startRecording.call(provider, request, context),
     );
   }
@@ -232,7 +232,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('stopRecording', request.provider || this.config.defaultProvider);
     const stopRecording = provider.stopRecording;
     if (!stopRecording) throw new TelephonyCapabilityError(provider.info.name, 'call recording');
-    return this.call('stopRecording', provider, request.signal, 'Telephony recording stop', (context) =>
+    return this.call('stopRecording', provider, request, 'Telephony recording stop', (context) =>
       stopRecording.call(provider, request, context),
     );
   }
@@ -252,7 +252,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('downloadRecording', request.provider || request.recording.providerUsed);
     const downloadRecording = provider.downloadRecording;
     if (!downloadRecording) throw new TelephonyCapabilityError(provider.info.name, 'recording downloads');
-    return this.call('downloadRecording', provider, request.signal, 'Telephony recording download', (context) =>
+    return this.call('downloadRecording', provider, request, 'Telephony recording download', (context) =>
       downloadRecording.call(provider, request, context),
     );
   }
@@ -262,7 +262,7 @@ export class TelephonyManager {
     const provider = this.resolveProvider('deleteRecording', request.provider || this.config.defaultProvider);
     const deleteRecording = provider.deleteRecording;
     if (!deleteRecording) throw new TelephonyCapabilityError(provider.info.name, 'recording deletion');
-    return this.call('deleteRecording', provider, request.signal, 'Telephony recording delete', (context) =>
+    return this.call('deleteRecording', provider, request, 'Telephony recording delete', (context) =>
       deleteRecording.call(provider, request, context),
     );
   }
@@ -281,7 +281,12 @@ export class TelephonyManager {
       throw new TelephonyProviderError('A message needs a body, media, or both', name);
     }
     return this.messaging.run(
-      { operation: 'sendMessage', provider: name, ...(request.signal ? { signal: request.signal } : {}) },
+      {
+        operation: 'sendMessage',
+        provider: name,
+        tenantId: request.tenantId,
+        ...(request.signal ? { signal: request.signal } : {}),
+      },
       async (context) => {
         try {
           return await sendMessage.call(provider, request, context);
@@ -332,19 +337,23 @@ export class TelephonyManager {
   private call<T>(
     operation: string,
     provider: TelephonyProvider,
-    signal: AbortSignal | undefined,
+    request: { signal?: AbortSignal; tenantId?: string },
     action: string,
     fn: (context: ProviderCallContext) => Promise<T>,
   ): Promise<T> {
     const name = provider.info.name;
-    return this.telemetry.run({ operation, provider: name, ...(signal ? { signal } : {}) }, async (context) => {
-      try {
-        return await fn(context);
-      } catch (error) {
-        if (error instanceof TelephonyProviderError) throw error;
-        throw new TelephonyProviderError(`${action} failed for provider "${name}"`, name, error);
-      }
-    });
+    const { signal, tenantId } = request;
+    return this.telemetry.run(
+      { operation, provider: name, tenantId, ...(signal ? { signal } : {}) },
+      async (context) => {
+        try {
+          return await fn(context);
+        } catch (error) {
+          if (error instanceof TelephonyProviderError) throw error;
+          throw new TelephonyProviderError(`${action} failed for provider "${name}"`, name, error);
+        }
+      },
+    );
   }
 
   private resolveProvider(capability: TelephonyCapability, preferred?: string): TelephonyProvider {

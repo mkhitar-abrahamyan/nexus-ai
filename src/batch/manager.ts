@@ -16,6 +16,7 @@ import { OperationRunner } from '../operations/runner.js';
 import { estimateCost } from '../optimizer/cost.js';
 import { DEFAULT_CURRENCY } from '../optimizer/cost.js';
 import { generateRequestId } from '../utils/ids.js';
+import { type ContinuedFields, continuing } from '../lifecycle/continue.js';
 import { withLifecycle } from '../lifecycle/run.js';
 import type { OperationLifecycleLike } from '../types/lifecycle.js';
 import { BatchCapabilityError, BatchProviderNotFoundError, BatchValidationError } from './errors.js';
@@ -111,6 +112,7 @@ export class BatchManager {
             operation: 'batch.submit',
             requestId,
             provider: providerName,
+            ...(request.tenantId !== undefined ? { tenantId: request.tenantId } : {}),
             metadata: { items: request.items.length },
           },
           {
@@ -130,7 +132,7 @@ export class BatchManager {
             // would run, and bill, both. Its ref is recorded the moment it exists.
             let ref = (operation.previousHeartbeat as { batchRef?: BatchJobRef } | undefined)?.batchRef;
             if (!ref) {
-              ref = await provider.submit(request, context);
+              ref = withTenant(await provider.submit(request, context), request.tenantId);
               await operation.heartbeat({ batchRef: ref });
             }
             operation.report({ completed: 0, total: request.items.length, message: `submitted as ${ref.id}` });
@@ -156,36 +158,62 @@ export class BatchManager {
   async resume(ref: BatchJobRef, options: Partial<BatchSubmitRequest> = {}): Promise<BatchJobResult> {
     const provider = this.providers.get(ref.provider);
     if (!provider) throw new BatchProviderNotFoundError(ref.provider);
-
-    const context: BatchProviderCallContext = {
-      requestId: generateRequestId(),
-      signal: options.signal ?? new AbortController().signal,
-      attempt: 1,
-    };
-    return this.collect(provider, ref, options, undefined, context);
+    return this.continuing('batch.collect', ref, options.tenantId, (continued) =>
+      this.collect(provider, ref, options, undefined, {
+        ...continued,
+        requestId: generateRequestId(),
+        signal: options.signal ?? new AbortController().signal,
+        attempt: 1,
+      }),
+    );
   }
 
   /** Current provider-side state, without waiting. */
   async status(ref: BatchJobRef): Promise<BatchJobState> {
     const provider = this.providers.get(ref.provider);
     if (!provider) throw new BatchProviderNotFoundError(ref.provider);
-    return provider.poll(ref, {
-      requestId: generateRequestId(),
-      signal: new AbortController().signal,
-      attempt: 1,
-    });
+    return this.continuing('batch.status', ref, undefined, (continued) =>
+      provider.poll(ref, {
+        ...continued,
+        requestId: generateRequestId(),
+        signal: new AbortController().signal,
+        attempt: 1,
+      }),
+    );
   }
 
   /** Cancels a batch. Throws when the provider cannot cancel. */
   async cancel(ref: BatchJobRef): Promise<BatchJobState> {
     const provider = this.providers.get(ref.provider);
     if (!provider) throw new BatchProviderNotFoundError(ref.provider);
-    if (!provider.cancel) throw new BatchCapabilityError(ref.provider, 'cancel');
-    return provider.cancel(ref, {
-      requestId: generateRequestId(),
-      signal: new AbortController().signal,
-      attempt: 1,
-    });
+    const cancel = provider.cancel;
+    if (!cancel) throw new BatchCapabilityError(ref.provider, 'cancel');
+    return this.continuing('batch.cancel', ref, undefined, (continued) =>
+      cancel.call(provider, ref, {
+        ...continued,
+        requestId: generateRequestId(),
+        signal: new AbortController().signal,
+        attempt: 1,
+      }),
+    );
+  }
+
+  /**
+   * A call on a batch outside its operation, as the tenant its ref records, or `tenantId` for a ref
+   * made before refs recorded one: with the tenant's key, inside its regions.
+   */
+  private continuing<T>(
+    operation: string,
+    ref: BatchJobRef,
+    tenantId: string | undefined,
+    call: (context: ContinuedFields) => Promise<T>,
+  ): Promise<T> {
+    const tenant = tenantOf(ref) ?? tenantId;
+    return continuing(
+      this.runtime.lifecycle,
+      { family: 'batch', operation, provider: ref.provider, ...(tenant !== undefined ? { tenantId: tenant } : {}) },
+      call,
+    );
   }
 
   // ── Internals ────────────────────────────────────────────────────
@@ -350,4 +378,15 @@ function sumUsage(items: BatchOutputItem[]): TokenUsage {
     outputTokens += usage.outputTokens;
   }
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+}
+
+/** A ref that records the tenant its batch runs for, beside what its adapter keeps. */
+function withTenant(ref: BatchJobRef, tenantId: string | undefined): BatchJobRef {
+  return tenantId === undefined ? ref : { ...ref, metadata: { ...ref.metadata, batch: { tenantId } } };
+}
+
+/** The tenant a ref records. */
+function tenantOf(ref: BatchJobRef): string | undefined {
+  const notes = ref.metadata?.batch as { tenantId?: unknown } | undefined;
+  return typeof notes?.tenantId === 'string' ? notes.tenantId : undefined;
 }

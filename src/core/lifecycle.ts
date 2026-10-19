@@ -4,6 +4,7 @@ import { NexusRateLimitError, type RateLimiter } from '../ops/rate-limiter.js';
 import type { AuditLogEvent, RateLimitConfig } from '../types/config.js';
 import type {
   BudgetReservation,
+  ContinuedCallContext,
   LifecycleConfig,
   LifecycleStage,
   OperationDescriptor,
@@ -205,6 +206,28 @@ export class OperationLifecycle implements OperationLifecycleLike {
       await ticket.fail(error);
       throw error;
     }
+  }
+
+  /**
+   * What a provider call that continues an operation admitted earlier is given, such as a video job
+   * polled after a restart or a batch collected by another worker: its tenant's credentials, resolved
+   * as `start()` resolves them, its residency, and a `scrub()` that keeps them out of its errors.
+   * Nothing is authorized, budgeted, or audited: the operation it continues was.
+   */
+  async callContext(
+    input: Omit<OperationDescriptor, 'requestId'> & { requestId?: string },
+  ): Promise<ContinuedCallContext> {
+    const descriptor: OperationDescriptor = { ...input, requestId: input.requestId?.trim() || generateRequestId() };
+    const credentials = this.runtime.config?.credentials
+      ? new CallCredentials(this.runtime.config.credentials, descriptor)
+      : undefined;
+    const residency = await this.access(descriptor);
+    return {
+      ...(descriptor.tenantId !== undefined ? { tenantId: descriptor.tenantId } : {}),
+      ...(credentials ? { credential: (provider: string) => credentials.resolve(provider) } : {}),
+      ...(residency ? { residency } : {}),
+      scrub: (error) => (credentials ? scrubSecrets(error, credentials.secrets) : error),
+    };
   }
 
   /**

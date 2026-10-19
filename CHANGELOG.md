@@ -24,9 +24,23 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   charges cards or writes to a database sends nothing. Answers are kept by tool, arguments, scenario,
   and call, and replayed, so a suite runs the same answers in CI without a model; tools that change
   nothing can run for real.
+- **Credentials per tenant in every family.** Video, media understanding, completion and embedding
+  batches, voice, telephony, and realtime sessions send the tenant's key, resolved by
+  `LifecycleConfig.credentials`, in place of the configured one, as completions, embeddings, and images
+  have since 2.13. Each takes `tenantId` on its requests. A video job's or a batch's ref records its
+  tenant, so `status()`, `resume()`, `cancel()`, and `download()` use the tenant's key and regions from
+  any process, through the new `OperationLifecycle.callContext()`. A Twilio tenant's calls go out on its
+  subaccount; an OpenAI SIP call keeps its project's key.
 - `ai.lifecycle.access()` returns the `CallResidency` an operation would get, and
   `CallResidency.refusal()` says why a provider would be refused once placed on its twin; `allows()`,
   `place()`, and `check()` take the model as well.
+
+### Fixed
+
+- `VideoManager.start()` and the calls on a video ref, and `EmbeddingBatchManager.start()` and the
+  calls on its refs, ran outside the client's residency policy; they are held to the tenant's regions
+  now. A durable video generation ran its operation without its tenant, so a tenant's budget and rate
+  limit did not apply to it.
 
 ## [2.13.0] - 2026-10-19
 

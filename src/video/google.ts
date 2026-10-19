@@ -264,10 +264,17 @@ export class GoogleVideoProvider implements VideoProvider {
   private async send(url: string, init: RequestInit, context: VideoCallContext): Promise<Response> {
     const headers = new Headers(this.config.defaultHeaders);
     if (init.body) headers.set('content-type', 'application/json');
-    const token =
-      typeof this.config.accessToken === 'function' ? await this.config.accessToken() : this.config.accessToken;
-    if (token) headers.set('authorization', `Bearer ${token}`);
+    // A credential resolved for the call's tenant replaces the configured key or token.
+    const credential = await context.credential?.(this.info.name);
+    const token = credential
+      ? undefined
+      : typeof this.config.accessToken === 'function'
+        ? await this.config.accessToken()
+        : this.config.accessToken;
+    if (credential?.apiKey) headers.set('x-goog-api-key', credential.apiKey);
+    else if (token) headers.set('authorization', `Bearer ${token}`);
     else if (this.config.apiKey) headers.set('x-goog-api-key', this.config.apiKey);
+    for (const [name, value] of Object.entries(credential?.headers ?? {})) headers.set(name, value);
     try {
       return await this.fetchImplementation(url, { ...init, headers, signal: context.signal });
     } catch (error) {

@@ -149,10 +149,13 @@ export class OpenAIBatchClient {
   private async send(path: string, init: RequestInit, context: BatchProviderCallContext): Promise<Response> {
     const fetchImpl = this.options.fetch ?? fetch;
     const baseUrl = (this.options.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
+    // A credential resolved for the batch's tenant replaces the configured key.
+    const credential = await context.credential?.('openai');
     const headers: Record<string, string> = {
-      authorization: `Bearer ${this.options.apiKey}`,
+      authorization: `Bearer ${credential?.apiKey ?? this.options.apiKey}`,
       ...(this.options.organization ? { 'openai-organization': this.options.organization } : {}),
       ...this.options.headers,
+      ...credential?.headers,
       ...((init.headers as Record<string, string>) ?? {}),
     };
     const response = await fetchImpl(`${baseUrl}${path}`, { ...init, headers, signal: context.signal });

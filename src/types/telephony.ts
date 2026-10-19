@@ -195,6 +195,8 @@ export interface CreateCallRequest {
   machineDetection?: 'enable' | 'detect-message-end';
   /** Application data, not sent to the provider. */
   metadata?: Record<string, unknown>;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request to place the call. The call may already be ringing. */
   signal?: AbortSignal;
 }
@@ -223,6 +225,8 @@ export interface GetCallRequest {
   provider?: string;
   /** The provider's id for the call. */
   callId: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the lookup. */
   signal?: AbortSignal;
 }
@@ -235,6 +239,8 @@ export interface EndCallRequest {
   callId: string;
   /** Provider-side end state. `completed` hangs up; `canceled` drops a call that has not been answered. */
   status?: 'completed' | 'canceled';
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
 }
@@ -339,6 +345,8 @@ export interface ListPhoneNumbersRequest {
   phoneNumber?: string;
   /** Numbers per page. */
   pageSize?: number;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
 }
@@ -372,6 +380,8 @@ export interface UpdatePhoneNumberRequest {
   smsFallbackUrl?: string;
   /** HTTP method for `smsFallbackUrl`. */
   smsFallbackMethod?: TelephonyHttpMethod;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
 }
@@ -538,6 +548,8 @@ export interface TelephonyOutboundAudioMessage {
 export interface AnswerCallRequest extends TelephonyResponseRequest {
   /** The provider's id for the call. */
   callId: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the commands not yet sent. */
   signal?: AbortSignal;
 }
@@ -554,6 +566,8 @@ export interface TransferCallRequest {
   from?: string;
   /** Seconds to let the one called ring. */
   timeoutSeconds?: number;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
 }
@@ -576,6 +590,8 @@ export interface JoinConferenceRequest extends TelephonyConferenceConfig {
   provider?: string;
   /** The provider's id for the call. */
   callId: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
 }
@@ -604,6 +620,8 @@ export interface StartRecordingRequest {
   channels?: 'single' | 'dual';
   /** Where the provider reports the recording once it is ready, when it reports per request. */
   statusCallbackUrl?: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
 }
@@ -616,6 +634,8 @@ export interface StopRecordingRequest {
   callId: string;
   /** The recording to stop, on a provider that names them. Defaults to the call's current one. */
   recordingId?: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
 }
@@ -658,6 +678,8 @@ export interface DownloadRecordingRequest {
   provider?: string;
   /** The recording, as `parseRecordingCallback()` reported it. */
   recording: TelephonyRecording;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the download. */
   signal?: AbortSignal;
 }
@@ -676,6 +698,8 @@ export interface DeleteRecordingRequest {
   provider?: string;
   /** The provider's id for the recording. */
   recordingId: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
 }
@@ -707,6 +731,8 @@ export interface SendMessageRequest {
   statusCallbackUrl?: string;
   /** Application data, not sent to the provider. */
   metadata?: Record<string, unknown>;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
 }

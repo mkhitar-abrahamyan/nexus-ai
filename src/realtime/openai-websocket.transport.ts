@@ -171,7 +171,7 @@ export class OpenAIWebSocketTransport implements RealtimeTransport {
       });
       if (generation !== this.generation || this.state !== 'connecting') throw this.abortError();
       const usingGlobalFactory = !this.options.webSocketFactory;
-      if (usingGlobalFactory && (!token || this.options.apiKey)) {
+      if (usingGlobalFactory && (!token.value || token.key || this.options.apiKey)) {
         throw new RealtimeError({
           message:
             'The global WebSocket adapter requires an ephemeral token; use an injected factory for server API keys',
@@ -183,10 +183,11 @@ export class OpenAIWebSocketTransport implements RealtimeTransport {
 
       const headers = {
         'openai-beta': 'realtime=v1',
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
         ...(this.options.headers || {}),
+        ...token.headers,
       };
-      const protocols = usingGlobalFactory ? this.browserProtocols(token as string) : this.options.protocols;
+      const protocols = usingGlobalFactory ? this.browserProtocols(token.value as string) : this.options.protocols;
       const socket = this.createSocket(this.url(config.model), { headers, protocols });
       this.socket = socket;
       socket.binaryType = 'arraybuffer';
@@ -437,10 +438,19 @@ export class OpenAIWebSocketTransport implements RealtimeTransport {
     return this.socket;
   }
 
-  private async resolveToken(config: RealtimeSessionConfig, signal?: AbortSignalLike): Promise<string | undefined> {
-    if (this.options.ephemeralTokenProvider) return this.options.ephemeralTokenProvider(config, signal);
-    if (this.options.ephemeralToken) return this.options.ephemeralToken;
-    return this.options.apiKey;
+  /** The token to connect with, and whether it is a key: a minted token, the tenant's key, or the configured one. */
+  private async resolveToken(
+    config: RealtimeSessionConfig,
+    signal?: AbortSignalLike,
+  ): Promise<{ value?: string; key: boolean; headers?: Record<string, string> }> {
+    if (this.options.ephemeralTokenProvider) {
+      return { value: await this.options.ephemeralTokenProvider(config, signal), key: false };
+    }
+    if (this.options.ephemeralToken) return { value: this.options.ephemeralToken, key: false };
+    // A SIP call belongs to the project that received it: it is attached with that project's key.
+    const credential = this.options.callId ? undefined : await config.credential?.();
+    if (credential?.apiKey) return { value: credential.apiKey, key: true, headers: credential.headers };
+    return { value: this.options.apiKey, key: Boolean(this.options.apiKey) };
   }
 
   private createSocket(url: string, options: OpenAIWebSocketFactoryOptions): RealtimeWebSocketLike {

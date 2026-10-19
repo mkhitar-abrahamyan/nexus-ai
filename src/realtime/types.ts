@@ -1,4 +1,4 @@
-import type { OperationLifecycleLike } from '../types/lifecycle.js';
+import type { OperationLifecycleLike, ProviderCredential } from '../types/lifecycle.js';
 import type { Principal } from '../types/principal.js';
 import type { RealtimeError } from './errors.js';
 
@@ -909,6 +909,13 @@ export interface RealtimeSessionConfig {
    * provider health.
    */
   lifecycle?: OperationLifecycleLike;
+  /**
+   * The key to connect with in place of the transport's configured one, such as the tenant's. A
+   * session run through a lifecycle with a credential resolver resolves its tenant's for its provider
+   * when it connects; a key the application mints into an ephemeral token is not replaced, and neither
+   * is the key of an OpenAI SIP call, which belongs to the project that received it.
+   */
+  credential?: () => Promise<ProviderCredential | undefined>;
   /** The tenant the session's operations are for, for budgets, rate limits, and audit. Defaults to the principal's. */
   tenantId?: string;
   /** The user the session's operations are for. Defaults to the principal's. */

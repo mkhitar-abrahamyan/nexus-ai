@@ -60,6 +60,8 @@ export interface TranscriptionRequest {
   responseFormat?: 'json' | 'text' | 'verbose_json' | 'srt' | 'vtt';
   /** Timestamp detail to include, per word or per segment. */
   timestampGranularities?: Array<'word' | 'segment'>;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
   /** Application data carried through to records. */
@@ -124,6 +126,8 @@ export interface SpeechRequest {
   speed?: number;
   /** How to speak it — tone, pace, emotion — for models that take direction. */
   instructions?: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
   /** Application data carried through to records. */

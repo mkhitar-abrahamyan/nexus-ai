@@ -202,6 +202,12 @@ providers and models each operation may reach, and `policy`, the `PolicyReferenc
 audit event records, as the [policy guide](./policy.md) describes. `applyPolicy()` sets them all from
 one file.
 
+`callContext()` gives a provider call that continues an operation admitted earlier, such as a video
+job polled by its ref, what that operation's calls get: a `ContinuedCallContext` with the tenant's
+credentials, its residency, and a `scrub()` for the call's errors, without authorizing, budgeting, or
+auditing another operation. A family calls it through `OperationLifecycleLike.callContext`, which is
+optional.
+
 ## Graphs, agents, sessions, queues, and batches
 
 Code outside the client takes the client's lifecycle as an option, `ai.lifecycle`. Its runs then

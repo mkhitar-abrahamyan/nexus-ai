@@ -236,7 +236,10 @@ export class RunwayVideoProvider implements VideoProvider {
 
   private async call<T>(path: string, init: RequestInit, context: VideoCallContext): Promise<T> {
     const headers = new Headers(this.config.defaultHeaders);
-    headers.set('authorization', `Bearer ${this.config.apiKey}`);
+    // A credential resolved for the call's tenant replaces the configured key.
+    const credential = await context.credential?.(this.info.name);
+    headers.set('authorization', `Bearer ${credential?.apiKey ?? this.config.apiKey}`);
+    for (const [name, value] of Object.entries(credential?.headers ?? {})) headers.set(name, value);
     headers.set('x-runway-version', this.config.version ?? API_VERSION);
     if (init.body) headers.set('content-type', 'application/json');
     let response: Response;

@@ -226,13 +226,16 @@ export class AnthropicBatchProvider implements BatchProvider {
   private async send(path: string, init: RequestInit, context: BatchProviderCallContext): Promise<Response> {
     const fetchImpl = this.options.fetch ?? fetch;
     const baseUrl = (this.options.baseUrl || 'https://api.anthropic.com/v1').replace(/\/$/, '');
+    // A credential resolved for the batch's tenant replaces the configured key.
+    const credential = await context.credential?.(this.info.name);
     const response = await fetchImpl(`${baseUrl}${path}`, {
       ...init,
       headers: {
-        'x-api-key': this.options.apiKey,
+        'x-api-key': credential?.apiKey ?? this.options.apiKey,
         'anthropic-version': this.options.version ?? '2023-06-01',
         'content-type': 'application/json',
         ...this.options.headers,
+        ...credential?.headers,
         ...((init.headers as Record<string, string>) ?? {}),
       },
       signal: context.signal,

@@ -4,6 +4,7 @@
  */
 import { BatchCapabilityError, BatchProviderNotFoundError, BatchValidationError } from '../batch/errors.js';
 import { pollUntilSettled } from '../batch/poll.js';
+import { type ContinuedFields, continuing } from '../lifecycle/continue.js';
 import type {
   BatchCounts,
   BatchJobRef,
@@ -58,6 +59,11 @@ export interface EmbeddingBatchSubmitRequest {
   completionWindow?: string;
   /** Replays the operation accepted under this key instead of submitting a second batch. */
   idempotencyKey?: string;
+  /**
+   * The tenant it runs for: its credentials, regions, and budget apply, and its ref records it, so
+   * every later call on the batch uses the tenant's key.
+   */
+  tenantId?: string;
   /** Labels attached to the batch on the provider's side. */
   metadata?: Record<string, string>;
   /** Overrides the manager's poll interval. */
@@ -194,6 +200,8 @@ interface RefNotes {
   images?: number;
   normalize?: boolean;
   items?: number;
+  /** The tenant the batch runs for, whose key every later call on it uses. */
+  tenant?: string;
 }
 
 /**
@@ -264,6 +272,7 @@ export class EmbeddingBatchManager {
             requestId,
             provider: providerName,
             model: request.model,
+            ...(request.tenantId !== undefined ? { tenantId: request.tenantId } : {}),
             metadata: { items: request.items.length },
           },
           { signal: operation.signal, ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}) },
@@ -304,13 +313,18 @@ export class EmbeddingBatchManager {
   async start(request: EmbeddingBatchSubmitRequest): Promise<BatchJobRef> {
     const [providerName, provider] = this.resolveProvider(request.provider);
     const prepared = this.prepare(request, providerName, provider);
-    const ref = await provider.submit(prepared.request, {
-      requestId: generateRequestId(),
-      signal: request.signal ?? new AbortController().signal,
-      idempotencyKey: request.idempotencyKey,
-      attempt: 1,
-    });
-    return withNotes(ref, prepared.notes);
+    return this.continuing('embedding.batch.submit', providerName, request.model, request.tenantId, async (context) =>
+      withNotes(
+        await provider.submit(prepared.request, {
+          ...context,
+          requestId: generateRequestId(),
+          signal: request.signal ?? new AbortController().signal,
+          idempotencyKey: request.idempotencyKey,
+          attempt: 1,
+        }),
+        prepared.notes,
+      ),
+    );
   }
 
   /** Waits for a batch, submitted here or by another process, and collects it. */
@@ -319,27 +333,67 @@ export class EmbeddingBatchManager {
     options: { signal?: AbortSignal; pollIntervalMs?: number } = {},
   ): Promise<EmbeddingBatchResult> {
     const provider = this.providerFor(ref);
-    return this.collect(provider, ref, options.pollIntervalMs, {
-      requestId: generateRequestId(),
-      signal: options.signal ?? new AbortController().signal,
-      attempt: 1,
-    });
+    return this.continuing(
+      'embedding.batch.collect',
+      ref.provider,
+      notesOf(ref).model,
+      notesOf(ref).tenant,
+      (context) =>
+        this.collect(provider, ref, options.pollIntervalMs, {
+          ...context,
+          requestId: generateRequestId(),
+          signal: options.signal ?? new AbortController().signal,
+          attempt: 1,
+        }),
+    );
   }
 
   /** The batch's state now, without waiting. */
   async status(ref: BatchJobRef): Promise<BatchJobState> {
-    return this.providerFor(ref).poll(ref, {
-      requestId: generateRequestId(),
-      signal: new AbortController().signal,
-      attempt: 1,
-    });
+    return this.continuing('embedding.batch.status', ref.provider, notesOf(ref).model, notesOf(ref).tenant, (context) =>
+      this.providerFor(ref).poll(ref, {
+        ...context,
+        requestId: generateRequestId(),
+        signal: new AbortController().signal,
+        attempt: 1,
+      }),
+    );
   }
 
   /** Cancels a batch. Throws when the adapter cannot cancel. */
   async cancel(ref: BatchJobRef): Promise<BatchJobState> {
     const provider = this.providerFor(ref);
-    if (!provider.cancel) throw new BatchCapabilityError(ref.provider, 'cancel');
-    return provider.cancel(ref, { requestId: generateRequestId(), signal: new AbortController().signal, attempt: 1 });
+    const cancel = provider.cancel;
+    if (!cancel) throw new BatchCapabilityError(ref.provider, 'cancel');
+    return this.continuing('embedding.batch.cancel', ref.provider, notesOf(ref).model, notesOf(ref).tenant, (context) =>
+      cancel.call(provider, ref, {
+        ...context,
+        requestId: generateRequestId(),
+        signal: new AbortController().signal,
+        attempt: 1,
+      }),
+    );
+  }
+
+  /** A call on a batch outside its operation: with its tenant's key, inside its regions. */
+  private continuing<T>(
+    operation: string,
+    provider: string,
+    model: string | undefined,
+    tenant: string | undefined,
+    call: (context: ContinuedFields) => Promise<T>,
+  ): Promise<T> {
+    return continuing(
+      this.runtime.lifecycle,
+      {
+        family: 'embedding',
+        operation,
+        provider,
+        ...(model !== undefined ? { model } : {}),
+        ...(tenant !== undefined ? { tenantId: tenant } : {}),
+      },
+      call,
+    );
   }
 
   // ── Internals ────────────────────────────────────────────────────
@@ -402,6 +456,7 @@ export class EmbeddingBatchManager {
         images: inputs.images.reduce((total, count) => total + count, 0),
         items: request.items.length,
         ...(request.normalize ? { normalize: true } : {}),
+        ...(request.tenantId !== undefined ? { tenant: request.tenantId } : {}),
       },
     };
   }
@@ -488,6 +543,10 @@ export class EmbeddingBatchManager {
 
 function withNotes(ref: BatchJobRef, notes: RefNotes): BatchJobRef {
   return { ...ref, metadata: { ...ref.metadata, embedding: notes } };
+}
+
+function notesOf(ref: BatchJobRef): RefNotes {
+  return (ref.metadata?.embedding ?? {}) as RefNotes;
 }
 
 function unitLength(vector: number[]): number[] {

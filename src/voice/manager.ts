@@ -66,7 +66,13 @@ export class VoiceManager {
     if (!transcribe) throw new VoiceCapabilityError(provider.info.name, 'transcription');
 
     return this.telemetry.run(
-      { operation: 'transcribe', provider: provider.info.name, model: request.model, signal: request.signal },
+      {
+        operation: 'transcribe',
+        provider: provider.info.name,
+        model: request.model,
+        tenantId: request.tenantId,
+        signal: request.signal,
+      },
       (context) => this.callTranscribe(provider.info.name, transcribe.bind(provider), request, context),
     );
   }
@@ -92,7 +98,13 @@ export class VoiceManager {
     if (!speak) throw new VoiceCapabilityError(provider.info.name, 'speech');
 
     return this.telemetry.run(
-      { operation: 'speak', provider: provider.info.name, model: request.model, signal: request.signal },
+      {
+        operation: 'speak',
+        provider: provider.info.name,
+        model: request.model,
+        tenantId: request.tenantId,
+        signal: request.signal,
+      },
       (context) => this.callSpeak(provider.info.name, speak.bind(provider), request, context),
     );
   }

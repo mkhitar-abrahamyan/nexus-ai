@@ -189,9 +189,16 @@ export class GoogleEmbeddingBatchProvider implements EmbeddingBatchProvider {
   private async request(path: string, init: RequestInit, context: BatchProviderCallContext): Promise<unknown> {
     const fetchImpl = this.options.fetch ?? fetch;
     const base = (this.options.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '');
+    // A credential resolved for the batch's tenant replaces the configured key.
+    const credential = await context.credential?.(this.info.name);
     const response = await fetchImpl(`${base}${path}`, {
       ...init,
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.options.apiKey, ...this.options.headers },
+      headers: {
+        'content-type': 'application/json',
+        'x-goog-api-key': credential?.apiKey ?? this.options.apiKey,
+        ...this.options.headers,
+        ...credential?.headers,
+      },
       signal: context.signal,
     });
     const text = await response.text();

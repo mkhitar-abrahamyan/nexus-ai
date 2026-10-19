@@ -70,6 +70,11 @@ export interface BatchSubmitRequest {
   completionWindow?: string;
   /** Replays an accepted batch instead of submitting a second one. */
   idempotencyKey?: string;
+  /**
+   * The tenant it runs for: its credentials, regions, and budget apply, and its ref records it, so
+   * every later call on the batch uses the tenant's key.
+   */
+  tenantId?: string;
   /** Labels attached to the batch on the provider's side, for its console and billing exports. */
   metadata?: Record<string, string>;
   /** Overrides the manager's poll interval for this batch. */

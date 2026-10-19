@@ -6,6 +6,7 @@
  */
 import { pollUntilSettled } from '../batch/poll.js';
 import type { AssetByteSource, AssetStore } from '../images/asset-support.js';
+import { type ContinuedFields, continuing } from '../lifecycle/continue.js';
 import type { AssetDescriptor, AssetInput, AssetLocation } from '../types/images.js';
 import type { OperationLifecycleLike, ProviderCallContext } from '../types/lifecycle.js';
 import type { DurableOperationHandle, OperationContext, OperationRunnerConfig } from '../types/operations.js';
@@ -412,6 +413,8 @@ interface VideoJob {
   requestId: string;
   delivery: 'store' | 'bytes';
   tenantId: string;
+  /** The tenant the operation runs for, when the request or the manager names one. */
+  tenant?: string;
   ttlSeconds?: number;
   pollIntervalMs?: number;
   idempotencyKey?: string;
@@ -431,6 +434,8 @@ interface RefNotes {
   count?: number;
   requestId?: string;
   labels?: Record<string, string>;
+  /** The tenant the job runs for, whose credentials every later call to its provider uses. */
+  tenant?: string;
 }
 
 type SerializedInput = Omit<AssetInput, 'location'> & {
@@ -523,6 +528,7 @@ export class VideoManager {
       requestId: generateRequestId(),
       delivery: this.deliveryFor(request.delivery),
       tenantId: request.tenantId ?? this.config.tenantId ?? 'default',
+      ...ifDefined('tenant', request.tenantId ?? this.config.tenantId),
       ...ifDefined('ttlSeconds', request.ttlSeconds ?? this.config.ttlSeconds),
       ...ifDefined('pollIntervalMs', request.pollIntervalMs),
       ...ifDefined('idempotencyKey', request.idempotencyKey),
@@ -556,49 +562,63 @@ export class VideoManager {
     const [providerName, provider] = this.resolveProvider(request.provider);
     const prepared = await this.prepare(request, providerName, provider);
     const requestId = generateRequestId();
-    const ref = await provider.submit(prepared, {
-      requestId,
-      signal: request.signal ?? new AbortController().signal,
-      idempotencyKey: request.idempotencyKey,
-      attempt: 1,
+    const tenant = request.tenantId ?? this.config.tenantId;
+    return this.continuing('video.submit', providerName, prepared.model, tenant, async (context) => {
+      const ref = await provider.submit(prepared, {
+        ...context,
+        requestId,
+        signal: request.signal ?? new AbortController().signal,
+        idempotencyKey: request.idempotencyKey,
+        attempt: 1,
+      });
+      return withNotes(ref, notesFor(prepared, provider, requestId, tenant));
     });
-    return withNotes(ref, notesFor(prepared, provider, requestId));
   }
 
   /** Waits for a job, submitted here or by another process, and collects its videos. */
   async resume(ref: VideoJobRef, options: VideoCollectOptions = {}): Promise<VideoResult> {
     const provider = this.providerFor(ref);
     const notes = notesOf(ref);
-    return this.collect(provider, ref, {
-      context: {
-        requestId: notes.requestId ?? generateRequestId(),
-        signal: options.signal ?? new AbortController().signal,
-        attempt: 1,
-      },
-      delivery: this.deliveryFor(options.delivery),
-      tenantId: options.tenantId ?? this.config.tenantId ?? 'default',
-      ttlSeconds: options.ttlSeconds ?? this.config.ttlSeconds,
-      pollIntervalMs: options.pollIntervalMs,
-      stored: [],
-    });
+    const tenant = notes.tenant ?? options.tenantId ?? this.config.tenantId;
+    return this.continuing('video.collect', this.nameOf(ref), ref.model, tenant, (context) =>
+      this.collect(provider, ref, {
+        context: {
+          ...context,
+          requestId: notes.requestId ?? generateRequestId(),
+          signal: options.signal ?? new AbortController().signal,
+          attempt: 1,
+        },
+        delivery: this.deliveryFor(options.delivery),
+        tenantId: options.tenantId ?? this.config.tenantId ?? 'default',
+        ttlSeconds: options.ttlSeconds ?? this.config.ttlSeconds,
+        pollIntervalMs: options.pollIntervalMs,
+        stored: [],
+      }),
+    );
   }
 
   /** The job's state now, without waiting. */
   status(ref: VideoJobRef): Promise<VideoJobState> {
-    return this.providerFor(ref).poll(ref, freshContext());
+    return this.continuing('video.status', this.nameOf(ref), ref.model, this.tenantOf(ref), (context) =>
+      this.providerFor(ref).poll(ref, { ...freshContext(), ...context }),
+    );
   }
 
   /** One finished video as a stream, to send on without storing it. */
   download(ref: VideoJobRef, index = 0): Promise<VideoContent> {
-    return this.providerFor(ref).download(ref, index, freshContext());
+    return this.continuing('video.download', this.nameOf(ref), ref.model, this.tenantOf(ref), (context) =>
+      this.providerFor(ref).download(ref, index, { ...freshContext(), ...context }),
+    );
   }
 
   /** Cancels a running job. Throws when the provider cannot. */
   async cancel(ref: VideoJobRef): Promise<void> {
     const provider = this.providerFor(ref);
-    if (!provider.cancel)
-      throw new VideoError(`Video provider "${ref.provider}" cannot cancel a job`, 'VIDEO_UNSUPPORTED');
-    await provider.cancel(ref, freshContext());
+    const cancel = provider.cancel;
+    if (!cancel) throw new VideoError(`Video provider "${ref.provider}" cannot cancel a job`, 'VIDEO_UNSUPPORTED');
+    await this.continuing('video.cancel', this.nameOf(ref), ref.model, this.tenantOf(ref), (context) =>
+      cancel.call(provider, ref, { ...freshContext(), ...context }),
+    );
   }
 
   // ── Internals ────────────────────────────────────────────────────
@@ -637,6 +657,7 @@ export class VideoManager {
         requestId: job.requestId,
         provider: job.provider,
         model: request.model,
+        ...ifDefined('tenantId', job.tenant),
         metadata: { ...ifDefined('durationSeconds', request.durationSeconds), count: request.count ?? 1 },
       },
       { signal: operation.signal, ...(job.idempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}) },
@@ -653,7 +674,10 @@ export class VideoManager {
         // make, and bill, both. Its ref is recorded the moment it exists.
         let ref = checkpoint.ref;
         if (!ref) {
-          ref = withNotes(await provider.submit(request, context), notesFor(request, provider, job.requestId));
+          ref = withNotes(
+            await provider.submit(request, context),
+            notesFor(request, provider, job.requestId, job.tenant),
+          );
           await operation.heartbeat({ ref, stored: [] } satisfies VideoCheckpoint);
         }
         operation.report({ message: `submitted as ${ref.id}` });
@@ -965,6 +989,37 @@ export class VideoManager {
   }
 
   /** The provider a ref belongs to: by its registered name, or the adapter's own name the ref carries. */
+  /**
+   * Runs a call that continues a job outside its operation, `start()` and the calls on a ref, with its
+   * tenant's credentials and inside its regions, when the lifecycle gives them, its errors cleaned of
+   * every credential.
+   */
+  private async continuing<T>(
+    operation: string,
+    provider: string,
+    model: string | undefined,
+    tenant: string | undefined,
+    call: (context: ContinuedFields) => Promise<T>,
+  ): Promise<T> {
+    return continuing(
+      this.runtime.lifecycle,
+      { family: 'video', operation, provider, ...ifDefined('model', model), ...ifDefined('tenantId', tenant) },
+      call,
+    );
+  }
+
+  /** The name a ref's provider is registered under: a ref records the adapter's own name. */
+  private nameOf(ref: VideoJobRef): string {
+    if (this.providers.has(ref.provider)) return ref.provider;
+    for (const [name, provider] of this.providers) if (provider.info.name === ref.provider) return name;
+    return ref.provider;
+  }
+
+  /** The tenant a job runs for: the one its ref records, or the manager's. */
+  private tenantOf(ref: VideoJobRef): string | undefined {
+    return notesOf(ref).tenant ?? this.config.tenantId;
+  }
+
   private providerFor(ref: VideoJobRef): VideoProvider {
     const provider =
       this.providers.get(ref.provider) ?? [...this.providers.values()].find((item) => item.info.name === ref.provider);
@@ -995,7 +1050,12 @@ function freshContext(): VideoCallContext {
   return { requestId: generateRequestId(), signal: new AbortController().signal, attempt: 1 };
 }
 
-function notesFor(request: VideoProviderRequest, provider: VideoProvider, requestId: string): RefNotes {
+function notesFor(
+  request: VideoProviderRequest,
+  provider: VideoProvider,
+  requestId: string,
+  tenant: string | undefined,
+): RefNotes {
   const caps = capabilitiesOf(provider.info.capabilities, request.model);
   return {
     ...ifDefined('durationSeconds', request.durationSeconds ?? caps.defaultDurationSeconds),
@@ -1004,6 +1064,7 @@ function notesFor(request: VideoProviderRequest, provider: VideoProvider, reques
     count: request.count ?? 1,
     requestId,
     ...ifDefined('labels', request.metadata),
+    ...ifDefined('tenant', tenant),
   };
 }
 

@@ -4,7 +4,7 @@
  * dedicated OCR service.
  */
 import { withLifecycle } from '../lifecycle/run.js';
-import type { OperationLifecycleLike } from '../types/lifecycle.js';
+import type { OperationLifecycleLike, ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest, ContentPart, DocumentContent, ImageContent } from '../types/messages.js';
 import type { NexusResponse, ResponseCost } from '../types/response.js';
 import { generateRequestId } from '../utils/ids.js';
@@ -26,6 +26,8 @@ export interface MediaReadRequest {
   pages?: readonly number[];
   /** The provider to use. Defaults to the manager's for reading. */
   provider?: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Stops the call. */
   signal?: AbortSignal;
 }
@@ -38,6 +40,8 @@ export interface MediaDescribeRequest {
   detail?: 'brief' | 'detailed';
   /** The provider to use. */
   provider?: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Stops the call. */
   signal?: AbortSignal;
 }
@@ -50,6 +54,8 @@ export interface MediaAnswerRequest {
   question: string;
   /** The provider to use. */
   provider?: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
   /** Stops the call. */
   signal?: AbortSignal;
 }
@@ -138,6 +144,13 @@ export interface MediaCallContext {
   signal: AbortSignal;
   /** The request's id, for logs and traces. */
   requestId: string;
+  /** The tenant it is for. */
+  tenantId?: string;
+  /**
+   * The tenant's credential for a provider, with a credential resolver: an adapter sends it in place
+   * of the key it was configured with.
+   */
+  credential?: ProviderCallContext['credential'];
 }
 
 /** A media understanding backend: a vision model, an OCR service, or a stand-in. Each task is optional. */
@@ -246,7 +259,7 @@ export class MediaManager {
 
   private async run<T extends MediaResultMeta>(
     task: MediaTask,
-    request: { provider?: string; signal?: AbortSignal },
+    request: { provider?: string; tenantId?: string; signal?: AbortSignal },
     media: readonly MediaInput[],
     call: (provider: MediaProvider, context: MediaCallContext) => Promise<T>,
   ): Promise<T> {
@@ -260,12 +273,21 @@ export class MediaManager {
     const requestId = generateRequestId();
     return withLifecycle(
       this.runtime.lifecycle,
-      { family: 'media', operation: `media.${task}`, requestId, provider: name, metadata: { media: media.length } },
+      {
+        family: 'media',
+        operation: `media.${task}`,
+        requestId,
+        provider: name,
+        ...(request.tenantId !== undefined ? { tenantId: request.tenantId } : {}),
+        metadata: { media: media.length },
+      },
       request.signal ? { signal: request.signal } : {},
       (ticket) =>
         call(provider, {
           signal: ticket?.context.signal ?? request.signal ?? new AbortController().signal,
           requestId,
+          ...(request.tenantId !== undefined ? { tenantId: request.tenantId } : {}),
+          ...(ticket?.context.credential ? { credential: ticket.context.credential } : {}),
         }),
       (result) => (result.cost ? { cost: result.cost.amount, model: result.model } : { model: result.model }),
     );
@@ -352,15 +374,17 @@ export function modelMediaProvider(client: CompletionClientLike, options: ModelM
   const ask = async (
     parts: ContentPart[],
     schema: Record<string, unknown>,
-    signal: AbortSignal,
+    context: MediaCallContext,
     maxTokens?: number,
   ) => {
+    // The client's own lifecycle resolves the tenant's credential for the model it routes to.
     const response = await client.complete({
       model: options.model,
       messages: [{ role: 'user', content: parts }],
       responseFormat: { type: 'json_schema', schema },
       temperature: 0,
-      signal,
+      signal: context.signal,
+      ...(context.tenantId !== undefined ? { tenantId: context.tenantId } : {}),
       ...(maxTokens ? { maxTokens } : {}),
     });
     return { response, json: parseJson(response.content) };
@@ -390,7 +414,7 @@ export function modelMediaProvider(client: CompletionClientLike, options: ModelM
           },
         ],
         READ_SCHEMA,
-        context.signal,
+        context,
         options.maxTokens ?? 8_192,
       );
       const listed = Array.isArray((json as { pages?: unknown })?.pages)
@@ -415,7 +439,7 @@ export function modelMediaProvider(client: CompletionClientLike, options: ModelM
           },
         ],
         DESCRIBE_SCHEMA,
-        context.signal,
+        context,
       );
       const found = json as { caption?: unknown; altText?: unknown; tags?: unknown } | undefined;
       const caption = typeof found?.caption === 'string' ? found.caption : response.content;
@@ -437,7 +461,7 @@ export function modelMediaProvider(client: CompletionClientLike, options: ModelM
           },
         ],
         ANSWER_SCHEMA,
-        context.signal,
+        context,
       );
       const found = json as { answer?: unknown; pages?: unknown } | undefined;
       return {
