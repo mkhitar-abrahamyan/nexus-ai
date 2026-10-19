@@ -41,6 +41,7 @@
     "./evals/judge": 14,
     "./evaluate": 58,
     "./evaluate/automation": 18,
+    "./evaluate/emulate": 16,
     "./evaluate/generate": 30,
     "./evaluate/media": 46,
     "./evaluate/online": 98,

@@ -274,6 +274,7 @@ const imports = [
   ['nexus-ai-pro/policy', ['parsePolicy', 'applyPolicy', 'checkPolicyChange']],
   ['nexus-ai-pro/tracing/otlp-grpc', ['OtlpGrpcTraceExporter', 'OtlpGrpcError']],
   ['nexus-ai-pro/evaluate/media', ['mediaChecks', 'mediaJudge']],
+  ['nexus-ai-pro/evaluate/emulate', ['emulatedTools', 'MemoryEmulationStore']],
   ['nexus-ai-pro/media/catalog', ['mediaCatalog', 'catalogedAssetStore']],
   ['nexus-ai-pro/evaluate/automation', ['automationRules', 'markUnhealthy']],
   ['nexus-ai-pro/realtime/openai-sip', ['answerOpenAISipCalls']],

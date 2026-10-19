@@ -153,7 +153,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [MCP](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/mcp.md) | Borrowing tools from MCP servers, a registry of many, and serving your own |
 | [Agent protocols](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/protocols.md) | Serving an agent to user interfaces over AG-UI, to other agents over A2A, and to code editors over ACP, and calling remote agents as tools |
 | [Traces](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tracing.md) | Run trees, queries, feedback, comparison, and alerts |
-| [Evaluation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md) | Datasets, evaluators, experiments, comparisons with a verdict, review queues, LLM judges |
+| [Evaluation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md) | Datasets, evaluators, experiments, comparisons with a verdict, review queues, LLM judges, and tools emulated by a model so an evaluation sends nothing |
 | [Context hub](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/context-hub.md) | Prompts, instructions, tools, and skills versioned together, promoted through gates, and moved between projects |
 | [Insights](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/insights.md) | Failing and slow runs clustered, regressions between time windows, and evaluated fix proposals |
 | [Prompts](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/prompts.md) | Typed templates, content versions, gated promotion, rollback, A/B splits, serving through outages |
@@ -5411,6 +5411,65 @@ nothing. Once the budget runs out, no further example starts. `evaluate()` then 
 | `claim()` | Hands the next item to a reviewer. |
 | `submit()` | Records a `ReviewAnswer`: the reviewer, their answers as scores, a comment, and when. |
 
+## Tools that touch nothing
+
+An agent whose tools charge a card, send an email, or write to a production database cannot be
+evaluated against them. `emulatedTools()`, from `nexus-ai-pro/evaluate/emulate`, returns the same
+tools, by name, description, parameters, and capabilities, each answered by a model playing it, or by
+an answer a store kept, and never run: nothing they would send is sent.
+
+```ts
+import { createAgent, agentInput } from 'nexus-ai-pro/agent';
+import { emulatedTools, MemoryEmulationStore } from 'nexus-ai-pro/evaluate/emulate';
+
+const store = new MemoryEmulationStore(JSON.parse(await readFile('emulated.json', 'utf8')));
+const experiment = await evaluate(
+  async (inputs, { example }) => {
+    const tools = emulatedTools([lookupOrder, refund], {
+      client: ai,
+      model: 'gpt-5-mini',
+      scenario: example.metadata?.scenario as string, // "Order 1042 was delivered and cost $59."
+      store,
+    });
+    return createAgent({ client: ai, model: 'gpt-5', tools }).invoke(agentInput(inputs.request));
+  },
+  dataset,
+  [answered, trajectory({ mode: 'exact' })],
+);
+await writeFile('emulated.json', JSON.stringify(store));
+```
+
+Each call asks the `EmulatorClient`, the client or anything with its `complete()`, to answer as the
+real tool would, as `{"result": ...}`, or as `{"error": "..."}` for a failure, which the tool then
+throws, so the agent sees it as it would the real tool's. The emulator is told, by
+`EmulatedToolsOptions`:
+- the tool's name, description, and parameters, and `results`, a JSON Schema of what it returns;
+- `instructions`, each tool's own notes, and the `scenario`, the world the tools act on, such as an
+  example's;
+- `examples`, real calls of the tool with what it returned, such as from production traces;
+- the calls this set has answered before, up to `history` (20), so an order looked up after a refund
+  shows it.
+
+It answers at `temperature` 0 by default, with `model`, `maxTokens`, and the call's signal and tenant.
+An answer that is not JSON, or that `validate` refuses with a reason, is asked for again once with
+that reason, and then fails the call with an `EmulationError`, `EMULATION_INVALID`. Tools named in
+`passthrough`, those that read and change nothing, run for real.
+
+The answers go to an `EmulationStore`, each an `EmulatedResult` of the tool, its arguments, and its result or error, by `emulationKey()`: the tool, the arguments, the scenario, and
+which call with those arguments it is. `mode` is `auto` with a store, replaying an answer it has and
+asking for the rest; `replay`, which asks for nothing and fails a call it has no answer for with
+`EMULATION_MISS`; `record`, which asks every time; or `emulate`, without a store. `MemoryEmulationStore`
+keeps them in memory, and `toJSON()` writes them where the next run reads them back, so a suite runs
+the same answers in CI without a model. `onCall` sees each `EmulatedToolCall`: the tool, the arguments,
+the result or the error, the key, and who answered, `model`, `store`, or `real`.
+
+In the test suite, a support agent looks orders up and refunds them through a shop of the test's own.
+Evaluated over the real tools and then over emulated ones told each example's scenario, it reaches the
+same verdict on all four examples, a refund, an order not yet delivered, one escalated, and a refund
+the shop refuses, and the emulated run sends the shop nothing. Replayed from the kept answers, it
+reaches that verdict again with the emulator never asked; told a different scenario, the evaluation
+reports the different answer it leads to.
+
 ## LLM judges and eval cases
 
 Use a plain assertion for small evals, or add an LLM judge when a rubric is more useful than exact matching:
@@ -5517,6 +5576,9 @@ regression in a test, not to judging content in production; use a model judge fo
   something, not that the question is a good one: read a sample before trusting a verdict.
 - An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
   or `rephrase`.
+- An emulated tool is as faithful as its scenario and its emulator. Check a suite against the real
+  tools, or a staging copy, once, and keep the answers; a verdict that differs is a scenario to fix.
+- `emulatedTools()` replaces `execute` and drops `stream`: an emulated tool reports no progress.
 - `mediaChecks()` reads the dimensions of PNG, JPEG, GIF, WebP, and BMP images and the duration
   of WAV audio. Other audio and video are checked for kind, type, and size; a judge can watch them, on
   a provider that takes them.
@@ -13869,6 +13931,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/residency` | 13 KB | 4% | none |
+| `nexus-ai-pro/evaluate/emulate` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/media` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
@@ -14129,7 +14192,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 193 entry points, 155 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 194 entry points, 156 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

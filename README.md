@@ -141,7 +141,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [MCP](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/mcp.md) | Borrowing tools from MCP servers, a registry of many, and serving your own |
 | [Agent protocols](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/protocols.md) | Serving an agent to user interfaces over AG-UI, to other agents over A2A, and to code editors over ACP, and calling remote agents as tools |
 | [Traces](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/tracing.md) | Run trees, queries, feedback, comparison, and alerts |
-| [Evaluation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md) | Datasets, evaluators, experiments, comparisons with a verdict, review queues, LLM judges |
+| [Evaluation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/evaluation.md) | Datasets, evaluators, experiments, comparisons with a verdict, review queues, LLM judges, and tools emulated by a model so an evaluation sends nothing |
 | [Context hub](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/context-hub.md) | Prompts, instructions, tools, and skills versioned together, promoted through gates, and moved between projects |
 | [Insights](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/insights.md) | Failing and slow runs clustered, regressions between time windows, and evaluated fix proposals |
 | [Prompts](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/prompts.md) | Typed templates, content versions, gated promotion, rollback, A/B splits, serving through outages |

@@ -53,6 +53,10 @@ New and stable:
 - `LifecycleConfig.providers` and `policy`, `ProviderGate`, `PolicyReference`,
   `OperationDescriptor.policy`, `AuditLogEvent.policy`, and `OperationLifecycle.access()`;
 - the `nexus policy check` command, its flags, its exit codes, and its `--json` output;
+- `nexus-ai-pro/evaluate/emulate`: `emulatedTools()`, `EmulatedToolsOptions`, `EmulatorClient`,
+  `EmulatedToolCall`, `EmulatedResult`, `EmulationStore`, `MemoryEmulationStore`, `EmulationError`, and
+  `emulationKey()`. What the emulator is told may be reworded in a minor release; a store's keys never
+  change within a major;
 - `CallResidency.refusal()`, optional, and the optional `model` its `allows()`, `place()`, and
   `check()` take.
 

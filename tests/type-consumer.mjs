@@ -318,6 +318,7 @@ import { regionalGateway, type RegionHealth } from 'nexus-ai-pro/server/regions'
 import { applyPolicy, checkPolicyChange, parsePolicy, type PolicyCheck, type PolicyDocument } from 'nexus-ai-pro/policy';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
 import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
+import { emulatedTools, MemoryEmulationStore, type EmulatedToolCall } from 'nexus-ai-pro/evaluate/emulate';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
 import {
   automationRules,
@@ -1134,6 +1135,20 @@ const grpcOptions: OtlpGrpcTraceExporterOptions = { endpoint: 'http://localhost:
 const grpcExporter = new OtlpGrpcTraceExporter(grpcOptions);
 const spooledGrpc = spoolingExporter({ sender: grpcExporter, store: {} as never, drainEveryMs: 0 });
 void spooledGrpc;
+// Tools a model plays, its answers kept for the next run.
+const emulationStore = new MemoryEmulationStore();
+const emulatedCalls: EmulatedToolCall[] = [];
+const playedTools = emulatedTools([], {
+  client: { complete: async () => ({}) as never },
+  model: 'gpt-5-mini',
+  scenario: 'Order 1042 was delivered.',
+  store: emulationStore,
+  mode: 'auto',
+  validate: { lookup_order: (result: unknown) => (result ? true : 'empty') },
+  onCall: (call) => emulatedCalls.push(call),
+});
+void playedTools;
+void emulationStore.toJSON();
 void grpcExporter.close();
 const encoded: Uint8Array = encodeOtlpTraceRequest({ resourceSpans: [] });
 void encoded;

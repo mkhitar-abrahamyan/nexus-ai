@@ -1,6 +1,6 @@
 # Evaluation
 
-<!-- covers: ./evaluate ./evaluate/threads ./evaluate/generate ./evaluate/online ./evaluate/media ./evals ./evals/judge -->
+<!-- covers: ./evaluate ./evaluate/threads ./evaluate/generate ./evaluate/online ./evaluate/media ./evaluate/emulate ./evals ./evals/judge -->
 
 Evaluation from `nexus-ai-pro/evaluate`: run any target — a completion, an agent, a graph, an image operation, or plain code — over a dataset versioned by its content, score it, and compare experiments with a verdict rather than a difference of means. `nexus-ai-pro/evals` keeps the eval-case runner and the LLM judge.
 
@@ -574,6 +574,65 @@ nothing. Once the budget runs out, no further example starts. `evaluate()` then 
 | `claim()` | Hands the next item to a reviewer. |
 | `submit()` | Records a `ReviewAnswer`: the reviewer, their answers as scores, a comment, and when. |
 
+## Tools that touch nothing
+
+An agent whose tools charge a card, send an email, or write to a production database cannot be
+evaluated against them. `emulatedTools()`, from `nexus-ai-pro/evaluate/emulate`, returns the same
+tools, by name, description, parameters, and capabilities, each answered by a model playing it, or by
+an answer a store kept, and never run: nothing they would send is sent.
+
+```ts
+import { createAgent, agentInput } from 'nexus-ai-pro/agent';
+import { emulatedTools, MemoryEmulationStore } from 'nexus-ai-pro/evaluate/emulate';
+
+const store = new MemoryEmulationStore(JSON.parse(await readFile('emulated.json', 'utf8')));
+const experiment = await evaluate(
+  async (inputs, { example }) => {
+    const tools = emulatedTools([lookupOrder, refund], {
+      client: ai,
+      model: 'gpt-5-mini',
+      scenario: example.metadata?.scenario as string, // "Order 1042 was delivered and cost $59."
+      store,
+    });
+    return createAgent({ client: ai, model: 'gpt-5', tools }).invoke(agentInput(inputs.request));
+  },
+  dataset,
+  [answered, trajectory({ mode: 'exact' })],
+);
+await writeFile('emulated.json', JSON.stringify(store));
+```
+
+Each call asks the `EmulatorClient`, the client or anything with its `complete()`, to answer as the
+real tool would, as `{"result": ...}`, or as `{"error": "..."}` for a failure, which the tool then
+throws, so the agent sees it as it would the real tool's. The emulator is told, by
+`EmulatedToolsOptions`:
+- the tool's name, description, and parameters, and `results`, a JSON Schema of what it returns;
+- `instructions`, each tool's own notes, and the `scenario`, the world the tools act on, such as an
+  example's;
+- `examples`, real calls of the tool with what it returned, such as from production traces;
+- the calls this set has answered before, up to `history` (20), so an order looked up after a refund
+  shows it.
+
+It answers at `temperature` 0 by default, with `model`, `maxTokens`, and the call's signal and tenant.
+An answer that is not JSON, or that `validate` refuses with a reason, is asked for again once with
+that reason, and then fails the call with an `EmulationError`, `EMULATION_INVALID`. Tools named in
+`passthrough`, those that read and change nothing, run for real.
+
+The answers go to an `EmulationStore`, each an `EmulatedResult` of the tool, its arguments, and its result or error, by `emulationKey()`: the tool, the arguments, the scenario, and
+which call with those arguments it is. `mode` is `auto` with a store, replaying an answer it has and
+asking for the rest; `replay`, which asks for nothing and fails a call it has no answer for with
+`EMULATION_MISS`; `record`, which asks every time; or `emulate`, without a store. `MemoryEmulationStore`
+keeps them in memory, and `toJSON()` writes them where the next run reads them back, so a suite runs
+the same answers in CI without a model. `onCall` sees each `EmulatedToolCall`: the tool, the arguments,
+the result or the error, the key, and who answered, `model`, `store`, or `real`.
+
+In the test suite, a support agent looks orders up and refunds them through a shop of the test's own.
+Evaluated over the real tools and then over emulated ones told each example's scenario, it reaches the
+same verdict on all four examples, a refund, an order not yet delivered, one escalated, and a refund
+the shop refuses, and the emulated run sends the shop nothing. Replayed from the kept answers, it
+reaches that verdict again with the emulator never asked; told a different scenario, the evaluation
+reports the different answer it leads to.
+
 ## LLM judges and eval cases
 
 Use a plain assertion for small evals, or add an LLM judge when a rubric is more useful than exact matching:
@@ -680,6 +739,9 @@ regression in a test, not to judging content in production; use a model judge fo
   something, not that the question is a good one: read a sample before trusting a verdict.
 - An adversarial dataset covers the attacks the guardrails know. A new phrasing needs a new pattern,
   or `rephrase`.
+- An emulated tool is as faithful as its scenario and its emulator. Check a suite against the real
+  tools, or a staging copy, once, and keep the answers; a verdict that differs is a scenario to fix.
+- `emulatedTools()` replaces `execute` and drops `stream`: an emulated tool reports no progress.
 - `mediaChecks()` reads the dimensions of PNG, JPEG, GIF, WebP, and BMP images and the duration
   of WAV audio. Other audio and video are checked for kind, type, and size; a judge can watch them, on
   a provider that takes them.
@@ -815,6 +877,20 @@ specific entry point that provides it.
 | `underCost` | function | Cost as a pass or fail, per example. |
 | `underLatency` | function | Latency as a pass or fail, so a quality gate can hold a budget as well as a score. |
 | `withProvenance` | function | Says where an evaluator's scores come from: its name and version, the judge model and prompt version behind it, and its rubric. |
+
+### `nexus-ai-pro/evaluate/emulate`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `EmulatedResult` | interface | An emulated answer, as a store keeps it. |
+| `EmulatedToolCall` | interface | One call to an emulated or passed-through tool, as `onCall` reports it. |
+| `emulatedTools` | function | Tools that look the same to the agent, by name, description, parameters, and capabilities, but are answered by a model playing each one, or by the answers a store kept, and never run: nothing they would send is sent. |
+| `EmulatedToolsOptions` | interface | Options for `emulatedTools()`. |
+| `EmulationError` | class | Raised when a call cannot be emulated: no kept answer in `replay`, or no valid answer from the model. |
+| `emulationKey` | function | The key of a call: its tool, its arguments, its scenario, and which call with those arguments it is, so an order looked up before and after a refund keeps both answers. |
+| `EmulationStore` | interface | Where emulated answers are kept, by `emulationKey()`, so a later run replays them. |
+| `EmulatorClient` | interface | The model that plays the tools: the client, or anything with its `complete()`. |
+| `MemoryEmulationStore` | class | Emulated answers in memory, from an earlier run's `toJSON()` when given one. |
 
 ### `nexus-ai-pro/evaluate/generate`
 

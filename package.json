@@ -900,6 +900,16 @@
         "default": "./dist-cjs/evaluate/media.js"
       }
     },
+    "./evaluate/emulate": {
+      "import": {
+        "types": "./dist/evaluate/emulate.d.ts",
+        "default": "./dist/evaluate/emulate.js"
+      },
+      "require": {
+        "types": "./dist-cjs/evaluate/emulate.d.ts",
+        "default": "./dist-cjs/evaluate/emulate.js"
+      }
+    },
     "./evaluate/online": {
       "import": {
         "types": "./dist/evaluate/online.d.ts",
@@ -2413,6 +2423,9 @@
       ],
       "evaluate/media": [
         "dist-cjs/evaluate/media.d.ts"
+      ],
+      "evaluate/emulate": [
+        "dist-cjs/evaluate/emulate.d.ts"
       ],
       "evaluate/automation": [
         "dist-cjs/evaluate/automation.d.ts"

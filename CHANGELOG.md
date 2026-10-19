@@ -18,6 +18,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   provider is refused with an `OperationDeniedError` naming the rule before anything is sent, a
   completion's refused attempt is dropped from its route, and an embedding never falls back to a
   refused model. `providerGate()` builds one from a policy's routing rules, with `*` wildcards.
+- **Evaluation without side effects.** `emulatedTools()`, on the new `nexus-ai-pro/evaluate/emulate`,
+  returns an agent's tools answered by a model playing each one, told the tool, its result schema, a
+  scenario, real calls, and the run's earlier calls, and never run, so an evaluation of an agent that
+  charges cards or writes to a database sends nothing. Answers are kept by tool, arguments, scenario,
+  and call, and replayed, so a suite runs the same answers in CI without a model; tools that change
+  nothing can run for real.
 - `ai.lifecycle.access()` returns the `CallResidency` an operation would get, and
   `CallResidency.refusal()` says why a provider would be refused once placed on its twin; `allows()`,
   `place()`, and `check()` take the model as well.
