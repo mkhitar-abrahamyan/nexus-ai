@@ -53,6 +53,9 @@ export async function runImageOperation(
   validateRequest(operation, submission.request);
   const request = await resolveInputs(state, operation, submission.request, signal);
   const [registeredName, provider] = resolveProvider(state, operation, request.provider);
+  // Whichever provider was chosen, by name, by default, or by what it supports, stays in the
+  // tenant's regions.
+  callContext.residency?.check(registeredName);
   assertCapabilities(registeredName, provider, operation, request);
 
   const context: ImageProviderCallContext = { ...callContext, operationId };

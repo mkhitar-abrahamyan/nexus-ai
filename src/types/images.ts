@@ -153,6 +153,11 @@ export interface ImageRequestBase {
   /** Identifies the request in records and traces. Generated when omitted. */
   requestId?: string;
   /**
+   * The tenant the request runs for: what per-tenant budgets charge, whose credential the provider
+   * sends, and whose regions it must stay in. Defaults to the manager's `tenantId`.
+   */
+  tenantId?: string;
+  /**
    * Replays an accepted request instead of generating twice, which is what makes a retried timeout
    * safe to pay for once.
    */

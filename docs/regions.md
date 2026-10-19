@@ -1,9 +1,88 @@
 # Regions and credentials
 
-<!-- covers: ./credentials -->
+<!-- covers: ./residency ./credentials -->
 
-Each tenant's provider keys, resolved when a call is made from the secret manager you already run,
-rotated there without a restart, and kept out of every error, log, trace, and audit event.
+Each tenant's requests and data kept in the regions it requires, and each tenant's provider keys,
+resolved when a call is made from the secret manager you already run, rotated there without a
+restart, and kept out of every error, log, trace, and audit event.
+
+```ts
+import { residency } from 'nexus-ai-pro/residency';
+
+const policy = residency({
+  regions: {
+    'eu-west': { providers: ['openai-eu', 'mistral'], twins: { openai: 'openai-eu' } },
+    'us-east': { providers: ['openai', 'anthropic'] },
+  },
+  tenants: { acme: 'eu-west', globex: 'any' },
+  unassigned: 'refuse',
+});
+const ai = new NexusAI({
+  providers: {
+    openai: { apiKey: process.env.OPENAI_API_KEY ?? '' },
+    custom: [{ name: 'openai-eu', format: 'openai', baseUrl: 'https://eu.api.openai.com/v1', apiKey: process.env.OPENAI_API_KEY }],
+  },
+  lifecycle: { residency: policy },
+});
+// Routed to openai, sent to openai-eu: acme's request never leaves the EU.
+await ai.complete({ model: 'gpt-5', tenantId: 'acme', messages: [{ role: 'user', content: 'Hello' }] });
+```
+
+## Residency
+
+`residency()` builds a `ResidencyPolicy` from `ResidencyOptions`:
+- `regions`, each region's `RegionDefinition`: the `providers` that run in it, by the name each is
+  registered under, and its `twins`, a provider outside the region mapped to one inside it that serves
+  the same models, such as the EU endpoint of the same service. A provider is listed in one region.
+- `tenants`, each tenant's `RegionRule`, as a map or a function, such as one that reads the tenant's
+  record: `any`, `refuse`, a region, or a list of regions, the first its home. A region a rule names
+  must be defined; a map is checked when the policy is built.
+- `unassigned`, the rule of a tenant `tenants` says nothing of, and `untenanted`, the rule of an
+  operation with no tenant, both `any` by default.
+
+`LifecycleConfig.residency` applies it to every operation. When an operation starts, the lifecycle
+decides its `ResidencyDecision`, the regions its tenant may reach and the rule that says so, and every
+provider it reaches must run in one of them. A completion or a stream is placed after routing: each
+attempt, the first and every fallback, is sent to the provider routing chose when that runs inside the
+regions, to its twin inside them when there is one, and dropped when neither, so a fallback never
+leaves the regions either; the context-window summary is placed the same way. In every other family,
+the provider an operation reaches, named, chosen by default, or chosen for what it supports, is
+checked, and an embedding never falls back to a provider outside the regions. A provider that runs in
+no region is outside every rule but `any`.
+
+What runs outside the regions is refused with a `ResidencyError` before anything is sent. It carries
+the `code` `RESIDENCY_DENIED`, the `target` it would have reached (a `ResidencyTarget`: its kind, name,
+and region), the tenant, the regions, and the `rule`, and its message quotes them:
+`provider anthropic runs in us-east, outside the regions tenant acme may reach (tenant acme: eu-west)`.
+The audit log records it as `blocked`. A provider of your own reads the operation's `CallResidency`
+from `ProviderCallContext.residency` to choose among providers the same way: `allows()`, `place()`,
+which returns a `ResidencyPlacement`, and `check()`.
+
+`Residency.regions()` lists the regions; `regionsFor()`, `regionOf()`, `place()`, `allows()`, and
+`check()` are the policy's own, for code that decides outside an operation.
+
+### Traces and assets in their regions
+
+`regionalTraceStore()` writes traces to a trace store per region, by `RegionalTraceStoreOptions`: the
+`stores`, the `residency` policy, how to read a run's tenant (`tenantOf`, by default its
+`metadata.tenantId` or the `metadata.nexus.tenant` an agent server records), the region of a trace
+with no tenant (`defaultRegion`), and how many traces' regions to remember (`maxTraces`, 10,000).
+Each run goes to its tenant's home region, the first it may reach that has a store, and a run with no
+tenant goes where its trace went, so a trace stays in one region. A run whose tenant may reach no
+region with a store is refused with a `ResidencyError` and written nowhere; a tracer reports it
+through its `onError`. Queries read every region, newest first across them. A `RegionalTraceStore`
+also has `forTenant()`, a view that reads and writes one tenant's regions only, and
+`regionOfTrace()`.
+
+`regionalAssetStore()` does the same for assets, by `RegionalAssetStoreOptions`: each asset is stored
+in its tenant's home region and read, signed, and deleted only through the regions the tenant may
+reach, so an asset is never served outside them, even after the tenant's rule changes.
+
+In the test suite, a provider server per region records every request that reaches it. A tenant
+pinned to the EU is answered by the EU twin of the provider routing chose, for completions and
+streams, and nothing of it reaches the US; a provider with no twin there is refused, with the rule,
+before anything is sent. An embedding whose EU provider fails does not fall back to the US, and each
+tenant's traces, every run of a trace, and assets land in its home region.
 
 ```ts
 import { NexusAI } from 'nexus-ai-pro';
@@ -89,6 +168,10 @@ its refusal is found in no error, stack, cause, audit event, log, trace, or heal
 
 ## Limitations
 
+- `ai.plan()` shows the route before placement: the provider routing chose, not its twin.
+- A cache, a checkpointer, or any other store the application gives the client is wherever the
+  application put it. The response cache keeps each tenant's entries apart; to keep them in a region,
+  give the region its own cache.
 - Realtime sessions, telephony, video, voice, media understanding, and batches send the key each
   provider was configured with; per-tenant credentials reach completions, streams, embeddings, and
   images.

@@ -6,6 +6,16 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Residency: each tenant's requests and data kept in its regions.** `residency()`, on the new
+  `nexus-ai-pro/residency`, says which regions each tenant may reach (a map, or a function over the
+  tenant's record), which providers run in each region, and each provider's twin inside a region.
+  `LifecycleConfig.residency` applies it to every family: a completion or stream, its fallbacks and
+  its context summary included, is sent to the provider routing chose when that runs inside the
+  tenant's regions and to its twin there when not; an embedding never falls back outside them; and a
+  provider anything would reach outside them is refused with a `ResidencyError` naming the rule,
+  before anything is sent. `regionalTraceStore()` and `regionalAssetStore()` write each tenant's
+  traces, every run of a trace together, and assets in its home region, and read them only from its
+  regions.
 - **Credentials per tenant.** `LifecycleConfig.credentials` resolves each provider's key per tenant,
   when a call is made, in every family that runs through the lifecycle: completions, streams,
   embeddings, and images send it in place of the configured key. `tenantCredentials()`, on the new
@@ -18,12 +28,21 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   on the new key; in any other family, the next operation reads the key again. Every key and header
   value an operation resolves is removed from the errors it raises, before an audit event, a log,
   a trace, or the health report sees them.
+- `ProviderCallContext.residency`, the operation's `CallResidency`; `ImageRequestBase.tenantId`; and
+  an agent server's trace root records its run's tenant as `metadata.nexus.tenant`.
 - `ProviderCallContext.tenantId` and `credential()`; `OperationTicket.refreshCredential()` and
   `scrub()`; `OpenAIProviderConfig.credentialHeader`; `EmbeddingRequest.tenantId`; and
   `EmbeddingProviderError.attempts`, each attempt's error.
 
 ### Proof
 
+- `tests/residency.test.ts`: against a provider server per region, a tenant pinned to the EU is
+  answered by the EU twin of the provider routing chose, completions and streams alike, and nothing
+  of it reaches the US; a provider with no twin there is refused with the rule, nothing sent; an
+  embedding whose EU provider fails never falls back to the US; an image provider outside the regions
+  is refused; and each tenant's traces and assets land in its home region and are read only from its
+  regions. Without placement, twins, the decision, the routed check, the fallback filter, the image
+  check, traces kept together, the tenant view, the asset home, or the rule checks, a test fails.
 - `tests/tenant-credentials.test.ts`: against a provider of the test's own that takes only live keys,
   each tenant's calls carry its own key through completions, streams, and embeddings; in a run of five
   calls whose key is rotated and revoked after the second, the third is answered on the new key and

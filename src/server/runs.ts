@@ -793,6 +793,7 @@ export class RunManager {
           attempt: context.attempt,
           ...(plan.revision ? { revision: plan.revision.id } : {}),
           ...(plan.threadId ? { thread: plan.threadId } : {}),
+          ...(plan.principal?.tenantId ? { tenant: plan.principal.tenantId } : {}),
         },
       },
     });

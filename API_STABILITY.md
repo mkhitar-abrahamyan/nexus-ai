@@ -46,6 +46,11 @@ one of its explicit subpaths.
 Everything 2.13 adds is stable from the start and additive, unless this section says otherwise.
 
 New and stable:
+- `nexus-ai-pro/residency`: `residency()`, `Residency`, `ResidencyOptions`, `RegionRule`,
+  `RegionDefinition`, `ResidencyPolicy`, `ResidencyDecision`, `ResidencyTarget`, `ResidencyPlacement`,
+  `CallResidency`, `ResidencyError`, `regionalTraceStore()`, `RegionalTraceStore`,
+  `RegionalTraceStoreOptions`, `regionalAssetStore()`, and `RegionalAssetStoreOptions`;
+- `LifecycleConfig.residency`, `ProviderCallContext.residency`, and `ImageRequestBase.tenantId`;
 - `nexus-ai-pro/credentials`: `tenantCredentials()`, `TenantCredentials`, `TenantCredentialsOptions`,
   `TenantCredentialStats`, `CredentialError`, `parseSecret()`, `credentialRequest()`, `SecretSource`,
   `awsSecrets()`, `gcpSecrets()`, `azureSecrets()`, `vaultSecrets()`, `envSecrets()`,

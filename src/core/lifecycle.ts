@@ -16,6 +16,7 @@ import type {
 import type { AuditLogger } from '../ops/audit-logger.js';
 import type { MetricsCollector } from '../ops/metrics.js';
 import { NexusRateLimitError, type RateLimiter } from '../ops/rate-limiter.js';
+import type { CallResidency, ResidencyPolicy } from '../types/residency.js';
 import { generateRequestId } from '../utils/ids.js';
 import { scrubSecrets } from '../utils/scrub.js';
 import { linkSignals } from '../utils/signals.js';
@@ -154,6 +155,11 @@ export class OperationLifecycle implements OperationLifecycleLike {
       await this.runtime.metrics?.recordRequest(labelsOf(descriptor));
       await this.checkRateLimit(descriptor);
       await this.authorize(descriptor);
+      const policy = this.runtime.config?.residency;
+      if (policy) {
+        context.residency = callResidency(policy, await policy.regionsFor(descriptor.tenantId));
+        if (descriptor.provider) context.residency.check(descriptor.provider);
+      }
     } catch (error) {
       await ticket.fail(error);
       throw error;
@@ -176,7 +182,11 @@ export class OperationLifecycle implements OperationLifecycleLike {
       await plan.inputPolicy?.(ticket.context);
       await plan.resolveAssets?.(ticket.context);
       const routed = await plan.route?.();
-      if (routed?.provider) ticket.descriptor.provider = routed.provider;
+      if (routed?.provider) {
+        // Nothing is sent to a provider outside the regions the tenant may reach.
+        ticket.context.residency?.check(routed.provider);
+        ticket.descriptor.provider = routed.provider;
+      }
       if (routed?.model) ticket.descriptor.model = routed.model;
       // Estimating can mean tokenizing every input, so it only happens when a budget will read it.
       if (this.runtime.config?.budget) await ticket.reserve(plan.estimate?.());
@@ -212,7 +222,8 @@ export class OperationLifecycle implements OperationLifecycleLike {
       !config?.authorize &&
       !config?.budget &&
       !config?.hooks &&
-      !config?.credentials
+      !config?.credentials &&
+      !config?.residency
     );
   }
 
@@ -242,6 +253,19 @@ export class OperationLifecycle implements OperationLifecycleLike {
     }
     if (verdict === false) throw new OperationDeniedError(descriptor);
   }
+}
+
+/** An operation's residency, as the families that call providers check it. */
+export function callResidency(policy: ResidencyPolicy, decision: CallResidency['decision']): CallResidency {
+  return {
+    decision,
+    allows: (provider) => policy.allows(policy.regionOf(provider), decision),
+    place: (provider) => policy.place(provider, decision),
+    check: (provider) => {
+      const region = policy.regionOf(provider);
+      policy.check({ kind: 'provider', name: provider, ...(region ? { region } : {}) }, decision);
+    },
+  };
 }
 
 /**
@@ -433,7 +457,11 @@ function outcomeOf(error: unknown, signal: AbortSignal): OperationOutcome['statu
     error instanceof BudgetExceededError ||
     error instanceof NexusRateLimitError ||
     (error instanceof Error &&
-      (error.name === 'CostBudgetError' || error.name === 'TenantLimitError' || error.name === 'NexusSecurityError'))
+      (error.name === 'CostBudgetError' ||
+        error.name === 'TenantLimitError' ||
+        error.name === 'NexusSecurityError' ||
+        error.name === 'ResidencyError' ||
+        error.name === 'CredentialError'))
   ) {
     return 'denied';
   }

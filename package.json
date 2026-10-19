@@ -790,6 +790,16 @@
         "default": "./dist-cjs/tracing/otlp-grpc.js"
       }
     },
+    "./residency": {
+      "import": {
+        "types": "./dist/residency/index.d.ts",
+        "default": "./dist/residency/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/residency/index.d.ts",
+        "default": "./dist-cjs/residency/index.js"
+      }
+    },
     "./credentials": {
       "import": {
         "types": "./dist/credentials/index.d.ts",
@@ -2353,6 +2363,9 @@
       ],
       "credentials": [
         "dist-cjs/credentials/index.d.ts"
+      ],
+      "residency": [
+        "dist-cjs/residency/index.d.ts"
       ],
       "tracing/otlp-grpc": [
         "dist-cjs/tracing/otlp-grpc.d.ts"

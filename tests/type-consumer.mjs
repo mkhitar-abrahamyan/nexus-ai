@@ -313,6 +313,7 @@ import { TwilioTelephonyProvider } from 'nexus-ai-pro/telephony/twilio';
 import { TelnyxTelephonyProvider } from 'nexus-ai-pro/telephony/telnyx';
 import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
 import { awsSecrets, memorySecrets, tenantCredentials, type TenantCredentialStats } from 'nexus-ai-pro/credentials';
+import { regionalTraceStore, residency, ResidencyError, type ResidencyDecision } from 'nexus-ai-pro/residency';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
 import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
@@ -1096,6 +1097,16 @@ const perTenant = tenantCredentials({
 const credentialStats: TenantCredentialStats = perTenant.stats();
 void credentialStats;
 void memorySecrets({ 'acme/openai': 'sk-acme' }).set('acme/openai', 'sk-acme-2');
+// Each tenant's requests and traces kept in its regions.
+const regions = residency({
+  regions: { 'eu-west': { providers: ['openai-eu'], twins: { openai: 'openai-eu' } }, 'us-east': { providers: ['openai'] } },
+  tenants: async (tenantId: string) => (tenantId === 'acme' ? 'eu-west' : 'any'),
+  unassigned: 'refuse',
+});
+const acmeRegions: Promise<ResidencyDecision> = Promise.resolve(regions.regionsFor('acme'));
+void acmeRegions;
+void regionalTraceStore({ stores: { 'eu-west': new MemoryTraceStore(), 'us-east': new MemoryTraceStore() }, residency: regions });
+void ResidencyError;
 const grpcOptions: OtlpGrpcTraceExporterOptions = { endpoint: 'http://localhost:4317', gzip: true, timeoutMs: 5_000 };
 const grpcExporter = new OtlpGrpcTraceExporter(grpcOptions);
 const spooledGrpc = spoolingExporter({ sender: grpcExporter, store: {} as never, drainEveryMs: 0 });

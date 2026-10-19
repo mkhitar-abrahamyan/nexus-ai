@@ -129,6 +129,9 @@ export class ImageManager {
         operation: `images.${submission.operation}`,
         model: submission.request.model,
         provider: submission.request.provider,
+        ...((submission.request.tenantId ?? this.config.tenantId)
+          ? { tenantId: submission.request.tenantId ?? this.config.tenantId }
+          : {}),
         requestId: submission.request.requestId ?? operationId,
         metadata: { count: submission.request.count },
         signal,

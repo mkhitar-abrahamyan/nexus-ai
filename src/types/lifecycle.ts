@@ -1,3 +1,5 @@
+import type { CallResidency, ResidencyPolicy } from './residency.js';
+
 /**
  * One lifecycle for every operation.
  *
@@ -63,6 +65,12 @@ export interface ProviderCallContext {
    * Each provider is resolved once per operation.
    */
   credential?: (provider: string) => Promise<ProviderCredential | undefined>;
+  /**
+   * The regions the call may reach, under the lifecycle's `residency` policy: a family that chooses
+   * among providers calls only those it `allows`, and sends a call to a provider's twin where it
+   * `place`s it.
+   */
+  residency?: CallResidency;
 }
 
 /** What a provider sends to authenticate one call, in place of its configured key. */
@@ -291,6 +299,13 @@ export interface LifecycleConfig {
    * again, and a resolved key is removed from every error the operation raises.
    */
   credentials?: CredentialResolver;
+  /**
+   * Which regions each tenant's operations may reach, and what runs where: `residency()` from
+   * `nexus-ai-pro/residency`. An operation is refused with a `ResidencyError`, before any provider
+   * is called, when the provider it would reach runs outside its tenant's regions; a completion is
+   * first sent to the provider's twin inside them, when there is one.
+   */
+  residency?: ResidencyPolicy;
 }
 
 /** Options for admitting one operation. */

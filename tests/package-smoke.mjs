@@ -324,6 +324,10 @@ const imports = [
     specifier: 'nexus-ai-pro/credentials',
     exports: ['tenantCredentials', 'memorySecrets', 'vaultSecrets', 'CredentialError'],
   },
+  {
+    specifier: 'nexus-ai-pro/residency',
+    exports: ['residency', 'regionalTraceStore', 'regionalAssetStore', 'ResidencyError'],
+  },
   { specifier: 'nexus-ai-pro/tracing/otlp-grpc', exports: ['OtlpGrpcTraceExporter', 'OtlpGrpcError'] },
   {
     specifier: 'nexus-ai-pro/tracing/rollups',

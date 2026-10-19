@@ -437,8 +437,13 @@ export class EmbeddingEngine {
       const providerName = fallback.provider || route.providerName;
       const provider = this.providers.get(providerName);
       const model = fallback.model || route.resolved.model;
-      // A fallback that cannot take the media is no fallback for this request.
-      if (provider && takesMedia(resolveEmbeddingModel(model, this.config.models).capabilities, provider, inputs)) {
+      // A fallback that cannot take the media, or runs outside the tenant's regions, is no fallback
+      // for this request.
+      if (
+        provider &&
+        (callContext.residency?.allows(providerName) ?? true) &&
+        takesMedia(resolveEmbeddingModel(model, this.config.models).capabilities, provider, inputs)
+      ) {
         attempts.push({ providerName, provider, model });
       }
     }

@@ -37,7 +37,9 @@ import type {
 import type { PipelineContext, PipelineStep, PipelineStepName } from '../pipeline/types.js';
 import type { BaseProvider } from '../providers/base.js';
 import { configuredProviders } from '../providers/lazy.js';
-import type { RouteDecision } from '../router/types.js';
+import type { RouteAttempt, RouteDecision } from '../router/types.js';
+import { ResidencyError } from '../residency/errors.js';
+import type { CallResidency } from '../types/residency.js';
 import { Router, FailoverExecutor } from '../router/index.js';
 import type { ExecutionOptions } from '../router/failover.js';
 import { Logger } from '../utils/logger.js';
@@ -69,7 +71,7 @@ import { runBatch, type BatchOptions, type BatchItemResult } from '../jobs/batch
 import { JobQueue, type QueueOptions } from '../jobs/queue.js';
 import type { EvalCase, EvalRunResult } from '../evals/runner.js';
 import type { SummarizeVerifyFormatOptions, WorkflowResult } from '../workflow/chains.js';
-import { OperationLifecycle } from './lifecycle.js';
+import { callResidency, OperationLifecycle } from './lifecycle.js';
 
 /**
  * Main runtime facade for provider routing, security, optimization, evals, voice, jobs, and observability.
@@ -225,12 +227,15 @@ export class NexusAI {
       context = await this.pipeline.runHook('afterSecurity', context);
 
       const decision = await this.pipeline.trace(context, 'routing', () => {
-        return this.router.route(
-          context.request,
-          this.config,
-          this.providers,
-          this.health.snapshot(),
-          this.circuitBreaker.openProviders(),
+        return this.placeRoute(
+          this.router.route(
+            context.request,
+            this.config,
+            this.providers,
+            this.health.snapshot(),
+            this.circuitBreaker.openProviders(),
+          ),
+          ticket.context.residency,
         );
       });
       context.route = decision;
@@ -1003,6 +1008,50 @@ export class NexusAI {
   }
 
   /**
+   * A route kept inside the regions the operation may reach: each attempt sent to its provider when
+   * that runs inside them, to the provider's twin inside them when there is one, and dropped when
+   * neither. With nothing left, the operation is refused with a `ResidencyError` naming the rule.
+   */
+  private placeRoute(decision: RouteDecision, residency: CallResidency | undefined): RouteDecision {
+    if (!residency) return decision;
+    const attempts: RouteAttempt[] = [
+      { providerName: decision.providerName, model: decision.model, ...decision.primary },
+      ...decision.fallbacks,
+    ];
+    const placed: RouteAttempt[] = [];
+    const seen = new Set<string>();
+    for (const attempt of attempts) {
+      const where = residency.place(attempt.providerName);
+      if (!where || !this.providers.has(where.provider)) continue;
+      const key = `${where.provider}\u0000${attempt.model}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      placed.push({ ...attempt, providerName: where.provider });
+    }
+    const [first, ...rest] = placed;
+    if (!first) {
+      // Throws, naming the rule, for a provider outside the tenant's regions.
+      residency.check(decision.providerName);
+      throw new ResidencyError(
+        { kind: 'provider', name: decision.providerName },
+        residency.decision,
+        'its twin is not registered',
+      );
+    }
+    const { providerName, model, ...limits } = first;
+    return {
+      providerName,
+      model,
+      reason:
+        providerName === decision.providerName
+          ? decision.reason
+          : `${decision.reason}; sent to ${providerName} inside ${residency.decision.rule}`,
+      fallbacks: rest,
+      ...(Object.keys(limits).length > 0 ? { primary: limits } : {}),
+    };
+  }
+
+  /**
    * How failover runs the provider calls of one operation, with the context each attempt hands on,
    * and, given the operation's ticket, how a refused credential is resolved again and every error
    * cleaned of the credentials it resolved.
@@ -1117,12 +1166,15 @@ export class NexusAI {
       : { ok: true, value: optimizationResult.value, findings: [], guardrailsApplied: [] };
     if (this.isSecurityEnabled()) this.security.assertSafe(securityResult);
 
-    const decision = this.router.route(
-      securityResult.value,
-      this.config,
-      this.providers,
-      this.health.snapshot(),
-      this.circuitBreaker.openProviders(),
+    const decision = this.placeRoute(
+      this.router.route(
+        securityResult.value,
+        this.config,
+        this.providers,
+        this.health.snapshot(),
+        this.circuitBreaker.openProviders(),
+      ),
+      ticket.context.residency,
     );
     this.logger.info('stream route decision', {
       ...(decision as unknown as Record<string, unknown>),
@@ -1207,7 +1259,12 @@ export class NexusAI {
         contextWindowSummary: true,
       },
     };
-    const decision = this.router.route(summaryRequest, this.config, this.providers, this.health.snapshot());
+    const policy = this.config.lifecycle?.residency;
+    const routed = this.router.route(summaryRequest, this.config, this.providers, this.health.snapshot());
+    // The summary stays in the tenant's regions too.
+    const decision = policy
+      ? this.placeRoute(routed, callResidency(policy, await policy.regionsFor(summaryRequest.tenantId)))
+      : routed;
     const routedRequest = { ...summaryRequest, model: resolveModel(decision.model, this.config).model };
     const response = await this.lifecycle.run(
       { ...this.describe(routedRequest, 'summarize'), provider: decision.providerName },
