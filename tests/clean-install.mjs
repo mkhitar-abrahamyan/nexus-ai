@@ -107,15 +107,18 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // evaluators, automation rules, and the media catalog), OTLP's protobuf encoding, traced server runs,
 // and deployment evaluation through the online worker. None is loaded by the root. Measured at
 // 1,483,687 bytes packed and 8,977,677 unpacked.
-const MAX_PACKED_BYTES = 1_540_000;
-const MAX_UNPACKED_BYTES = 9_260_000;
+// Raised again in 2.13.0 for three opt-in entry points (residency, credentials per tenant, and the
+// regional gateway), per-call credentials in every adapter, and placement by residency in the client.
+// None is loaded by the root. Measured at 1,515,201 bytes packed and 9,129,629 unpacked.
+const MAX_PACKED_BYTES = 1_590_000;
+const MAX_UNPACKED_BYTES = 9_450_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
 // came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0 and
-// 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0 and 2.10.0 and 2.11.0 and 2.12.0, for the
-// same reasons, and still nothing but the package itself: 6,908,187 bytes in 2.4.0.
-const MAX_INSTALLED_BYTES = 9_360_000;
+// 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0 and 2.10.0 and 2.11.0 and 2.12.0 and 2.13.0,
+// for the same reasons, and still nothing but the package itself: 6,908,187 bytes in 2.4.0.
+const MAX_INSTALLED_BYTES = 9_550_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

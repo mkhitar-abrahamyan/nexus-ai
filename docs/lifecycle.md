@@ -194,8 +194,9 @@ limit, a budget, or a guardrail refused the call. It also says whether a cache a
 call took, what it cost, and the error when there was one. A throwing hook is ignored, so
 observability can never fail a call.
 
-`LifecycleConfig` is the whole setting: `authorize`, `budget`, `hooks`, and `credentials`, a
-`CredentialResolver` that gives each provider call its tenant's own key, as the
+`LifecycleConfig` is the whole setting: `authorize`, `budget`, `hooks`, `credentials`, a
+`CredentialResolver` that gives each provider call its tenant's own key, and `residency`, a
+`ResidencyPolicy` that keeps each tenant's provider calls in its regions, as the
 [regions and credentials guide](./regions.md) describes.
 
 ## Graphs, agents, sessions, queues, and batches
@@ -226,7 +227,7 @@ Every provider call receives a `ProviderCallContext` beside its request. It hold
 request id, its abort signal, its deadline, its trace headers, its idempotency key, its tenant, and,
 with a credential resolver, `credential(provider)`: the `ProviderCredential` to send in place of the
 configured key. A provider of your own sends `(await context?.credential?.(name))?.apiKey`, falling
-back to its own. A chat
+back to its own. Under a residency policy, `residency` says which providers the call may reach. A chat
 provider gets it as the second argument of `complete()` and `stream()`. Each family's own context
 extends it: an image provider's adds the operation id, and an embedding provider's adds the attempt
 and the batch index.
