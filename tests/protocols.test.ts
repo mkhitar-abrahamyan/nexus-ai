@@ -380,7 +380,10 @@ test('A2A: a raw JSON-RPC client reads the card, sends a message, and continues 
     await handler(new Request('https://agents.example.test/.well-known/agent-card.json'))
   ).json()) as Wire;
   assert.equal(card.name, 'Weather agent');
-  assert.deepEqual(card.supportedInterfaces, [{ url: CARD.url, protocolBinding: 'JSONRPC', protocolVersion: '1.0' }]);
+  assert.deepEqual(card.supportedInterfaces, [
+    { url: CARD.url, protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
+    { url: CARD.url, protocolBinding: 'HTTP+JSON', protocolVersion: '1.0' },
+  ]);
   assert.equal(card.capabilities.streaming, true);
   assert.deepEqual(card.skills[0].tags, ['weather']);
 

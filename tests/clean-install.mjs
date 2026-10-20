@@ -111,15 +111,21 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // Raised again in 2.13.0 for three opt-in entry points (residency, credentials per tenant, and the
 // regional gateway), per-call credentials in every adapter, and placement by residency in the client.
 // None is loaded by the root. Measured at 1,515,201 bytes packed and 9,129,629 unpacked.
-const MAX_PACKED_BYTES = 1_590_000;
-const MAX_UNPACKED_BYTES = 9_450_000;
+// Raised again in 2.16.0 for A2A's HTTP+JSON and gRPC bindings: one opt-in entry point (the gRPC
+// service and client, with the binding's protobuf codec), and the HTTP+JSON routes and the call every
+// binding shares, in both builds and their declarations. 2.14's policy file and emulated tools and
+// 2.15's compatibility records had already brought it to 1,570,521 packed. None is loaded by the
+// root. Measured at 1,590,573 bytes packed and 9,498,226 unpacked.
+const MAX_PACKED_BYTES = 1_670_000;
+const MAX_UNPACKED_BYTES = 9_850_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
 // came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0 and
-// 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0 and 2.10.0 and 2.11.0 and 2.12.0 and 2.13.0,
-// for the same reasons, and still nothing but the package itself: 6,908,187 bytes in 2.4.0.
-const MAX_INSTALLED_BYTES = 9_550_000;
+// 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0 and 2.10.0 and 2.11.0 and 2.12.0 and 2.13.0
+// and 2.16.0, for the same reasons, and still nothing but the package itself: 6,908,187 bytes in
+// 2.4.0.
+const MAX_INSTALLED_BYTES = 9_950_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;

@@ -196,6 +196,7 @@ const imports = [
     ],
   },
   { specifier: 'nexus-ai-pro/protocols/acp/editor', exports: ['acpEditor'] },
+  { specifier: 'nexus-ai-pro/protocols/a2a/grpc', exports: ['a2aGrpcService', 'a2aGrpcClient'] },
   { specifier: 'nexus-ai-pro/agent/sandbox/container', exports: ['containerSandbox'] },
   {
     specifier: 'nexus-ai-pro/agent/interpreter',

@@ -41,6 +41,21 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.16 stage (Unreleased)
+
+Everything 2.16 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- `nexus-ai-pro/protocols/a2a/grpc`: `a2aGrpcService()`, `a2aGrpcClient()`, `A2aGrpcService`,
+  `A2aGrpcServiceOptions`, `A2aGrpcClient`, and `A2aGrpcClientOptions`;
+- in `nexus-ai-pro/protocols/a2a`: the HTTP+JSON routes, `A2aServerOptions.bindings` and
+  `interfaces`, `A2aHandler.call()`, `card`, and `authenticate()`, `A2aBinding`, `A2aCallContext`,
+  `A2aCallOutcome`, `A2aErrorStatus`, `a2aErrorStatus()`, `a2aErrorCode()`,
+  `A2aClientOptions.binding`, `A2aPushOptions.text`, and `A2aPushNotificationConfig.authentication`.
+
+The routes, the gRPC service, and their errors follow A2A 1.0's bindings: a change the specification
+makes in a later version comes with that version, behind `A2A_PROTOCOL_VERSION`.
+
 ## 2.15 stage (2.15.0)
 
 Everything 2.15 adds is stable from the start and additive, unless this section says otherwise.

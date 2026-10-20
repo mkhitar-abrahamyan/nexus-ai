@@ -740,6 +740,16 @@
         "default": "./dist-cjs/protocols/a2a.js"
       }
     },
+    "./protocols/a2a/grpc": {
+      "import": {
+        "types": "./dist/protocols/a2a-grpc.d.ts",
+        "default": "./dist/protocols/a2a-grpc.js"
+      },
+      "require": {
+        "types": "./dist-cjs/protocols/a2a-grpc.d.ts",
+        "default": "./dist-cjs/protocols/a2a-grpc.js"
+      }
+    },
     "./protocols/acp": {
       "import": {
         "types": "./dist/protocols/acp.d.ts",
@@ -2752,6 +2762,9 @@
       ],
       "protocols/a2a": [
         "dist-cjs/protocols/a2a.d.ts"
+      ],
+      "protocols/a2a/grpc": [
+        "dist-cjs/protocols/a2a-grpc.d.ts"
       ],
       "protocols/acp": [
         "dist-cjs/protocols/acp.d.ts"

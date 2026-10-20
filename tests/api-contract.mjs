@@ -130,6 +130,7 @@ const expectedSubpaths = [
   './mcp/registry',
   './protocols/ag-ui',
   './protocols/a2a',
+  './protocols/a2a/grpc',
   './protocols/acp',
   './protocols/acp/editor',
   './tracing',

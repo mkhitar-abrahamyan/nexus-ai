@@ -4,6 +4,34 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+A2A on all three of its bindings over one set of tasks, and webhooks told the answer as it is written.
+
+### Added
+
+- **A2A over HTTP+JSON and gRPC.** `a2aHandler()` serves the protocol's HTTP+JSON binding beside
+  JSON-RPC, at routes under the card's URL, its errors AIP-193's JSON with A2A's `ErrorInfo` reason.
+  `a2aGrpcService()`, on the new `nexus-ai-pro/protocols/a2a/grpc`, serves the gRPC binding,
+  `lf.a2a.v1.A2AService`, over `node:http2` with no dependency. The card names each binding served
+  (`bindings`, `interfaces`). All three run through `A2aHandler.call()` over one task store, so a
+  caller on any binding continues, reads, cancels, or follows a task another started, and reads the
+  same history.
+- **Clients on every binding.** `a2aClient({ binding: 'HTTP+JSON' })` calls the HTTP+JSON binding, and
+  `a2aGrpcClient()` the gRPC one, with every method `a2aClient()` has. An error on any binding raises
+  an `A2aError` with A2A's code; `a2aErrorStatus()` and `a2aErrorCode()` map a code to its HTTP
+  status, gRPC status, and reason, and back.
+- **A webhook told the answer as it is written.** `pushNotifications.text` pushes each piece of
+  streamed text to a task's webhooks, the same pieces a stream sends, before the state that follows
+  them; `text: { everyMs }` gathers the pieces into fewer deliveries. A push config's
+  `authentication` is sent as each delivery's `Authorization` header.
+- Push configs take protocol 1.0's flat shape on every binding, and JSON-RPC answers both it and the
+  drafts' nested one; `ListTaskPushNotificationConfigs` is answered under its 1.0 name too.
+
+### Changed
+
+- The nightly interoperability check drives `@a2a-js/sdk` over each of the three bindings, and a
+  task across them. It drives `@agentclientprotocol/sdk` 2.0, which dropped
+  `ClientSideConnection`, through its new connection API, and 1.x as before.
+
 ## [2.15.1] - 2026-10-19
 
 A test that could fail by chance, made exact. The package is unchanged from 2.15.0.

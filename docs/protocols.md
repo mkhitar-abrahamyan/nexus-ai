@@ -1,6 +1,6 @@
 # Agent protocols
 
-<!-- covers: ./protocols/ag-ui ./protocols/a2a ./protocols/acp ./protocols/acp/editor -->
+<!-- covers: ./protocols/ag-ui ./protocols/a2a ./protocols/a2a/grpc ./protocols/acp ./protocols/acp/editor -->
 
 Three open protocols put an agent where other software already expects one:
 - **AG-UI** connects an agent to a user interface. Any AG-UI frontend renders the run as it happens:
@@ -129,7 +129,7 @@ known and a signal.
 ## A2A: agents calling agents
 
 `a2aHandler()` serves a graph as an A2A agent, speaking version `A2A_PROTOCOL_VERSION` (1.0) over
-JSON-RPC:
+JSON-RPC and HTTP+JSON, and over gRPC with `a2aGrpcService()`:
 
 ```ts
 import { a2aHandler } from 'nexus-ai-pro/protocols/a2a';
@@ -148,11 +148,12 @@ const handler = a2aHandler(researcher, {
 
 A `GET` returns the `A2aAgentCard` at `/.well-known/agent-card.json`. `A2aServerOptions.card` gives
 the name, description, version, provider, and each `A2aSkill`. The handler fills in the rest:
-- the JSON-RPC interface at the card's `url`;
+- an interface for each binding: JSON-RPC and HTTP+JSON at the card's `url`, as `bindings` chooses
+  (both by default), then each of `interfaces`, such as the gRPC service's address;
 - the capabilities: streaming, and push notifications and an extended card when they are set up;
 - the input and output media types, unless given.
 
-A `POST` is a JSON-RPC call:
+A `POST` to the card's `url` is a JSON-RPC call. HTTP+JSON and gRPC call the same methods:
 - `SendMessage` starts a task from an `A2aMessage` and returns the `A2aTask` when it is done.
   With `returnImmediately`, it returns the task while it runs.
 - `SendStreamingMessage` streams `A2aStreamEvent` values: the task, then the answer as artifact
@@ -176,6 +177,64 @@ A `POST` is a JSON-RPC call:
 A message is made of `A2aPart` values: text, data, or a file by URL or bytes. Who sent it is an
 `A2aRole`. A task moves through the `A2aTaskState` values. A finished task carries its answer as an
 `A2aArtifact` and as the status message.
+
+### HTTP+JSON and gRPC
+
+HTTP+JSON is served at routes under the card's `url`, so mount the handler at that path and every
+path under it. Each route is one method:
+
+| Route | Method |
+| --- | --- |
+| `POST /message:send` | `SendMessage` |
+| `POST /message:stream` | `SendStreamingMessage`, as Server-Sent Events of the events themselves |
+| `GET /tasks/{id}` | `GetTask`, with `historyLength` in the query |
+| `GET /tasks` | `ListTasks`, with its filters and paging in the query |
+| `POST /tasks/{id}:cancel` | `CancelTask` |
+| `POST /tasks/{id}:subscribe` | `SubscribeToTask`; a `GET` works too |
+| `POST /tasks/{id}/pushNotificationConfigs` | `CreateTaskPushNotificationConfig` |
+| `GET /tasks/{id}/pushNotificationConfigs` | `ListTaskPushNotificationConfigs` |
+| `GET /tasks/{id}/pushNotificationConfigs/{configId}` | `GetTaskPushNotificationConfig` |
+| `DELETE /tasks/{id}/pushNotificationConfigs/{configId}` | `DeleteTaskPushNotificationConfig` |
+| `GET /extendedAgentCard` | `GetExtendedAgentCard` |
+
+An error is the JSON of Google's AIP-193: an HTTP status, and a `google.rpc.ErrorInfo` whose reason
+names the A2A error, such as `TASK_NOT_FOUND` with 404. `a2aErrorStatus()` gives each code's HTTP
+status, gRPC status, and reason, as an `A2aErrorStatus`; `a2aErrorCode()` reads a reason back as its
+code. `bindings: ['JSONRPC']` serves JSON-RPC alone.
+
+`a2aGrpcService()`, on `nexus-ai-pro/protocols/a2a/grpc`, serves the gRPC binding over the same
+handler, and so over the same tasks:
+
+```ts
+import { a2aHandler } from 'nexus-ai-pro/protocols/a2a';
+import { a2aGrpcService } from 'nexus-ai-pro/protocols/a2a/grpc';
+
+const handler = a2aHandler(researcher, {
+  card,
+  interfaces: [{ url: 'agents.example.com:50051', protocolBinding: 'GRPC' }],
+});
+const grpc = await a2aGrpcService(handler).listen(50051, '0.0.0.0');
+```
+
+An `A2aGrpcService` answers each method of `lf.a2a.v1.A2AService` as the specification's proto
+defines it, over `node:http2` and with no dependency:
+- a stream is a server-streaming call;
+- an error is a gRPC status, such as `NOT_FOUND`, with its `ErrorInfo` in `grpc-status-details-bin`;
+- the caller is read by the handler's `principal`, from a `Request` with the call's metadata as its
+  headers;
+- `grpc-timeout` cancels a call at its deadline, and a gzip or deflate message is read.
+
+`listen()` serves plain HTTP/2, for a server behind a proxy that ends TLS. To end TLS here, create
+your own server with `http2.createSecureServer()` and give each of its streams to `handle()`. List
+the address on the card as `host:port`, the form gRPC names a target in. `close()` stops taking
+calls, tells each connected client to go, and resolves once the calls in flight finish.
+`A2aGrpcServiceOptions.maxMessageBytes` caps a request's message, 4 MiB by default.
+
+A task is the same task on every binding: a caller can start it over gRPC, answer its question over
+HTTP+JSON, and read it over JSON-RPC, with the same history. Each binding runs a method through
+`A2aHandler.call()`, with an `A2aCallContext` naming its `A2aBinding`, and gets back an
+`A2aCallOutcome`: a result, an error, or a stream of events. A binding of your own serves the same
+tasks the same way, with the caller read by `authenticate()`.
 
 ### Conversations and questions
 
@@ -257,12 +316,23 @@ the replica that takes it over.
 ### Push notifications and the extended card
 
 With `pushNotifications`, a caller can give a task a webhook, an `A2aPushNotificationConfig` with a
-URL and a token. Each change of the task's state is then POSTed to it as a status update, in order:
-- with the caller's token as `X-A2A-Notification-Token`;
+URL, a token, and optionally its authentication. Each change of the task's state is then POSTed to
+it as a status update, in order:
+- with the caller's token as `X-A2A-Notification-Token`, and its `authentication` as the
+  `Authorization` header, such as `Bearer` and a credential the receiver checks;
 - signed with `A2aPushOptions.secret` as the server's operation webhooks are, in
   `x-nexus-signature`, so the receiver checks it with `verifyOperationWebhook()`;
 - within `timeoutMs` (5 seconds), without following a redirect. A failed delivery goes to `onError`
   and never fails the task.
+
+With `A2aPushOptions.text`, a webhook also receives the answer as it is written: each piece is an
+artifact update, the same pieces a stream sends, delivered before the state that follows them.
+`text: { everyMs }` gathers the pieces written within that many milliseconds into one delivery,
+for a receiver that wants fewer calls.
+
+```ts
+const handler = a2aHandler(researcher, { card, pushNotifications: { text: { everyMs: 250 } } });
+```
 
 A webhook is a URL a caller chose, which the agent then fetches. So it must be `https`, and not a
 loopback, private, or link-local address or name such as `localhost` or `metadata.internal`.
@@ -275,8 +345,12 @@ is called with the caller's principal, and `GetExtendedAgentCard` refuses a call
 
 ### Calling other agents
 
-`a2aClient()` talks to any A2A agent. `A2aClientOptions` takes the agent's card URL, or its
-endpoint, whose origin serves the card. Pass `fetch` and `headers` for authentication or a proxy.
+`a2aClient()` talks to any A2A agent, over JSON-RPC or, with `binding: 'HTTP+JSON'`, over HTTP+JSON.
+`A2aClientOptions` takes the agent's card URL, whose interface for the binding it then calls, or the
+endpoint itself, whose origin serves the card. Pass `fetch` and `headers` for authentication or a
+proxy. `a2aGrpcClient()`, on `nexus-ai-pro/protocols/a2a/grpc`, is the same client over gRPC. Give
+`A2aGrpcClientOptions` the service as `host:port`, or an `https://` URL for TLS, and the `cardUrl`.
+An `A2aGrpcClient` holds one HTTP/2 connection until its `close()`.
 An `A2aClient` can:
 - read the `card()`, and the `extendedCard()`;
 - `send()` a message and wait for its task;
@@ -288,7 +362,8 @@ An `A2aClient` can:
 
 `A2aSendOptions` continues a conversation by `contextId`, answers a task by `taskId`, sends data
 beside the text, gives a webhook as `push`, returns at once with `returnImmediately`, or cancels by
-signal. `A2aListTasksOptions` filters and pages a listing. A JSON-RPC error raises an `A2aError` with its code.
+signal. `A2aListTasksOptions` filters and pages a listing. An error on any binding raises an
+`A2aError` with A2A's code.
 
 `a2aTool()` makes a remote agent one more tool. `A2aToolOptions` gives the tool's name and a
 description written for the model. Each call is a task, and the result reports:
@@ -454,6 +529,11 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
 - **A2A, calling.** The client and tool are tested against a stub agent written from the
   specification alone. The stub answers with a task, with a bare message, and with a stream split
   mid-frame. Then one Nexus agent calls another through the tool.
+- **A2A, on every binding.** One agent is served over JSON-RPC, HTTP+JSON, and gRPC from one
+  handler. A task started over gRPC is answered over HTTP+JSON, and all three bindings read it back
+  the same, with the same history. A webhook asked for text receives, piece by piece, the text a
+  stream receives. Each binding's errors carry the protocol's codes, and a gRPC message is written
+  byte for byte as the specification's proto numbers it.
 - **ACP.** An editor's end of the connection, written line by line, does the following:
   - it initializes;
   - it opens a session;
@@ -470,10 +550,12 @@ Each protocol is also tested across releases and against the reference client of
   both releases' servers. A 2.6 client asking a 2.5 agent for something 2.6 added gets a protocol
   error, never a broken answer.
 - **Reference clients, nightly.** `scripts/interop/run.mjs` installs the latest `@ag-ui/client`,
-  `@a2a-js/sdk`, and `@agentclientprotocol/sdk` in a directory of their own, without their
-  scripts. Each drives its protocol:
+  `@a2a-js/sdk` with its gRPC transport's peers, and `@agentclientprotocol/sdk` in a directory
+  of their own, without their scripts. Each drives its protocol:
   - the AG-UI client pauses a run, resumes it, and rebuilds the state from its deltas;
-  - the A2A client sends, approves, reads, lists, and streams tasks;
+  - the A2A client sends, approves, reads, lists, and streams tasks, and sets their webhooks,
+    over each of JSON-RPC, HTTP+JSON, and gRPC; a task it starts over gRPC it answers over
+    HTTP+JSON, and every binding reads the same history;
   - the ACP client starts an agent as an editor would. The agent reads a file through it, writes
     once the client allows it, and has its session reloaded.
 
@@ -488,8 +570,9 @@ Each protocol is also tested across releases and against the reference client of
   process stopped runs again on the replica that takes it over, as a graph's steps do after any
   crash, so a tool with side effects needs an idempotency key. A slow replica that loses its lease
   stops its run, but a tool already running finishes.
-- **A2A coverage.** Only the JSON-RPC binding is served. A webhook receives state changes, not each
-  piece of streamed text.
+- **A2A coverage.** A request's `tenant` is not routed on: serve each tenant from a handler of its
+  own. Over gRPC, a card's security schemes and signatures are read past; `card()` reads them from
+  the `cardUrl` as JSON.
 - **ACP turns.** A turn goes on when the editor reopens its session, not before; one the agent stops
   in again while carrying it on goes on at the next reopening. A step that was halfway through when
   the agent stopped runs again, so a tool with side effects needs an idempotency key.
@@ -510,11 +593,17 @@ specific entry point that provides it.
 | `A2A_PROTOCOL_VERSION` | constant | The protocol version this module speaks. |
 | `A2aAgentCard` | interface | What an agent publishes about itself at `/.well-known/agent-card.json`. |
 | `A2aArtifact` | interface | What a task produced. |
+| `A2aBinding` | type | The binding a call arrived on. |
+| `A2aCallContext` | interface | Who a call is for, and what carries it. |
+| `A2aCallOutcome` | type | What one A2A call answers, whatever binding carries it: a result, an error, or a stream of events. |
 | `a2aClient` | function | A client for an A2A agent, by its card or endpoint URL. |
 | `A2aClient` | interface | A client for one A2A agent. |
 | `A2aClientOptions` | interface | Options for `a2aClient()`. |
-| `A2aError` | class | Raised by the client when an agent answers with a JSON-RPC error. |
-| `a2aHandler` | function | An HTTP handler that serves a graph as an A2A agent: `GET` the card, `POST` JSON-RPC. |
+| `A2aError` | class | Raised by a client when an agent answers with an error, on any binding, as A2A's code. |
+| `a2aErrorCode` | function | The error code of an `ErrorInfo` reason, the way back: `TASK_NOT_FOUND` is -32001. |
+| `a2aErrorStatus` | function | How an error code is carried on the HTTP+JSON and gRPC bindings, as protocol 1.0 maps them. |
+| `A2aErrorStatus` | interface | An A2A error, as each binding carries it: its HTTP status, its gRPC status, and its reason. |
+| `a2aHandler` | function | An HTTP handler that serves a graph as an A2A agent: `GET` the card, `POST` JSON-RPC, or call an HTTP+JSON route. |
 | `A2aHandler` | interface | An A2A agent's HTTP handler, with what keeps its tasks alive across replicas: `recover()` takes over the working tasks whose replica stopped renewing their lease, and `close()` stops the recovery timer. |
 | `A2aListTasksOptions` | interface | Which tasks `A2aClient.listTasks()` asks for. |
 | `A2aMessage` | interface | A message between agents. |
@@ -539,6 +628,17 @@ specific entry point that provides it.
 | `A2aToolOptions` | interface | Options for `a2aTool()`. |
 | `MemoryA2aTaskStore` | class | Tasks and conversations in this process: the default, for one replica. |
 | `storeA2aTasks` | function | Tasks and conversations in any long-term `Store`: the memory, Redis, Postgres, or SQLite store, so every replica sees one set. |
+
+### `nexus-ai-pro/protocols/a2a/grpc`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `a2aGrpcClient` | function | A client for one A2A agent over its gRPC binding: the same methods as `a2aClient()`, each a call of `lf.a2a.v1.A2AService` over one HTTP/2 connection, a gRPC error raised as an `A2aError` with the protocol's code. |
+| `A2aGrpcClient` | interface | A client for an A2A agent over gRPC, with `close()` for its connection. |
+| `A2aGrpcClientOptions` | interface | Options for `a2aGrpcClient()`. |
+| `a2aGrpcService` | function | The gRPC binding over an `a2aHandler()`: each method of `lf.a2a.v1.A2AService`, its message read as the JSON the handler takes and its answer written back, a stream as a server-streaming call, and an error as a gRPC status with A2A's `ErrorInfo` in `grpc-status-details-bin`. |
+| `A2aGrpcService` | interface | The gRPC binding of one A2A handler. |
+| `A2aGrpcServiceOptions` | interface | Options for `a2aGrpcService()`. |
 
 ### `nexus-ai-pro/protocols/acp`
 

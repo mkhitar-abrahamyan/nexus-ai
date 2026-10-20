@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Each agent protocol against the reference client of its own project: `@ag-ui/client` drives the
- * AG-UI handler, `@a2a-js/sdk` the A2A agent, and `@agentclientprotocol/sdk` an ACP agent it starts
- * as an editor would. Run nightly, against the clients' latest releases, so a change on their side
+ * AG-UI handler, `@a2a-js/sdk` the A2A agent over each of its three bindings, and
+ * `@agentclientprotocol/sdk` an ACP agent it starts as an editor would. Run nightly, against the clients' latest releases, so a change on their side
  * shows up before a user finds it.
  *
  *   node scripts/interop/run.mjs                       # installs the latest clients in a fresh directory
@@ -24,6 +24,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const given = args.includes('--clients') ? args[args.indexOf('--clients') + 1] : undefined;
 const CLIENTS = ['@ag-ui/client', '@a2a-js/sdk', '@agentclientprotocol/sdk'];
+// What `@a2a-js/sdk`'s gRPC transport needs beside it, as its peers.
+const PEERS = ['@grpc/grpc-js', '@bufbuild/protobuf'];
 
 let directory = given;
 if (!directory) {
@@ -32,7 +34,13 @@ if (!directory) {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const installed = spawnSync(
     npm,
-    ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...CLIENTS.map((name) => `${name}@latest`)],
+    [
+      'install',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      ...[...CLIENTS, ...PEERS].map((name) => `${name}@latest`),
+    ],
     { cwd: directory, stdio: 'inherit', shell: process.platform === 'win32' },
   );
   if (installed.status !== 0) throw new Error('Could not install the reference clients');
@@ -46,6 +54,7 @@ const versionOf = (name) =>
 const { createAgent, tool } = await import('../../dist/agent/index.js');
 const { agUiHandler } = await import('../../dist/protocols/ag-ui.js');
 const { a2aHandler } = await import('../../dist/protocols/a2a.js');
+const { a2aGrpcService } = await import('../../dist/protocols/a2a-grpc.js');
 
 /** Serves a `Request` → `Response` handler over real HTTP, streaming its body. */
 async function serve(handler) {
@@ -156,15 +165,39 @@ const check = (label, condition, detail = '') => {
 // ── A2A ────────────────────────────────────────────────────────────
 
 {
-  const { ClientFactory } = await load('@a2a-js/sdk/client');
-  const { ListTasksRequest, Message, Task } = await load('@a2a-js/sdk');
-  let server;
-  server = await serve((request) => handler(request));
-  const handler = a2aHandler(mailer(), {
+  const { ClientFactory, ClientFactoryOptions } = await load('@a2a-js/sdk/client');
+  const { GrpcTransportFactory } = await load('@a2a-js/sdk/client/grpc');
+  const { ListTaskPushNotificationConfigsRequest, ListTasksRequest, Message, Task, TaskPushNotificationConfig } =
+    await load('@a2a-js/sdk');
+  let handler;
+  // What each binding was asked, to be sure the client spoke it.
+  const routes = new Set();
+  const overGrpc = new Set();
+  const server = await serve((request) => {
+    routes.add(new URL(request.url).pathname);
+    return handler(request);
+  });
+  const grpc = await a2aGrpcService({
+    call: (method, params, context) => {
+      overGrpc.add(method);
+      return handler.call(method, params, context);
+    },
+    authenticate: (request) => handler.authenticate(request),
+  }).listen(0);
+  handler = a2aHandler(mailer(), {
     card: { name: 'Interop mailer', description: 'Sends mail', version: '1.0.0', url: `${server.url}/a2a`, skills: [] },
+    interfaces: [{ url: grpc.url, protocolBinding: 'GRPC' }],
+    pushNotifications: { allowPrivateNetworks: true },
   });
   try {
-    const client = await new ClientFactory().createFromUrl(server.url);
+    const clients = {};
+    for (const binding of ['JSONRPC', 'HTTP+JSON', 'GRPC']) {
+      const options = ClientFactoryOptions.createFrom(ClientFactoryOptions.default, {
+        transports: [new GrpcTransportFactory()],
+        preferredTransports: [binding],
+      });
+      clients[binding] = await new ClientFactory(options).createFromUrl(server.url);
+    }
     const message = (text, taskId) =>
       Message.fromJSON({
         messageId: `m-${Math.random()}`,
@@ -173,25 +206,66 @@ const check = (label, condition, detail = '') => {
         ...(taskId ? { taskId } : {}),
       });
     const asJson = (result) => Task.toJSON(result.task ?? result.payload?.value ?? result);
-    const paused = asJson(await client.sendMessage({ message: message('Email Ana') }));
+    for (const [binding, client] of Object.entries(clients)) {
+      const paused = asJson(await client.sendMessage({ message: message('Email Ana') }));
+      check(
+        `A2A ${binding}: a task pauses for approval`,
+        paused.status?.state === 'TASK_STATE_INPUT_REQUIRED',
+        JSON.stringify(paused.status),
+      );
+      const done = asJson(await client.sendMessage({ message: message('yes', paused.id) }));
+      check(
+        `A2A ${binding}: the answer completes it`,
+        done.status?.state === 'TASK_STATE_COMPLETED',
+        JSON.stringify(done.status),
+      );
+      const read = Task.toJSON(await client.getTask({ id: paused.id }));
+      check(`A2A ${binding}: the task reads back`, read.id === paused.id);
+      const listed = await client.listTasks(ListTasksRequest.fromJSON({}));
+      check(`A2A ${binding}: tasks are listed`, (listed.tasks ?? []).length >= 1);
+      const events = [];
+      for await (const event of client.sendMessageStream({ message: message('Email Rui') })) events.push(event);
+      check(`A2A ${binding}: a task streams`, events.length >= 2, String(events.length));
+      const config = await client.createTaskPushNotificationConfig(
+        TaskPushNotificationConfig.fromJSON({ taskId: paused.id, url: 'http://127.0.0.1:9/hook', token: binding }),
+      );
+      const configs = await client.listTaskPushNotificationConfig(
+        ListTaskPushNotificationConfigsRequest.fromJSON({ taskId: paused.id }),
+      );
+      check(
+        `A2A ${binding}: a webhook is set and listed`,
+        (configs.configs ?? []).some((item) => item.id === config.id && item.token === binding),
+        JSON.stringify(configs),
+      );
+    }
+    check('A2A: JSON-RPC was spoken', routes.has('/a2a'), [...routes].join(','));
+    check('A2A: HTTP+JSON was spoken', routes.has('/a2a/message:send'), [...routes].join(','));
+    check('A2A: gRPC was spoken', overGrpc.has('SendMessage'), [...overGrpc].join(','));
+
+    // One task across the three: started over gRPC, answered over HTTP+JSON, read over each.
+    const started = asJson(await clients.GRPC.sendMessage({ message: message('Email Ana') }));
+    const finished = asJson(await clients['HTTP+JSON'].sendMessage({ message: message('yes', started.id) }));
     check(
-      'A2A: a task pauses for approval',
-      paused.status?.state === 'TASK_STATE_INPUT_REQUIRED',
-      JSON.stringify(paused.status),
+      'A2A: a task started over gRPC is answered over HTTP+JSON',
+      finished.id === started.id && finished.status?.state === 'TASK_STATE_COMPLETED',
+      JSON.stringify(finished.status),
     );
-    const done = asJson(await client.sendMessage({ message: message('yes', paused.id) }));
-    check('A2A: the answer completes it', done.status?.state === 'TASK_STATE_COMPLETED', JSON.stringify(done.status));
-    const read = Task.toJSON(await client.getTask({ id: paused.id }));
-    check('A2A: the task reads back', read.id === paused.id);
-    const listed = await client.listTasks(ListTasksRequest.fromJSON({}));
-    check('A2A: tasks are listed', (listed.tasks ?? []).length >= 1);
-    const events = [];
-    for await (const event of client.sendMessageStream({ message: message('Email Rui') })) events.push(event);
-    check('A2A: a task streams', events.length >= 2, String(events.length));
+    const reads = await Promise.all(
+      Object.values(clients).map(async (client) =>
+        Task.toJSON(await client.getTask({ id: started.id, historyLength: 10 })),
+      ),
+    );
+    const histories = reads.map((read) => JSON.stringify(read.history));
+    check(
+      'A2A: every binding reads the same history',
+      reads[0].history?.length === 3 && histories.every((history) => history === histories[0]),
+      histories.join(' | '),
+    );
   } catch (error) {
     failures.push(`A2A: ${error?.stack ?? error}`);
   } finally {
     await server.close();
+    await grpc.close();
   }
 }
 
@@ -275,7 +349,7 @@ const check = (label, condition, detail = '') => {
   }
 }
 
-const versions = CLIENTS.map((name) => `${name}@${versionOf(name)}`).join(', ');
+const versions = [...CLIENTS, ...PEERS].map((name) => `${name}@${versionOf(name)}`).join(', ');
 if (!given) rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 if (failures.length) {
   console.error(`Interoperability failed against ${versions}:\n  - ${failures.join('\n  - ')}`);

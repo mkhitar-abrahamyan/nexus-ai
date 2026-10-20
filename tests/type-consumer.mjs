@@ -326,6 +326,8 @@ import {
   recordStatus,
 } from 'nexus-ai-pro/adapter-kit';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
+import { a2aClient, a2aErrorStatus, a2aHandler, type A2aCallOutcome } from 'nexus-ai-pro/protocols/a2a';
+import { a2aGrpcClient, a2aGrpcService, type A2aGrpcClient } from 'nexus-ai-pro/protocols/a2a/grpc';
 import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { emulatedTools, MemoryEmulationStore, type EmulatedToolCall } from 'nexus-ai-pro/evaluate/emulate';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
@@ -1159,6 +1161,19 @@ const grpcOptions: OtlpGrpcTraceExporterOptions = { endpoint: 'http://localhost:
 const grpcExporter = new OtlpGrpcTraceExporter(grpcOptions);
 const spooledGrpc = spoolingExporter({ sender: grpcExporter, store: {} as never, drainEveryMs: 0 });
 void spooledGrpc;
+// One A2A handler over JSON-RPC, HTTP+JSON, and gRPC, its webhooks told each piece of text.
+const a2aAgent = a2aHandler(createAgent({ client: { complete: async () => ({}) as never } }), {
+  card: { name: 'Mailer', description: 'Sends mail', version: '1.0.0', url: 'https://agents.example.com/a2a', skills: [] },
+  bindings: ['JSONRPC', 'HTTP+JSON'],
+  interfaces: [{ url: 'agents.example.com:443', protocolBinding: 'GRPC' }],
+  pushNotifications: { text: { everyMs: 250 } },
+});
+const a2aOutcome: Promise<A2aCallOutcome> = a2aAgent.call('GetTask', { id: 'task-1' }, { binding: 'GRPC' });
+const a2aOverGrpc = a2aGrpcService(a2aAgent, { maxMessageBytes: 4_000_000 });
+const a2aCaller: A2aGrpcClient = a2aGrpcClient({ url: 'agents.example.com:443' });
+const a2aRest = a2aClient({ url: 'https://agents.example.com/a2a', binding: 'HTTP+JSON' });
+const notFoundOverHttp: number = a2aErrorStatus(-32001).httpStatus;
+void [a2aOutcome, a2aOverGrpc.listen, a2aCaller.close, a2aRest.getTask, notFoundOverHttp];
 // Tools a model plays, its answers kept for the next run.
 const emulationStore = new MemoryEmulationStore();
 const emulatedCalls: EmulatedToolCall[] = [];

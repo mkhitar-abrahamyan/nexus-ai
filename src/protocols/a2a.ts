@@ -2,8 +2,9 @@
  * A2A, the Agent2Agent protocol (version 1.0): a Nexus agent served to remote agents, and remote
  * agents called from a Nexus agent.
  *
- * The server publishes an agent card at `/.well-known/agent-card.json` and answers JSON-RPC 2.0 over
- * HTTP:
+ * The server publishes an agent card at `/.well-known/agent-card.json` and answers over the
+ * protocol's bindings: JSON-RPC 2.0 at the card's URL, HTTP+JSON at routes under it, and gRPC through
+ * `nexus-ai-pro/protocols/a2a/grpc`, every one over the same tasks:
  * - `SendMessage`, and `SendStreamingMessage` with its events;
  * - `GetTask`, `ListTasks`, `SubscribeToTask`, and `CancelTask`;
  * - push notification configs, when it pushes, and `GetExtendedAgentCard`, when it has one.
@@ -137,7 +138,7 @@ export interface A2aAgentCard {
   /** Who provides it. */
   provider?: { organization: string; url?: string };
   /** Where it is reached, and how. */
-  supportedInterfaces: Array<{ url: string; protocolBinding: string; protocolVersion: string }>;
+  supportedInterfaces: Array<{ url: string; protocolBinding: string; protocolVersion: string; tenant?: string }>;
   /** What it supports. */
   capabilities: { streaming: boolean; pushNotifications: boolean; extendedAgentCard: boolean };
   /** Media types it accepts. */
@@ -173,10 +174,10 @@ export const A2A_ERRORS = {
   versionNotSupported: -32009,
 } as const;
 
-/** Raised by the client when an agent answers with a JSON-RPC error. */
+/** Raised by a client when an agent answers with an error, on any binding, as A2A's code. */
 export class A2aError extends Error {
   constructor(
-    /** The JSON-RPC error code. */
+    /** The error's JSON-RPC code: on HTTP+JSON and gRPC, the code of its `ErrorInfo` reason. */
     readonly code: number,
     message: string,
     /** The error's data, when the agent sent any. */
@@ -197,6 +198,8 @@ export interface A2aPushNotificationConfig {
   url: string;
   /** Sent back as the `X-A2A-Notification-Token` header, so the receiver knows the update is its own. */
   token?: string;
+  /** Sent as the `Authorization` header of each delivery, `<scheme> <credentials>`, such as a bearer token. */
+  authentication?: { scheme: string; credentials?: string };
 }
 
 /** A task as a store keeps it: the task, its messages, the questions it waits on, and its webhooks. */
@@ -437,6 +440,13 @@ export interface A2aPushOptions {
   fetch?: typeof globalThis.fetch;
   /** How long one delivery may take, in milliseconds. Defaults to 5 seconds. */
   timeoutMs?: number;
+  /**
+   * Pushes the answer's text as it is written too, each piece as an `artifactUpdate`, in order with
+   * the task's changes of state: so a caller that cannot hold a stream open still sees the answer
+   * arrive. `everyMs` gathers the pieces written within that many milliseconds into one delivery.
+   * Off by default: only changes of state are pushed.
+   */
+  text?: boolean | { everyMs?: number };
 }
 
 /** Options for `a2aHandler()`. */
@@ -487,6 +497,76 @@ export interface A2aServerOptions {
   recoverEveryMs?: number;
   /** Receives push delivery failures, which never fail a task. */
   onError?: (error: unknown) => void;
+  /**
+   * The bindings this handler answers, as its card lists them: `JSONRPC`, POSTed to the card's `url`,
+   * and `HTTP+JSON`, its routes under that URL, such as `<url>/message:send`. Defaults to both.
+   */
+  bindings?: ReadonlyArray<'JSONRPC' | 'HTTP+JSON'>;
+  /**
+   * More interfaces the card lists, after this handler's own: the gRPC service
+   * `nexus-ai-pro/protocols/a2a/grpc` serves over this handler, as `{ url: 'agents.example.com:443',
+   * protocolBinding: 'GRPC' }`, or a binding of your own.
+   */
+  interfaces?: ReadonlyArray<{ url: string; protocolBinding: string; protocolVersion?: string; tenant?: string }>;
+}
+
+/** The binding a call arrived on. */
+export type A2aBinding = 'JSONRPC' | 'HTTP+JSON' | 'GRPC' | (string & {});
+
+/** Who a call is for, and what carries it. */
+export interface A2aCallContext {
+  /** The caller, as `A2aServerOptions.principal` read them. */
+  principal?: Principal;
+  /** Stops a stream when the caller goes away. */
+  signal?: AbortSignal;
+  /**
+   * The binding, which shapes a push config's answer: JSON-RPC's carries the config both flat, as
+   * protocol 1.0 has it, and as the `pushNotificationConfig` the drafts had. Defaults to `JSONRPC`.
+   */
+  binding?: A2aBinding;
+}
+
+/** What one A2A call answers, whatever binding carries it: a result, an error, or a stream of events. */
+export type A2aCallOutcome =
+  | { result: unknown }
+  | { error: { code: number; message: string } }
+  | { events: ReadableStream<A2aStreamEvent> };
+
+/** An A2A error, as each binding carries it: its HTTP status, its gRPC status, and its reason. */
+export interface A2aErrorStatus {
+  /** The HTTP status of the HTTP+JSON binding. */
+  httpStatus: number;
+  /** The gRPC status code's name, such as `NOT_FOUND`. */
+  grpcStatus: string;
+  /** The `google.rpc.ErrorInfo` reason, such as `TASK_NOT_FOUND`. */
+  reason: string;
+}
+
+const ERROR_STATUS: Record<number, A2aErrorStatus> = {
+  [-32001]: { httpStatus: 404, grpcStatus: 'NOT_FOUND', reason: 'TASK_NOT_FOUND' },
+  [-32002]: { httpStatus: 409, grpcStatus: 'FAILED_PRECONDITION', reason: 'TASK_NOT_CANCELABLE' },
+  [-32003]: { httpStatus: 400, grpcStatus: 'UNIMPLEMENTED', reason: 'PUSH_NOTIFICATION_NOT_SUPPORTED' },
+  [-32004]: { httpStatus: 400, grpcStatus: 'UNIMPLEMENTED', reason: 'UNSUPPORTED_OPERATION' },
+  [-32005]: { httpStatus: 415, grpcStatus: 'INVALID_ARGUMENT', reason: 'CONTENT_TYPE_NOT_SUPPORTED' },
+  [-32006]: { httpStatus: 502, grpcStatus: 'INTERNAL', reason: 'INVALID_AGENT_RESPONSE' },
+  [-32007]: { httpStatus: 400, grpcStatus: 'FAILED_PRECONDITION', reason: 'EXTENDED_AGENT_CARD_NOT_CONFIGURED' },
+  [-32008]: { httpStatus: 400, grpcStatus: 'FAILED_PRECONDITION', reason: 'EXTENSION_SUPPORT_REQUIRED' },
+  [-32009]: { httpStatus: 400, grpcStatus: 'UNIMPLEMENTED', reason: 'VERSION_NOT_SUPPORTED' },
+  [-32700]: { httpStatus: 400, grpcStatus: 'INVALID_ARGUMENT', reason: 'INVALID_PARAMS' },
+  [-32600]: { httpStatus: 400, grpcStatus: 'INVALID_ARGUMENT', reason: 'INVALID_PARAMS' },
+  [-32601]: { httpStatus: 404, grpcStatus: 'UNIMPLEMENTED', reason: 'METHOD_NOT_FOUND' },
+  [-32602]: { httpStatus: 400, grpcStatus: 'INVALID_ARGUMENT', reason: 'INVALID_PARAMS' },
+};
+
+/** How an error code is carried on the HTTP+JSON and gRPC bindings, as protocol 1.0 maps them. */
+export function a2aErrorStatus(code: number): A2aErrorStatus {
+  return ERROR_STATUS[code] ?? { httpStatus: 500, grpcStatus: 'INTERNAL', reason: 'INTERNAL_ERROR' };
+}
+
+/** The error code of an `ErrorInfo` reason, the way back: `TASK_NOT_FOUND` is -32001. */
+export function a2aErrorCode(reason: string | undefined, fallback = -32603): number {
+  for (const [code, status] of Object.entries(ERROR_STATUS)) if (status.reason === reason) return Number(code);
+  return fallback;
 }
 
 /** What one `recover()` did. */
@@ -502,7 +582,7 @@ export interface A2aRecoveryReport {
  * the working tasks whose replica stopped renewing their lease, and `close()` stops the recovery timer.
  */
 export interface A2aHandler {
-  /** Answers one HTTP request: `GET` the card, `POST` JSON-RPC. */
+  /** Answers one HTTP request: `GET` the card, a JSON-RPC `POST`, or an HTTP+JSON route under the card's URL. */
   (request: Request): Promise<Response>;
   /** This replica's name in the leases it holds. */
   readonly owner: string;
@@ -515,6 +595,15 @@ export interface A2aHandler {
   recover(options?: { limit?: number }): Promise<A2aRecoveryReport>;
   /** Stops the recovery timer `recoverEveryMs` started. Tasks running here carry on. */
   close(): void;
+  /**
+   * Runs one method by its name, with its params as protocol 1.0's JSON has them: what every binding
+   * does, and so how another binding is served over the same tasks, as the gRPC service is.
+   */
+  call(method: string, params: Record<string, unknown>, context?: A2aCallContext): Promise<A2aCallOutcome>;
+  /** The card this handler serves. */
+  readonly card: A2aAgentCard;
+  /** Who a request is for, as `A2aServerOptions.principal` reads it: for a binding of your own to call with. */
+  authenticate(request: Request): Promise<Principal | undefined>;
 }
 
 /** Where a running task's events go: every stream and subscriber following it here. */
@@ -540,8 +629,9 @@ const TASK_STATES = new Set<A2aTaskState>([
 const settled = (state: A2aTaskState) => TERMINAL.has(state) || state === 'TASK_STATE_INPUT_REQUIRED';
 
 /**
- * An HTTP handler that serves a graph as an A2A agent: `GET` the card, `POST` JSON-RPC. Mount it
- * at the card's `url`; it answers the well-known card path under the same origin too.
+ * An HTTP handler that serves a graph as an A2A agent: `GET` the card, `POST` JSON-RPC, or call an
+ * HTTP+JSON route. Mount it at the card's `url` and every path under it; it answers the well-known card
+ * path under the same origin too. Its `call()` serves any other binding, as `a2aGrpcService()` does.
  *
  * ```ts
  * const handler = a2aHandler(agent, {
@@ -555,7 +645,19 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
     description: options.card.description,
     version: options.card.version,
     ...(options.card.provider ? { provider: options.card.provider } : {}),
-    supportedInterfaces: [{ url: options.card.url, protocolBinding: 'JSONRPC', protocolVersion: A2A_PROTOCOL_VERSION }],
+    supportedInterfaces: [
+      ...(options.bindings ?? ['JSONRPC', 'HTTP+JSON']).map((protocolBinding) => ({
+        url: options.card.url,
+        protocolBinding,
+        protocolVersion: A2A_PROTOCOL_VERSION,
+      })),
+      ...(options.interfaces ?? []).map((item) => ({
+        url: item.url,
+        protocolBinding: item.protocolBinding,
+        protocolVersion: item.protocolVersion ?? A2A_PROTOCOL_VERSION,
+        ...(item.tenant ? { tenant: item.tenant } : {}),
+      })),
+    ],
     capabilities: {
       streaming: true,
       pushNotifications: Boolean(options.pushNotifications),
@@ -596,8 +698,53 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
     };
   };
 
+  /** Text written but not yet pushed, by task, when the pieces are gathered. */
+  const pendingText = new Map<
+    string,
+    { record: A2aTaskRecord; event: A2aStreamEvent; timer: ReturnType<typeof setTimeout> }
+  >();
+  const textEvery = (() => {
+    const text = options.pushNotifications?.text;
+    if (!text) return undefined;
+    return typeof text === 'object' ? Math.max(0, text.everyMs ?? 0) : 0;
+  })();
+  /** Pushes the text gathered for a task, before anything after it. */
+  const flushText = (taskId: string) => {
+    const pending = pendingText.get(taskId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingText.delete(taskId);
+    pushNow(pending.record, pending.event);
+  };
+  /** Pushes a piece of the answer, now or gathered with the pieces after it within `everyMs`. */
+  const pushText = (record: A2aTaskRecord, event: Extract<A2aStreamEvent, { artifactUpdate: unknown }>) => {
+    if (textEvery === undefined || !record.push?.length) return;
+    if (textEvery === 0) return pushNow(record, event);
+    const taskId = record.task.id;
+    const pending = pendingText.get(taskId);
+    if (pending && 'artifactUpdate' in pending.event) {
+      const update = pending.event.artifactUpdate;
+      const parts = [...update.artifact.parts, ...event.artifactUpdate.artifact.parts];
+      const text = parts.map((part) => part.text ?? '').join('');
+      pending.event = {
+        artifactUpdate: {
+          ...update,
+          artifact: { ...update.artifact, parts: text ? [{ text }] : [] },
+          ...(event.artifactUpdate.lastChunk ? { lastChunk: true } : {}),
+        },
+      };
+      return;
+    }
+    pendingText.set(taskId, { record, event, timer: setTimeout(() => flushText(taskId), textEvery) });
+  };
+
   /** Posts an update to each of the task's webhooks, after the ones before it. */
   const pushUpdate = (record: A2aTaskRecord, event: A2aStreamEvent) => {
+    // Text gathered for the task goes first, so the webhooks see what a stream does, in its order.
+    flushText(record.task.id);
+    pushNow(record, event);
+  };
+  const pushNow = (record: A2aTaskRecord, event: A2aStreamEvent) => {
     const push = options.pushNotifications;
     if (!push || !record.push?.length) return;
     const configs = [...record.push];
@@ -665,14 +812,16 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
       onEvent: (event: GraphEvent) => {
         if (event.namespace) return;
         if (event.type === 'message' && event.chunk.kind !== 'reasoning' && event.chunk.content) {
-          publish(task.id, {
+          const piece = {
             artifactUpdate: {
               taskId: task.id,
               contextId: task.contextId,
               artifact: { artifactId: `${task.id}:answer`, name: 'answer', parts: [{ text: event.chunk.content }] },
               append: streamed,
             },
-          });
+          };
+          publish(task.id, piece);
+          pushText(record, piece);
           streamed = true;
         } else if (event.type === 'tool' && event.tool.phase === 'progress') {
           publish(task.id, { statusUpdate: progressUpdate(task, event.tool) });
@@ -755,7 +904,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
         );
         task.artifacts = [{ artifactId: `${task.id}:answer`, name: 'answer', parts: [{ text }] }];
         if (streamed) {
-          publish(task.id, {
+          const last = {
             artifactUpdate: {
               taskId: task.id,
               contextId: task.contextId,
@@ -763,7 +912,9 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
               append: true,
               lastChunk: true,
             },
-          });
+          };
+          publish(task.id, last);
+          pushText(record, last);
         }
         await changeStatus(record, 'TASK_STATE_COMPLETED', reply);
       }
@@ -905,18 +1056,17 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
 
   /** A stream of a task's events: the task, then each event until it finishes or waits. */
   const follow = (
-    id: unknown,
     record: A2aTaskRecord,
     start: (() => Promise<void>) | undefined,
-    signal: AbortSignal,
-  ): Response => {
-    const encoder = new TextEncoder();
+    signal: AbortSignal | undefined,
+  ): ReadableStream<A2aStreamEvent> => {
     const taskId = record.task.id;
-    const body = new ReadableStream<Uint8Array>({
+    let open = true;
+    let stop = () => {};
+    return new ReadableStream<A2aStreamEvent>({
       start: async (controller) => {
-        let open = true;
-        const send = (result: A2aStreamEvent) => {
-          if (open) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`));
+        const send = (event: A2aStreamEvent) => {
+          if (open) controller.enqueue(event);
         };
         const close = () => {
           if (!open) return;
@@ -925,11 +1075,11 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           controller.close();
         };
         send({ task: view(record) });
-        const stop = listen(taskId, (event) => {
+        stop = listen(taskId, (event) => {
           send(event);
           if ('statusUpdate' in event && settled(event.statusUpdate.status.state)) close();
         });
-        signal.addEventListener('abort', close, { once: true });
+        signal?.addEventListener('abort', close, { once: true });
         if (start) {
           await start();
           close();
@@ -951,13 +1101,19 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           close();
         }
       },
+      // The caller went away: stop following, and leave the task running.
+      cancel: () => {
+        open = false;
+        stop();
+      },
     });
-    return new Response(body, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } });
   };
 
-  /** A task's webhook config, from either shape a caller may send. */
+  /** A task's webhook config, from any shape a caller sends: protocol 1.0's, flat, or the drafts', nested. */
   const pushConfigOf = (params: Record<string, unknown>): A2aPushNotificationConfig | undefined => {
-    const config = (params.pushNotificationConfig ?? params.config) as A2aPushNotificationConfig | undefined;
+    const nested = (params.pushNotificationConfig ?? params.config) as A2aPushNotificationConfig | undefined;
+    const config =
+      nested ?? (typeof params.url === 'string' ? (params as unknown as A2aPushNotificationConfig) : undefined);
     return config && typeof config.url === 'string' ? config : undefined;
   };
 
@@ -965,13 +1121,288 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
   const addPush = (record: A2aTaskRecord, config: A2aPushNotificationConfig): A2aPushNotificationConfig => {
     const refusal = pushRefusal(config.url, options.pushNotifications?.allowPrivateNetworks === true);
     if (refusal) throw Object.assign(new Error(refusal), { code: -32602 });
+    const authentication = config.authentication?.scheme ? config.authentication : undefined;
     const kept: A2aPushNotificationConfig = {
-      id: config.id ?? protocolId('push'),
+      // A config sent over gRPC carries an empty id when it has none.
+      id: config.id || protocolId('push'),
       url: config.url,
       ...(config.token ? { token: config.token } : {}),
+      ...(authentication
+        ? {
+            authentication: {
+              scheme: authentication.scheme,
+              ...(authentication.credentials ? { credentials: authentication.credentials } : {}),
+            },
+          }
+        : {}),
     };
     record.push = [...(record.push ?? []).filter((item) => item.id !== kept.id), kept];
     return kept;
+  };
+
+  /**
+   * A push config as answered: flat, as protocol 1.0 has it, and over JSON-RPC also nested, as the
+   * drafts had it, so a client written against either reads it.
+   */
+  const pushAnswer = (taskId: string, config: A2aPushNotificationConfig, binding: A2aBinding) =>
+    binding === 'JSONRPC' ? { taskId, ...config, pushNotificationConfig: config } : { taskId, ...config };
+
+  const fail = (code: number, message: string): A2aCallOutcome => ({ error: { code, message } });
+
+  /** Runs one method of the protocol, for whichever binding carried it. */
+  const call = async (
+    method: string,
+    params: Record<string, unknown>,
+    context: A2aCallContext = {},
+  ): Promise<A2aCallOutcome> => {
+    const principal = context.principal;
+    const binding = context.binding ?? 'JSONRPC';
+    const pushOn = Boolean(options.pushNotifications);
+    try {
+      switch (method) {
+        case 'SendMessage':
+        case 'SendStreamingMessage': {
+          const message = params.message as A2aMessage | undefined;
+          if (!message || !Array.isArray(message.parts)) return fail(-32602, 'params.message with parts is required');
+          const configuration = (params.configuration ?? {}) as {
+            returnImmediately?: boolean;
+            historyLength?: number;
+            pushNotificationConfig?: A2aPushNotificationConfig;
+            taskPushNotificationConfig?: A2aPushNotificationConfig;
+          };
+          const pushConfig = configuration.taskPushNotificationConfig ?? configuration.pushNotificationConfig;
+          if (pushConfig && !pushOn) {
+            return fail(A2A_ERRORS.pushNotificationNotSupported, 'This agent does not push notifications');
+          }
+          const record = await taskFor(message, principal);
+          if ('error' in record) return fail(record.error, record.message);
+          if (pushConfig) {
+            addPush(record, pushConfig);
+            await store.put(record);
+          }
+          if (method === 'SendMessage') {
+            const run = execute(record, message, principal);
+            if (configuration.returnImmediately) void run.catch((error: unknown) => options.onError?.(error));
+            else await run;
+            return { result: { task: view(record, configuration.historyLength) } };
+          }
+          return { events: follow(record, () => execute(record, message, principal), context.signal) };
+        }
+        case 'GetTask': {
+          const record = await store.get(String(params.id ?? ''));
+          if (!record) return fail(A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
+          return { result: view(record, typeof params.historyLength === 'number' ? params.historyLength : undefined) };
+        }
+        case 'ListTasks': {
+          const pageSize = Math.min(100, Math.max(1, Number(params.pageSize ?? 50) || 50));
+          const offset = Math.max(0, Number.parseInt(String(params.pageToken ?? '0'), 10) || 0);
+          // An unset filter arrives as the protocol's unspecified state, or, from the reference SDK, as
+          // UNRECOGNIZED; either filters nothing. Any other state this agent does not know is refused.
+          const raw = typeof params.status === 'string' ? params.status : '';
+          const status = raw === 'UNRECOGNIZED' ? '' : taskStateOf(raw);
+          const filtered = status !== '' && status !== 'TASK_STATE_UNSPECIFIED';
+          if (filtered && !TASK_STATES.has(status as A2aTaskState)) return fail(-32602, `"${raw}" is not a task state`);
+          const listed = await store.list({
+            ...(typeof params.contextId === 'string' && params.contextId !== '' ? { contextId: params.contextId } : {}),
+            ...(filtered ? { state: status as A2aTaskState } : {}),
+            limit: pageSize,
+            offset,
+          });
+          const historyLength = typeof params.historyLength === 'number' ? params.historyLength : undefined;
+          const after = typeof params.statusTimestampAfter === 'string' ? params.statusTimestampAfter : undefined;
+          const more =
+            listed.total === undefined ? listed.records.length === pageSize : offset + pageSize < listed.total;
+          return {
+            result: {
+              tasks: listed.records
+                .filter((record) => !after || (record.task.status.timestamp ?? '') >= after)
+                .map((record) => view(record, historyLength))
+                .map(({ artifacts, ...task }) =>
+                  params.includeArtifacts === false ? task : { ...task, ...(artifacts ? { artifacts } : {}) },
+                ),
+              nextPageToken: more ? String(offset + pageSize) : '',
+              pageSize,
+              ...(listed.total === undefined ? {} : { totalSize: listed.total }),
+            },
+          };
+        }
+        case 'SubscribeToTask': {
+          const record = await store.get(String(params.id ?? ''));
+          if (!record) return fail(A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
+          if (TERMINAL.has(record.task.status.state)) {
+            return fail(A2A_ERRORS.unsupportedOperation, `Task ${record.task.id} has already finished`);
+          }
+          if (record.task.status.state === 'TASK_STATE_INPUT_REQUIRED') {
+            return { events: follow(record, async () => undefined, context.signal) };
+          }
+          return { events: follow(record, undefined, context.signal) };
+        }
+        case 'CancelTask': {
+          const record = await store.get(String(params.id ?? ''));
+          if (!record) return fail(A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
+          if (TERMINAL.has(record.task.status.state)) {
+            return fail(A2A_ERRORS.taskNotCancelable, `Task ${record.task.id} has already finished`);
+          }
+          running.get(record.task.id)?.abort(new Error('Cancelled by the calling agent'));
+          record.lease = undefined;
+          record.run = undefined;
+          await changeStatus(record, 'TASK_STATE_CANCELED');
+          return { result: view(record) };
+        }
+        case 'CreateTaskPushNotificationConfig':
+        case 'GetTaskPushNotificationConfig':
+        case 'ListTaskPushNotificationConfig':
+        case 'ListTaskPushNotificationConfigs':
+        case 'DeleteTaskPushNotificationConfig': {
+          if (!pushOn) return fail(A2A_ERRORS.pushNotificationNotSupported, 'This agent does not push notifications');
+          const taskId = String(params.taskId ?? params.id ?? '');
+          const record = await store.get(taskId);
+          if (!record) return fail(A2A_ERRORS.taskNotFound, `Task ${taskId} was not found`);
+          if (method === 'CreateTaskPushNotificationConfig') {
+            const config = pushConfigOf(params);
+            if (!config) return fail(-32602, 'A push notification config with a url is required');
+            const kept = addPush(record, config);
+            await store.put(record);
+            return { result: pushAnswer(taskId, kept, binding) };
+          }
+          if (method === 'ListTaskPushNotificationConfigs') {
+            return {
+              result: { configs: (record.push ?? []).map((config) => ({ taskId, ...config })), nextPageToken: '' },
+            };
+          }
+          if (method === 'ListTaskPushNotificationConfig') {
+            return { result: (record.push ?? []).map((config) => ({ taskId, pushNotificationConfig: config })) };
+          }
+          // Protocol 1.0 names the config `id` beside `taskId`; the drafts, `pushNotificationConfigId`.
+          const configId = String(
+            params.pushNotificationConfigId ??
+              params.configId ??
+              (params.taskId !== undefined ? (params.id ?? '') : ''),
+          );
+          const found = record.push?.find((item) => item.id === configId);
+          if (!found) return fail(-32602, `Task ${taskId} has no push config ${configId}`);
+          if (method === 'GetTaskPushNotificationConfig') return { result: pushAnswer(taskId, found, binding) };
+          record.push = record.push?.filter((item) => item.id !== configId);
+          await store.put(record);
+          return { result: binding === 'JSONRPC' ? null : {} };
+        }
+        case 'GetExtendedAgentCard': {
+          if (!options.extendedCard)
+            return fail(A2A_ERRORS.extendedCardNotConfigured, 'This agent has no extended card');
+          if (!principal) {
+            return fail(A2A_ERRORS.extendedCardNotConfigured, 'The extended card needs an authenticated caller');
+          }
+          return { result: { ...card, ...(await options.extendedCard(principal)) } };
+        }
+        default:
+          return fail(-32601, `Method ${method} is not supported`);
+      }
+    } catch (error) {
+      const code = (error as { code?: unknown })?.code;
+      return fail(typeof code === 'number' ? code : -32603, error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const bindings = new Set(options.bindings ?? ['JSONRPC', 'HTTP+JSON']);
+  /** Where the handler is mounted: its routes are under the card URL's path. */
+  const base = new URL(options.card.url).pathname.replace(/\/+$/, '');
+  const versionRefused = (request: Request) => {
+    const version = request.headers.get('a2a-version');
+    return version && !version.startsWith('1.')
+      ? `This agent speaks A2A ${A2A_PROTOCOL_VERSION}, not ${version}`
+      : undefined;
+  };
+
+  /** The JSON-RPC binding: one POST per call, a stream as Server-Sent Events of JSON-RPC results. */
+  const jsonRpc = async (request: Request): Promise<Response> => {
+    let rpc: { jsonrpc?: string; id?: unknown; method?: unknown; params?: Record<string, unknown> };
+    try {
+      rpc = (await request.json()) as typeof rpc;
+    } catch {
+      return rpcError(null, -32700, 'The body is not JSON');
+    }
+    const id = rpc.id ?? null;
+    if (rpc.jsonrpc !== '2.0' || typeof rpc.method !== 'string')
+      return rpcError(id, -32600, 'Not a JSON-RPC 2.0 request');
+    const refused = versionRefused(request);
+    if (refused) return rpcError(id, A2A_ERRORS.versionNotSupported, refused);
+    const outcome = await call(rpc.method, rpc.params ?? {}, {
+      principal: await options.principal?.(request),
+      signal: request.signal,
+      binding: 'JSONRPC',
+    });
+    if ('events' in outcome)
+      return serverSent(outcome.events, (result) => JSON.stringify({ jsonrpc: '2.0', id, result }));
+    if ('error' in outcome) return rpcError(id, outcome.error.code, outcome.error.message);
+    return rpcResult(id, outcome.result);
+  };
+
+  /**
+   * The HTTP+JSON binding: a route per call under the card's URL, its params in the path, the query,
+   * and the body, a stream as Server-Sent Events of each event, an error as AIP-193's JSON. `undefined`
+   * for a request that is not one of its routes.
+   */
+  const httpJson = async (request: Request, route: string): Promise<Response | undefined> => {
+    const verb = request.method;
+    const query = new URL(request.url).searchParams;
+    const number = (name: string) => (query.has(name) ? Number(query.get(name)) : undefined);
+    const id = (value: string | undefined) => decodeURIComponent(value ?? '');
+    const cancel = /^\/tasks\/([^/:]+):cancel$/.exec(route);
+    const subscribe = /^\/tasks\/([^/:]+):subscribe$/.exec(route);
+    const configs = /^\/tasks\/([^/:]+)\/pushNotificationConfigs$/.exec(route);
+    const config = /^\/tasks\/([^/:]+)\/pushNotificationConfigs\/([^/]+)$/.exec(route);
+    const task = /^\/tasks\/([^/:]+)$/.exec(route);
+    let method: string;
+    let params: Record<string, unknown> = {};
+    let body = false;
+    if (verb === 'POST' && route === '/message:send') [method, body] = ['SendMessage', true];
+    else if (verb === 'POST' && route === '/message:stream') [method, body] = ['SendStreamingMessage', true];
+    else if (verb === 'GET' && route === '/tasks') {
+      method = 'ListTasks';
+      params = {
+        ...(query.has('contextId') ? { contextId: query.get('contextId') } : {}),
+        ...(query.has('status') ? { status: query.get('status') } : {}),
+        ...(query.has('pageSize') ? { pageSize: number('pageSize') } : {}),
+        ...(query.has('pageToken') ? { pageToken: query.get('pageToken') } : {}),
+        ...(query.has('historyLength') ? { historyLength: number('historyLength') } : {}),
+        ...(query.has('statusTimestampAfter') ? { statusTimestampAfter: query.get('statusTimestampAfter') } : {}),
+        ...(query.has('includeArtifacts') ? { includeArtifacts: query.get('includeArtifacts') === 'true' } : {}),
+      };
+    } else if (verb === 'GET' && route === '/extendedAgentCard') method = 'GetExtendedAgentCard';
+    else if (cancel && verb === 'POST') [method, body, params] = ['CancelTask', true, { id: id(cancel[1]) }];
+    else if (subscribe && (verb === 'POST' || verb === 'GET'))
+      [method, params] = ['SubscribeToTask', { id: id(subscribe[1]) }];
+    else if (configs && verb === 'POST') {
+      [method, body, params] = ['CreateTaskPushNotificationConfig', true, { taskId: id(configs[1]) }];
+    } else if (configs && verb === 'GET')
+      [method, params] = ['ListTaskPushNotificationConfigs', { taskId: id(configs[1]) }];
+    else if (config && (verb === 'GET' || verb === 'DELETE')) {
+      method = verb === 'GET' ? 'GetTaskPushNotificationConfig' : 'DeleteTaskPushNotificationConfig';
+      params = { taskId: id(config[1]), id: id(config[2]) };
+    } else if (task && verb === 'GET') {
+      method = 'GetTask';
+      params = { id: id(task[1]), ...(query.has('historyLength') ? { historyLength: number('historyLength') } : {}) };
+    } else return undefined;
+
+    const refused = versionRefused(request);
+    if (refused) return restError(A2A_ERRORS.versionNotSupported, refused);
+    if (body) {
+      const text = await request.text();
+      try {
+        // The path's ids stand over the body's.
+        params = { ...(text ? (JSON.parse(text) as Record<string, unknown>) : {}), ...params };
+      } catch {
+        return restError(-32700, 'The body is not JSON');
+      }
+    }
+    const outcome = await call(method, params, {
+      principal: await options.principal?.(request),
+      signal: request.signal,
+      binding: 'HTTP+JSON',
+    });
+    if ('events' in outcome) return serverSent(outcome.events, (event) => JSON.stringify(event));
+    if ('error' in outcome) return restError(outcome.error.code, outcome.error.message);
+    return Response.json(outcome.result ?? {});
   };
 
   const handle = async (request: Request): Promise<Response> => {
@@ -980,172 +1411,26 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
       if (url.pathname.endsWith('/.well-known/agent-card.json') || url.pathname.endsWith('/agent-card.json')) {
         return Response.json(card);
       }
-      return new Response('Not found', { status: 404 });
     }
+    // Under the card's URL, a route of the HTTP+JSON binding; the URL itself, or any other path a
+    // POST reaches, JSON-RPC, as it always was.
+    const route = url.pathname.startsWith(base) ? url.pathname.slice(base.length) : undefined;
+    if (bindings.has('HTTP+JSON') && route && route !== '/') {
+      const answered = await httpJson(request, route);
+      if (answered) return answered;
+    }
+    if (request.method === 'GET') return new Response('Not found', { status: 404 });
     if (request.method !== 'POST')
       return new Response('A2A calls are POSTed', { status: 405, headers: { allow: 'GET, POST' } });
-    const version = request.headers.get('a2a-version');
-    let call: { jsonrpc?: string; id?: unknown; method?: unknown; params?: Record<string, unknown> };
-    try {
-      call = (await request.json()) as typeof call;
-    } catch {
-      return rpcError(null, -32700, 'The body is not JSON');
-    }
-    const id = call.id ?? null;
-    if (call.jsonrpc !== '2.0' || typeof call.method !== 'string')
-      return rpcError(id, -32600, 'Not a JSON-RPC 2.0 request');
-    if (version && !version.startsWith('1.')) {
-      return rpcError(
-        id,
-        A2A_ERRORS.versionNotSupported,
-        `This agent speaks A2A ${A2A_PROTOCOL_VERSION}, not ${version}`,
-      );
-    }
-    const params = call.params ?? {};
-    const principal = await options.principal?.(request);
-    const pushOn = Boolean(options.pushNotifications);
-
-    try {
-      switch (call.method) {
-        case 'SendMessage':
-        case 'SendStreamingMessage': {
-          const message = params.message as A2aMessage | undefined;
-          if (!message || !Array.isArray(message.parts))
-            return rpcError(id, -32602, 'params.message with parts is required');
-          const configuration = (params.configuration ?? {}) as {
-            returnImmediately?: boolean;
-            historyLength?: number;
-            pushNotificationConfig?: A2aPushNotificationConfig;
-          };
-          if (configuration.pushNotificationConfig && !pushOn) {
-            return rpcError(id, A2A_ERRORS.pushNotificationNotSupported, 'This agent does not push notifications');
-          }
-          const record = await taskFor(message, principal);
-          if ('error' in record) return rpcError(id, record.error, record.message);
-          if (configuration.pushNotificationConfig) {
-            addPush(record, configuration.pushNotificationConfig);
-            await store.put(record);
-          }
-          if (call.method === 'SendMessage') {
-            const run = execute(record, message, principal);
-            if (configuration.returnImmediately) void run.catch((error: unknown) => options.onError?.(error));
-            else await run;
-            return rpcResult(id, { task: view(record, configuration.historyLength) });
-          }
-          return follow(id, record, () => execute(record, message, principal), request.signal);
-        }
-        case 'GetTask': {
-          const record = await store.get(String(params.id ?? ''));
-          if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
-          return rpcResult(
-            id,
-            view(record, typeof params.historyLength === 'number' ? params.historyLength : undefined),
-          );
-        }
-        case 'ListTasks': {
-          const pageSize = Math.min(100, Math.max(1, Number(params.pageSize ?? 50) || 50));
-          const offset = Math.max(0, Number.parseInt(String(params.pageToken ?? '0'), 10) || 0);
-          // An unset filter arrives as the protocol's unspecified state, or, from the reference SDK, as
-          // UNRECOGNIZED; either filters nothing. Any other state this agent does not know is refused.
-          const status = typeof params.status === 'string' ? params.status : '';
-          const filtered = status !== '' && status !== 'TASK_STATE_UNSPECIFIED' && status !== 'UNRECOGNIZED';
-          if (filtered && !TASK_STATES.has(status as A2aTaskState)) {
-            return rpcError(id, -32602, `"${status}" is not a task state`);
-          }
-          const listed = await store.list({
-            ...(typeof params.contextId === 'string' && params.contextId !== '' ? { contextId: params.contextId } : {}),
-            ...(filtered ? { state: status as A2aTaskState } : {}),
-            limit: pageSize,
-            offset,
-          });
-          const historyLength = typeof params.historyLength === 'number' ? params.historyLength : undefined;
-          const more =
-            listed.total === undefined ? listed.records.length === pageSize : offset + pageSize < listed.total;
-          return rpcResult(id, {
-            tasks: listed.records.map((record) => view(record, historyLength)),
-            nextPageToken: more ? String(offset + pageSize) : '',
-            pageSize,
-            ...(listed.total === undefined ? {} : { totalSize: listed.total }),
-          });
-        }
-        case 'SubscribeToTask': {
-          const record = await store.get(String(params.id ?? ''));
-          if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
-          if (TERMINAL.has(record.task.status.state)) {
-            return rpcError(id, A2A_ERRORS.unsupportedOperation, `Task ${record.task.id} has already finished`);
-          }
-          if (record.task.status.state === 'TASK_STATE_INPUT_REQUIRED') {
-            return follow(id, record, async () => undefined, request.signal);
-          }
-          return follow(id, record, undefined, request.signal);
-        }
-        case 'CancelTask': {
-          const record = await store.get(String(params.id ?? ''));
-          if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
-          if (TERMINAL.has(record.task.status.state)) {
-            return rpcError(id, A2A_ERRORS.taskNotCancelable, `Task ${record.task.id} has already finished`);
-          }
-          running.get(record.task.id)?.abort(new Error('Cancelled by the calling agent'));
-          record.lease = undefined;
-          record.run = undefined;
-          await changeStatus(record, 'TASK_STATE_CANCELED');
-          return rpcResult(id, view(record));
-        }
-        case 'CreateTaskPushNotificationConfig':
-        case 'GetTaskPushNotificationConfig':
-        case 'ListTaskPushNotificationConfig':
-        case 'DeleteTaskPushNotificationConfig': {
-          if (!pushOn) {
-            return rpcError(id, A2A_ERRORS.pushNotificationNotSupported, 'This agent does not push notifications');
-          }
-          const taskId = String(params.taskId ?? params.id ?? '');
-          const record = await store.get(taskId);
-          if (!record) return rpcError(id, A2A_ERRORS.taskNotFound, `Task ${taskId} was not found`);
-          const shaped = (config: A2aPushNotificationConfig) => ({ taskId, pushNotificationConfig: config });
-          if (call.method === 'CreateTaskPushNotificationConfig') {
-            const config = pushConfigOf(params);
-            if (!config) return rpcError(id, -32602, 'params.pushNotificationConfig with a url is required');
-            const kept = addPush(record, config);
-            await store.put(record);
-            return rpcResult(id, shaped(kept));
-          }
-          if (call.method === 'ListTaskPushNotificationConfig') return rpcResult(id, (record.push ?? []).map(shaped));
-          const configId = String(params.pushNotificationConfigId ?? params.configId ?? '');
-          const found = record.push?.find((item) => item.id === configId);
-          if (!found) return rpcError(id, -32602, `Task ${taskId} has no push config ${configId}`);
-          if (call.method === 'GetTaskPushNotificationConfig') return rpcResult(id, shaped(found));
-          record.push = record.push?.filter((item) => item.id !== configId);
-          await store.put(record);
-          return rpcResult(id, null);
-        }
-        case 'GetExtendedAgentCard': {
-          if (!options.extendedCard) {
-            return rpcError(id, A2A_ERRORS.extendedCardNotConfigured, 'This agent has no extended card');
-          }
-          if (!principal) {
-            return rpcError(
-              id,
-              A2A_ERRORS.extendedCardNotConfigured,
-              'The extended card needs an authenticated caller',
-            );
-          }
-          return rpcResult(id, { ...card, ...(await options.extendedCard(principal)) });
-        }
-        default:
-          return rpcError(id, -32601, `Method ${call.method} is not supported`);
-      }
-    } catch (error) {
-      const code = (error as { code?: unknown })?.code;
-      return rpcError(
-        id,
-        typeof code === 'number' ? code : -32603,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
+    if (!bindings.has('JSONRPC')) return new Response('Not found', { status: 404 });
+    return jsonRpc(request);
   };
   return Object.assign(handle, {
     owner,
     recover,
+    call,
+    card,
+    authenticate: async (request: Request) => options.principal?.(request),
     close: () => {
       if (timer) clearInterval(timer);
     },
@@ -1219,6 +1504,9 @@ async function deliver(config: A2aPushNotificationConfig, body: string, push: A2
   const fetcher = push.fetch ?? globalThis.fetch;
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (config.token) headers['x-a2a-notification-token'] = config.token;
+  if (config.authentication?.scheme) {
+    headers.authorization = `${config.authentication.scheme} ${config.authentication.credentials ?? ''}`.trim();
+  }
   if (push.secret) headers['x-nexus-signature'] = await signature(body, push.secret);
   const response = await fetcher(config.url, {
     method: 'POST',
@@ -1280,16 +1568,61 @@ function rpcError(id: unknown, code: number, message: string): Response {
   return Response.json({ jsonrpc: '2.0', id, error: { code, message } });
 }
 
+/** An error as the HTTP+JSON binding carries it: AIP-193's JSON, with A2A's `ErrorInfo`. */
+function restError(code: number, message: string): Response {
+  const status = a2aErrorStatus(code);
+  return Response.json(
+    {
+      error: {
+        code: status.httpStatus,
+        status: status.grpcStatus,
+        message,
+        details: [
+          { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: status.reason, domain: 'a2a-protocol.org' },
+        ],
+      },
+    },
+    { status: status.httpStatus },
+  );
+}
+
+/** A stream of events as Server-Sent Events, each framed by `frame`; an error mid-stream as `error`. */
+function serverSent(events: ReadableStream<A2aStreamEvent>, frame: (event: A2aStreamEvent) => string): Response {
+  const encoder = new TextEncoder();
+  const reader = events.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { value, done } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(encoder.encode(`data: ${frame(value)}\n\n`));
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+  return new Response(body, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } });
+}
+
+/** A task state as a query names it: `TASK_STATE_WORKING`, or `working`, or `input-required`. */
+function taskStateOf(value: string): string {
+  if (value === '' || value.startsWith('TASK_STATE_')) return value;
+  return `TASK_STATE_${value.replace(/[-\s]/g, '_').toUpperCase()}`;
+}
+
 // ── The client ──────────────────────────────────────────────────────
 
 /** Options for `a2aClient()`. */
 export interface A2aClientOptions {
-  /** The agent: its card's URL, or its JSON-RPC endpoint, whose origin serves the card. */
+  /** The agent: its card's URL, or its endpoint for the binding, whose origin serves the card. */
   url: string;
   /** Replaces the global `fetch`, for authentication, a proxy, or tests. */
   fetch?: typeof globalThis.fetch;
   /** Headers added to every request, such as an authorization header. */
   headers?: Record<string, string>;
+  /**
+   * The binding to call the agent over: `JSONRPC`, the default, or `HTTP+JSON`. Given the card's URL,
+   * the client calls the interface the card lists for it. gRPC has its own client, `a2aGrpcClient()`,
+   * on `nexus-ai-pro/protocols/a2a/grpc`.
+   */
+  binding?: 'JSONRPC' | 'HTTP+JSON';
 }
 
 /** What to send: text, and optionally data, a conversation, or the paused task it answers. */
@@ -1363,6 +1696,7 @@ export interface A2aClient {
 /** A client for an A2A agent, by its card or endpoint URL. */
 export function a2aClient(options: A2aClientOptions): A2aClient {
   const fetcher = options.fetch ?? globalThis.fetch;
+  const binding = options.binding ?? 'JSONRPC';
   const isCard = /agent-card\.json$/.test(options.url);
   const cardUrl = isCard ? options.url : `${new URL(options.url).origin}/.well-known/agent-card.json`;
   let cached: Promise<A2aAgentCard> | undefined;
@@ -1377,25 +1711,55 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
   };
   const endpoint = async () =>
     isCard
-      ? ((await card()).supportedInterfaces.find((item) => item.protocolBinding === 'JSONRPC')?.url ?? options.url)
+      ? ((await card()).supportedInterfaces.find((item) => item.protocolBinding === binding)?.url ?? options.url)
       : options.url;
+  const headers = { 'content-type': 'application/json', 'a2a-version': A2A_PROTOCOL_VERSION, ...options.headers };
+
   let ids = 0;
-  const post = async (method: string, params: unknown, signal?: AbortSignal) =>
+  /** A JSON-RPC call, POSTed to the endpoint. */
+  const rpc = async (method: string, params: unknown, signal?: AbortSignal) =>
     fetcher(await endpoint(), {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'a2a-version': A2A_PROTOCOL_VERSION, ...options.headers },
+      headers,
       body: JSON.stringify({ jsonrpc: '2.0', id: ++ids, method, params }),
       ...(signal ? { signal } : {}),
     });
-  const call = async <T>(method: string, params: unknown, signal?: AbortSignal): Promise<T> => {
-    const response = await post(method, params, signal);
+  /** An HTTP+JSON call: its route under the endpoint, a body for a POST. */
+  const route = async (verb: string, path: string, body?: unknown, signal?: AbortSignal) =>
+    fetcher(`${(await endpoint()).replace(/\/+$/, '')}${path}`, {
+      method: verb,
+      headers: body === undefined ? { ...headers, 'content-type': 'application/json' } : headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(signal ? { signal } : {}),
+    });
+  /** The HTTP+JSON binding's error, AIP-193's JSON, as an `A2aError` with the protocol's code. */
+  const restFailure = async (response: Response): Promise<A2aError> => {
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: { message?: string; details?: Array<{ reason?: string }> };
+    };
+    const reason = body.error?.details?.find((detail) => detail.reason)?.reason;
+    return new A2aError(
+      a2aErrorCode(reason, response.status >= 500 ? -32603 : -32602),
+      body.error?.message ?? `The agent answered ${response.status}`,
+      body.error,
+    );
+  };
+  const call = async <T>(method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<T> => {
+    if (binding === 'HTTP+JSON') {
+      const [verb, path, body] = restCall(method, params);
+      const response = await route(verb, path, body, signal);
+      if (!response.ok) throw await restFailure(response);
+      return (response.status === 204 ? {} : await response.json()) as T;
+    }
+    const response = await rpc(method, params, signal);
     const body = (await response.json()) as { result?: T; error?: { code: number; message: string; data?: unknown } };
     if (body.error) throw new A2aError(body.error.code, body.error.message, body.error.data);
     return body.result as T;
   };
-  /** Reads a stream of JSON-RPC results sent as Server-Sent Events. */
+  /** Reads a stream of events sent as Server-Sent Events: JSON-RPC results, or the events themselves. */
   async function* events(response: Response): AsyncGenerator<A2aStreamEvent> {
     if (!(response.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      if (binding === 'HTTP+JSON') throw await restFailure(response);
       const body = (await response.json()) as { error?: { code: number; message: string } };
       throw new A2aError(body.error?.code ?? response.status, body.error?.message ?? 'The agent did not stream');
     }
@@ -1416,14 +1780,28 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
           .map((line) => line.slice(5).trim())
           .join('');
         if (data) {
-          const parsed = JSON.parse(data) as { result?: A2aStreamEvent; error?: { code: number; message: string } };
-          if (parsed.error) throw new A2aError(parsed.error.code, parsed.error.message);
-          if (parsed.result) yield parsed.result;
+          const parsed = JSON.parse(data) as Record<string, unknown> & {
+            result?: A2aStreamEvent;
+            error?: { code?: number; message: string; details?: Array<{ reason?: string }> };
+          };
+          if (parsed.error) {
+            const reason = parsed.error.details?.find((detail) => detail.reason)?.reason;
+            throw new A2aError(parsed.error.code ?? a2aErrorCode(reason), parsed.error.message);
+          }
+          if (binding === 'HTTP+JSON') yield parsed as unknown as A2aStreamEvent;
+          else if (parsed.result) yield parsed.result;
         }
         boundary = buffer.indexOf('\n\n');
       }
     }
   }
+  const stream = async (method: string, params: Record<string, unknown>, signal?: AbortSignal) => {
+    if (binding === 'HTTP+JSON') {
+      const [verb, path, body] = restCall(method, params);
+      return route(verb, path, body, signal);
+    }
+    return rpc(method, params, signal);
+  };
   const message = (text: string, send: A2aSendOptions): A2aMessage => ({
     messageId: protocolId('message'),
     role: 'ROLE_USER',
@@ -1431,10 +1809,23 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
     ...(send.contextId ? { contextId: send.contextId } : {}),
     ...(send.taskId ? { taskId: send.taskId } : {}),
   });
+  // Protocol 1.0 names the webhook `taskPushNotificationConfig`; JSON-RPC agents written to the drafts
+  // read `pushNotificationConfig`, so JSON-RPC sends both.
   const configuration = (send: A2aSendOptions) => ({
     returnImmediately: send.returnImmediately === true,
-    ...(send.push ? { pushNotificationConfig: send.push } : {}),
+    ...(send.push
+      ? binding === 'JSONRPC'
+        ? { taskPushNotificationConfig: send.push, pushNotificationConfig: send.push }
+        : { taskPushNotificationConfig: send.push }
+      : {}),
   });
+  /** A push config as an agent answers it: flat, as protocol 1.0 has it, or nested, as the drafts did. */
+  const pushConfigOf = (answer: Record<string, unknown>): A2aPushNotificationConfig => {
+    const nested = answer.pushNotificationConfig as A2aPushNotificationConfig | undefined;
+    if (nested) return nested;
+    const { taskId: _taskId, tenant: _tenant, ...config } = answer;
+    return config as unknown as A2aPushNotificationConfig;
+  };
 
   return {
     card,
@@ -1456,7 +1847,7 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
       };
     },
     async *stream(text, send = {}) {
-      const response = await post(
+      const response = await stream(
         'SendStreamingMessage',
         { message: message(text, send), ...(send.push ? { configuration: configuration(send) } : {}) },
         send.signal,
@@ -1465,29 +1856,78 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
     },
     getTask: (taskId, historyLength) =>
       call<A2aTask>('GetTask', { id: taskId, ...(historyLength ? { historyLength } : {}) }),
-    listTasks: (list = {}) => call<A2aTaskPage>('ListTasks', list),
+    listTasks: (list = {}) => call<A2aTaskPage>('ListTasks', { ...list }),
     async *subscribe(taskId, subscribe = {}) {
-      yield* events(await post('SubscribeToTask', { id: taskId }, subscribe.signal));
+      yield* events(await stream('SubscribeToTask', { id: taskId }, subscribe.signal));
     },
     cancel: (taskId) => call<A2aTask>('CancelTask', { id: taskId }),
     async setPushNotification(taskId, config) {
-      const result = await call<{ pushNotificationConfig: A2aPushNotificationConfig }>(
+      const answer = await call<Record<string, unknown>>(
         'CreateTaskPushNotificationConfig',
-        { taskId, pushNotificationConfig: config },
+        binding === 'JSONRPC' ? { taskId, pushNotificationConfig: config } : { ...config, taskId },
       );
-      return result.pushNotificationConfig;
+      return pushConfigOf(answer);
     },
     async listPushNotifications(taskId) {
-      const result = await call<Array<{ pushNotificationConfig: A2aPushNotificationConfig }>>(
-        'ListTaskPushNotificationConfig',
-        { taskId },
-      );
-      return result.map((item) => item.pushNotificationConfig);
+      if (binding === 'JSONRPC') {
+        const result = await call<Array<{ pushNotificationConfig: A2aPushNotificationConfig }>>(
+          'ListTaskPushNotificationConfig',
+          { taskId },
+        );
+        return result.map((item) => item.pushNotificationConfig);
+      }
+      const result = await call<{ configs?: Array<Record<string, unknown>> }>('ListTaskPushNotificationConfigs', {
+        taskId,
+      });
+      return (result.configs ?? []).map(pushConfigOf);
     },
     async deletePushNotification(taskId, configId) {
-      await call('DeleteTaskPushNotificationConfig', { taskId, pushNotificationConfigId: configId });
+      await call(
+        'DeleteTaskPushNotificationConfig',
+        binding === 'JSONRPC' ? { taskId, pushNotificationConfigId: configId } : { taskId, id: configId },
+      );
     },
   };
+}
+
+/** A call of the HTTP+JSON binding: its verb, its route with its query, and its body for a POST. */
+function restCall(method: string, params: Record<string, unknown>): [string, string, unknown?] {
+  const path = (value: unknown) => encodeURIComponent(String(value ?? ''));
+  const query = (names: readonly string[]) => {
+    const search = new URLSearchParams();
+    for (const name of names) {
+      const value = params[name];
+      if (value !== undefined && value !== '') search.set(name, String(value));
+    }
+    const text = search.toString();
+    return text ? `?${text}` : '';
+  };
+  switch (method) {
+    case 'SendMessage':
+      return ['POST', '/message:send', params];
+    case 'SendStreamingMessage':
+      return ['POST', '/message:stream', params];
+    case 'GetTask':
+      return ['GET', `/tasks/${path(params.id)}${query(['historyLength'])}`];
+    case 'ListTasks':
+      return ['GET', `/tasks${query(['contextId', 'status', 'pageSize', 'pageToken', 'historyLength'])}`];
+    case 'CancelTask':
+      return ['POST', `/tasks/${path(params.id)}:cancel`, {}];
+    case 'SubscribeToTask':
+      return ['POST', `/tasks/${path(params.id)}:subscribe`, {}];
+    case 'CreateTaskPushNotificationConfig':
+      return ['POST', `/tasks/${path(params.taskId)}/pushNotificationConfigs`, params];
+    case 'ListTaskPushNotificationConfigs':
+      return ['GET', `/tasks/${path(params.taskId)}/pushNotificationConfigs`];
+    case 'GetTaskPushNotificationConfig':
+      return ['GET', `/tasks/${path(params.taskId)}/pushNotificationConfigs/${path(params.id)}`];
+    case 'DeleteTaskPushNotificationConfig':
+      return ['DELETE', `/tasks/${path(params.taskId)}/pushNotificationConfigs/${path(params.id)}`];
+    case 'GetExtendedAgentCard':
+      return ['GET', '/extendedAgentCard'];
+    default:
+      throw new A2aError(-32601, `Method ${method} has no HTTP+JSON route`);
+  }
 }
 
 /** Options for `a2aTool()`. */
