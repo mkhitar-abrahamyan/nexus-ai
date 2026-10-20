@@ -18,14 +18,14 @@
     "kind": "retriever",
     "version": 1
   },
-  "nexusVersion": "2.15.1",
-  "verifiedAt": "2026-10-19T12:47:16.345Z",
+  "nexusVersion": "2.16.0",
+  "verifiedAt": "2026-10-20T09:39:39.852Z",
   "runtime": "node 22.16.0 win32 x64",
   "compatible": true,
   "passed": true,
   "checks": [
     {
-      "name": "declares support for nexus-ai-pro 2.15.1",
+      "name": "declares support for nexus-ai-pro 2.16.0",
       "ok": true
     },
     {
@@ -64,19 +64,19 @@
   "benchmark": {
     "add": {
       "calls": 2,
-      "p50Ms": 0.04,
-      "p95Ms": 0.59
+      "p50Ms": 0.02,
+      "p95Ms": 0.56
     },
     "retrieve": {
       "calls": 6,
-      "p50Ms": 0.02,
-      "p95Ms": 0.15
+      "p50Ms": 0.01,
+      "p95Ms": 0.13
     },
     "delete": {
       "calls": 1,
-      "p50Ms": 0.02,
-      "p95Ms": 0.02
+      "p50Ms": 0.03,
+      "p95Ms": 0.03
     }
   },
-  "digest": "025044810cc4bbfae8924a9b0fb1a73bfd511fff4c79d111d0f5ad2e6f322c4a"
+  "digest": "3b30f81de0adddeafc78fc09da9df06830ef33d57fd993073987fc4beaf131ba"
 }

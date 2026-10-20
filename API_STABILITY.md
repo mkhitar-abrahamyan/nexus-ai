@@ -41,7 +41,7 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
-## 2.16 stage (Unreleased)
+## 2.16 stage (2.16.0)
 
 Everything 2.16 adds is stable from the start and additive, unless this section says otherwise.
 
