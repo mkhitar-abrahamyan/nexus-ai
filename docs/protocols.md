@@ -485,16 +485,24 @@ Each session gets the tools the editor said it can serve, in `initialize`, as `A
 - `editor_run_command` runs a command in the editor's terminal, which the person sees, and returns
   its output and exit code. A cancelled run kills the command, and the terminal is always released;
 - the tools of each MCP server the editor offered for the session, prefixed by the server's name.
-  Servers started over stdio run in the session's directory, and HTTP servers are reached as given.
+  Servers started over stdio run in the session's directory, and HTTP and SSE servers are reached as
+  given, with the editor's headers. The agent tells the editor, in `initialize`, that it connects
+  servers over HTTP and SSE, as the bridge's `mcpCapabilities`, so the editor offers those too.
 
 A relative path is taken from the session's directory. Each tool declares what it touches, as
 `filesystem:read:<path>`, `filesystem:write:<path>`, or `shell:<command>`, so a permission policy
-decides it, and an approval asks the person in the editor. The bridge asks the editor through an
+decides it, and an approval asks the person in the editor. An MCP server's tools declare what their
+server says they do: `mcp.read`, `mcp.write`, or `mcp.destructive` under the server's name, and
+`network` for one that reaches beyond it. A policy that lets MCP tools read and nothing else,
+`{ custom: { 'mcp.read': 'allow' } }`, then runs a server's lookup and refuses its delete, with no
+rule naming either. The bridge asks the editor through an
 `AcpConnection`, which `serveAcp()` attaches. When the editor closes its end, the bridge closes the
 MCP servers it started.
 
 `AcpEditorOptions` turns off `files`, `terminal`, or `mcp`, and sets `mcpTimeoutMs` (30 seconds),
 `mcpFetch`, `maxOutputBytes` (64 KB), and `onError` for a server that fails to start.
+`mcpToolCapabilities` decides what MCP tools declare: `true`, the default, reads their annotations, a
+function decides per tool and server, and `false` declares nothing, as before 2.17.
 
 The prompt answers with an `AcpStopReason`:
 - `end_turn` when the agent answered;
@@ -543,6 +551,10 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
 
   A second prompt in the session asks nothing and carries the transcript over. Rejecting runs
   nothing, cancelling ends the turn as cancelled, and a question is asked in words.
+- **ACP, with the editor's MCP servers.** An editor offers one server over stdio, one over HTTP, and
+  one over SSE. The agent says it connects HTTP and SSE, calls a tool on each, and a policy that only
+  lets MCP tools read refuses each server's destructive tool before the server sees it, with no rule
+  naming a tool.
 
 Each protocol is also tested across releases and against the reference client of its own project:
 - **The previous minor.** A 2.5 client drives this release's server, and this release's client a
@@ -550,14 +562,16 @@ Each protocol is also tested across releases and against the reference client of
   both releases' servers. A 2.6 client asking a 2.5 agent for something 2.6 added gets a protocol
   error, never a broken answer.
 - **Reference clients, nightly.** `scripts/interop/run.mjs` installs the latest `@ag-ui/client`,
-  `@a2a-js/sdk` with its gRPC transport's peers, and `@agentclientprotocol/sdk` in a directory
-  of their own, without their scripts. Each drives its protocol:
+  `@a2a-js/sdk` with its gRPC transport's peers, `@agentclientprotocol/sdk`, and
+  `@modelcontextprotocol/sdk` in a directory of their own, without their scripts. Each drives its protocol:
   - the AG-UI client pauses a run, resumes it, and rebuilds the state from its deltas;
   - the A2A client sends, approves, reads, lists, and streams tasks, and sets their webhooks,
     over each of JSON-RPC, HTTP+JSON, and gRPC; a task it starts over gRPC it answers over
     HTTP+JSON, and every binding reads the same history;
   - the ACP client starts an agent as an editor would. The agent reads a file through it, writes
-    once the client allows it, and has its session reloaded.
+    once the client allows it, and has its session reloaded;
+  - the ACP client offers that agent MCP servers built with `@modelcontextprotocol/sdk` over stdio,
+    HTTP, and SSE. Each server's tool that reads runs, and its destructive one is refused.
 
   The `Interoperability` workflow runs it every night.
 
@@ -576,8 +590,9 @@ Each protocol is also tested across releases and against the reference client of
 - **ACP turns.** A turn goes on when the editor reopens its session, not before; one the agent stops
   in again while carrying it on goes on at the next reopening. A step that was halfway through when
   the agent stopped runs again, so a tool with side effects needs an idempotency key.
-- **The editor's MCP servers.** Servers over stdio and HTTP are connected; an SSE server is not. A
-  server's tools declare no capabilities, so a permission policy needs a rule for them by name.
+- **The editor's MCP servers.** A tool's capabilities are what its server says of it. The editor
+  chose the server, so the agent takes its word; for a server you trust less, decide with
+  `mcpToolCapabilities`. An SSE server whose stream ends is not reconnected within the session.
 
 <!-- reference:start -->
 ## Reference

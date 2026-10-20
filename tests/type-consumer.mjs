@@ -194,7 +194,17 @@ import { SqliteOperationStore, SqliteStore, type SqliteLikeClient } from 'nexus-
 import { createAgent, agentInput, type AgentMiddleware, type AgentState } from 'nexus-ai-pro/agent';
 import { MemoryStore, type Store, type StoreItem } from 'nexus-ai-pro/store';
 import { RedisStore } from 'nexus-ai-pro/store/redis';
-import { McpClient, McpServer, type McpTransport } from 'nexus-ai-pro/mcp';
+import {
+  createSseTransport,
+  McpClient,
+  McpServer,
+  mcpToolAnnotations,
+  mcpToolCapabilities,
+  type McpToolAnnotations,
+  type McpToolsOptions,
+  type McpTransport,
+} from 'nexus-ai-pro/mcp';
+import { acpEditor } from 'nexus-ai-pro/protocols/acp/editor';
 import { Tracer, MemoryTraceStore, traceGraph, AlertEvaluator, traceRetriever, type Run, type TraceStore } from 'nexus-ai-pro/tracing';
 import { traceEvidence, type EvaluationTrace } from 'nexus-ai-pro/evaluate';
 import {
@@ -741,6 +751,19 @@ const mcpTransport: McpTransport = { send: () => undefined, onMessage: () => und
 const mcpClient = new McpClient(mcpTransport);
 const mcpTools = mcpClient.toNexusTools({ prefix: 'files' });
 const mcpServer = new McpServer({ name: 'consumer' });
+// MCP tools with the capabilities their server gives them, over SSE too.
+const mcpToolsOptions: McpToolsOptions = { prefix: 'docs', capabilities: true };
+const declaredTools = new McpClient(createSseTransport({ url: 'https://mcp.example.com/sse', timeoutMs: 5_000 })).toNexusTools(
+  mcpToolsOptions,
+);
+const lookupCapabilities: string[] | undefined = mcpToolCapabilities(
+  { name: 'lookup', annotations: { readOnlyHint: true, openWorldHint: false } },
+  'docs',
+);
+const servedAnnotations: McpToolAnnotations | undefined = mcpToolAnnotations({ capabilities: ['filesystem:read'] });
+const consumerEditor = acpEditor({ mcpToolCapabilities: (tool, server) => (tool.annotations ? ['mcp.read:' + server] : undefined) });
+const editorTransports: { http: boolean; sse: boolean } = consumerEditor.mcpCapabilities;
+void [declaredTools, lookupCapabilities, servedAnnotations, editorTransports];
 const traceStore: TraceStore = new MemoryTraceStore({ maxRuns: 500 });
 const tracer = new Tracer({ store: traceStore, sampling: { rate: 0.1, keepErrors: true }, redaction: { hideFields: ['apiKey'] } });
 const traced: Promise<string> = tracer.trace({ name: 'demo', kind: 'chain' }, () => 'ok');

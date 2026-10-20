@@ -53,6 +53,34 @@ protocol failure throws `McpError`.
 With `toNexusTools()`, a `prefix` keeps two servers' `search` tools apart. Each tool returns its text,
 and a failure throws, so the agent sees a failed tool call.
 
+### What a server says its tools do
+
+A server describes each tool with `McpToolAnnotations`: whether it only reads (`readOnlyHint`), may
+destroy what it changes (`destructiveHint`), repeats safely (`idempotentHint`), and reaches beyond the
+server (`openWorldHint`). `McpToolsOptions.capabilities: true` turns them into the capabilities each
+tool declares, so a permission policy decides a server's tools as it decides the agent's own:
+
+```ts
+const tools = await client.toNexusTools({ prefix: 'github', capabilities: true });
+const agent = createAgent({
+  client: ai,
+  tools,
+  permissions: permissionPolicy({ custom: { 'mcp.read': 'allow', 'mcp.write': 'ask' }, network: { allow: ['*'] } }),
+});
+```
+
+`mcpToolCapabilities()` gives each tool, under the server's name (the `server` option, then the
+prefix, then the name the server reports):
+- `mcp.read:<server>/<tool>` when it only reads;
+- `mcp.write:<server>/<tool>` when it changes things but destroys nothing;
+- `mcp.destructive:<server>/<tool>` when it may destroy or overwrite;
+- and `network` beside it, unless the server says it stays within itself.
+
+A hint left out takes the specification's default: not read-only, destructive, and reaching out. A
+tool with no annotations declares nothing, and a policy decides it as undeclared. A function as
+`capabilities` decides per tool instead. Annotations are the server's word, so give `true` for
+servers you trust, and decide the others yourself.
+
 `callTool()` takes a `progress` listener. The call then names a progress token, and each
 `notifications/progress` the server sends for it arrives there, with its progress, total, and
 message. A tool from `toNexusTools()` passes them to the agent's `context.progress`, so a remote
@@ -81,6 +109,14 @@ list adds variables by name, `true` passes the whole environment, as releases be
 `HttpClientOptions` gives the `url`, `headers` such as authorization, and a `fetch` to use instead of
 the global one.
 
+`createSseTransport()` speaks to a server over HTTP with Server-Sent Events, the transport before
+streamable HTTP that many servers still serve. It opens one `GET` on the server's event stream, posts
+each message to the endpoint the stream names, and reads every answer from the stream.
+`SseClientOptions` gives the `url`, `headers` for the stream and every message, a `fetch`, and
+`timeoutMs`, how long to wait for the endpoint (10 seconds). The endpoint must be on the stream's
+origin, so a server cannot send the messages, and their headers, anywhere else. When the stream ends,
+the transport closes and the requests waiting on it fail.
+
 `McpTransport` is the whole contract, for a transport of your own: `send()` a message, `onMessage()`
 to receive them, and optional `start()` and `onClose()` with `close()`. The messages are JSON-RPC:
 `JsonRpcRequest` expects a `JsonRpcResponse` with the same id, carrying a result or an error, and a
@@ -94,6 +130,13 @@ skipping a malformed line rather than losing the stream.
 `resources`, each a URI with a name, description, MIME type, and a `read()` function. `register()`
 adds a tool later. `connect()` starts serving over a transport, `close()` stops, and `handle()` takes
 one message directly, for a host that carries messages itself.
+
+Each tool is listed with the annotations its capabilities give it, from `mcpToolAnnotations()`, read
+so a client is never told less than the tool may do. It is read-only only when every capability reads
+files or is `mcp.read`, or there are none. It is not destructive only when everything else it does is
+`mcp.write`. It stays within itself only when every capability is the filesystem's or an MCP tool's.
+A tool whose capabilities depend on its arguments, or that declares none, is listed without
+annotations, which a client reads as able to do anything.
 
 It answers `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, and `resources/read`.
 A tool with neither `execute` nor `stream` is a schema for a model to call elsewhere, so the server
@@ -174,6 +217,8 @@ with method-not-found, so a client can tell an unsupported feature from a failur
 ## Limitations
 
 - The HTTP transport covers request and response; server-initiated streaming is not implemented.
+- The SSE transport does not reconnect: when its stream ends, open a new client.
+- A tool's capabilities from its annotations are only as true as its server is honest.
 - The server exposes tools and resources. Prompts, sampling, and change notifications are not served.
 
 <!-- reference:start -->
@@ -187,6 +232,7 @@ specific entry point that provides it.
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `createHttpTransport` | function | Speaks to an MCP server over HTTP, one POST per message. |
+| `createSseTransport` | function | Speaks to an MCP server over HTTP with Server-Sent Events, as MCP's 2024-11-05 transport: one long `GET` the server answers on, and a `POST` per message to the endpoint the stream names first. |
 | `createStdioServerTransport` | function | Serves MCP over this process's stdin and stdout. |
 | `createStdioTransport` | function | Runs an MCP server as a child process and speaks to it over its stdin and stdout. |
 | `HttpClientOptions` | interface | Connects to a remote MCP server over HTTP. |
@@ -204,9 +250,14 @@ specific entry point that provides it.
 | `McpResourceDescriptor` | interface | A resource an MCP server offers. |
 | `McpServer` | class | Exposes tools over MCP, so other assistants can call them. |
 | `McpServerOptions` | interface | Options for an MCP server. |
+| `mcpToolAnnotations` | function | The annotations a tool is served with, from the capabilities it declares, read so a client is never told less than the tool may do: - read-only only when every capability reads, `filesystem:read` or `mcp.read`, or there are none; - not destructive only when everything else it does is `mcp.write`; - closed to the world only when every capability is the filesystem's or an MCP tool's effect. |
+| `McpToolAnnotations` | interface | What a server says a tool does, as MCP's tool annotations: hints, which a client trusts only as far as it trusts the server. |
+| `mcpToolCapabilities` | function | The capabilities an MCP tool declares, from what its server says of it in its annotations, so a permission policy decides it as it decides any tool: - `mcp.read:<server>/<tool>` for a tool that only reads; - `mcp.write:<server>/<tool>` for one that changes things but destroys nothing; - `mcp.destructive:<server>/<tool>` for one that may destroy or overwrite; - and `network`, beside it, for one that reaches beyond its server. |
 | `McpToolDescriptor` | interface | A tool an MCP server offers. |
 | `McpToolResult` | interface | What a tool call returned. |
+| `McpToolsOptions` | interface | Options for `McpClient.toNexusTools()`. |
 | `McpTransport` | interface | Carries a transport's messages in both directions. |
+| `SseClientOptions` | interface | Connects to a remote MCP server over HTTP with Server-Sent Events, the transport before streamable HTTP. |
 | `StdioClientOptions` | interface | Launches a local MCP server as a child process and talks to it over stdin and stdout. |
 
 ### `nexus-ai-pro/mcp/registry`

@@ -212,6 +212,9 @@ the policy sees the path, host, or command the call actually uses:
 | `network`, `network:<host or URL>` | Opens a network connection |
 | `shell`, `shell:<command line>` | Runs a shell command |
 | `code` | Runs code it was given |
+| `mcp.read:<server>/<tool>` | An MCP tool its server says only reads |
+| `mcp.write:<server>/<tool>` | An MCP tool its server says changes things but destroys nothing |
+| `mcp.destructive:<server>/<tool>` | An MCP tool its server says may destroy or overwrite |
 | `<name>`, `<name>:<detail>` | An effect of your own, such as `payments:refund` |
 
 `capabilities: []` says a tool changes nothing; a tool with no list is undeclared. From

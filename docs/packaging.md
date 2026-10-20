@@ -162,8 +162,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
 | `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 7% | none |
+| `nexus-ai-pro/mcp` | 27 KB | 7% | none |
+| `nexus-ai-pro/mcp/registry` | 27 KB | 7% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 7% | none |
 | `nexus-ai-pro/server/tenancy` | 27 KB | 7% | none |
+| `nexus-ai-pro/protocols/acp/editor` | 26 KB | 7% | none |
 | `nexus-ai-pro/runtime` | 25 KB | 7% | none |
 | `nexus-ai-pro/images/assets` | 25 KB | 7% | none |
 | `nexus-ai-pro/protocols/acp` | 25 KB | 7% | none |
@@ -173,14 +176,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
-| `nexus-ai-pro/mcp/registry` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
-| `nexus-ai-pro/protocols/acp/editor` | 20 KB | 6% | none |
 | `nexus-ai-pro/media/catalog` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 5% | none |
-| `nexus-ai-pro/mcp` | 19 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 19 KB | 5% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 18 KB | 5% | none |

@@ -130,6 +130,11 @@ export interface AcpConnection {
 
 /** Something that uses the editor's connection, such as `acpEditor()`. `serveAcp()` attaches it when it starts. */
 export interface AcpEditorBridge {
+  /**
+   * The MCP transports it connects beyond stdio, which the agent tells the editor in `initialize` so
+   * the editor offers servers over them too.
+   */
+  readonly mcpCapabilities?: { http?: boolean; sse?: boolean };
   /** Receives the connection to the editor. */
   attach(connection: AcpConnection): void;
   /** Called when the editor closes its end, or the server is closed: the place to stop what it started. */
@@ -507,6 +512,7 @@ export function serveAcp(graph: ProtocolGraph, streams: AcpStreams, options: Acp
           agentCapabilities: {
             loadSession: true,
             promptCapabilities: { image: true, audio: true, embeddedContext: true },
+            ...(options.editor?.mcpCapabilities ? { mcpCapabilities: options.editor.mcpCapabilities } : {}),
           },
           authMethods: [],
           ...(options.agentInfo ? { agentInfo: options.agentInfo } : {}),

@@ -2,7 +2,8 @@
 /**
  * Each agent protocol against the reference client of its own project: `@ag-ui/client` drives the
  * AG-UI handler, `@a2a-js/sdk` the A2A agent over each of its three bindings, and
- * `@agentclientprotocol/sdk` an ACP agent it starts as an editor would. Run nightly, against the clients' latest releases, so a change on their side
+ * `@agentclientprotocol/sdk` an ACP agent it starts as an editor would, offering it MCP servers built
+ * with `@modelcontextprotocol/sdk` over stdio, HTTP, and SSE. Run nightly, against the clients' latest releases, so a change on their side
  * shows up before a user finds it.
  *
  *   node scripts/interop/run.mjs                       # installs the latest clients in a fresh directory
@@ -23,7 +24,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const given = args.includes('--clients') ? args[args.indexOf('--clients') + 1] : undefined;
-const CLIENTS = ['@ag-ui/client', '@a2a-js/sdk', '@agentclientprotocol/sdk'];
+const CLIENTS = ['@ag-ui/client', '@a2a-js/sdk', '@agentclientprotocol/sdk', '@modelcontextprotocol/sdk'];
 // What `@a2a-js/sdk`'s gRPC transport needs beside it, as its peers.
 const PEERS = ['@grpc/grpc-js', '@bufbuild/protobuf'];
 
@@ -55,6 +56,31 @@ const { createAgent, tool } = await import('../../dist/agent/index.js');
 const { agUiHandler } = await import('../../dist/protocols/ag-ui.js');
 const { a2aHandler } = await import('../../dist/protocols/a2a.js');
 const { a2aGrpcService } = await import('../../dist/protocols/a2a-grpc.js');
+const { mcpSdk, mcpTools } = await import('./mcp-server.mjs');
+
+/**
+ * Drives an ACP agent as an editor, as the SDK builds one: from 2.0, an app with a handler per method
+ * and the calls made inside `connectWith()`; before it, a `ClientSideConnection` over the editor.
+ */
+function driveEditor(acp, stream, editor, calls) {
+  if (typeof acp.client === 'function') {
+    let app = acp
+      .client()
+      .onRequest('session/request_permission', ({ params }) => editor.requestPermission(params))
+      .onNotification('session/update', ({ params }) => editor.sessionUpdate(params));
+    if (editor.readTextFile) app = app.onRequest('fs/read_text_file', ({ params }) => editor.readTextFile(params));
+    if (editor.writeTextFile) app = app.onRequest('fs/write_text_file', ({ params }) => editor.writeTextFile(params));
+    return app.connectWith(stream, (agent) => calls((method, params) => agent.request(method, params)));
+  }
+  const connection = new acp.ClientSideConnection(() => editor, stream);
+  const named = {
+    initialize: 'initialize',
+    'session/new': 'newSession',
+    'session/prompt': 'prompt',
+    'session/load': 'loadSession',
+  };
+  return calls((method, params) => connection[named[method]](params));
+}
 
 /** Serves a `Request` → `Response` handler over real HTTP, streaming its body. */
 async function serve(handler) {
@@ -293,28 +319,7 @@ const check = (label, condition, detail = '') => {
       },
     };
     const stream = acp.ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout));
-    // The editor, as the SDK builds one: from 2.0, an app with a handler per method and the calls made
-    // inside `connectWith()`; before it, a `ClientSideConnection` over the editor object.
-    const asEditor = async (calls) => {
-      if (typeof acp.client === 'function') {
-        const app = acp
-          .client()
-          .onRequest('session/request_permission', ({ params }) => editor.requestPermission(params))
-          .onNotification('session/update', ({ params }) => editor.sessionUpdate(params))
-          .onRequest('fs/read_text_file', ({ params }) => editor.readTextFile(params))
-          .onRequest('fs/write_text_file', ({ params }) => editor.writeTextFile(params));
-        return app.connectWith(stream, (agent) => calls((method, params) => agent.request(method, params)));
-      }
-      const connection = new acp.ClientSideConnection(() => editor, stream);
-      const named = {
-        initialize: 'initialize',
-        'session/new': 'newSession',
-        'session/prompt': 'prompt',
-        'session/load': 'loadSession',
-      };
-      return calls((method, params) => connection[named[method]](params));
-    };
-    await asEditor(async (request) => {
+    await driveEditor(acp, stream, editor, async (request) => {
       const init = await request('initialize', {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false },
@@ -346,6 +351,130 @@ const check = (label, condition, detail = '') => {
     failures.push(`ACP: ${error?.stack ?? error}`);
   } finally {
     child.kill();
+  }
+}
+
+// ── ACP, with the editor's MCP servers ─────────────────────────────
+
+{
+  const acp = await load('@agentclientprotocol/sdk');
+  const sdk = await mcpSdk(directory);
+  const work = mkdtempSync(path.join(tmpdir(), 'nexus-interop-mcp-'));
+  const localLog = path.join(work, 'local.log');
+  writeFileSync(localLog, '');
+  const called = { remote: [], streamed: [] };
+  const listen = async (server) => {
+    await new Promise((done) => server.listen(0, '127.0.0.1', done));
+    return `http://127.0.0.1:${server.address().port}`;
+  };
+  // Streamable HTTP without sessions: a server and a transport per request, as the SDK shows it.
+  const http = createServer(async (incoming, outgoing) => {
+    const server = mcpTools(new sdk.McpServer({ name: 'remote', version: '1.0.0' }), 'remote', (tool) =>
+      called.remote.push(tool),
+    );
+    const transport = new sdk.StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    outgoing.on('close', () => {
+      void transport.close();
+      void server.close();
+    });
+    await server.connect(transport);
+    const chunks = [];
+    for await (const chunk of incoming) chunks.push(chunk);
+    const body = Buffer.concat(chunks).toString();
+    await transport.handleRequest(incoming, outgoing, body ? JSON.parse(body) : undefined);
+  });
+  // HTTP with Server-Sent Events: a stream per connection, and messages posted where it says.
+  const streams = new Map();
+  const sse = createServer(async (incoming, outgoing) => {
+    const url = new URL(incoming.url, 'http://localhost');
+    if (incoming.method === 'GET' && url.pathname === '/sse') {
+      const transport = new sdk.SSEServerTransport('/messages', outgoing);
+      streams.set(transport.sessionId, transport);
+      const server = mcpTools(new sdk.McpServer({ name: 'streamed', version: '1.0.0' }), 'streamed', (tool) =>
+        called.streamed.push(tool),
+      );
+      await server.connect(transport);
+      return;
+    }
+    const transport = streams.get(url.searchParams.get('sessionId'));
+    if (incoming.method === 'POST' && transport) return transport.handlePostMessage(incoming, outgoing);
+    outgoing.writeHead(404).end();
+  });
+  const httpUrl = `${await listen(http)}/mcp`;
+  const sseUrl = `${await listen(sse)}/sse`;
+  const child = spawn(process.execPath, [path.join(here, 'acp-agent.mjs'), '--mcp'], {
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  try {
+    const updates = [];
+    const editor = {
+      async requestPermission(params) {
+        return { outcome: { outcome: 'selected', optionId: params.options[0].optionId } };
+      },
+      async sessionUpdate(params) {
+        updates.push(params.update);
+      },
+    };
+    const stream = acp.ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout));
+    await driveEditor(acp, stream, editor, async (request) => {
+      const init = await request('initialize', { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
+      check(
+        'ACP: the agent connects MCP servers over HTTP and SSE',
+        init.agentCapabilities?.mcpCapabilities?.http === true && init.agentCapabilities?.mcpCapabilities?.sse === true,
+        JSON.stringify(init.agentCapabilities?.mcpCapabilities),
+      );
+      // The stdio server runs in the session's directory: not the one removed afterwards, which a
+      // server still stopping would hold on Windows.
+      const session = await request('session/new', {
+        cwd: here,
+        mcpServers: [
+          {
+            name: 'local',
+            command: process.execPath,
+            args: [path.join(here, 'mcp-server.mjs'), directory, 'local', localLog],
+            env: [],
+          },
+          { type: 'http', name: 'remote', url: httpUrl, headers: [] },
+          { type: 'sse', name: 'streamed', url: sseUrl, headers: [] },
+        ],
+      });
+      const turn = await request('session/prompt', {
+        sessionId: session.sessionId,
+        prompt: [{ type: 'text', text: 'Tidy the records' }],
+      });
+      check('ACP with MCP: the turn ends', turn.stopReason === 'end_turn', turn.stopReason);
+    });
+    const local = readFileSync(localLog, 'utf8').split('\n').filter(Boolean);
+    for (const [name, calls] of [
+      ['stdio', local],
+      ['HTTP', called.remote],
+      ['SSE', called.streamed],
+    ]) {
+      check(
+        `ACP with MCP: the ${name} server's tool that reads ran, and its destructive one never`,
+        calls.join() === 'lookup',
+        calls.join(),
+      );
+    }
+    const said = updates
+      .filter((update) => update.sessionUpdate === 'agent_message_chunk')
+      .map((update) => update.content.text)
+      .join('');
+    check(
+      'ACP with MCP: the agent heard from all three servers, and was refused the rest by its policy',
+      ['local found it', 'remote found it', 'streamed found it'].every((text) => said.includes(text)) &&
+        said.split('Permission denied').length === 4,
+      said,
+    );
+  } catch (error) {
+    failures.push(`ACP with MCP: ${error?.stack ?? error}`);
+  } finally {
+    child.kill();
+    for (const server of [http, sse]) {
+      server.closeAllConnections();
+      server.close();
+    }
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

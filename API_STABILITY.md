@@ -41,6 +41,21 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.17 stage (Unreleased)
+
+Everything 2.17 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- in `nexus-ai-pro/mcp`: `createSseTransport()`, `SseClientOptions`, `mcpToolCapabilities()`,
+  `mcpToolAnnotations()`, `McpToolAnnotations`, `McpToolsOptions`, and `McpToolDescriptor.annotations`;
+  the capability kinds `mcp.read`, `mcp.write`, and `mcp.destructive`;
+- in `nexus-ai-pro/protocols/acp/editor`: `AcpEditorOptions.mcpToolCapabilities` and
+  `AcpEditor.mcpCapabilities`; in `nexus-ai-pro/protocols/acp`: `AcpEditorBridge.mcpCapabilities`.
+
+Changed on purpose: `acpEditor()` reads MCP tool annotations by default. A policy that allowed the
+editor's MCP tools as undeclared (`undeclared: 'allow'`) now decides annotated tools by their
+capabilities; `mcpToolCapabilities: false` keeps the earlier decisions.
+
 ## 2.16 stage (2.16.0)
 
 Everything 2.16 adds is stable from the start and additive, unless this section says otherwise.

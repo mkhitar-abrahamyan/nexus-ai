@@ -11,6 +11,23 @@ import {
   type McpTransport,
 } from './protocol.js';
 
+/**
+ * What a server says a tool does, as MCP's tool annotations: hints, which a client trusts only as far
+ * as it trusts the server. A hint left out takes the specification's default.
+ */
+export interface McpToolAnnotations {
+  /** A name for people. */
+  title?: string;
+  /** It changes nothing. Defaults to false. */
+  readOnlyHint?: boolean;
+  /** When it changes things, it may destroy or overwrite them, not only add. Defaults to true. */
+  destructiveHint?: boolean;
+  /** Calling it again with the same arguments changes nothing more. Defaults to false. */
+  idempotentHint?: boolean;
+  /** It reaches things beyond the server, such as the web. Defaults to true. */
+  openWorldHint?: boolean;
+}
+
 /** A tool an MCP server offers. */
 export interface McpToolDescriptor {
   /** The tool's name. */
@@ -19,6 +36,41 @@ export interface McpToolDescriptor {
   description?: string;
   /** JSON Schema for the arguments. */
   inputSchema?: Record<string, unknown>;
+  /** What the server says the tool does. */
+  annotations?: McpToolAnnotations;
+}
+
+/**
+ * The capabilities an MCP tool declares, from what its server says of it in its annotations, so a
+ * permission policy decides it as it decides any tool:
+ * - `mcp.read:<server>/<tool>` for a tool that only reads;
+ * - `mcp.write:<server>/<tool>` for one that changes things but destroys nothing;
+ * - `mcp.destructive:<server>/<tool>` for one that may destroy or overwrite;
+ * - and `network`, beside it, for one that reaches beyond its server.
+ *
+ * A hint left out takes the specification's default: not read-only, destructive, and open. A tool
+ * with no annotations at all declares nothing, `undefined`, so a policy decides it as undeclared.
+ */
+export function mcpToolCapabilities(tool: McpToolDescriptor, server: string): string[] | undefined {
+  const hints = tool.annotations;
+  if (!hints || typeof hints !== 'object') return undefined;
+  const effect =
+    hints.readOnlyHint === true ? 'mcp.read' : hints.destructiveHint === false ? 'mcp.write' : 'mcp.destructive';
+  return [`${effect}:${server}/${tool.name}`, ...(hints.openWorldHint === false ? [] : ['network'])];
+}
+
+/** Options for `McpClient.toNexusTools()`. */
+export interface McpToolsOptions {
+  /** Put before each tool's name with an underscore, so two servers' `search` tools differ. */
+  prefix?: string;
+  /**
+   * The capabilities each tool declares: `true` reads them from the server's annotations, with
+   * `mcpToolCapabilities()`, under the server's name (the prefix, or the name the server gives); a
+   * function decides them per tool. Without it, a tool declares none, as before 2.17.
+   */
+  capabilities?: boolean | ((tool: McpToolDescriptor) => readonly string[] | undefined);
+  /** The server's name in each capability, when `capabilities` is `true`. Defaults to the prefix. */
+  server?: string;
 }
 
 /** A resource an MCP server offers. */
@@ -189,23 +241,34 @@ export class McpClient {
    * Names are prefixed when asked, because two servers can both offer `search` and a model has to be
    * able to tell them apart.
    */
-  async toNexusTools(options: { prefix?: string } = {}): Promise<ToolDefinition[]> {
+  async toNexusTools(options: McpToolsOptions = {}): Promise<ToolDefinition[]> {
     const tools = await this.listTools();
-    return tools.map((descriptor) => ({
-      name: options.prefix ? `${options.prefix}_${descriptor.name}` : descriptor.name,
-      description: descriptor.description ?? `MCP tool ${descriptor.name}`,
-      parameters: descriptor.inputSchema ?? { type: 'object', properties: {} },
-      execute: async (args: Record<string, unknown>, context?: ToolContext) => {
-        const progress = context?.progress;
-        const result = await this.callTool(descriptor.name, args, progress ? { progress } : {});
-        const text = result.content
-          .map((part) => part.text ?? (part.type === 'text' ? '' : JSON.stringify(part)))
-          .filter(Boolean)
-          .join('\n');
-        if (result.isError) throw new McpError(text || `MCP tool ${descriptor.name} failed`);
-        return text;
-      },
-    }));
+    const server = options.server ?? options.prefix ?? this.serverInfo.name ?? 'mcp';
+    const declared = (descriptor: McpToolDescriptor) => {
+      const { capabilities } = options;
+      if (!capabilities) return undefined;
+      const list = capabilities === true ? mcpToolCapabilities(descriptor, server) : capabilities(descriptor);
+      return list === undefined ? undefined : [...list];
+    };
+    return tools.map((descriptor) => {
+      const capabilities = declared(descriptor);
+      return {
+        name: options.prefix ? `${options.prefix}_${descriptor.name}` : descriptor.name,
+        description: descriptor.description ?? `MCP tool ${descriptor.name}`,
+        parameters: descriptor.inputSchema ?? { type: 'object', properties: {} },
+        ...(capabilities ? { capabilities } : {}),
+        execute: async (args: Record<string, unknown>, context?: ToolContext) => {
+          const progress = context?.progress;
+          const result = await this.callTool(descriptor.name, args, progress ? { progress } : {});
+          const text = result.content
+            .map((part) => part.text ?? (part.type === 'text' ? '' : JSON.stringify(part)))
+            .filter(Boolean)
+            .join('\n');
+          if (result.isError) throw new McpError(text || `MCP tool ${descriptor.name} failed`);
+          return text;
+        },
+      };
+    });
   }
 
   /** Closes the connection and rejects every request still waiting. */
@@ -488,6 +551,146 @@ export function createHttpTransport(options: HttpClientOptions): McpTransport {
       sessionId = undefined;
     },
   };
+}
+
+/** Connects to a remote MCP server over HTTP with Server-Sent Events, the transport before streamable HTTP. */
+export interface SseClientOptions {
+  /** The server's event stream: a `GET` here opens it, and the server names where to post messages. */
+  url: string;
+  /** Headers sent with the stream's request and with every message, such as authorization. */
+  headers?: Record<string, string>;
+  /** Replaces the global `fetch`. */
+  fetch?: typeof globalThis.fetch;
+  /** How long to wait for the server to name where messages go, in milliseconds. Defaults to 10 seconds. */
+  timeoutMs?: number;
+}
+
+/**
+ * Speaks to an MCP server over HTTP with Server-Sent Events, as MCP's 2024-11-05 transport: one
+ * long `GET` the server answers on, and a `POST` per message to the endpoint the stream names
+ * first. The endpoint must be on the stream's own origin, so a server cannot send the messages, and
+ * their headers, anywhere else. When the stream ends, the transport closes.
+ */
+export function createSseTransport(options: SseClientOptions): McpTransport {
+  const fetchImplementation = options.fetch ?? globalThis.fetch;
+  let onMessage: (message: JsonRpcMessage) => void = () => undefined;
+  const onClose: Array<() => void> = [];
+  let endpoint: string | undefined;
+  let opening: Promise<void> | undefined;
+  let closed = false;
+  const stream = new AbortController();
+  const ended = () => {
+    if (closed) return;
+    closed = true;
+    for (const handler of onClose) handler();
+  };
+
+  const open = async () => {
+    const response = await fetchImplementation(options.url, {
+      headers: { accept: 'text/event-stream', ...options.headers },
+      signal: stream.signal,
+    });
+    if (!response.ok || !response.body) throw new McpError(`MCP SSE transport failed with ${response.status}`);
+    const reader = response.body.getReader();
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new McpError(`The MCP server named no endpoint within ${options.timeoutMs ?? 10_000}ms`));
+        stream.abort();
+      }, options.timeoutMs ?? 10_000);
+      const event = (name: string, data: string) => {
+        if (name === 'endpoint') {
+          if (endpoint) return;
+          const target = new URL(data.trim(), options.url);
+          if (target.origin !== new URL(options.url).origin) {
+            clearTimeout(timer);
+            reject(new McpError(`The MCP server named an endpoint on another origin, ${target.origin}`));
+            stream.abort();
+            return;
+          }
+          endpoint = target.href;
+          clearTimeout(timer);
+          resolve();
+        } else if (name === 'message') {
+          try {
+            onMessage(JSON.parse(data) as JsonRpcMessage);
+          } catch {
+            // A frame that is not JSON-RPC is skipped, not fatal.
+          }
+        }
+      };
+      void readEvents(reader, event).then(
+        () => {
+          clearTimeout(timer);
+          reject(new McpError('The MCP event stream ended'));
+          ended();
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error instanceof McpError ? error : new McpError(`The MCP event stream failed: ${String(error)}`));
+          ended();
+        },
+      );
+    });
+  };
+
+  /** Opens the stream once, for the first caller; later callers wait on the same opening. */
+  const started = () => {
+    opening ??= open();
+    return opening;
+  };
+
+  return {
+    start: started,
+    async send(message) {
+      await started();
+      if (closed || !endpoint) throw new McpError('The MCP event stream is closed');
+      const response = await fetchImplementation(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...options.headers },
+        body: JSON.stringify(message),
+      });
+      // The answer comes on the stream; the POST's own body says only that it was taken.
+      await response.body?.cancel().catch(() => undefined);
+      if (!response.ok) throw new McpError(`MCP SSE transport failed with ${response.status}`);
+    },
+    onMessage(handler) {
+      onMessage = handler;
+    },
+    onClose(handler) {
+      onClose.push(handler);
+    },
+    close() {
+      stream.abort();
+      ended();
+    },
+  };
+}
+
+/** Reads Server-Sent Events, calling `event` with each one's name (`message` by default) and data. */
+async function readEvents(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  event: (name: string, data: string) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, '\n');
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      let name = 'message';
+      const data: string[] = [];
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) name = line.slice(6).trim();
+        else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+      }
+      if (data.length) event(name, data.join('\n'));
+      boundary = buffer.indexOf('\n\n');
+    }
+  }
 }
 
 function sseData(body: string): string[] {

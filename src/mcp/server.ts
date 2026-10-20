@@ -1,4 +1,6 @@
+import { parseCapability } from '../agent/capabilities.js';
 import type { ToolDefinition } from '../types/messages.js';
+import type { McpToolAnnotations } from './client.js';
 import {
   isNotification,
   isRequest,
@@ -28,6 +30,33 @@ export interface McpServerOptions {
     mimeType?: string;
     read(): Promise<unknown> | unknown;
   }>;
+}
+
+/** Kinds of capability that stay within what the tool was given, without reaching beyond it. */
+const CLOSED = new Set(['filesystem', 'mcp.read', 'mcp.write', 'mcp.destructive']);
+
+/**
+ * The annotations a tool is served with, from the capabilities it declares, read so a client is never
+ * told less than the tool may do:
+ * - read-only only when every capability reads, `filesystem:read` or `mcp.read`, or there are none;
+ * - not destructive only when everything else it does is `mcp.write`;
+ * - closed to the world only when every capability is the filesystem's or an MCP tool's effect.
+ *
+ * A tool whose capabilities depend on its arguments, or that declares none, is served without
+ * annotations, which a client reads as the specification's defaults: it may do anything.
+ */
+export function mcpToolAnnotations(tool: Pick<ToolDefinition, 'capabilities'>): McpToolAnnotations | undefined {
+  const declared = tool.capabilities;
+  if (!declared || typeof declared === 'function') return undefined;
+  const parsed = declared.map((capability) => parseCapability(capability));
+  const reads = (item: (typeof parsed)[number]) =>
+    (item.kind === 'filesystem' && item.access === 'read') || item.kind === 'mcp.read';
+  const readOnly = parsed.every(reads);
+  return {
+    readOnlyHint: readOnly,
+    ...(readOnly ? {} : { destructiveHint: !parsed.every((item) => reads(item) || item.kind === 'mcp.write') }),
+    openWorldHint: !parsed.every((item) => CLOSED.has(item.kind)),
+  };
 }
 
 /**
@@ -101,11 +130,15 @@ export class McpServer {
         return {};
       case 'tools/list':
         return {
-          tools: [...this.tools.values()].map((item) => ({
-            name: item.name,
-            description: item.description,
-            inputSchema: item.parameters ?? { type: 'object', properties: {} },
-          })),
+          tools: [...this.tools.values()].map((item) => {
+            const annotations = mcpToolAnnotations(item);
+            return {
+              name: item.name,
+              description: item.description,
+              inputSchema: item.parameters ?? { type: 'object', properties: {} },
+              ...(annotations ? { annotations } : {}),
+            };
+          }),
         };
       case 'tools/call': {
         const name = String(params.name ?? '');

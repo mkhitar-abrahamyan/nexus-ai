@@ -10,6 +10,9 @@ import type { ToolDefinition } from '../types/messages.js';
  * | `network`, `network:<host or URL>` | Opens a network connection, to a host when given |
  * | `shell`, `shell:<command line>` | Runs a shell command |
  * | `code` | Runs code it was given, as an interpreter does |
+ * | `mcp.read:<server>/<tool>` | An MCP tool its server says only reads |
+ * | `mcp.write:<server>/<tool>` | An MCP tool its server says changes things but destroys nothing |
+ * | `mcp.destructive:<server>/<tool>` | An MCP tool its server says may destroy or overwrite |
  * | `<name>`, `<name>:<detail>` | Anything the application names, such as `payments:refund` |
  *
  * A tool that declares `capabilities: []` does nothing to the world; one that declares none at all

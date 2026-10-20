@@ -4,6 +4,34 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+The editor's MCP servers over every transport, decided by what their servers say they do.
+
+### Added
+
+- **MCP over SSE.** `createSseTransport()`, on `nexus-ai-pro/mcp`, speaks to a server over HTTP with
+  Server-Sent Events, MCP's transport before streamable HTTP: one `GET` on the event stream, a `POST`
+  per message to the endpoint the stream names, kept to the stream's origin. An ACP agent connects the
+  SSE servers an editor offers, beside stdio and HTTP.
+- **MCP tools that declare what they do.** `toNexusTools({ capabilities: true })` gives each tool the
+  capabilities its server's annotations describe, from `mcpToolCapabilities()`: `mcp.read`,
+  `mcp.write`, or `mcp.destructive` under the server's name, and `network` for one that reaches
+  beyond it, with the specification's defaults for a hint left out. A permission policy then decides a
+  server's tools as it decides the agent's own: `{ custom: { 'mcp.read': 'allow' } }` runs a lookup
+  and refuses a delete, with no rule naming either. A function decides per tool instead.
+- **The package's MCP server says what its tools do.** `McpServer` lists each tool with the
+  annotations its capabilities give it, from `mcpToolAnnotations()`, never claiming less than the
+  tool may do.
+
+### Changed
+
+- `acpEditor()` reads its MCP servers' annotations by default (`mcpToolCapabilities`), so an
+  annotated tool is decided by its capabilities rather than as undeclared; `mcpToolCapabilities: false`
+  keeps the 2.16 behaviour. A tool its server says nothing about is undeclared, as before.
+- The ACP agent tells the editor, in `initialize`, that it connects MCP servers over HTTP and SSE, so
+  an editor that follows the protocol offers them; before, it offered only stdio servers.
+- The nightly interoperability check offers the ACP agent MCP servers built with
+  `@modelcontextprotocol/sdk` over stdio, HTTP, and SSE.
+
 ## [2.16.0] - 2026-10-20
 
 A2A on all three of its bindings over one set of tasks, and webhooks told the answer as it is written.

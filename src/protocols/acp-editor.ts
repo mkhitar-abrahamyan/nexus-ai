@@ -10,10 +10,17 @@
  *
  * A tool is offered only when the editor said it can do that thing, in `initialize`. Each declares
  * what it touches, as `filesystem:read:<path>`, `filesystem:write:<path>`, or `shell:<command>`, so a
- * permission policy decides it like any other tool, and an approval asks the person in the editor.
+ * permission policy decides it like any other tool, and an approval asks the person in the editor. An
+ * MCP server's tools, over stdio, HTTP, or SSE, declare what their server says they do.
  */
 import type { ToolSourceContext } from '../agent/create-agent.js';
-import { createHttpTransport, createStdioTransport, McpClient } from '../mcp/client.js';
+import {
+  createHttpTransport,
+  createSseTransport,
+  createStdioTransport,
+  McpClient,
+  type McpToolDescriptor,
+} from '../mcp/client.js';
 import type { ToolDefinition } from '../types/messages.js';
 import type { AcpConnection, AcpEditorBridge, AcpSessionInfo } from './acp.js';
 
@@ -27,8 +34,15 @@ export interface AcpEditorOptions {
   mcp?: boolean;
   /** How long a request to an MCP server may take, in milliseconds. Defaults to 30 seconds. */
   mcpTimeoutMs?: number;
-  /** Replaces `fetch` for MCP servers reached over HTTP: a proxy, or a test. */
+  /** Replaces `fetch` for MCP servers reached over HTTP or SSE: a proxy, or a test. */
   mcpFetch?: typeof globalThis.fetch;
+  /**
+   * What an MCP server's tools declare they do, for a permission policy. `true`, the default, reads
+   * it from the server's annotations, with `mcpToolCapabilities()`: `mcp.read`, `mcp.write`, or
+   * `mcp.destructive` under the server's name, and `network` for a tool that reaches beyond it. A
+   * function decides per tool, and `false` declares nothing, as before 2.17.
+   */
+  mcpToolCapabilities?: boolean | ((tool: McpToolDescriptor, server: string) => readonly string[] | undefined);
   /** The most terminal output a command returns, in bytes. Defaults to 64 KB. */
   maxOutputBytes?: number;
   /** Receives an MCP server that failed to start, whose tools are then not offered. */
@@ -37,6 +51,8 @@ export interface AcpEditorOptions {
 
 /** The editor, as tools for an agent. */
 export interface AcpEditor extends AcpEditorBridge {
+  /** The MCP transports it connects, which the agent tells the editor in `initialize`. */
+  readonly mcpCapabilities: { http: boolean; sse: boolean };
   /** The tools of one session, for `CreateAgentOptions.toolSource`: the session is the run's thread. */
   toolSource(context: ToolSourceContext): Promise<ToolDefinition[]>;
   /** Closes every MCP server it connected. */
@@ -67,9 +83,18 @@ export function acpEditor(options: AcpEditorOptions = {}): AcpEditor {
       connected = (async () => {
         const clients: McpClient[] = [];
         const tools: ToolDefinition[] = [];
+        const declare = options.mcpToolCapabilities ?? true;
         for (const offered of session.mcpServers as OfferedServer[]) {
           const name = String(offered.name ?? 'mcp');
+          const prefix = name.replace(/[^A-Za-z0-9_-]/g, '_');
           try {
+            const remote = offered.url
+              ? {
+                  url: offered.url,
+                  headers: Object.fromEntries((offered.headers ?? []).map((item) => [item.name, item.value])),
+                  ...(options.mcpFetch ? { fetch: options.mcpFetch } : {}),
+                }
+              : undefined;
             const transport = offered.command
               ? createStdioTransport({
                   command: offered.command,
@@ -77,17 +102,21 @@ export function acpEditor(options: AcpEditorOptions = {}): AcpEditor {
                   env: Object.fromEntries((offered.env ?? []).map((item) => [item.name, item.value])),
                   ...(session.cwd ? { cwd: session.cwd } : {}),
                 })
-              : offered.url && (offered.type === 'http' || offered.type === undefined)
-                ? createHttpTransport({
-                    url: offered.url,
-                    headers: Object.fromEntries((offered.headers ?? []).map((item) => [item.name, item.value])),
-                    ...(options.mcpFetch ? { fetch: options.mcpFetch } : {}),
-                  })
-                : undefined;
+              : remote && offered.type === 'sse'
+                ? createSseTransport({ ...remote, timeoutMs: options.mcpTimeoutMs ?? 30_000 })
+                : remote && (offered.type === 'http' || offered.type === undefined)
+                  ? createHttpTransport(remote)
+                  : undefined;
             if (!transport) throw new Error(`MCP server "${name}" uses a transport this agent does not speak`);
             const client = new McpClient(transport, { timeoutMs: options.mcpTimeoutMs ?? 30_000 });
-            tools.push(...(await client.toNexusTools({ prefix: name.replace(/[^A-Za-z0-9_-]/g, '_') })));
             clients.push(client);
+            tools.push(
+              ...(await client.toNexusTools({
+                prefix,
+                server: prefix,
+                capabilities: typeof declare === 'function' ? (tool) => declare(tool, prefix) : declare,
+              })),
+            );
           } catch (error) {
             options.onError?.(error, name);
           }
@@ -207,6 +236,7 @@ export function acpEditor(options: AcpEditorOptions = {}): AcpEditor {
   };
 
   return {
+    mcpCapabilities: { http: options.mcp !== false, sse: options.mcp !== false },
     attach(next) {
       connection = next;
     },

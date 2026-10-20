@@ -1,13 +1,18 @@
 export {
   createHttpTransport,
+  createSseTransport,
   createStdioTransport,
   type HttpClientOptions,
   McpClient,
   type McpClientOptions,
   type McpContent,
   type McpResourceDescriptor,
+  type McpToolAnnotations,
   type McpToolDescriptor,
   type McpToolResult,
+  type McpToolsOptions,
+  mcpToolCapabilities,
+  type SseClientOptions,
   type StdioClientOptions,
 } from './client.js';
 export {
@@ -21,4 +26,4 @@ export {
   McpError,
   type McpTransport,
 } from './protocol.js';
-export { createStdioServerTransport, McpServer, type McpServerOptions } from './server.js';
+export { createStdioServerTransport, McpServer, type McpServerOptions, mcpToolAnnotations } from './server.js';
