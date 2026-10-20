@@ -218,36 +218,56 @@ const check = (label, condition, detail = '') => {
         return {};
       },
     };
-    const connection = new acp.ClientSideConnection(
-      () => editor,
-      acp.ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)),
-    );
-    const init = await connection.initialize({
-      protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false },
+    const stream = acp.ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout));
+    // The editor, as the SDK builds one: from 2.0, an app with a handler per method and the calls made
+    // inside `connectWith()`; before it, a `ClientSideConnection` over the editor object.
+    const asEditor = async (calls) => {
+      if (typeof acp.client === 'function') {
+        const app = acp
+          .client()
+          .onRequest('session/request_permission', ({ params }) => editor.requestPermission(params))
+          .onNotification('session/update', ({ params }) => editor.sessionUpdate(params))
+          .onRequest('fs/read_text_file', ({ params }) => editor.readTextFile(params))
+          .onRequest('fs/write_text_file', ({ params }) => editor.writeTextFile(params));
+        return app.connectWith(stream, (agent) => calls((method, params) => agent.request(method, params)));
+      }
+      const connection = new acp.ClientSideConnection(() => editor, stream);
+      const named = {
+        initialize: 'initialize',
+        'session/new': 'newSession',
+        'session/prompt': 'prompt',
+        'session/load': 'loadSession',
+      };
+      return calls((method, params) => connection[named[method]](params));
+    };
+    await asEditor(async (request) => {
+      const init = await request('initialize', {
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false },
+      });
+      check('ACP: the agent can load sessions', init.agentCapabilities?.loadSession === true);
+      const session = await request('session/new', { cwd: '/work', mcpServers: [] });
+      const turn = await request('session/prompt', {
+        sessionId: session.sessionId,
+        prompt: [{ type: 'text', text: 'Review notes.md' }],
+      });
+      check('ACP: the turn ends', turn.stopReason === 'end_turn', turn.stopReason);
+      check('ACP: the agent wrote through the editor, after asking', files.get('/work/notes.md') === 'reviewed');
+      const said = updates
+        .filter((update) => update.sessionUpdate === 'agent_message_chunk')
+        .map((update) => update.content.text);
+      check(
+        'ACP: the agent reported what it did',
+        said.some((text) => text.includes('draft')),
+        said.join(' '),
+      );
+      updates.length = 0;
+      await request('session/load', { sessionId: session.sessionId, cwd: '/work', mcpServers: [] });
+      check(
+        'ACP: a loaded session replays its conversation',
+        updates.some((update) => update.sessionUpdate === 'user_message_chunk'),
+      );
     });
-    check('ACP: the agent can load sessions', init.agentCapabilities?.loadSession === true);
-    const session = await connection.newSession({ cwd: '/work', mcpServers: [] });
-    const turn = await connection.prompt({
-      sessionId: session.sessionId,
-      prompt: [{ type: 'text', text: 'Review notes.md' }],
-    });
-    check('ACP: the turn ends', turn.stopReason === 'end_turn', turn.stopReason);
-    check('ACP: the agent wrote through the editor, after asking', files.get('/work/notes.md') === 'reviewed');
-    const said = updates
-      .filter((update) => update.sessionUpdate === 'agent_message_chunk')
-      .map((update) => update.content.text);
-    check(
-      'ACP: the agent reported what it did',
-      said.some((text) => text.includes('draft')),
-      said.join(' '),
-    );
-    updates.length = 0;
-    await connection.loadSession({ sessionId: session.sessionId, cwd: '/work', mcpServers: [] });
-    check(
-      'ACP: a loaded session replays its conversation',
-      updates.some((update) => update.sessionUpdate === 'user_message_chunk'),
-    );
   } catch (error) {
     failures.push(`ACP: ${error?.stack ?? error}`);
   } finally {
