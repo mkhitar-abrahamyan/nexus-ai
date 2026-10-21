@@ -324,13 +324,15 @@ Shipped so far:
   [page](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/COMPATIBILITY.md) lists them;
 - 2.16 A2A over every binding: one agent served over JSON-RPC, HTTP+JSON, and gRPC from one task
   store, so a caller on any binding continues a task another started, and webhooks told the answer
-  as it is written.
+  as it is written;
+- 2.17 the editor's MCP servers over every transport, and video you can extend or edit: an ACP agent
+  connects stdio, HTTP, and SSE servers and decides each tool by what its server says it does, and a
+  video is extended from its own job or edited on Gemini Omni Flash, Veo, and Runway.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.17 connects the MCP servers an editor gives an ACP agent over SSE as well as stdio and HTTP,
-and reads what their tools declare they do, so a permission policy covers them without a rule for
-each. Pinecone, images, the Gemini
+Next, 2.18 records events and links on spans, as OpenTelemetry has them, and reads the length of
+compressed audio and video, so an evaluation holds a clip to its duration. Pinecone, images, the Gemini
 embedding batch tier, media understanding, video, Gemini Live, SIP, and both phone providers
 graduate once the live workflow passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order

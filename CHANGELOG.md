@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-10-21
+
 The editor's MCP servers over every transport, decided by what their servers say they do; and video
 extended or edited on every provider, with Gemini Omni Flash on Google's Interactions API.
 
@@ -3101,7 +3103,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.16.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.17.0...HEAD
+[2.17.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.15.1...v2.16.0
 [2.15.1]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.14.0...v2.15.0

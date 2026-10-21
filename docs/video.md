@@ -204,8 +204,8 @@ the Gemini API and on Vertex AI, and Runway pass it against stand-ins for their 
 
 ## Limitations
 
-- The family is experimental until Veo and Runway pass the conformance suite against the live
-  services.
+- The family is experimental until Gemini Omni Flash, Veo, and Runway pass the conformance suite
+  against the live services.
 - OpenAI removed its Videos API, and the Sora 2 models, on 2026-09-24, so there is no OpenAI adapter.
 - Gemini Omni Flash is served on the Gemini API, not on Vertex AI, where it is in preview on another
   protocol.
