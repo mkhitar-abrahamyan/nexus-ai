@@ -1,6 +1,6 @@
 /**
  * Runway's video task API: one protocol for its own models and the hosted ones it serves, Veo,
- * Gemini Omni Flash, and Seedance among them.
+ * Gemini Omni Flash, and Seedance among them, from a prompt, an image, or a video to extend or edit.
  */
 import type { AssetInput } from '../types/images.js';
 import { encodeBase64 } from '../utils/base64.js';
@@ -20,7 +20,10 @@ import { VideoError } from './errors.js';
 const BASE_URL = 'https://api.dev.runwayml.com';
 const API_VERSION = '2024-11-06';
 const DEFAULT_MODEL = 'gen4.5';
-/** The text-to-video models Runway's API names, as its SDK listed them on 2026-10-14. */
+/**
+ * The models Runway's API names, as its SDK listed them on 2026-10-20: every text-to-video model, and
+ * Aleph, which only changes a video it is given.
+ */
 const RUNWAY_MODELS = [
   'gen4.5',
   'veo3.1',
@@ -38,7 +41,10 @@ const RUNWAY_MODELS = [
   'wan3',
   'wan3_prime',
   'h3_max',
+  'aleph2',
 ] as const;
+/** What Omni adds when it extends a video, in seconds. */
+const OMNI_LENGTHS = [3, 4, 5, 6, 7, 8, 9, 10];
 const VEO: Partial<VideoModelCapabilities> = {
   durations: [4, 6, 8],
   defaultDurationSeconds: 8,
@@ -56,9 +62,26 @@ const BY_MODEL: Record<string, Partial<VideoModelCapabilities>> = {
   },
   'veo3.1': VEO,
   'veo3.1_fast': VEO,
-  'gemini_omni_flash_1.1': { durations: [3, 4, 5, 6, 7, 8, 9, 10], audio: 'none', supportsSeed: false },
-  gemini_omni_flash: { durations: [3, 4, 5, 6, 7, 8, 9, 10], audio: 'none', supportsSeed: false },
+  'gemini_omni_flash_1.1': {
+    inputs: ['image', 'extend', 'edit'],
+    durations: OMNI_LENGTHS,
+    extendDurations: OMNI_LENGTHS,
+    audio: 'none',
+    supportsSeed: false,
+    continuesJobs: true,
+  },
+  gemini_omni_flash: {
+    inputs: ['image', 'edit'],
+    durations: OMNI_LENGTHS,
+    audio: 'none',
+    supportsSeed: false,
+    continuesJobs: true,
+  },
+  // Aleph changes the video it is given, as its prompt says; it makes none from nothing.
+  aleph2: { inputs: ['edit'], requires: ['edit'], audio: 'none', supportsSeed: true, continuesJobs: true },
 };
+/** The most a video inline in a request may hold: Runway takes a larger one by URL. */
+const MAX_INLINE_VIDEO_BYTES = 5 * 1024 * 1024;
 /** Pixel sizes Runway's `ratio` names, by shape and frame size. */
 const RATIOS: Record<string, Record<string, string>> = {
   '16:9': { '720p': '1280:720', '1080p': '1920:1080' },
@@ -132,14 +155,19 @@ export class RunwayVideoProvider implements VideoProvider {
         byModel: { ...BY_MODEL, ...config.byModel },
         inputLocationKinds: ['bytes', 'url'],
         inputMimeTypes: ['image/png', 'image/jpeg', 'image/webp'],
+        inputVideoMimeTypes: ['video/mp4', 'video/quicktime', 'video/webm'],
         supportsCancel: true,
         supportsRemove: true,
       },
     };
   }
 
-  /** Starts a text-to-video task, or an image-to-video one when the request has a first frame. */
+  /**
+   * Starts a text-to-video task, an image-to-video one when the request has a first frame, or a
+   * video-to-video one when it has a video to extend or edit.
+   */
   async submit(request: VideoProviderRequest, context: VideoCallContext): Promise<VideoJobRef> {
+    if (request.video) return this.fromVideo(request, context);
     const caps = { ...this.info.capabilities, ...this.info.capabilities.byModel?.[request.model] };
     const body: Record<string, unknown> = { model: request.model };
     if (request.prompt.trim()) body.promptText = request.prompt;
@@ -166,6 +194,58 @@ export class RunwayVideoProvider implements VideoProvider {
         task.createdAt && !Number.isNaN(Date.parse(task.createdAt)) ? task.createdAt : new Date().toISOString(),
       ...(duration !== undefined ? { metadata: { runway: { duration } } } : {}),
     };
+  }
+
+  /** A video-to-video task: the video given, or the one a task of this account made, changed or continued. */
+  private async fromVideo(request: VideoProviderRequest, context: VideoCallContext): Promise<VideoJobRef> {
+    const video = request.video as NonNullable<VideoProviderRequest['video']>;
+    const body: Record<string, unknown> = { model: request.model, videoUri: await this.videoUri(video, context) };
+    if (request.prompt.trim()) body.promptText = request.prompt;
+    if (request.model === 'gemini_omni_flash_1.1') {
+      body.mode = video.mode;
+      // Extending, the duration is what is added; editing, the video keeps its own.
+      if (video.mode === 'extend' && request.durationSeconds !== undefined) body.duration = request.durationSeconds;
+      const ratio = ratioOf(request.aspectRatio, request.resolution);
+      if (ratio) body.ratio = ratio;
+    }
+    if (request.seed !== undefined) body.seed = request.seed;
+    if (request.references?.length)
+      body.references = request.references.map((reference) => ({ uri: imageUri(reference) }));
+    Object.assign(body, request.providerOptions);
+    const task = await this.call<RunwayTask>(
+      '/v1/video_to_video',
+      { method: 'POST', body: JSON.stringify(body) },
+      context,
+    );
+    if (!task.id) throw new VideoError('Runway returned no task id', 'VIDEO_PROVIDER');
+    return {
+      provider: this.info.name,
+      id: task.id,
+      model: request.model,
+      createdAt:
+        task.createdAt && !Number.isNaN(Date.parse(task.createdAt)) ? task.createdAt : new Date().toISOString(),
+    };
+  }
+
+  /** A video as Runway takes it: by URL, inline up to 5 MB, or the signed URL of a task's own video. */
+  private async videoUri(
+    video: NonNullable<VideoProviderRequest['video']>,
+    context: VideoCallContext,
+  ): Promise<string> {
+    if (video.from) {
+      const index = video.from.index ?? 0;
+      const url = (await this.task(video.from.ref, context)).output?.[index];
+      if (!url)
+        throw new VideoError(`Runway task ${video.from.ref.id} has no video ${index} to continue`, 'VIDEO_INVALID');
+      return url;
+    }
+    const input = video.input as AssetInput;
+    if (input.location.kind === 'bytes' && input.location.data.byteLength > MAX_INLINE_VIDEO_BYTES) {
+      throw new VideoError('Runway takes a video inline up to 5 MB; give a larger one by URL', 'VIDEO_UNSUPPORTED');
+    }
+    if (input.location.kind === 'url') return input.location.url;
+    if (input.location.kind === 'bytes') return `data:${input.mimeType};base64,${encodeBase64(input.location.data)}`;
+    throw new VideoError('Runway takes a video as bytes or by URL', 'VIDEO_UNSUPPORTED');
   }
 
   /** Reads the task. */

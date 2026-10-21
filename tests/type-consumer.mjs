@@ -311,7 +311,7 @@ import { MediaManager, modelMediaProvider, type MediaText } from 'nexus-ai-pro/m
 import { MistralOcrProvider } from 'nexus-ai-pro/media/mistral';
 import { MockMediaProvider } from 'nexus-ai-pro/media/mock';
 import { answerFromMedia, createMediaIndex, type MediaHit } from 'nexus-ai-pro/media/rag';
-import { priceVideo, VideoManager, type VideoJobRef, type VideoResult } from 'nexus-ai-pro/video';
+import { priceVideo, VideoManager, type VideoJobRef, type VideoResult, type VideoSource } from 'nexus-ai-pro/video';
 import { GoogleVideoProvider } from 'nexus-ai-pro/video/google';
 import { MockVideoProvider } from 'nexus-ai-pro/video/mock';
 import { RunwayVideoProvider } from 'nexus-ai-pro/video/runway';
@@ -922,6 +922,19 @@ const videoManager = new VideoManager({
 const videoJob: Promise<VideoJobRef> = videoManager.start({ prompt: 'a lighthouse', durationSeconds: 8 });
 const videoResult: Promise<VideoResult> = videoJob.then((ref) => videoManager.resume(ref, { delivery: 'bytes' }));
 const videoCost: number | undefined = priceVideo('veo-3.1-generate-preview', 8)?.amount;
+// A video extended from a job of its own, and one of the application's edited.
+const continuedVideo: Promise<VideoJobRef> = videoJob.then((ref) => {
+  const source: VideoSource = { mode: 'extend', from: { ref, index: 0 } };
+  return videoManager.start({ prompt: 'and then', video: source, durationSeconds: 4 });
+});
+const editedVideo: Promise<VideoJobRef> = videoManager.start({
+  provider: 'runway',
+  model: 'aleph2',
+  prompt: 'make it winter',
+  video: { mode: 'edit', input: { location: { kind: 'url', url: 'https://example.com/a.mp4' }, mimeType: 'video/mp4' } },
+});
+const omniCost: number | undefined = priceVideo('gemini-omni-1.1-flash', 6)?.amount;
+void [continuedVideo, editedVideo, omniCost];
 const readPages: Promise<number> = mediaManager
   .read({ media: { type: 'document', source: { url: 'https://example.com/a.pdf' } } })
   .then((text: MediaText) => text.pages.length);

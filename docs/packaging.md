@@ -143,11 +143,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings` | 41 KB | 11% | none |
 | `nexus-ai-pro/embeddings/batch` | 41 KB | 11% | none |
 | `nexus-ai-pro/evaluate/media` | 41 KB | 11% | none |
+| `nexus-ai-pro/video` | 41 KB | 11% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 11% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 11% | none |
 | `nexus-ai-pro/agent/workspace` | 38 KB | 10% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 10% | none |
-| `nexus-ai-pro/video` | 37 KB | 10% | none |
 | `nexus-ai-pro/models` | 37 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/lifecycle` | 35 KB | 10% | none |
@@ -175,6 +175,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/openai-server` | 24 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
+| `nexus-ai-pro/video/google` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
 | `nexus-ai-pro/media/catalog` | 20 KB | 6% | none |
@@ -201,13 +202,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/protocols/ag-ui` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
 | `nexus-ai-pro/doctor` | 14 KB | 4% | none |
+| `nexus-ai-pro/video/runway` | 14 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/residency` | 13 KB | 4% | none |
 | `nexus-ai-pro/evaluate/emulate` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/media` | 13 KB | 4% | none |
-| `nexus-ai-pro/video/google` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/rag/redis` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/traces` | 12 KB | 3% | none |
@@ -222,7 +223,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/cache` | 11 KB | 3% | none |
 | `nexus-ai-pro/embeddings/batch/google` | 11 KB | 3% | none |
 | `nexus-ai-pro/sqlite/store` | 11 KB | 3% | none |
-| `nexus-ai-pro/video/runway` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/qdrant` | 11 KB | 3% | none |
 | `nexus-ai-pro/rag/chroma` | 11 KB | 3% | none |
 | `nexus-ai-pro/postgres/vectors` | 10 KB | 3% | none |

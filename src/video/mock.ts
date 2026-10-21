@@ -67,8 +67,10 @@ export class MockVideoProvider implements VideoProvider {
     this.info = {
       name: options.name ?? 'mock',
       capabilities: {
-        inputs: ['image', 'last-frame', 'references'],
+        inputs: ['image', 'last-frame', 'references', 'extend', 'edit'],
         durations: [4, 8],
+        extendDurations: [4],
+        continuesJobs: true,
         defaultDurationSeconds: 4,
         aspectRatios: ['16:9', '9:16'],
         resolutions: ['720p', '1080p'],
@@ -89,6 +91,14 @@ export class MockVideoProvider implements VideoProvider {
   /** Starts a job. */
   async submit(request: VideoProviderRequest, context: VideoCallContext): Promise<VideoJobRef> {
     context.signal.throwIfAborted();
+    // A job continued from another is continued from what this provider made, as a real one would.
+    const from = request.video?.from;
+    if (from) {
+      const earlier = this.job(from.ref);
+      if (earlier.removed || (from.index ?? 0) >= (earlier.request.count ?? 1)) {
+        throw new VideoError(`Mock job ${from.ref.id} has no video ${from.index ?? 0} to continue`, 'VIDEO_INVALID');
+      }
+    }
     const id = `mock-video-${this.jobs.size + 1}-${++this.nextId}`;
     this.jobs.set(id, { request: structuredClone(request), polls: 0 });
     return { provider: this.info.name, id, model: request.model, createdAt: new Date().toISOString() };

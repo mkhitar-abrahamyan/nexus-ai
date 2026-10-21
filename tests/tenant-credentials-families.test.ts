@@ -130,10 +130,10 @@ test('video: Google sends the tenant’s key in place of the configured key or t
     { providers: { veo: new GoogleVideoProvider({ accessToken: 'ya29.shared', fetch: google.fetch }) } },
     { lifecycle: lifecycle() },
   );
-  const ref = await manager.start({ prompt: 'a lighthouse', model: 'veo-3.1-generate-preview', tenantId: 'acme' });
+  const ref = await manager.start({ prompt: 'a lighthouse', model: 'veo-3.1-generate-001', tenantId: 'acme' });
   await manager.status(ref);
   assert.deepEqual(google.keys(), ['g-acme', 'g-acme']);
-  await manager.start({ prompt: 'a field', model: 'veo-3.1-generate-preview' });
+  await manager.start({ prompt: 'a field', model: 'veo-3.1-generate-001' });
   assert.equal(google.keys().at(-1), 'ya29.shared', 'the configured token without a tenant');
 });
 

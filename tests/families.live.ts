@@ -212,7 +212,7 @@ if (env.NEXUS_LIVE_VIDEO) {
     video.push({
       name: 'Veo',
       provider: new GoogleVideoProvider({ apiKey: env.GOOGLE_API_KEY }),
-      model: env.GOOGLE_VIDEO_MODEL || 'veo-3.1-lite-generate-preview',
+      model: env.GOOGLE_VIDEO_MODEL || 'gemini-omni-1.1-flash',
     });
   }
   if (env.RUNWAYML_API_SECRET) {

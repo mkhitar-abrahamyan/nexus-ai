@@ -4,9 +4,27 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-The editor's MCP servers over every transport, decided by what their servers say they do.
+The editor's MCP servers over every transport, decided by what their servers say they do; and video
+extended or edited on every provider, with Gemini Omni Flash on Google's Interactions API.
 
 ### Added
+
+- **Video extended or edited.** A `VideoGenerateRequest` takes a `video`, a `VideoSource`: `extend`
+  continues it, and `edit` changes it as the prompt says. The video is an input (bytes, a URL, or a
+  stored asset), or `from` a finished job of the same provider, which continues from what it holds
+  with nothing uploaded. Models declare `extend` and `edit` among their `inputs`, with
+  `extendDurations`, `continuesJobs`, and `requires`, and providers their `inputVideoMimeTypes`;
+  anything a model cannot do is refused before it is sent, and the input travels with a durable
+  generation. The conformance suite checks extending and editing, and continuing a job.
+- **Gemini Omni Flash on the Interactions API.** `GoogleVideoProvider` serves `gemini-omni-1.1-flash`
+  as a background interaction: 3 to 10 seconds at 360p to 4k, from a prompt, a first frame, or
+  reference images, extending and editing videos, continuing its own interactions by id, cancelled and
+  deleted with them. It is priced at its 720p token rate.
+- **Veo extends on Vertex AI.** Veo 3.1 extends a video in Cloud Storage by seven seconds, or a job of
+  its own when `storageUri` keeps its videos there, and makes up to four videos a request.
+- **Runway's video to video.** `gemini_omni_flash_1.1` extends and edits, `gemini_omni_flash` edits,
+  and `aleph2`, now among the models, only edits, from a video by URL, inline up to 5 MB, or a task's
+  own video.
 
 - **MCP over SSE.** `createSseTransport()`, on `nexus-ai-pro/mcp`, speaks to a server over HTTP with
   Server-Sent Events, MCP's transport before streamable HTTP: one `GET` on the event stream, a `POST`
@@ -24,6 +42,10 @@ The editor's MCP servers over every transport, decided by what their servers say
 
 ### Changed
 
+- **Google's video defaults follow its shutdown of the Veo 3.1 previews on 2026-10-22.** On the Gemini
+  API, `GoogleVideoProvider` serves Gemini Omni Flash by default; on Vertex AI, the generally
+  available `veo-3.1-generate-001` and `veo-3.1-fast-generate-001`, and `veo-3.1-lite-generate-001`.
+  Name the preview models in `models` to keep them until Google stops serving them.
 - `acpEditor()` reads its MCP servers' annotations by default (`mcpToolCapabilities`), so an
   annotated tool is decided by its capabilities rather than as undeclared; `mcpToolCapabilities: false`
   keeps the 2.16 behaviour. A tool its server says nothing about is undeclared, as before.

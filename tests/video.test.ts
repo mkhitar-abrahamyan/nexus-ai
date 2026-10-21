@@ -148,10 +148,13 @@ function runwayApi(options: { failureCode?: string } = {}) {
   return { fetch, calls };
 }
 
+/** Veo on the Gemini API, as it was served until its previews shut down on 2026-10-22. */
+const VEO_PREVIEWS = ['veo-3.1-generate-preview', 'veo-3.1-fast-generate-preview', 'veo-3.1-lite-generate-preview'];
+
 test('the mock, Google Veo on both APIs, and Runway pass the video conformance suite', async () => {
   const providers: VideoProvider[] = [
     new MockVideoProvider(),
-    new GoogleVideoProvider({ apiKey: 'key', fetch: googleApi().fetch }),
+    new GoogleVideoProvider({ apiKey: 'key', fetch: googleApi().fetch, models: VEO_PREVIEWS }),
     new GoogleVideoProvider({
       accessToken: async () => 'token',
       baseUrl: 'https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1/publishers/google',
@@ -173,7 +176,12 @@ test('the mock, Google Veo on both APIs, and Runway pass the video conformance s
 
 test('Google: a request becomes a long-running prediction, and its video is read with the key', async () => {
   const api = googleApi();
-  const veo = new GoogleVideoProvider({ apiKey: 'key', fetch: api.fetch, personGeneration: 'allow_adult' });
+  const veo = new GoogleVideoProvider({
+    apiKey: 'key',
+    fetch: api.fetch,
+    personGeneration: 'allow_adult',
+    models: VEO_PREVIEWS,
+  });
   const manager = new VideoManager({ providers: { veo }, pollIntervalMs: 1 });
   // Started and collected as bytes: a durable generation would store the video instead.
   const result = await manager.resume(
@@ -320,7 +328,7 @@ test('Runway: a request becomes a task in its own vocabulary, and its video is r
 
 test('a request a model cannot make is refused before any job is submitted', async () => {
   const mock = new MockVideoProvider();
-  const google = new GoogleVideoProvider({ apiKey: 'key', fetch: googleApi().fetch });
+  const google = new GoogleVideoProvider({ apiKey: 'key', fetch: googleApi().fetch, models: VEO_PREVIEWS });
   const runway = new RunwayVideoProvider({ apiKey: 'secret', fetch: runwayApi().fetch });
   const manager = new VideoManager({ providers: { mock, google, runway } });
   const refused: Array<[string, Parameters<VideoManager['start']>[0], RegExp]> = [
@@ -329,7 +337,7 @@ test('a request a model cannot make is refused before any job is submitted', asy
     ['a shape', { prompt: 'x', aspectRatio: '1:1' }, /aspect ratio "1:1"/],
     ['too many references', { prompt: 'x', references: [png, png, png, png] }, /4 reference images/],
     ['too many videos', { prompt: 'x', count: 3 }, /3 videos/],
-    ['an empty prompt', { prompt: '  ' }, /needs a prompt, or an image/],
+    ['an empty prompt', { prompt: '  ' }, /needs a prompt, an image to animate, or a video/],
     ['silence from a model that always speaks', { prompt: 'x', provider: 'google', audio: false }, /silent video/],
     [
       'a 4k Lite video',

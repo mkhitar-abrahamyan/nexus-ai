@@ -50,11 +50,18 @@ New and stable:
   `mcpToolAnnotations()`, `McpToolAnnotations`, `McpToolsOptions`, and `McpToolDescriptor.annotations`;
   the capability kinds `mcp.read`, `mcp.write`, and `mcp.destructive`;
 - in `nexus-ai-pro/protocols/acp/editor`: `AcpEditorOptions.mcpToolCapabilities` and
-  `AcpEditor.mcpCapabilities`; in `nexus-ai-pro/protocols/acp`: `AcpEditorBridge.mcpCapabilities`.
+  `AcpEditor.mcpCapabilities`; in `nexus-ai-pro/protocols/acp`: `AcpEditorBridge.mcpCapabilities`;
+- in `nexus-ai-pro/video`, experimental with the family: `VideoSource`, `VideoGenerateRequest.video`,
+  `VideoProviderRequest.video`, the `VideoInputKind` values `extend` and `edit`,
+  `VideoModelCapabilities.extendDurations`, `requires`, and `continuesJobs`,
+  `VideoProviderCapabilities.inputVideoMimeTypes`, and `VideoConformanceOptions.video`; Gemini Omni
+  Flash in `nexus-ai-pro/video/google`, and video to video in `nexus-ai-pro/video/runway`.
 
 Changed on purpose: `acpEditor()` reads MCP tool annotations by default. A policy that allowed the
 editor's MCP tools as undeclared (`undeclared: 'allow'`) now decides annotated tools by their
-capabilities; `mcpToolCapabilities: false` keeps the earlier decisions.
+capabilities; `mcpToolCapabilities: false` keeps the earlier decisions. `GoogleVideoProvider`'s
+default models follow Google's shutdown of the Veo 3.1 previews: Gemini Omni Flash on the Gemini API,
+and the generally available Veo 3.1 models on Vertex AI.
 
 ## 2.16 stage (2.16.0)
 

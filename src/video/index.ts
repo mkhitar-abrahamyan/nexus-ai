@@ -1,6 +1,6 @@
 /**
- * Video generation: a prompt, and optionally a first frame, a last frame, or reference images, become
- * a video through a provider's asynchronous job. The job is recorded the moment it exists, so a worker
+ * Video generation: a prompt, and optionally a first frame, a last frame, reference images, or a video
+ * to extend or edit, become a video through a provider's asynchronous job. The job is recorded the moment it exists, so a worker
  * that dies while it waits is replaced by one that collects that job, never a second; the video is
  * streamed into an asset store and priced per second.
  */
@@ -24,8 +24,25 @@ const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 
 // ── Requests ───────────────────────────────────────────────────────
 
-/** What a video can be made from beside its prompt. */
-export type VideoInputKind = 'image' | 'last-frame' | 'references';
+/**
+ * What a video can be made from beside its prompt: a first frame, a last frame, reference images, or
+ * a video to continue (`extend`) or to change as the prompt says (`edit`).
+ */
+export type VideoInputKind = 'image' | 'last-frame' | 'references' | 'extend' | 'edit';
+
+/**
+ * A video to work from: one to continue from its end, or one to change as the prompt says. Give the
+ * video itself as `input`, or name a finished job of the same provider as `from`, which the provider
+ * continues from what it already holds, with nothing uploaded.
+ */
+export interface VideoSource {
+  /** `extend` continues the video; `edit` changes it as the prompt says. */
+  mode: 'extend' | 'edit';
+  /** The video: bytes, a URL the provider can read, or an asset in the manager's store. */
+  input?: AssetInput;
+  /** Or a video this provider made: its job, and which of the job's videos, from 0. */
+  from?: { ref: VideoJobRef; index?: number };
+}
 
 /** Whether a model makes sound: always, when asked, or never. */
 export type VideoAudioSupport = 'always' | 'optional' | 'none';
@@ -44,7 +61,9 @@ export interface VideoGenerateRequest {
   lastFrame?: AssetInput;
   /** Images whose subject, character, or style the video keeps. */
   references?: readonly AssetInput[];
-  /** Length in seconds. Defaults to the model's. */
+  /** A video to extend or edit. */
+  video?: VideoSource;
+  /** Length in seconds; for `extend`, how much is added. Defaults to the model's. */
   durationSeconds?: number;
   /** Frame shape, such as `16:9` or `9:16`. */
   aspectRatio?: string;
@@ -94,7 +113,9 @@ export interface VideoProviderRequest {
   lastFrame?: AssetInput;
   /** Reference images. */
   references?: readonly AssetInput[];
-  /** Length in seconds. */
+  /** A video to extend or edit, its input resolved to bytes or a URL. */
+  video?: VideoSource;
+  /** Length in seconds; for `extend`, how much is added. */
   durationSeconds?: number;
   /** Frame shape. */
   aspectRatio?: string;
@@ -207,6 +228,12 @@ export interface VideoModelCapabilities {
   supportsSeed?: boolean;
   /** Whether it takes a negative prompt. */
   supportsNegativePrompt?: boolean;
+  /** The lengths `extend` adds, in seconds. Any when absent. */
+  extendDurations?: readonly number[];
+  /** What every request to it must give, such as `edit` for a model that only changes videos. */
+  requires?: readonly VideoInputKind[];
+  /** Whether `video.from` may name a job of its own, which it continues from what it holds. */
+  continuesJobs?: boolean;
 }
 
 /** What a video provider supports: its models, and what each makes. */
@@ -221,6 +248,8 @@ export interface VideoProviderCapabilities extends VideoModelCapabilities {
   inputLocationKinds: readonly ('bytes' | 'url')[];
   /** The image types it takes. Any image when absent. */
   inputMimeTypes?: readonly string[];
+  /** The video types it takes to extend or edit. Any video when absent. */
+  inputVideoMimeTypes?: readonly string[];
   /** Whether a running job can be cancelled. */
   supportsCancel?: boolean;
   /** Whether a finished job's video can be deleted from the provider. */
@@ -320,9 +349,12 @@ export interface VideoPrice {
 
 /**
  * List prices on the Gemini API's paid tier, in dollars per second with sound, as published on
- * 2026-10-14. An account priced otherwise passes its own as `prices`.
+ * 2026-10-20. Gemini Omni Flash is billed by output token, 5,792 a second of 720p video at $17.50 a
+ * million, which is the rate here; Google publishes no rate for its other sizes, which stay unpriced.
+ * The Veo 3.1 previews shut down on 2026-10-22. An account priced otherwise passes its own as `prices`.
  */
 export const VIDEO_PRICES: Readonly<Record<string, VideoPrice>> = {
+  'gemini-omni-1.1-flash': { perSecond: { '720p': 0.10136 } },
   'veo-3.1-generate-preview': { perSecond: { '720p': 0.4, '1080p': 0.4, '4k': 0.6 } },
   'veo-3.1-fast-generate-preview': { perSecond: { '720p': 0.1, '1080p': 0.12, '4k': 0.3 } },
   'veo-3.1-lite-generate-preview': { perSecond: { '720p': 0.05, '1080p': 0.08 } },
@@ -441,10 +473,11 @@ interface RefNotes {
 type SerializedInput = Omit<AssetInput, 'location'> & {
   location: AssetLocation | { kind: 'base64'; data: string };
 };
-type SerializedRequest = Omit<VideoProviderRequest, 'image' | 'lastFrame' | 'references'> & {
+type SerializedRequest = Omit<VideoProviderRequest, 'image' | 'lastFrame' | 'references' | 'video'> & {
   image?: SerializedInput;
   lastFrame?: SerializedInput;
   references?: SerializedInput[];
+  video?: Omit<VideoSource, 'input'> & { input?: SerializedInput };
 };
 
 /**
@@ -454,7 +487,7 @@ type SerializedRequest = Omit<VideoProviderRequest, 'image' | 'lastFrame' | 'ref
  *
  * ```ts
  * const video = new VideoManager(
- *   { providers: { veo: new GoogleVideoProvider({ apiKey }) }, store: new S3AssetStore({ ... }) },
+ *   { providers: { google: new GoogleVideoProvider({ apiKey }) }, store: new S3AssetStore({ ... }) },
  *   { operations: { store: new RedisOperationStore({ client }) }, lifecycle: ai.lifecycle },
  * );
  * const handle = await video.generate({ prompt: 'a lighthouse at dusk', durationSeconds: 8 });
@@ -866,8 +899,8 @@ export class VideoManager {
     provider: VideoProvider,
   ): Promise<VideoProviderRequest> {
     if (!request || typeof request !== 'object') throw new VideoError('A video request is required', 'VIDEO_INVALID');
-    if (typeof request.prompt !== 'string' || (!request.prompt.trim() && !request.image)) {
-      throw new VideoError('A video request needs a prompt, or an image to animate', 'VIDEO_INVALID');
+    if (typeof request.prompt !== 'string' || (!request.prompt.trim() && !request.image && !request.video)) {
+      throw new VideoError('A video request needs a prompt, an image to animate, or a video', 'VIDEO_INVALID');
     }
     const capabilities = provider.info.capabilities;
     const model = request.model?.trim() || capabilities.defaultModel || capabilities.models[0];
@@ -876,13 +909,21 @@ export class VideoManager {
       throw unsupported(providerName, `the model "${model}"`);
     }
     const caps = capabilitiesOf(capabilities, model);
+    const video = request.video;
+    if (video !== undefined) this.checkVideo(video, caps, model, providerName, provider);
     const durationSeconds = request.durationSeconds;
     if (durationSeconds !== undefined) {
       if (!(Number.isFinite(durationSeconds) && durationSeconds > 0)) {
         throw new VideoError('durationSeconds must be a positive number', 'VIDEO_INVALID');
       }
-      if (caps.durations && !caps.durations.includes(durationSeconds)) {
-        throw unsupported(providerName, `${durationSeconds}-second videos from "${model}"`, caps.durations.join(', '));
+      // Extending, the length is what is added, and a model adds what it adds.
+      const lengths = video?.mode === 'extend' ? caps.extendDurations : caps.durations;
+      if (lengths && !lengths.includes(durationSeconds)) {
+        const what =
+          video?.mode === 'extend'
+            ? `${durationSeconds} seconds added by "${model}"`
+            : `${durationSeconds}-second videos from "${model}"`;
+        throw unsupported(providerName, what, lengths.join(', '));
       }
     }
     if (request.aspectRatio !== undefined && caps.aspectRatios && !caps.aspectRatios.includes(request.aspectRatio)) {
@@ -916,14 +957,26 @@ export class VideoManager {
     if (caps.maxReferences !== undefined && references.length > caps.maxReferences) {
       throw unsupported(providerName, `${references.length} reference images`, `at most ${caps.maxReferences}`);
     }
+    const given: Record<VideoInputKind, boolean> = {
+      image: request.image !== undefined,
+      'last-frame': request.lastFrame !== undefined,
+      references: references.length > 0,
+      extend: video?.mode === 'extend',
+      edit: video?.mode === 'edit',
+    };
+    const missing = (caps.requires ?? []).filter((kind) => !given[kind]);
+    if (missing.length) {
+      throw new VideoError(`"${model}" needs ${missing.join(' and ')} in every request`, 'VIDEO_UNSUPPORTED');
+    }
 
     const tenantId = request.tenantId ?? this.config.tenantId ?? 'default';
-    const resolve = (input: AssetInput, option: string) =>
-      this.resolveInput(input, option, providerName, capabilities, tenantId);
-    const [image, lastFrame, resolvedReferences] = await Promise.all([
+    const resolve = (input: AssetInput, option: string, kind: 'image' | 'video' = 'image') =>
+      this.resolveInput(input, option, providerName, capabilities, tenantId, kind);
+    const [image, lastFrame, resolvedReferences, videoInput] = await Promise.all([
       request.image ? resolve(request.image, 'image') : undefined,
       request.lastFrame ? resolve(request.lastFrame, 'lastFrame') : undefined,
       Promise.all(references.map((input, index) => resolve(input, `references[${index}]`))),
+      video?.input ? resolve(video.input, 'video.input', 'video') : undefined,
     ]);
     return {
       prompt: request.prompt,
@@ -931,6 +984,13 @@ export class VideoManager {
       ...ifDefined('image', image),
       ...ifDefined('lastFrame', lastFrame),
       ...(resolvedReferences.length ? { references: resolvedReferences } : {}),
+      ...(video
+        ? {
+            video: videoInput
+              ? { mode: video.mode, input: videoInput }
+              : { mode: video.mode, from: { ref: video.from?.ref as VideoJobRef, index: video.from?.index ?? 0 } },
+          }
+        : {}),
       ...ifDefined('durationSeconds', durationSeconds),
       ...ifDefined('aspectRatio', request.aspectRatio),
       ...ifDefined('resolution', request.resolution),
@@ -943,6 +1003,40 @@ export class VideoManager {
     };
   }
 
+  /** Checks a video to work from: a mode the model takes, and one source, an input or a job of this provider's. */
+  private checkVideo(
+    video: VideoSource,
+    caps: VideoModelCapabilities,
+    model: string,
+    providerName: string,
+    provider: VideoProvider,
+  ): void {
+    if (!video || (video.mode !== 'extend' && video.mode !== 'edit')) {
+      throw new VideoError('video.mode must be "extend" or "edit"', 'VIDEO_INVALID');
+    }
+    if (!caps.inputs.includes(video.mode)) {
+      throw unsupported(providerName, `${video.mode === 'extend' ? 'extending' : 'editing'} a video with "${model}"`);
+    }
+    if ((video.input === undefined) === (video.from === undefined)) {
+      throw new VideoError('video needs an input or a job to continue from, and not both', 'VIDEO_INVALID');
+    }
+    if (video.from) {
+      const { ref, index = 0 } = video.from;
+      if (!ref || typeof ref.id !== 'string' || !ref.id)
+        throw new VideoError('video.from needs a ref', 'VIDEO_INVALID');
+      if (!caps.continuesJobs) throw unsupported(providerName, `continuing a job with "${model}"`);
+      if (ref.provider !== provider.info.name) {
+        throw new VideoError(
+          `video.from names a job of "${ref.provider}", and only "${provider.info.name}" can continue its own`,
+          'VIDEO_INVALID',
+        );
+      }
+      if (!Number.isSafeInteger(index) || index < 0) {
+        throw new VideoError('video.from.index must be a whole number from 0', 'VIDEO_INVALID');
+      }
+    }
+  }
+
   /** An input as the provider takes it: a stored asset read from the manager's store into bytes. */
   private async resolveInput(
     input: AssetInput,
@@ -950,13 +1044,14 @@ export class VideoManager {
     providerName: string,
     capabilities: VideoProviderCapabilities,
     tenantId: string,
+    kind: 'image' | 'video' = 'image',
   ): Promise<AssetInput> {
     if (!input?.location || typeof input.mimeType !== 'string' || !input.mimeType.trim()) {
       throw new VideoError(`${option} needs a location and a mimeType`, 'VIDEO_INVALID');
     }
-    const accepted = capabilities.inputMimeTypes;
+    const accepted = kind === 'video' ? capabilities.inputVideoMimeTypes : capabilities.inputMimeTypes;
     const mimeType = input.mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-    if (accepted ? !accepted.includes(mimeType) : !mimeType.startsWith('image/')) {
+    if (accepted ? !accepted.includes(mimeType) : !mimeType.startsWith(`${kind}/`)) {
       throw unsupported(providerName, `${option} of type ${input.mimeType}`, accepted?.join(', '));
     }
     let resolved = input;
@@ -966,11 +1061,11 @@ export class VideoManager {
       if (!held) throw new VideoError(`${option} names an asset the manager's store does not hold`, 'VIDEO_INVALID');
       resolved = { ...input, location: held.location };
     }
-    const kind = resolved.location.kind as 'bytes' | 'url';
-    if (!capabilities.inputLocationKinds.includes(kind)) {
-      throw unsupported(providerName, `${option} as ${kind}`, capabilities.inputLocationKinds.join(', '));
+    const location = resolved.location.kind as 'bytes' | 'url';
+    if (!capabilities.inputLocationKinds.includes(location)) {
+      throw unsupported(providerName, `${option} as ${location}`, capabilities.inputLocationKinds.join(', '));
     }
-    if (kind === 'bytes' && !(resolved.location.kind === 'bytes' && resolved.location.data.byteLength > 0)) {
+    if (location === 'bytes' && !(resolved.location.kind === 'bytes' && resolved.location.data.byteLength > 0)) {
       throw new VideoError(`${option} holds no bytes`, 'VIDEO_INVALID');
     }
     return resolved;
@@ -1090,22 +1185,26 @@ function deserializeInput(input: SerializedInput): AssetInput {
 
 /** A request as JSON, its image bytes as base64, so it can wait in an operation store for any worker. */
 function serializeRequest(request: VideoProviderRequest): SerializedRequest {
-  const { image, lastFrame, references, ...rest } = request;
+  const { image, lastFrame, references, video, ...rest } = request;
   return {
     ...rest,
     ...(image ? { image: serializeInput(image) } : {}),
     ...(lastFrame ? { lastFrame: serializeInput(lastFrame) } : {}),
     ...(references ? { references: references.map(serializeInput) } : {}),
+    ...(video ? { video: { ...video, ...(video.input ? { input: serializeInput(video.input) } : {}) } } : {}),
   };
 }
 
 function deserializeRequest(request: SerializedRequest): VideoProviderRequest {
-  const { image, lastFrame, references, ...rest } = request;
+  const { image, lastFrame, references, video, ...rest } = request;
   return {
     ...rest,
     ...(image ? { image: deserializeInput(image) } : {}),
     ...(lastFrame ? { lastFrame: deserializeInput(lastFrame) } : {}),
     ...(references ? { references: references.map(deserializeInput) } : {}),
+    ...(video
+      ? { video: { ...video, ...(video.input ? { input: deserializeInput(video.input) } : {}) } as VideoSource }
+      : {}),
   };
 }
 
@@ -1135,6 +1234,11 @@ export interface VideoConformanceOptions {
   request?: Partial<VideoProviderRequest>;
   /** An image, to check image-to-video on a provider that takes one. */
   image?: AssetInput;
+  /**
+   * A video of the provider's limits, to check extending or editing it on a model that takes that. A
+   * model that continues its own jobs is also asked to extend the first job it made.
+   */
+  video?: { mode: 'extend' | 'edit'; input: AssetInput };
   /** Submits and cancels a second job, on a provider that can cancel. Off by default: it costs a job. */
   checkCancel?: boolean;
   /** How often to poll. Defaults to 5 seconds. */
@@ -1212,6 +1316,11 @@ export async function runVideoConformance(
       ) {
         throw new Error(`"${model}" defaults to a duration it does not make`);
       }
+      const unknown = (caps.requires ?? []).filter((kind) => !caps.inputs.includes(kind));
+      if (unknown.length) throw new Error(`"${model}" requires ${unknown.join(', ')}, which it does not take`);
+      if (caps.continuesJobs && !caps.inputs.some((kind) => kind === 'extend' || kind === 'edit')) {
+        throw new Error(`"${model}" continues jobs, but takes no video to extend or edit`);
+      }
     }
     if (capabilities.supportsCancel && typeof provider.cancel !== 'function')
       throw new Error('cancel is declared, but not implemented');
@@ -1285,6 +1394,23 @@ export async function runVideoConformance(
       const state = await settle(await provider.submit({ ...request, image }, context()));
       if (state.status !== 'completed') throw new Error(`the job ended ${state.status}`);
     });
+  }
+  const source = options.video;
+  if (source && caps.inputs.includes(source.mode)) {
+    await check(`${source.mode} a video`, async () => {
+      const state = await settle(
+        await provider.submit({ ...request, video: { mode: source.mode, input: source.input } }, context()),
+      );
+      if (state.status !== 'completed') throw new Error(`the job ended ${state.status}`);
+    });
+    if (settled && caps.continuesJobs && caps.inputs.includes('extend')) {
+      await check('extend its own job', async () => {
+        const state = await settle(
+          await provider.submit({ ...request, video: { mode: 'extend', from: { ref: parsed, index: 0 } } }, context()),
+        );
+        if (state.status !== 'completed') throw new Error(`the job ended ${state.status}`);
+      });
+    }
   }
   if (options.checkCancel && capabilities.supportsCancel && provider.cancel) {
     const cancel = provider.cancel.bind(provider);
