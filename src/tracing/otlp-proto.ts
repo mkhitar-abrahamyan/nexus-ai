@@ -125,6 +125,23 @@ function span(writer: Writer, item: OtlpSpan): void {
   writer.fixed64(7, BigInt(item.startTimeUnixNano));
   writer.fixed64(8, BigInt(item.endTimeUnixNano));
   for (const attribute of item.attributes) writer.message(9, (inner) => keyValue(inner, attribute));
+  // Span.Event: time_unix_nano 1, name 2, attributes 3.
+  for (const event of item.events ?? []) {
+    writer.message(11, (inner) => {
+      inner.fixed64(1, BigInt(event.timeUnixNano));
+      inner.string(2, event.name);
+      for (const attribute of event.attributes) inner.message(3, (kv) => keyValue(kv, attribute));
+    });
+  }
+  if (item.droppedEventsCount) writer.uint(12, item.droppedEventsCount);
+  // Span.Link: trace_id 1, span_id 2, attributes 4.
+  for (const link of item.links ?? []) {
+    writer.message(13, (inner) => {
+      inner.bytes(1, hex(link.traceId));
+      inner.bytes(2, hex(link.spanId));
+      for (const attribute of link.attributes) inner.message(4, (kv) => keyValue(kv, attribute));
+    });
+  }
   writer.message(15, (status) => {
     if (item.status.message) status.string(2, item.status.message);
     status.uint(3, item.status.code);

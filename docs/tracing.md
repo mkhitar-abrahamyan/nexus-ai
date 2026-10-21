@@ -92,6 +92,8 @@ A `Run` is one unit of work.
 | tags, metadata | Metadata can be queried by dot path. |
 | usage, cost, model, provider | For model runs. |
 | feedback | Judgements left on it. |
+| events, dropped events | What happened inside it, each a `RunEvent` at its time, and how many past the cap were counted. |
+| links | The runs it came from beside its parent, each a `RunLink`. |
 
 A `RunTree` is a run with its `children` in start order. That is how a trace is read.
 
@@ -110,6 +112,7 @@ in the time.
 | `redaction` | A `RedactionPolicy`, below. |
 | `tags`, `metadata` | Added to every run, such as the deployment or release. |
 | `onError` | Store errors are swallowed so tracing never breaks a request; this hook lets you notice them. |
+| `maxEventsPerRun` | The events one run keeps (128); the rest are counted as its `droppedEvents`. |
 | clock | For tests. |
 
 The current run travels through `AsyncLocalStorage`, which is created only when a tracer exists.
@@ -123,12 +126,37 @@ The current run travels through `AsyncLocalStorage`, which is created only when 
 | `traceable()` | Wraps a function so every call becomes a run, with its arguments as inputs. |
 | `within()` | Runs a function with a run started by `startRun()` in scope, so what it traces nests beneath that run, which its handle still finishes. |
 | `current()` | The run in scope. |
+| `event()` | Records an event on the run in scope, and says whether there was one. |
+| `handle.event()`, `handle.link()` | Records an event on that run; returns a link to it, for another run to name. |
 
 `StartRunOptions` give the name, kind (`chain` by default), inputs, tags, metadata, model, and
 provider. A `parentId` or `traceId` attaches the run somewhere explicit.
 
 `FinishRunOptions` give the outputs, usage, cost, metadata to merge, and the model and provider that
 actually ran. Passing an `error` marks the run failed.
+
+### Events and links
+
+An event is something that happened inside a run, at a moment: a retry, a guardrail's verdict, a
+tool's progress, the cache's answer. A `RunEvent` has a `name`, an ISO-8601 `time`, and
+`attributes`, each a `RunAttributeValue`: a string, a number, or a boolean. A link names a run this
+one came from, beside its parent: a branch a joined step gathers, the run that queued a job, or a span
+in another process's trace. A `RunLink` has the linked run's `traceId` and `runId`, and attributes
+that say why.
+
+```ts
+await tracer.trace({ name: 'job', links: [{ traceparent: request.headers.traceparent }] }, async (run) => {
+  tracer.event('cache', { outcome: 'miss' });
+  run.event('checkpoint', { step: 3 });
+});
+```
+
+`StartRunOptions.links` takes `RunLinkInput` values: a `RunLink`, or a W3C `traceparent` header,
+read as the trace and span it names; one that cannot be read is skipped. `FinishRunOptions` also take
+`links`, and `events` as `RunEventInput` values, for what a run learns only as it ends, each
+recorded at its own time and read in order with the rest. Once a run finishes, it records nothing
+more, so an exporter holding it sees what it ended with. Redaction's `redact` hook sees the events
+and links too.
 
 ### Writing as it runs
 
@@ -181,9 +209,11 @@ changing what you pass.
 
 ## Graphs and model calls
 
-`traceGraph()` records a graph or agent run: a root run with one child per task, retries included.
-Each tool call is a run inside its node's. A tool that reports progress keeps it in the run's
-`metadata.progress`: each report with when it came, the latest 50.
+`traceGraph()` records a graph or agent run: a root run with one child per task, retries included,
+each retry a `retry` event of its task's run with the attempt that failed and why. Each tool call is
+a run inside its node's. A tool that reports progress has each report as a `progress` event, and
+keeps them in the run's `metadata.progress` too: each report with when it came, the latest 50. A task
+that follows a step of several tasks, such as the join after a fan-out, links to each of them.
 `GraphTracingOptions` names the root, labels it `graph` or `agent`, and adds tags, metadata, and
 inputs. It returns `GraphTracing`:
 
@@ -196,7 +226,12 @@ inputs. It returns `GraphTracing`:
 every call becomes a `model` run. The run records the request, the content and tool calls, token usage,
 cost, finish reason, the model and provider that answered, and the prompt and context versions when the
 request came from a registry or a context hub. Its `parent` option decides where the call hangs: `() => tracing.runFor('model')`
-nests it inside the node that made it.
+nests it inside the node that made it. What the response reports becomes the run's events:
+- each attempt that failed before it, from the response's `failedAttempts`, as `retry` when it went
+  to the provider that answered and `failover` when it went to another, at the time it failed;
+- each guardrail applied, as `guardrail`;
+- the cache's answer, as `cache`;
+- each capability warning, as `capability_warning`.
 
 A tool call an agent reports — `createAgent()` reports every one — becomes a `tool` run inside the
 node that made it, with the arguments as inputs and the result or the error.
@@ -221,7 +256,8 @@ model call or a retrieval, lands beneath it. The run records the trace's id as `
 reported through `onError` and never fails the run.
 
 `OtlpTraceExporter` from `nexus-ai-pro/tracing/otlp` sends runs to any OpenTelemetry collector over
-OTLP/HTTP, with no SDK to install:
+OTLP/HTTP, with no SDK to install. A run's events become its span's events, an `OtlpSpanEvent` each,
+and its links the span's links, an `OtlpSpanLink` each, in JSON, in protobuf, and over gRPC:
 
 ```ts
 import { OtlpTraceExporter } from 'nexus-ai-pro/tracing/otlp';
@@ -458,7 +494,8 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
   process stays `running` until `closeAbandonedRuns()` closes it.
 - `OtlpGrpcTraceExporter` runs on Node.js only. On another runtime, send OTLP/HTTP with
   `OtlpTraceExporter`, in JSON or protobuf.
-- Spans carry no events or links: a run is one span, with its attributes.
+- A run keeps at most `maxEventsPerRun` events; the rest are counted, not kept. A model run's events
+  from its response, other than failed attempts, carry the time the response came back.
 - Without `writeAhead`, the runs waiting to be batched, at most `flushIntervalMs` of them, are lost
   with a process that stops before it sends them; what the collector refused is not. Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a
   `RollupStore` of your own.
@@ -501,12 +538,17 @@ specific entry point that provides it.
 | `RedactionPolicy` | interface | What is removed from runs before they are stored, so a hidden field is never written anywhere. |
 | `RetrieverLike` | interface | Anything with a `retrieve()` method, such as every retriever in `nexus-ai-pro/rag`. |
 | `Run` | interface | One unit of work in a trace: a model call, a tool call, a graph node, or anything else worth timing. |
+| `RunAttributeValue` | type | A value an event or a link can carry, as OpenTelemetry's attributes take them. |
 | `runCursor` | function | A run's place in query order, for `RunQuery.after`: the next page starts after it. |
 | `RunCursor` | interface | A run's place in query order, newest first and then by id from last to first: what a page resumes after. |
 | `RunDifference` | interface | One field that differs between two matched runs. |
+| `RunEvent` | interface | Something that happened inside a run, at a moment: a retry, a guardrail's verdict, a tool's progress, a cache's answer. |
+| `RunEventInput` | interface | An event to record: its time defaults to now. |
 | `RunFeedback` | interface | A judgement attached to a run, by a person or an evaluator. |
 | `RunHandle` | interface | A run in progress. |
 | `RunKind` | type | What kind of work a run was, so a trace can be filtered and drawn by family. |
+| `RunLink` | interface | A run this one came from, beside its parent: a branch a joined step gathers, the run that queued a job, or a span in another trace. |
+| `RunLinkInput` | type | A run to link to: by its trace and id, or by a W3C `traceparent` header from another process. |
 | `RunQuery` | interface | Filters for `TraceStore.query()`. |
 | `RunStatus` | type | Where a run stands: still going, finished, or failed. |
 | `RunTree` | interface | A run and the runs beneath it, which is how a trace is read rather than a flat list. |
@@ -537,6 +579,8 @@ specific entry point that provides it.
 | `OtlpPartialSuccess` | interface | What a collector says it rejected of an export it otherwise took, from OTLP's partial success. |
 | `OtlpPartialSuccessError` | class | Thrown to `onError` when a collector took a batch but rejected some of its spans. |
 | `OtlpSpan` | interface | One span in OTLP's JSON encoding. |
+| `OtlpSpanEvent` | interface | A span event in OTLP's JSON encoding. |
+| `OtlpSpanLink` | interface | A span link in OTLP's JSON encoding. |
 | `OtlpTraceExporter` | class | Sends finished runs to any OpenTelemetry collector as OTLP/HTTP JSON, with no SDK to install. |
 | `OtlpTraceExporterOptions` | interface | Options for `OtlpTraceExporter`. |
 | `runToOtlpSpan` | function | Turns one finished run into an OpenTelemetry span, with the GenAI semantic conventions. |

@@ -511,11 +511,18 @@ takes the example's inputs instead, and `from: 'all'` both. `select` picks them 
 
 **Reading them.** `resolveMedia()` reads one medium into a `ResolvedMedia`: its `MediaSubjectKind`
 (`image`, `audio`, `video`, `document`, or `other`), its MIME type as its bytes say, its bytes, and
-what its header says: an image's width and height, a WAV's duration. It reads base64, bytes, a data
-URL, and an asset's bytes as they are. `MediaResolveOptions` reach the rest: `assets`, an asset store
+what its headers say: an image's width and height, and the length of audio or video. It reads base64,
+bytes, a data URL, and an asset's bytes as they are. `MediaResolveOptions` reach the rest: `assets`, an asset store
 and the tenant, for a stored asset; `fetch`, for a URL, which is otherwise never fetched; `readFile`,
 for a path; and `maxBytes`, 20 MiB of any one medium. A medium that cannot be read says why in
 `unreadable`.
+
+**Lengths.** `readMediaDuration()` reads the length of audio or video from its own headers, with
+nothing decoded and no dependency, as a `MediaDuration`: the milliseconds, the container's MIME type,
+and whether it holds a picture. It reads WAV, MP4 and MOV (a fragmented MP4 by its fragments), WebM
+and Matroska, MP3 (by its Xing, Info, or VBRI frame count, or at its constant bitrate), Ogg Vorbis and
+Opus (without Opus's pre-skip, as RFC 7845 counts it), and FLAC. Bytes it cannot read have no length,
+and never throw. Against ffmpeg's own encodings, each container's length is read to the millisecond.
 
 **Checks.** `mediaChecks()` takes `MediaCheckOptions`, each a `MediaRange` or a list, and makes only
 the checks asked: `count` (at least one), `kinds`, `mimeTypes` (with `image/*` for any image),
@@ -742,9 +749,10 @@ regression in a test, not to judging content in production; use a model judge fo
 - An emulated tool is as faithful as its scenario and its emulator. Check a suite against the real
   tools, or a staging copy, once, and keep the answers; a verdict that differs is a scenario to fix.
 - `emulatedTools()` replaces `execute` and drops `stream`: an emulated tool reports no progress.
-- `mediaChecks()` reads the dimensions of PNG, JPEG, GIF, WebP, and BMP images and the duration
-  of WAV audio. Other audio and video are checked for kind, type, and size; a judge can watch them, on
-  a provider that takes them.
+- `mediaChecks()` reads the dimensions of PNG, JPEG, GIF, WebP, and BMP images, and the length of
+  WAV, MP4 and MOV, WebM and Matroska, MP3, Ogg (Vorbis and Opus), and FLAC. Other audio and video are
+  checked for kind, type, and size; a judge can watch them, on a provider that takes them. A file cut
+  short before the part that says its length, such as an MP4 whose movie header comes last, has none.
 
 <!-- reference:start -->
 ## Reference
@@ -920,6 +928,7 @@ specific entry point that provides it.
 | --- | --- | --- |
 | `MediaCheckOptions` | interface | Options for `mediaChecks()`. |
 | `mediaChecks` | function | Checks the media an evaluation is about, reading them: how many there are, and of each its kind, MIME type, size, dimensions, aspect ratio, and duration, as the options ask. |
+| `MediaDuration` | interface | What the headers say: the length, the container's type, and whether it holds a picture. |
 | `mediaJudge` | function | Judges the media an evaluation is about with a model that is shown them: each image, document, audio clip, or video goes to the model as itself, read from bytes, base64, a URL, a path, or an asset store, beside the rubric and the brief, and the model answers with a score. |
 | `MediaJudgeOptions` | interface | Options for `mediaJudge()`. |
 | `mediaOf` | function | The media an evaluation is about: those in the output, or, with none there, those the run's trace says it produced; or those it was given. |
@@ -927,6 +936,7 @@ specific entry point that provides it.
 | `MediaResolveOptions` | interface | Where media judged by reference are read from. |
 | `MediaSelection` | interface | Which media an evaluator judges. |
 | `MediaSubjectKind` | type | What kind of medium something is. |
+| `readMediaDuration` | function | The length of audio or video from its headers, or `undefined` when the bytes are none of the containers read, or say no length: a stream still being written, or a file cut short before the part that says it. |
 | `ResolvedMedia` | interface | A medium read for judging: what it is, and as much of it as could be read. |
 | `resolveMedia` | function | Reads one medium: its kind, its bytes where it can, and what its header says. |
 

@@ -32,7 +32,9 @@ export {
 } from './stores.js';
 export {
   type FinishRunOptions,
+  type RunEventInput,
   type RunHandle,
+  type RunLinkInput,
   type StartRunOptions,
   stripFields,
   Tracer,
@@ -43,9 +45,12 @@ export {
 export type {
   RedactionPolicy,
   Run,
+  RunAttributeValue,
   RunCursor,
+  RunEvent,
   RunFeedback,
   RunKind,
+  RunLink,
   RunQuery,
   RunStatus,
   RunTree,

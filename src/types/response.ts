@@ -101,12 +101,31 @@ export interface ResponseMeta {
   };
   /** Per-stage timings of the request pipeline, when tracing of the pipeline is on. */
   pipeline?: PipelineTrace;
+  /**
+   * The attempts that failed before the one that answered, in order: retried on the same provider, or
+   * failed over to the next. Absent when the first attempt answered.
+   */
+  failedAttempts?: ResponseAttempt[];
   /** Whether the semantic cache answered the request, and how similar the match was. */
   semanticCache?: {
     hit: boolean;
     score: number;
     key: string;
   };
+}
+
+/** One attempt that failed before a response: the provider and model it went to, why, and when. */
+export interface ResponseAttempt {
+  /** The provider it was sent to. */
+  provider: string;
+  /** The model it asked for. */
+  model: string;
+  /** Why it failed, with any credential removed. */
+  error: string;
+  /** The error's category, such as `rate_limit` or `timeout`, when the provider classified it. */
+  category?: string;
+  /** ISO-8601 time it failed. */
+  at: string;
 }
 
 /** A tool call the model made. */

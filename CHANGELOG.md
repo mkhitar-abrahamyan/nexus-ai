@@ -4,6 +4,30 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Span events and links, and media that knows its length.
+
+### Added
+
+- **Span events and links.** A run records what happened inside it as `RunEvent` values, each at its
+  time, and the runs it came from beside its parent as `RunLink` values. `Tracer.event()` records on
+  the run in scope, `RunHandle.event()` and `link()` on one run; `StartRunOptions.links` take a link
+  or a W3C `traceparent`, and `FinishRunOptions` take the `events` and `links` a run learns as it
+  ends. `maxEventsPerRun` (128) keeps a run's events bounded, counting the rest as `droppedEvents`.
+  Both reach OTLP as span events and links, in JSON, in protobuf, and over gRPC, and the studio shows
+  them.
+- **Events where they happen.** A graph's retry is a `retry` event of its task's run, a tool's
+  progress a `progress` event of the tool's, and a task after a step of several, such as a fan-out's
+  join, links to each of them. A model run has the attempts that failed before its answer, as `retry`
+  and `failover` at the times they failed, and its guardrails, cache answer, and capability warnings.
+- **Failed attempts on the response.** `ResponseMeta.failedAttempts` lists each `ResponseAttempt` that
+  failed before the answer: its provider, model, error, category, and time; a stream's last chunk
+  carries them too.
+- **Media that knows its length.** `readMediaDuration()`, on `nexus-ai-pro/evaluate/media`, reads the
+  length of WAV, MP4 and MOV (fragmented MP4 included), WebM and Matroska, MP3, Ogg Vorbis and Opus,
+  and FLAC from their own headers, with no dependency. `mediaChecks()` holds audio and video to a
+  `durationMs` range with it, and a video model's `maxInputVideoSeconds` refuses a longer video before
+  it is sent: 10 seconds on Gemini Omni Flash, 30 on Veo.
+
 ## [2.17.0] - 2026-10-21
 
 The editor's MCP servers over every transport, decided by what their servers say they do; and video

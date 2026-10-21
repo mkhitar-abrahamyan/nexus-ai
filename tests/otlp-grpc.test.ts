@@ -96,6 +96,24 @@ function decodeRequest(bytes: Uint8Array) {
             const status = parse((one(span, 15)?.value as Uint8Array) ?? new Uint8Array(0));
             const parent = hexOf(one(span, 4));
             const message = text(one(status, 2));
+            // Span.Event 11 (time 1, name 2, attributes 3), dropped events 12, Span.Link 13 (ids 1 and 2, attributes 4).
+            const events = all(span, 11).map((field) => {
+              const event = parse(field.value as Uint8Array);
+              return {
+                timeUnixNano: fixed64(one(event, 1)),
+                name: text(one(event, 2)),
+                attributes: all(event, 3).map((item) => attribute(item.value as Uint8Array)),
+              };
+            });
+            const dropped = Number(one(span, 12)?.value ?? 0);
+            const links = all(span, 13).map((field) => {
+              const link = parse(field.value as Uint8Array);
+              return {
+                traceId: hexOf(one(link, 1)),
+                spanId: hexOf(one(link, 2)),
+                attributes: all(link, 4).map((item) => attribute(item.value as Uint8Array)),
+              };
+            });
             return {
               traceId: hexOf(one(span, 1)),
               spanId: hexOf(one(span, 2)),
@@ -105,6 +123,9 @@ function decodeRequest(bytes: Uint8Array) {
               startTimeUnixNano: fixed64(one(span, 7)),
               endTimeUnixNano: fixed64(one(span, 8)),
               attributes: all(span, 9).map((field) => attribute(field.value as Uint8Array)),
+              ...(events.length ? { events } : {}),
+              ...(dropped ? { droppedEventsCount: dropped } : {}),
+              ...(links.length ? { links } : {}),
               status: { code: Number(one(status, 3)?.value ?? 0), ...(message ? { message } : {}) },
             };
           }),
@@ -135,6 +156,14 @@ const runs: Run[] = [
     startedAt: iso(0),
     endedAt: iso(900),
     tags: ['canary'],
+    // The run that queued it, in another trace.
+    links: [
+      {
+        traceId: 'trace-00000000000000000000000000000fed',
+        runId: 'run-00000000000000ff',
+        attributes: { 'nexus.link': 'queued_by' },
+      },
+    ],
   },
   {
     id: 'run-0000000000000002',
@@ -150,6 +179,15 @@ const runs: Run[] = [
     endedAt: iso(400),
     usage: { inputTokens: 1200, outputTokens: 3 },
     cost: 0.0125,
+    events: [
+      {
+        name: 'retry',
+        time: iso(120),
+        attributes: { 'gen_ai.provider.name': 'openai', 'error.message': 'rate limited', 'nexus.attempt': 2 },
+      },
+      { name: 'guardrail', time: iso(390), attributes: { 'nexus.guardrail': 'pii-redaction' } },
+    ],
+    droppedEvents: 3,
   },
 ];
 
@@ -563,6 +601,22 @@ test('the OpenTelemetry Collector takes the spans over gRPC, and sends on every 
         `${item.name}: its attributes`,
       );
       assert.deepEqual(arrived.status, item.status.code === 2 ? item.status : { code: 1 }, `${item.name}: its status`);
+      // Its events and links, as the collector forwards them.
+      const named = (attributes: Array<{ key: string; value: unknown }> | undefined) =>
+        new Map((attributes ?? []).map((attribute) => [attribute.key, attribute.value]));
+      const events = (arrived.events as Array<Record<string, unknown>> | undefined) ?? [];
+      assert.deepEqual(
+        events.map((event) => [event.name, event.timeUnixNano, named(event.attributes as never)]),
+        (item.events ?? []).map((event) => [event.name, event.timeUnixNano, named(event.attributes)]),
+        `${item.name}: its events`,
+      );
+      assert.equal(arrived.droppedEventsCount ?? 0, item.droppedEventsCount ?? 0, `${item.name}: its dropped events`);
+      const links = (arrived.links as Array<Record<string, unknown>> | undefined) ?? [];
+      assert.deepEqual(
+        links.map((link) => [link.traceId, link.spanId, named(link.attributes as never)]),
+        (item.links ?? []).map((link) => [link.traceId, link.spanId, named(link.attributes)]),
+        `${item.name}: its links`,
+      );
     }
     const resource = (forwarded[0] as { resourceSpans: Array<{ resource: { attributes: unknown[] } }> })
       .resourceSpans[0]?.resource.attributes;

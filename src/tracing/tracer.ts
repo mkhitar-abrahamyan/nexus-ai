@@ -2,13 +2,32 @@ import { randomHex } from '../utils/ids.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   Run,
+  RunAttributeValue,
+  RunEvent,
   RunFeedback,
   RunKind,
+  RunLink,
   RedactionPolicy,
   SamplingPolicy,
   TraceExporter,
   TraceStore,
 } from '../types/tracing.js';
+
+/** The events a run keeps before it counts the rest as dropped, unless the tracer says otherwise. */
+const DEFAULT_MAX_EVENTS = 128;
+
+/** An event to record: its time defaults to now. */
+export interface RunEventInput {
+  /** What happened. */
+  name: string;
+  /** When, as ISO-8601 or a `Date`. Defaults to now. */
+  time?: string | Date;
+  /** What it carries. */
+  attributes?: Record<string, RunAttributeValue>;
+}
+
+/** A run to link to: by its trace and id, or by a W3C `traceparent` header from another process. */
+export type RunLinkInput = RunLink | { traceparent: string; attributes?: Record<string, RunAttributeValue> };
 
 /** Configuration for a tracer. */
 export interface TracerOptions {
@@ -42,6 +61,8 @@ export interface TracerOptions {
   now?: () => Date;
   /** Errors from the store are swallowed by default; a hook lets an application notice them. */
   onError?: (error: unknown) => void;
+  /** The events one run keeps; the rest are counted as `droppedEvents`. Defaults to 128. */
+  maxEventsPerRun?: number;
 }
 
 /** Options for starting a run. */
@@ -70,6 +91,8 @@ export interface StartRunOptions {
    * under the span the header names, and keeps its sampling decision.
    */
   traceparent?: string;
+  /** The runs it came from beside its parent, such as the branches a joined step gathers. */
+  links?: readonly RunLinkInput[];
 }
 
 /** Options for finishing a run. */
@@ -88,6 +111,10 @@ export interface FinishRunOptions {
   model?: string;
   /** The provider that actually ran. */
   provider?: string;
+  /** Events learned only as it ends, such as those a response reports, recorded at their own times. */
+  events?: readonly RunEventInput[];
+  /** Links learned only as it ends. */
+  links?: readonly RunLinkInput[];
 }
 
 /** A run in progress. Finishing it writes it to the store. */
@@ -109,12 +136,18 @@ export interface RunHandle {
    * as `StartRunOptions.traceparent` there.
    */
   traceparent(): string;
+  /** Records something that happened inside the run, now unless `time` says. Ignored once it finished. */
+  event(name: string, attributes?: Record<string, RunAttributeValue>, time?: string | Date): void;
+  /** A link to this run, for another run to say it came from it. */
+  link(attributes?: Record<string, RunAttributeValue>): RunLink;
 }
 
 interface ActiveContext {
   traceId: string;
   runId: string;
   sampled: boolean;
+  /** The run itself, so `event()` records on it. */
+  run?: Run;
 }
 
 /**
@@ -130,6 +163,8 @@ export class Tracer {
   private readonly writes = new Map<string, Promise<void>>();
   /** What each handle puts in scope for `within()`. */
   private readonly scopes = new WeakMap<RunHandle, ActiveContext>();
+  /** Runs that finished, whose events are closed. Weak, so a run never finished is never held. */
+  private readonly closed = new WeakSet<Run>();
   private readonly now: () => Date;
 
   constructor(private readonly options: TracerOptions) {
@@ -150,6 +185,18 @@ export class Tracer {
   current(): { traceId: string; runId: string } | undefined {
     const active = this.context.getStore();
     return active ? { traceId: active.traceId, runId: active.runId } : undefined;
+  }
+
+  /**
+   * Records something that happened on the run in scope, such as a retry or a verdict, now unless
+   * `time` says. Returns whether there was a run to record it on.
+   */
+  event(name: string, attributes?: Record<string, RunAttributeValue>, time?: string | Date): boolean {
+    const active = this.context.getStore();
+    const run = active?.run;
+    if (!run || this.closed.has(run)) return false;
+    this.record(run, { name, ...(attributes ? { attributes } : {}), ...(time ? { time } : {}) });
+    return true;
   }
 
   /**
@@ -177,6 +224,7 @@ export class Tracer {
       ...(options.provider ? { provider: options.provider } : {}),
       tags: [...(this.options.tags ?? []), ...(options.tags ?? [])],
       metadata: { ...this.options.metadata, ...options.metadata },
+      ...(options.links?.length ? { links: linksOf(options.links) } : {}),
     };
 
     if (this.options.incremental && sampled) {
@@ -192,7 +240,12 @@ export class Tracer {
   /** Runs `fn` inside a new run, finishing it with the result or the error. */
   async trace<T>(options: StartRunOptions, fn: (handle: RunHandle) => Promise<T> | T): Promise<T> {
     const handle = this.startRun(options);
-    const active: ActiveContext = { traceId: handle.traceId, runId: handle.id, sampled: true };
+    const active: ActiveContext = {
+      traceId: handle.traceId,
+      runId: handle.id,
+      sampled: true,
+      ...(this.scopes.get(handle)?.run ? { run: this.scopes.get(handle)?.run } : {}),
+    };
     try {
       const result = await this.context.run(active, () => fn(handle));
       await handle.finish({ outputs: result });
@@ -253,8 +306,32 @@ export class Tracer {
     );
   }
 
+  /** Adds an event to a run still open, keeping at most `maxEventsPerRun` and counting the rest. */
+  private record(run: Run, input: RunEventInput): void {
+    if (this.closed.has(run)) return;
+    const max = this.options.maxEventsPerRun ?? DEFAULT_MAX_EVENTS;
+    run.events ??= [];
+    const events = run.events;
+    if (events.length >= max) {
+      run.droppedEvents = (run.droppedEvents ?? 0) + 1;
+      return;
+    }
+    const time = input.time instanceof Date ? input.time : input.time ? new Date(input.time) : this.now();
+    const event: RunEvent = {
+      name: input.name,
+      time: Number.isNaN(time.getTime()) ? this.now().toISOString() : time.toISOString(),
+      ...(input.attributes && Object.keys(input.attributes).length ? { attributes: { ...input.attributes } } : {}),
+    };
+    events.push(event);
+  }
+
   private handle(run: Run, sampled: boolean): RunHandle {
     const finish = async (options: FinishRunOptions = {}): Promise<void> => {
+      for (const event of options.events ?? []) this.record(run, event);
+      // Recorded at their own times, the events an end reports read in order with the rest.
+      if (options.events?.length) run.events?.sort((a, b) => a.time.localeCompare(b.time));
+      if (options.links?.length) run.links = [...(run.links ?? []), ...linksOf(options.links)];
+      this.closed.add(run);
       const endedAt = this.now();
       const finished: Run = {
         ...run,
@@ -288,8 +365,11 @@ export class Tracer {
       finish,
       child: (options) => this.startRun({ ...options, traceId: run.traceId, parentId: run.id }),
       traceparent: () => formatTraceparent(run.traceId, run.id, sampled),
+      event: (name, attributes, time) =>
+        this.record(run, { name, ...(attributes ? { attributes } : {}), ...(time ? { time } : {}) }),
+      link: (attributes) => ({ traceId: run.traceId, runId: run.id, ...(attributes ? { attributes } : {}) }),
     };
-    this.scopes.set(handle, { traceId: run.traceId, runId: run.id, sampled });
+    this.scopes.set(handle, { traceId: run.traceId, runId: run.id, sampled, run });
     return handle;
   }
 
@@ -377,6 +457,30 @@ export class Tracer {
 
 function id(prefix: string): string {
   return `${prefix}-${randomHex(8)}`;
+}
+
+/** Links as a run keeps them: a `traceparent` read as the trace and run it names; an unreadable one skipped. */
+function linksOf(inputs: readonly RunLinkInput[]): RunLink[] {
+  const links: RunLink[] = [];
+  for (const input of inputs) {
+    if ('traceparent' in input) {
+      const remote = parseTraceparent(input.traceparent);
+      if (remote) {
+        links.push({
+          traceId: remote.traceId,
+          runId: `run-${remote.spanId}`,
+          ...(input.attributes ? { attributes: input.attributes } : {}),
+        });
+      }
+    } else if (input.traceId && input.runId) {
+      links.push({
+        traceId: input.traceId,
+        runId: input.runId,
+        ...(input.attributes ? { attributes: input.attributes } : {}),
+      });
+    }
+  }
+  return links;
 }
 
 /**

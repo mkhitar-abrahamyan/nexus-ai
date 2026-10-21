@@ -1,0 +1,16 @@
+{
+  "clip.mp4": 2.5,
+  "clip.mov": 2.25,
+  "clip-fragmented.mp4": 2.0,
+  "tone.m4a": 3.2,
+  "clip.webm": 2.0,
+  "tone.webm": 1.808,
+  "clip.mkv": 2.209,
+  "tone-vbr.mp3": 2.88,
+  "tone-cbr.mp3": 2.88,
+  "tone-bare.mp3": 2.88,
+  "tone.ogg": 2.3,
+  "tone.opus": 2.6065,
+  "tone.flac": 1.5,
+  "tone.wav": 1.2
+}

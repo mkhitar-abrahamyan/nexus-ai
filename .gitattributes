@@ -1,0 +1,4 @@
+# Encoded media the duration tests read byte for byte: never converted.
+tests/fixtures/media/* binary
+tests/fixtures/media/*.json text eol=lf
+tests/fixtures/media/*.txt text eol=lf

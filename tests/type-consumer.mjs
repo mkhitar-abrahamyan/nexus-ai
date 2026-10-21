@@ -205,7 +205,7 @@ import {
   type McpTransport,
 } from 'nexus-ai-pro/mcp';
 import { acpEditor } from 'nexus-ai-pro/protocols/acp/editor';
-import { Tracer, MemoryTraceStore, traceGraph, AlertEvaluator, traceRetriever, type Run, type TraceStore } from 'nexus-ai-pro/tracing';
+import { Tracer, MemoryTraceStore, traceGraph, AlertEvaluator, traceRetriever, type Run, type RunEvent, type RunLink, type TraceStore } from 'nexus-ai-pro/tracing';
 import { traceEvidence, type EvaluationTrace } from 'nexus-ai-pro/evaluate';
 import {
   evaluate,
@@ -338,7 +338,7 @@ import {
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
 import { a2aClient, a2aErrorStatus, a2aHandler, type A2aCallOutcome } from 'nexus-ai-pro/protocols/a2a';
 import { a2aGrpcClient, a2aGrpcService, type A2aGrpcClient } from 'nexus-ai-pro/protocols/a2a/grpc';
-import { mediaChecks, mediaJudge, resolveMedia, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
+import { mediaChecks, mediaJudge, readMediaDuration, resolveMedia, type MediaDuration, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { emulatedTools, MemoryEmulationStore, type EmulatedToolCall } from 'nexus-ai-pro/evaluate/emulate';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
 import {
@@ -767,6 +767,19 @@ void [declaredTools, lookupCapabilities, servedAnnotations, editorTransports];
 const traceStore: TraceStore = new MemoryTraceStore({ maxRuns: 500 });
 const tracer = new Tracer({ store: traceStore, sampling: { rate: 0.1, keepErrors: true }, redaction: { hideFields: ['apiKey'] } });
 const traced: Promise<string> = tracer.trace({ name: 'demo', kind: 'chain' }, () => 'ok');
+// What happened inside a run, and the runs it came from.
+const eventful: Promise<RunLink> = tracer.trace(
+  { name: 'joined', links: [{ traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' }] },
+  (handle) => {
+    const recorded: boolean = tracer.event('cache', { outcome: 'miss', hits: 0, warm: false });
+    handle.event('checkpoint', { step: 3 }, new Date());
+    void recorded;
+    return handle.link({ why: 'continues' });
+  },
+);
+const firstEvent = (run: Run): RunEvent | undefined => run.events?.[0];
+const clipLength: number | undefined = (readMediaDuration(new Uint8Array(0)) as MediaDuration | undefined)?.durationMs;
+void [eventful, firstEvent, clipLength];
 const graphTracing = traceGraph(tracer, { name: 'demo-graph' });
 const alerts = new AlertEvaluator(traceStore, [{ name: 'errors', metric: 'errorRate', threshold: 0.1 }]);
 const firstRun: Promise<Run | undefined> = Promise.resolve(traceStore.query({ limit: 1 })).then((runs) => runs[0]);

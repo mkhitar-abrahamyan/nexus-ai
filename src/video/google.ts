@@ -48,6 +48,8 @@ const OMNI: VideoModelCapabilities = {
   supportsSeed: false,
   supportsNegativePrompt: false,
   continuesJobs: true,
+  // An uploaded video it extends or edits is 10 seconds at most.
+  maxInputVideoSeconds: 10,
 };
 
 /** Whether a model is served on the Interactions API: Gemini Omni Flash and its versions. */
@@ -194,6 +196,7 @@ export class GoogleVideoProvider implements VideoProvider {
       if (model.includes('lite')) veo.inputs = ['image', 'last-frame'];
       veo.inputs = [...veo.inputs, 'extend'];
       veo.extendDurations = [7];
+      veo.maxInputVideoSeconds = 30;
       veo.maxCount = 4;
       // A job's video can be extended only when it is in Cloud Storage.
       veo.continuesJobs = this.config.storageUri !== undefined;

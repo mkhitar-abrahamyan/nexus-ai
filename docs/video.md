@@ -82,10 +82,12 @@ A model says what it takes in its capabilities:
 - `extendDurations`, the seconds an extension adds;
 - `continuesJobs`, whether `from` may name a job of its own;
 - `requires`, what every request must give, such as `edit` for a model that only changes videos;
+- `maxInputVideoSeconds`, the longest video it extends or edits: 10 seconds on Omni, 30 on Veo;
 - and the provider's `inputVideoMimeTypes`.
 
 A mode the model does not take, a job of another provider, a length it does not add, a video type it
-does not read, or a request without what the model requires is refused before anything is sent. The
+does not read, a video longer than it takes, read from the video's own headers, or a request without
+what the model requires is refused before anything is sent. The
 input travels with a durable generation, so a worker that takes it over sends the same video.
 
 | Provider | Extends | Edits | Continues its own job |
@@ -211,8 +213,9 @@ the Gemini API and on Vertex AI, and Runway pass it against stand-ins for their 
   protocol.
 - Veo extends videos on Vertex AI only, and edits none. Editing or extending an uploaded video on Omni
   is unavailable in the EEA, Switzerland, and the UK.
-- A video's length is not read: a provider refuses one longer than it takes, Omni's over 10 seconds
-  and Veo's over 30, when it is sent.
+- A video's length is read from its headers when it is given as bytes, and one longer than the model
+  takes is refused before it is sent. A video given by URL, or in Cloud Storage, is refused by its
+  provider when it is too long.
 - Seedance's and Hailuo's reference videos are not part of the contract; pass them in
   `providerOptions`.
 

@@ -12,6 +12,9 @@ import { decodeBase64, encodeBase64 } from '../utils/base64.js';
 import { sha256Hex } from '../utils/sha256.js';
 import { withProvenance } from './provenance.js';
 import { asMediaPart, mediaParts } from './trace.js';
+import { readMediaDuration } from '../utils/media-duration.js';
+
+export { type MediaDuration, readMediaDuration } from '../utils/media-duration.js';
 
 /** What kind of medium something is. */
 export type MediaSubjectKind = 'image' | 'audio' | 'video' | 'document' | 'other';
@@ -36,7 +39,10 @@ export interface ResolvedMedia {
   width?: number;
   /** Height in pixels. */
   height?: number;
-  /** Duration in milliseconds, read from a WAV header. */
+  /**
+   * Duration in milliseconds, read from the file's own headers: WAV, MP4 and MOV, WebM and Matroska,
+   * MP3, Ogg (Vorbis and Opus), and FLAC.
+   */
   durationMs?: number;
   /** Why its bytes could not be read, when they could not. */
   unreadable?: string;
@@ -124,11 +130,11 @@ export async function resolveMedia(part: MediaPart, options: MediaResolveOptions
       resolved.mimeType = 'application/pdf';
       resolved.kind = 'document';
     } else {
-      const wav = wavDuration(bytes);
-      if (wav !== undefined) {
-        resolved.mimeType = 'audio/wav';
-        resolved.kind = 'audio';
-        resolved.durationMs = wav;
+      const read = readMediaDuration(bytes);
+      if (read) {
+        resolved.mimeType = read.mimeType;
+        resolved.kind = read.kind;
+        resolved.durationMs = read.durationMs;
       }
     }
   }
@@ -161,7 +167,7 @@ export interface MediaCheckOptions extends MediaResolveOptions, MediaSelection {
   height?: MediaRange;
   /** Width over height, within a tolerance (0.02 by default), such as `{ ratio: 16 / 9 }`. */
   aspectRatio?: { ratio: number; tolerance?: number };
-  /** The duration in milliseconds allowed, for audio whose header says it. */
+  /** The duration in milliseconds allowed, for audio or video whose headers say it. */
   durationMs?: MediaRange;
   /** A medium whose measurement could not be read passes or fails that check. Defaults to `fail`. */
   unknown?: 'pass' | 'fail';
@@ -556,21 +562,6 @@ function mimeMatches(pattern: string, mimeType: string): boolean {
   if (pattern === '*' || pattern === '*/*') return true;
   if (pattern.endsWith('/*')) return mimeType.startsWith(pattern.slice(0, -1));
   return pattern === mimeType;
-}
-
-/** A WAV file's duration, from its header, or undefined when it is not one. */
-function wavDuration(bytes: Uint8Array): number | undefined {
-  if (!startsWith(bytes, 'RIFF') || ascii(bytes, 8, 4) !== 'WAVE') return undefined;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let byteRate: number | undefined;
-  for (let at = 12; at + 8 <= bytes.length; ) {
-    const id = ascii(bytes, at, 4);
-    const size = view.getUint32(at + 4, true);
-    if (id === 'fmt ' && at + 16 <= bytes.length) byteRate = view.getUint32(at + 16, true);
-    if (id === 'data') return byteRate ? Math.round((size / byteRate) * 1000) : undefined;
-    at += 8 + size + (size % 2);
-  }
-  return undefined;
 }
 
 function startsWith(bytes: Uint8Array, text: string): boolean {

@@ -41,6 +41,21 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.18 stage (Unreleased)
+
+Everything 2.18 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- in `nexus-ai-pro/tracing`: `RunEvent`, `RunLink`, `RunAttributeValue`, `RunEventInput`, `RunLinkInput`,
+  `Run.events`, `droppedEvents`, and `links`, `Tracer.event()`, `RunHandle.event()` and `link()`,
+  `StartRunOptions.links`, `FinishRunOptions.events` and `links`, `TracerOptions.maxEventsPerRun`, and
+  the event names `retry`, `failover`, `progress`, `guardrail`, `cache`, and `capability_warning`;
+- in `nexus-ai-pro/tracing/otlp`: `OtlpSpanEvent`, `OtlpSpanLink`, and `OtlpSpan.events`,
+  `droppedEventsCount`, and `links`;
+- in the root: `ResponseAttempt` and `ResponseMeta.failedAttempts`;
+- in `nexus-ai-pro/evaluate/media`: `readMediaDuration()` and `MediaDuration`;
+- in `nexus-ai-pro/video`, experimental with the family: `VideoModelCapabilities.maxInputVideoSeconds`.
+
 ## 2.17 stage (2.17.0)
 
 Everything 2.17 adds is stable from the start and additive, unless this section says otherwise.

@@ -317,6 +317,20 @@ async function renderTrace(traceId) {
   const { tree, text } = await api(`/api/traces/${encodeURIComponent(traceId)}`);
   const detail = h('div');
   let selected;
+  // Every run of the trace by id, so a link to one of them reads as its name.
+  const byId = new Map();
+  const index = (node) => {
+    if (!node) return;
+    byId.set(node.id, node);
+    for (const child of node.children ?? []) index(child);
+  };
+  for (const root of Array.isArray(tree) ? tree : [tree]) index(root);
+  const attributesOf = (attributes) =>
+    attributes
+      ? Object.entries(attributes)
+          .map(([name, value]) => ` ${name}=${value}`)
+          .join('')
+      : '';
 
   const select = (run, element) => {
     selected?.classList.remove('selected');
@@ -351,6 +365,49 @@ async function renderTrace(traceId) {
                   {},
                   h('span', { class: 'muted' }, `${String(report.at ?? '').slice(11, 23)} `),
                   typeof report.progress === 'string' ? report.progress : JSON.stringify(report.progress),
+                ),
+              ),
+            ),
+          ]
+        : '',
+      // What happened inside the run, each at its time, and the runs it came from.
+      run.events?.length
+        ? [
+            h('h2', {}, 'Events'),
+            h(
+              'ol',
+              { class: 'progress' },
+              run.events.map((event) =>
+                h(
+                  'li',
+                  {},
+                  h('span', { class: 'muted' }, `${String(event.time ?? '').slice(11, 23)} `),
+                  h('strong', {}, event.name),
+                  attributesOf(event.attributes),
+                ),
+              ),
+            ),
+            run.droppedEvents ? h('p', { class: 'muted' }, `${run.droppedEvents} more were not kept`) : '',
+          ]
+        : '',
+      run.links?.length
+        ? [
+            h('h2', {}, 'Links'),
+            h(
+              'ul',
+              {},
+              run.links.map((link) =>
+                h(
+                  'li',
+                  {},
+                  h(
+                    'a',
+                    { href: `#/traces/${encodeURIComponent(link.traceId)}` },
+                    link.traceId === run.traceId && byId.has(link.runId)
+                      ? `${byId.get(link.runId).name} (${link.runId})`
+                      : `${link.traceId} / ${link.runId}`,
+                  ),
+                  attributesOf(link.attributes),
                 ),
               ),
             ),

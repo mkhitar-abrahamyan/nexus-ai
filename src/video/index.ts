@@ -13,6 +13,7 @@ import type { DurableOperationHandle, OperationContext, OperationRunnerConfig } 
 import type { ResponseCost } from '../types/response.js';
 import { decodeBase64, encodeBase64 } from '../utils/base64.js';
 import { generateRequestId } from '../utils/ids.js';
+import { readMediaDuration } from '../utils/media-duration.js';
 import { VideoError, VideoJobFailedError } from './errors.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
@@ -234,6 +235,8 @@ export interface VideoModelCapabilities {
   requires?: readonly VideoInputKind[];
   /** Whether `video.from` may name a job of its own, which it continues from what it holds. */
   continuesJobs?: boolean;
+  /** The longest video it extends or edits, in seconds, read from the video's headers when it is bytes. */
+  maxInputVideoSeconds?: number;
 }
 
 /** What a video provider supports: its models, and what each makes. */
@@ -978,6 +981,17 @@ export class VideoManager {
       Promise.all(references.map((input, index) => resolve(input, `references[${index}]`))),
       video?.input ? resolve(video.input, 'video.input', 'video') : undefined,
     ]);
+    // A video given as bytes says its own length; one longer than the model takes goes nowhere.
+    if (videoInput?.location.kind === 'bytes' && caps.maxInputVideoSeconds !== undefined) {
+      const length = readMediaDuration(videoInput.location.data)?.durationMs;
+      if (length !== undefined && length > caps.maxInputVideoSeconds * 1000) {
+        throw unsupported(
+          providerName,
+          `a ${(length / 1000).toFixed(1)}-second video for "${model}"`,
+          `at most ${caps.maxInputVideoSeconds} seconds`,
+        );
+      }
+    }
     return {
       prompt: request.prompt,
       model,

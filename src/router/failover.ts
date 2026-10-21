@@ -9,7 +9,7 @@ import {
 import type { RetryConfig } from '../types/config.js';
 import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest } from '../types/messages.js';
-import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
+import type { NexusResponse, NexusStream, ResponseAttempt, StreamChunk } from '../types/response.js';
 import { generateRequestId } from '../utils/ids.js';
 import type { RouteAttempt, RouteDecision } from './types.js';
 
@@ -72,6 +72,7 @@ export class FailoverExecutor {
   ): Promise<NexusResponse> {
     const attempts = attemptsOf(decision);
     const errors: string[] = [];
+    const failures: ResponseAttempt[] = [];
     const retry = this.mergeRetry(options.retry, request.retry);
     const timeoutMs = this.resolveTimeout(request.timeoutMs, options.timeoutMs);
     const refreshed = new Set<string>();
@@ -113,6 +114,7 @@ export class FailoverExecutor {
           if (retryIndex > 0) {
             response.meta.guardrailsApplied.push(`provider-retry-${retryIndex}`);
           }
+          if (failures.length) response.meta.failedAttempts = failures;
           return response;
         } catch (caught) {
           const raw = caught instanceof NexusProviderError ? caught : (context?.cancellationError() ?? caught);
@@ -129,6 +131,7 @@ export class FailoverExecutor {
           }
           const message = `${attempt.providerName}/${attempt.model}: ${error instanceof Error ? error.message : String(error)}`;
           errors.push(message);
+          failures.push(failureOf(attempt, error));
 
           if (error instanceof UnsettledProviderAttemptError) {
             break attemptsLoop;
@@ -197,6 +200,7 @@ export class FailoverExecutor {
     const retry = this.mergeRetry(options.retry, request.retry);
     const timeoutMs = this.resolveTimeout(request.timeoutMs, options.timeoutMs);
     const errors: string[] = [];
+    const failures: ResponseAttempt[] = [];
 
     const refreshed = new Set<string>();
     attemptsLoop: for (const attempt of attempts) {
@@ -251,7 +255,10 @@ export class FailoverExecutor {
             const chunk = result.value;
             if (chunk.type === 'error') throw new Error(chunk.error || 'stream error');
             emitted = emitted || chunk.type === 'text' || chunk.type === 'tool_call';
-            yield chunk;
+            // The stream's last chunk carries what failed before it, as a response's meta does.
+            yield chunk.type === 'done' && failures.length
+              ? { ...chunk, meta: { ...chunk.meta, failedAttempts: [...failures] } }
+              : chunk;
           }
         } catch (caught) {
           const cancellation = context?.cancellationError();
@@ -287,6 +294,7 @@ export class FailoverExecutor {
         errors.push(
           `${attempt.providerName}/${attempt.model}: ${attemptError instanceof Error ? attemptError.message : String(attemptError)}`,
         );
+        failures.push(failureOf(attempt, attemptError));
 
         if (attemptError instanceof UnsettledProviderAttemptError) break attemptsLoop;
         if (emitted) break attemptsLoop;
@@ -589,4 +597,16 @@ function attemptsOf(decision: RouteDecision): RouteAttempt[] {
 /** The most retries an attempt can take: the request's policy, or its rate-limit policy if larger. */
 function maxRetriesFor(attempt: RouteAttempt, retry: Required<RetryConfig>): number {
   return Math.max(retry.maxRetries, attempt.rateLimit?.maxRetries ?? 0);
+}
+
+/** An attempt that failed, as a response records it. */
+function failureOf(attempt: RouteAttempt, error: unknown): ResponseAttempt {
+  const category = error instanceof NexusProviderError ? error.category : undefined;
+  return {
+    provider: attempt.providerName,
+    model: attempt.model,
+    error: error instanceof Error ? error.message : String(error),
+    ...(category ? { category } : {}),
+    at: new Date().toISOString(),
+  };
 }

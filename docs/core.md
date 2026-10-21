@@ -137,7 +137,10 @@ as a path, receives one line naming the part instead.
 - the text, the `ToolCall` values the model made, and a `finishReason`;
 - `assets`, when a model whose output includes images returned some, as bytes;
 - `ResponseMeta`: which provider and model answered, the latency, `TokenUsage`, `ResponseCost`,
-  whether it was a cache hit, the guardrails applied, and the `PipelineTrace` when tracing is on.
+  whether it was a cache hit, the guardrails applied, and the `PipelineTrace` when tracing is on;
+- `failedAttempts`, when the first attempt did not answer: each `ResponseAttempt` that failed before
+  it, retried on the same provider or failed over to the next, with its provider, model, error,
+  category, and the time it failed. A stream's last chunk carries them in its `meta`.
 
 After running a tool, you send back a `ToolCallResult`. `NexusStream` and `StreamChunk` are the
 streaming equivalents.
@@ -742,6 +745,7 @@ specific entry point that provides it.
 | `PriceUsageOptions` | interface | Options for `priceUsage()`. |
 | `ProvidersConfig` | interface | Provider configs that Nexus can register from the constructor. |
 | `RateLimitConfig` | interface | Limits how many requests are allowed per window. |
+| `ResponseAttempt` | interface | One attempt that failed before a response: the provider and model it went to, why, and when. |
 | `ResponseFormatConfig` | interface | A response format applied to every request that does not set its own. |
 | `ResponseFormatError` | class | Raised when a response does not match the requested format and cannot be repaired. |
 | `RetryConfig` | interface | How a failed provider call is retried before failover moves on. |

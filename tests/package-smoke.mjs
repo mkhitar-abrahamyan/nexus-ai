@@ -218,7 +218,10 @@ const imports = [
     exports: ['adversarialDataset', 'promoteIssue', 'resistsAttack', 'syntheticDataset'],
   },
   { specifier: 'nexus-ai-pro/evaluate/online', exports: ['onlineEvaluationWorker'] },
-  { specifier: 'nexus-ai-pro/evaluate/media', exports: ['mediaChecks', 'mediaJudge', 'mediaOf', 'resolveMedia'] },
+  {
+    specifier: 'nexus-ai-pro/evaluate/media',
+    exports: ['mediaChecks', 'mediaJudge', 'mediaOf', 'resolveMedia', 'readMediaDuration'],
+  },
   {
     specifier: 'nexus-ai-pro/evaluate/emulate',
     exports: ['emulatedTools', 'emulationKey', 'MemoryEmulationStore', 'EmulationError'],

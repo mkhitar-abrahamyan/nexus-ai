@@ -85,6 +85,7 @@ export type {
 export type {
   NexusResponse,
   NexusStream,
+  ResponseAttempt,
   ResponseCost,
   ResponseMeta,
   StreamChunk,

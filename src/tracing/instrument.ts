@@ -1,7 +1,8 @@
 import type { GraphEvent, GraphResult } from '../types/graph.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
-import type { RunHandle, Tracer } from './tracer.js';
+import type { RunAttributeValue } from '../types/tracing.js';
+import type { RunEventInput, RunHandle, Tracer } from './tracer.js';
 
 /** Progress reports a tool run keeps: the latest, when a long tool reports often. */
 const MAX_PROGRESS = 50;
@@ -36,8 +37,9 @@ export interface GraphTracing {
  * Records a graph or agent run as a trace.
  *
  * The graph already reports every task starting, retrying, and finishing; tracing is that stream
- * written down as a tree. Nothing inside the graph knows about tracing, and a run without it pays
- * nothing.
+ * written down as a tree. A retry is an event on its task's run, and a tool's progress an event on
+ * the tool's. A task that follows a step of several tasks, such as the join after a fan-out, links to
+ * each of them. Nothing inside the graph knows about tracing, and a run without it pays nothing.
  */
 export function traceGraph(tracer: Tracer, options: GraphTracingOptions = {}): GraphTracing {
   const root = tracer.startRun({
@@ -54,23 +56,31 @@ export function traceGraph(tracer: Tracer, options: GraphTracingOptions = {}): G
   const tools = new Map<string, RunHandle>();
   /** Progress each tool call reported, kept with its run when it finishes. */
   const progress = new Map<string, Array<{ at: string; progress: unknown }>>();
+  /** Each step's task runs, by namespace and step, for the step after to link back to. */
+  const steps = new Map<string, RunHandle[]>();
 
   const onEvent = (event: GraphEvent): void => {
     switch (event.type) {
       case 'task_start': {
         if (active.has(event.taskId)) return;
-        active.set(
-          event.taskId,
-          root.child({
-            name: event.node,
-            kind: 'node',
-            metadata: { step: event.step, taskId: event.taskId },
-          }),
-        );
+        const scope = (event.namespace ?? []).join('/');
+        // A task after a step that ran several came from each of them: a join after a fan-out.
+        const before = steps.get(`${scope}:${event.step - 1}`) ?? [];
+        const handle = root.child({
+          name: event.node,
+          kind: 'node',
+          metadata: { step: event.step, taskId: event.taskId },
+          ...(before.length > 1 ? { links: before.map((run) => run.link({ 'nexus.link': 'previous_step' })) } : {}),
+        });
+        active.set(event.taskId, handle);
+        const key = `${scope}:${event.step}`;
+        steps.set(key, [...(steps.get(key) ?? []), handle]);
+        steps.delete(`${scope}:${event.step - 2}`);
         return;
       }
       case 'task_retry': {
         retries.set(event.taskId, event.attempt);
+        active.get(event.taskId)?.event('retry', { 'nexus.attempt': event.attempt, 'error.message': event.error });
         return;
       }
       case 'tool': {
@@ -90,6 +100,7 @@ export function traceGraph(tracer: Tracer, options: GraphTracingOptions = {}): G
           return;
         }
         if (event.tool.phase === 'progress') {
+          tools.get(key)?.event('progress', progressAttributes(event.tool.progress));
           // The latest reports are the ones worth keeping when a long tool reports often.
           const reports = [
             ...(progress.get(key) ?? []),
@@ -184,6 +195,10 @@ export interface ModelClientLike {
  *
  * `parent` decides where the call hangs: pass `() => tracing.runFor('model')` and a model call lands
  * inside the node that made it rather than beside it.
+ *
+ * What the response reports becomes the run's events: each attempt that failed before it, as `retry`
+ * on the same provider or `failover` to another, at the time it failed; each guardrail applied, as
+ * `guardrail`; the cache's answer, as `cache`; and each capability warning.
  */
 export function traceModelClient<T extends ModelClientLike>(
   client: T,
@@ -218,6 +233,7 @@ export function traceModelClient<T extends ModelClientLike>(
           ...(response.meta?.cost?.amount === undefined ? {} : { cost: response.meta.cost.amount }),
           ...(response.meta?.modelUsed ? { model: response.meta.modelUsed } : {}),
           ...(response.meta?.providerUsed ? { provider: response.meta.providerUsed } : {}),
+          events: responseEvents(response),
           metadata: {
             provider: response.meta?.providerUsed,
             model: response.meta?.modelUsed,
@@ -284,4 +300,57 @@ export function traceRetriever<T extends RetrieverLike>(
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
+}
+
+/** A tool's progress report as an event's attributes: its number, total, and message, or the report as text. */
+function progressAttributes(report: unknown): Record<string, RunAttributeValue> {
+  if (typeof report === 'number') return { 'nexus.progress': report };
+  if (typeof report === 'string') return { 'nexus.progress.message': report };
+  if (report && typeof report === 'object') {
+    const { progress, total, message } = report as { progress?: unknown; total?: unknown; message?: unknown };
+    const attributes: Record<string, RunAttributeValue> = {};
+    if (typeof progress === 'number') attributes['nexus.progress'] = progress;
+    if (typeof total === 'number') attributes['nexus.progress.total'] = total;
+    if (typeof message === 'string') attributes['nexus.progress.message'] = message;
+    if (Object.keys(attributes).length) return attributes;
+  }
+  return { 'nexus.progress.message': JSON.stringify(report)?.slice(0, 1024) ?? String(report) };
+}
+
+/** What a response reports, as the events of its model run. */
+function responseEvents(response: NexusResponse): RunEventInput[] {
+  const meta = response.meta;
+  if (!meta) return [];
+  const events: RunEventInput[] = [];
+  for (const attempt of meta.failedAttempts ?? []) {
+    events.push({
+      name: attempt.provider === meta.providerUsed ? 'retry' : 'failover',
+      time: attempt.at,
+      attributes: {
+        'gen_ai.provider.name': attempt.provider,
+        'gen_ai.request.model': attempt.model,
+        'error.message': attempt.error,
+        ...(attempt.category ? { 'error.type': attempt.category } : {}),
+      },
+    });
+  }
+  for (const name of meta.guardrailsApplied ?? [])
+    events.push({ name: 'guardrail', attributes: { 'nexus.guardrail': name } });
+  if (meta.cache) {
+    events.push({
+      name: 'cache',
+      attributes: {
+        'nexus.cache.outcome': meta.cache.outcome,
+        ...(meta.cache.layer ? { 'nexus.cache.layer': meta.cache.layer } : {}),
+        'nexus.cache.reason': meta.cache.reason,
+      },
+    });
+  }
+  for (const warning of meta.capabilityWarnings ?? []) {
+    events.push({
+      name: 'capability_warning',
+      attributes: { 'nexus.capability.feature': warning.feature, 'nexus.capability.action': String(warning.action) },
+    });
+  }
+  return events;
 }

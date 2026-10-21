@@ -95,8 +95,34 @@ export interface OtlpSpan {
   endTimeUnixNano: string;
   /** Typed attributes. */
   attributes: OtlpKeyValue[];
+  /** What happened inside it, each at its time. */
+  events?: OtlpSpanEvent[];
+  /** Events the run counted rather than kept. */
+  droppedEventsCount?: number;
+  /** The spans it came from, beside its parent. */
+  links?: OtlpSpanLink[];
   /** 1 ok, 2 error. */
   status: { code: number; message?: string };
+}
+
+/** A span event in OTLP's JSON encoding. */
+export interface OtlpSpanEvent {
+  /** Nanoseconds since the epoch, as a decimal string. */
+  timeUnixNano: string;
+  /** What happened. */
+  name: string;
+  /** What it carries. */
+  attributes: OtlpKeyValue[];
+}
+
+/** A span link in OTLP's JSON encoding. */
+export interface OtlpSpanLink {
+  /** 32 hex digits. */
+  traceId: string;
+  /** 16 hex digits. */
+  spanId: string;
+  /** Why it is linked. */
+  attributes: OtlpKeyValue[];
 }
 
 const OPERATIONS: Partial<Record<Run['kind'], string>> = {
@@ -113,7 +139,8 @@ const OPERATIONS: Partial<Record<Run['kind'], string>> = {
  * `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, and
  * `gen_ai.usage.input_tokens` and `output_tokens`. A tool run carries `gen_ai.tool.name`, an agent
  * run `gen_ai.agent.name`. What only Nexus knows goes under `nexus.*`: the run kind, a graph node and
- * its step, the cost, and the run id. A failed run has `error.type` and an error status.
+ * its step, the cost, and the run id. A failed run has `error.type` and an error status. The run's
+ * events become the span's events, and its links the span's links, to the spans of the runs named.
  */
 export function runToOtlpSpan(run: Run): OtlpSpan {
   const attributes: Record<string, string | number | boolean> = { 'nexus.run.kind': run.kind, 'nexus.run.id': run.id };
@@ -153,6 +180,25 @@ export function runToOtlpSpan(run: Run): OtlpSpan {
     startTimeUnixNano: nanos(started),
     endTimeUnixNano: nanos(ended),
     attributes: Object.entries(attributes).map(([key, value]) => ({ key, value: typed(value) })),
+    ...(run.events?.length
+      ? {
+          events: run.events.map((event) => ({
+            timeUnixNano: nanos(Date.parse(event.time)),
+            name: event.name,
+            attributes: Object.entries(event.attributes ?? {}).map(([key, value]) => ({ key, value: typed(value) })),
+          })),
+        }
+      : {}),
+    ...(run.droppedEvents ? { droppedEventsCount: run.droppedEvents } : {}),
+    ...(run.links?.length
+      ? {
+          links: run.links.map((link) => ({
+            traceId: w3cTraceId(link.traceId),
+            spanId: w3cSpanId(link.runId),
+            attributes: Object.entries(link.attributes ?? {}).map(([key, value]) => ({ key, value: typed(value) })),
+          })),
+        }
+      : {}),
     status: run.status === 'error' ? { code: 2, ...(run.error ? { message: run.error.message } : {}) } : { code: 1 },
   };
 }

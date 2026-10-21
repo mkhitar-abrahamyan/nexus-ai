@@ -93,7 +93,7 @@ declarations, which carry every doc comment to your editor.
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 362 KB | 100% | none |
+| `nexus-ai-pro` | 363 KB | 100% | none |
 | `nexus-ai-pro/config` | 355 KB | 98% | none |
 | `nexus-ai-pro/core` | 351 KB | 97% | none |
 | `nexus-ai-pro/realtime` | 216 KB | 60% | none |
@@ -116,8 +116,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/openai` | 87 KB | 24% | none |
 | `nexus-ai-pro/providers/openrouter` | 87 KB | 24% | none |
 | `nexus-ai-pro/policy` | 85 KB | 23% | none |
+| `nexus-ai-pro/router` | 83 KB | 23% | none |
 | `nexus-ai-pro/graph` | 82 KB | 23% | none |
-| `nexus-ai-pro/router` | 82 KB | 23% | none |
 | `nexus-ai-pro/images` | 81 KB | 22% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 73 KB | 20% | none |
@@ -127,6 +127,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/ollama` | 58 KB | 16% | none |
 | `nexus-ai-pro/security` | 58 KB | 16% | none |
 | `nexus-ai-pro/operations` | 56 KB | 15% | none |
+| `nexus-ai-pro/video` | 56 KB | 15% | none |
+| `nexus-ai-pro/evaluate/media` | 54 KB | 15% | none |
 | `nexus-ai-pro/evaluate` | 52 KB | 14% | none |
 | `nexus-ai-pro/adapter-kit` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 14% | none |
@@ -142,25 +144,24 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/voice` | 42 KB | 12% | none |
 | `nexus-ai-pro/embeddings` | 41 KB | 11% | none |
 | `nexus-ai-pro/embeddings/batch` | 41 KB | 11% | none |
-| `nexus-ai-pro/evaluate/media` | 41 KB | 11% | none |
-| `nexus-ai-pro/video` | 41 KB | 11% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 11% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 11% | none |
 | `nexus-ai-pro/agent/workspace` | 38 KB | 10% | none |
+| `nexus-ai-pro/tracing` | 38 KB | 10% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 10% | none |
 | `nexus-ai-pro/models` | 37 KB | 10% | none |
+| `nexus-ai-pro/tracing/otlp-grpc` | 36 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/lifecycle` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 9% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
-| `nexus-ai-pro/tracing` | 32 KB | 9% | none |
-| `nexus-ai-pro/tracing/otlp-grpc` | 32 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 9% | none |
 | `nexus-ai-pro/telephony/twilio` | 30 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
 | `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |
+| `nexus-ai-pro/tracing/otlp` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 7% | none |
 | `nexus-ai-pro/mcp` | 27 KB | 7% | none |
 | `nexus-ai-pro/mcp/registry` | 27 KB | 7% | none |
@@ -171,7 +172,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/assets` | 25 KB | 7% | none |
 | `nexus-ai-pro/protocols/acp` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |
-| `nexus-ai-pro/tracing/otlp` | 24 KB | 7% | none |
 | `nexus-ai-pro/realtime/openai-server` | 24 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |

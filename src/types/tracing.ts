@@ -42,6 +42,35 @@ export interface RunFeedback {
   createdAt: string;
 }
 
+/** A value an event or a link can carry, as OpenTelemetry's attributes take them. */
+export type RunAttributeValue = string | number | boolean;
+
+/**
+ * Something that happened inside a run, at a moment: a retry, a guardrail's verdict, a tool's progress,
+ * a cache's answer. An OpenTelemetry span event.
+ */
+export interface RunEvent {
+  /** What happened, such as `retry` or `guardrail`. */
+  name: string;
+  /** ISO-8601 time it happened. */
+  time: string;
+  /** What it carries. */
+  attributes?: Record<string, RunAttributeValue>;
+}
+
+/**
+ * A run this one came from, beside its parent: a branch a joined step gathers, the run that queued a
+ * job, or a span in another trace. An OpenTelemetry span link.
+ */
+export interface RunLink {
+  /** The trace the linked run belongs to. */
+  traceId: string;
+  /** The linked run's id. */
+  runId: string;
+  /** Why it is linked. */
+  attributes?: Record<string, RunAttributeValue>;
+}
+
 /**
  * One unit of work in a trace: a model call, a tool call, a graph node, or anything else worth
  * timing.
@@ -85,6 +114,12 @@ export interface Run {
   provider?: string;
   /** Judgements attached to it. */
   feedback?: RunFeedback[];
+  /** What happened inside it, in order. */
+  events?: RunEvent[];
+  /** Events past the tracer's `maxEventsPerRun`, counted rather than kept. */
+  droppedEvents?: number;
+  /** The runs it came from, beside its parent. */
+  links?: RunLink[];
 }
 
 /** A run and the runs beneath it, which is how a trace is read rather than a flat list. */
