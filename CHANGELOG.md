@@ -4,7 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-Span events and links, and media that knows its length.
+Span events and links, media that knows its length, and a tenant's threads and runs listed across all
+of its regions.
 
 ### Added
 
@@ -27,6 +28,15 @@ Span events and links, and media that knows its length.
   and FLAC from their own headers, with no dependency. `mediaChecks()` holds audio and video to a
   `durationMs` range with it, and a video model's `maxInputVideoSeconds` refuses a longer video before
   it is sent: 10 seconds on Gemini Omni Flash, 30 on Veo.
+- **Lists across regions.** The regional gateway answers `GET /threads` and `GET /runs` from every
+  region the tenant may reach, merged newest first and cut to the limit, naming the regions that
+  answered and, as `RegionListGap` values under `incomplete`, those that were down or failed. A
+  refusal every region gives is the answer. `lists: 'home'` keeps the home region's list alone.
+
+### Changed
+
+- A list of threads or runs through the regional gateway comes from every region the tenant may
+  reach, not its home region alone; `RegionalGatewayOptions.lists: 'home'` keeps the 2.17 answer.
 
 ## [2.17.0] - 2026-10-21
 

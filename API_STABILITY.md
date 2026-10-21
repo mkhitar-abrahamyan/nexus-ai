@@ -54,7 +54,12 @@ New and stable:
   `droppedEventsCount`, and `links`;
 - in the root: `ResponseAttempt` and `ResponseMeta.failedAttempts`;
 - in `nexus-ai-pro/evaluate/media`: `readMediaDuration()` and `MediaDuration`;
-- in `nexus-ai-pro/video`, experimental with the family: `VideoModelCapabilities.maxInputVideoSeconds`.
+- in `nexus-ai-pro/video`, experimental with the family: `VideoModelCapabilities.maxInputVideoSeconds`;
+- in `nexus-ai-pro/server/regions`: `RegionalGatewayOptions.lists`, `RegionListGap`, and a merged
+  list's `regions` and `incomplete`.
+
+Changed on purpose: a list through the regional gateway is merged from every region the tenant may
+reach; `lists: 'home'` keeps the earlier answer.
 
 ## 2.17 stage (2.17.0)
 

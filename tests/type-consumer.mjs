@@ -324,7 +324,7 @@ import { TelnyxTelephonyProvider } from 'nexus-ai-pro/telephony/telnyx';
 import { spoolingExporter, type SpoolStats } from 'nexus-ai-pro/tracing/spool';
 import { awsSecrets, memorySecrets, tenantCredentials, type TenantCredentialStats } from 'nexus-ai-pro/credentials';
 import { regionalTraceStore, residency, ResidencyError, type ResidencyDecision } from 'nexus-ai-pro/residency';
-import { regionalGateway, type RegionHealth } from 'nexus-ai-pro/server/regions';
+import { regionalGateway, type RegionHealth, type RegionListGap } from 'nexus-ai-pro/server/regions';
 import { applyPolicy, checkPolicyChange, parsePolicy, type PolicyCheck, type PolicyDocument } from 'nexus-ai-pro/policy';
 import {
   ADAPTER_CONTRACTS,
@@ -1176,8 +1176,11 @@ const gateway = regionalGateway({
   residency: regions,
   tenantOf: (request: Request) => request.headers.get('x-tenant') ?? undefined,
   health: { everyMs: 5_000, failuresToDown: 2 },
+  lists: 'merged',
 });
 const regionHealth: Record<string, RegionHealth> = gateway.status();
+const listGap: RegionListGap = { region: 'us-east', reason: 'down' };
+void listGap;
 void regionHealth;
 // One versioned policy: validated as the client starts, checked against the version before it.
 const policyDocument: PolicyDocument = {

@@ -211,6 +211,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/media` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
 | `nexus-ai-pro/rag/redis` | 13 KB | 4% | none |
+| `nexus-ai-pro/server/regions` | 12 KB | 3% | none |
 | `nexus-ai-pro/postgres/traces` | 12 KB | 3% | none |
 | `nexus-ai-pro/postgres/rollups` | 12 KB | 3% | none |
 | `nexus-ai-pro/rag/files` | 12 KB | 3% | none |
@@ -237,7 +238,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/sqlite/migrations` | 9 KB | 2% | none |
 | `nexus-ai-pro/graph/visualize` | 9 KB | 2% | none |
 | `nexus-ai-pro/graph/lint` | 9 KB | 2% | none |
-| `nexus-ai-pro/server/regions` | 9 KB | 2% | none |
 | `nexus-ai-pro/tracing/spool` | 9 KB | 2% | none |
 | `nexus-ai-pro/ops/circuit-breaker` | 9 KB | 2% | none |
 | `nexus-ai-pro/agent/permissions` | 8 KB | 2% | none |

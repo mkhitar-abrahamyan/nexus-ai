@@ -41,6 +41,12 @@ export interface RegionalGatewayOptions {
   health?: RegionHealthOptions;
   /** Replaces the global `fetch` for regions given by URL. */
   fetch?: typeof globalThis.fetch;
+  /**
+   * How `GET /threads` and `GET /runs` are answered: `merged`, the default, asks every region the
+   * tenant may reach and merges their answers, newest first; `home` asks the home region alone, as
+   * before 2.18.
+   */
+  lists?: 'merged' | 'home';
   /** Hears each failure to reach a region. */
   onError?: (error: unknown, region: string) => void;
   /** Replaces the system clock, for tests. */
@@ -81,6 +87,16 @@ export interface RegionalGateway {
 
 /** The id of a thread or run a region's server created, which starts with the region. */
 const REGIONAL_ID = /^([A-Za-z0-9_.-]+)~(?:thread|run)-/;
+/** The lists of a tenant's threads and runs, which the gateway gathers from every region. */
+const LIST = /\/(threads|runs)\/?$/;
+
+/** A region a merged list could not ask, and why. */
+export interface RegionListGap {
+  /** The region. */
+  region: string;
+  /** Why it is missing: down, unreachable, or what it answered. */
+  reason: string;
+}
 
 /**
  * A gateway in front of one agent server per region. A request for a thread or a run, whose id names
@@ -88,7 +104,8 @@ const REGIONAL_ID = /^([A-Za-z0-9_.-]+)~(?:thread|run)-/;
  * reach it, and answered 503 while the region is down, since its data is there and nowhere else. A
  * request for new work goes to the tenant's home region, the first region it may reach, and, when that
  * is down or does not answer, to the next one it may reach, never to another. A tenant that may reach
- * no region the gateway serves is refused with a 403 naming the rule.
+ * no region the gateway serves is refused with a 403 naming the rule. A list of the tenant's threads or
+ * runs is gathered from every region it may reach, newest first, naming any that could not answer.
  *
  * ```ts
  * const gateway = regionalGateway({
@@ -157,6 +174,63 @@ export function regionalGateway(options: RegionalGatewayOptions): RegionalGatewa
         .message,
     );
 
+  /**
+   * A list gathered from every region the tenant may reach: each asked for the same page, the answers
+   * merged newest first and cut to the limit, with the regions that answered and those that could not.
+   */
+  const merged = async (kind: 'threads' | 'runs', request: Request, allowed: string[]): Promise<Response> => {
+    const gaps: RegionListGap[] = allowed
+      .filter((region) => !isUp(region))
+      .map((region) => ({ region, reason: 'down' }));
+    const answers = await Promise.all(
+      allowed.filter(isUp).map(async (region) => {
+        try {
+          const response = await send(region, request, undefined);
+          if (!response.ok) {
+            if (response.status === 502 || response.status === 504) failed(region, `answered ${response.status}`);
+            return { region, response };
+          }
+          succeeded(region);
+          const body = (await response.json()) as Record<string, unknown>;
+          return { region, items: Array.isArray(body[kind]) ? (body[kind] as Array<Record<string, unknown>>) : [] };
+        } catch (error) {
+          options.onError?.(error, region);
+          failed(region, error instanceof Error ? error.message : String(error));
+          return { region, error: error instanceof Error ? error.message : String(error) };
+        }
+      }),
+    );
+    const answered = answers.filter((answer) => answer.items).map((answer) => answer.region);
+    for (const answer of answers) {
+      if (answer.response) gaps.push({ region: answer.region, reason: `answered ${answer.response.status}` });
+      else if (answer.error !== undefined) gaps.push({ region: answer.region, reason: answer.error });
+    }
+    if (answered.length === 0) {
+      // A refusal every region gives, such as a missing credential, is the answer; otherwise none could.
+      const refused = answers.find((answer) => answer.response && answer.response.status < 500)?.response;
+      if (refused) return refused;
+      return refuse(503, 'REGION_DOWN', `No region this list may reach answered: ${allowed.join(', ')}`, {
+        'retry-after': String(Math.ceil((options.health?.everyMs ?? 10_000) / 1000)),
+      });
+    }
+    const requested = Number(new URL(request.url).searchParams.get('limit'));
+    const limit = Number.isInteger(requested) && requested > 0 ? requested : 50;
+    const items = answers
+      .flatMap((answer) => answer.items ?? [])
+      .sort((a, b) => {
+        const time = String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? ''));
+        return time || String(a.id ?? '').localeCompare(String(b.id ?? ''));
+      })
+      .slice(0, limit);
+    return new Response(
+      JSON.stringify({ [kind]: items, regions: answered, ...(gaps.length ? { incomplete: gaps } : {}) }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json; charset=utf-8', 'x-nexus-region': answered.join(',') },
+      },
+    );
+  };
+
   const gateway: RegionalGateway = {
     async handle(request) {
       const decision = await options.residency.regionsFor(await options.tenantOf(request));
@@ -191,6 +265,8 @@ export function regionalGateway(options: RegionalGatewayOptions): RegionalGatewa
 
       const allowed = (decision.regions ?? Object.keys(options.regions)).filter((region) => region in options.regions);
       if (allowed.length === 0) return residencyRefusal(undefined, decision, 'no region it may reach is served here');
+      const list = request.method === 'GET' ? LIST.exec(path)?.[1] : undefined;
+      if (list && (options.lists ?? 'merged') === 'merged') return merged(list as 'threads' | 'runs', request, allowed);
       const candidates = allowed.filter(isUp);
       if (candidates.length === 0) {
         return refuse(503, 'REGION_DOWN', `Every region this request may reach is down: ${allowed.join(', ')}`, {
