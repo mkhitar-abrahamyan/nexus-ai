@@ -584,7 +584,12 @@ test('proof: a job whose process dies is collected by another worker, submitted 
       { providers: { mock: survivor }, store, pollIntervalMs: 1, prices },
       { operations: { store: operations, leaseMs: 100 } },
     );
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Once its lease has lapsed by the wall clock, which leases are kept by and a timer does not run on.
+    for (let tries = 0; tries < 500; tries += 1) {
+      const expiresAt = operations.read(handle.id)?.lease?.expiresAt;
+      if (expiresAt === undefined || Date.parse(expiresAt) < Date.now()) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     const recovered = await worker.recover();
     assert.equal(recovered.length, 1, `${point}: the generation was taken over`);
     const result = await recovered[0]?.result();

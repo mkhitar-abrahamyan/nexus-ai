@@ -262,8 +262,10 @@ test('an evaluation worker scores a deployment’s runs as they finish, and hear
   assert.equal((await worker.drain()).scored, 5);
   await start(5, 7);
   await finished(state, 12);
-  // New runs reach a worker within the deployment's read cache.
-  await new Promise((resolve) => setTimeout(resolve, 2_100));
+  // New runs reach a worker within the deployment's read cache, kept by the wall clock, which a timer
+  // does not run on: a virtual machine's, stepped back as it syncs with its host, can fall behind it.
+  const cachedUntil = Date.now() + 2_100;
+  while (Date.now() <= cachedUntil) await new Promise((resolve) => setTimeout(resolve, 20));
   const report = await worker.drain();
   assert.deepEqual([report.scored, report.failed], [12, 0]);
   assert.equal(heard.length, 12);

@@ -872,14 +872,14 @@ test('tasks in one superstep run at the same time', async () => {
       .addEdge('d', END)
       .compile(maxConcurrency === undefined ? {} : { maxConcurrency });
 
-  const startedParallel = Date.now();
+  const startedParallel = performance.now();
   const parallel = await build().invoke();
-  const parallelMs = Date.now() - startedParallel;
+  const parallelMs = Math.round(performance.now() - startedParallel);
 
   order.length = 0;
-  const startedSerial = Date.now();
+  const startedSerial = performance.now();
   const serial = await build(1).invoke();
-  const serialMs = Date.now() - startedSerial;
+  const serialMs = Math.round(performance.now() - startedSerial);
 
   assert.equal(parallel.status, 'completed');
   // Four 60 ms branches together take about 60 ms, not 240 ms.

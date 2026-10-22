@@ -109,10 +109,13 @@ function sharedContract(name: string, create: () => AssetStore): void {
     // The factory uses the default clock, so expiry is driven by a genuinely short TTL rather than
     // an injected one. Each backend's purge behavior is covered separately with a fake clock.
     const store = create();
+    const putAt = Date.now();
     const stat = await store.put(input(), putOptions({ ttlSeconds: 1 }));
     assert.ok(await store.get(stat.assetId, 'tenant-a'));
 
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    // Past its TTL by the wall clock, which expiry is kept by and a timer does not run on: a virtual
+    // machine's, stepped back as it syncs with its host, can fall a few hundred milliseconds behind.
+    while (Date.now() <= putAt + 1_100) await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(await store.get(stat.assetId, 'tenant-a'), undefined, 'a lapsed asset is not readable');
   });
 

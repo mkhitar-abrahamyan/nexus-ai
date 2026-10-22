@@ -156,6 +156,24 @@ function a2aReplica(store: A2aTaskStore, checkpointer: MemoryGraphCheckpointer, 
   return { handler, client, life };
 }
 
+/**
+ * Waits until a task can be taken over by the wall clock, which leases are kept by: its lease lapsed,
+ * or, with none, it has been still a lease long; or it is no longer working. A timer runs on another
+ * clock, which a virtual machine's wall clock, stepped back as it syncs with its host, can fall behind.
+ */
+async function lapsed(store: A2aTaskStore, id: string, what: string): Promise<void> {
+  await until(
+    async () => {
+      const record = await store.get(id);
+      if (!record || !['TASK_STATE_WORKING', 'TASK_STATE_SUBMITTED'].includes(record.task.status.state)) return true;
+      const now = Date.now();
+      return record.lease ? Date.parse(record.lease.expiresAt) < now : Date.parse(record.updatedAt) < now - LEASE_MS;
+    },
+    what,
+    1_000,
+  );
+}
+
 async function settledTask(client: ReturnType<typeof a2aClient>, id: string): Promise<A2aTask> {
   let task: A2aTask | undefined;
   await until(async () => {
@@ -207,7 +225,7 @@ test('an A2A task killed at every write is taken over and ends as an uninterrupt
 
       // Another replica takes the task over once the lease lapses, and it ends as the clean run did.
       const second = a2aReplica(store, checkpointer, effects);
-      await sleep(LEASE_MS * 2);
+      await lapsed(store, id, `${at}: the lease lapses`);
       await second.handler.recover();
       const done = await settledTask(second.client, id);
       assert.equal(done.status.state, 'TASK_STATE_COMPLETED', at);
