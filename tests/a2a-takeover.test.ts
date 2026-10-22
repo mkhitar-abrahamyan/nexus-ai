@@ -149,6 +149,20 @@ async function stores(): Promise<Array<[string, () => A2aTaskStore]>> {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Waits until a task's lease has lapsed by the wall clock, which leases are kept by. A timer runs on
+ * another clock, and a virtual machine's wall clock, stepped back as it is synced with its host's, can
+ * be a few hundred milliseconds behind it: a fixed sleep would then recover before the lease is over.
+ */
+async function lapsed(store: A2aTaskStore, id: string): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const expiresAt = (await store.get(id))?.lease?.expiresAt;
+    if (expiresAt !== undefined && Date.parse(expiresAt) < Date.now()) return;
+    await sleep(10);
+  }
+  throw new Error(`the lease of task ${id} never lapsed`);
+}
+
 async function settled(client: ReturnType<typeof a2aClient>, id: string): Promise<A2aTask> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const task = await client.getTask(id);
@@ -181,7 +195,7 @@ test('proof: a task working when its replica dies is taken over and carried on f
     // Two replicas recover at the same moment, once the lease has lapsed: one takes the task over.
     const second = replica(open(), checkpointer, counters);
     const third = replica(open(), checkpointer, counters);
-    await sleep(200);
+    await lapsed(open(), started.id);
     const reports = await Promise.all([second.handler.recover(), third.handler.recover()]);
     assert.deepEqual(
       reports.flatMap((report) => report.tookOver),
@@ -225,7 +239,7 @@ test('a paused task answered on a replica that dies is answered again by the one
   dying.life.dead = true;
 
   const taker = replica(store, checkpointer, counters, { approve: true });
-  await sleep(200);
+  await lapsed(store, paused.id);
   assert.deepEqual((await taker.handler.recover()).tookOver, [paused.id]);
   const done = await settled(taker.client, paused.id);
   assert.equal(done.status.state, 'TASK_STATE_COMPLETED');
@@ -260,7 +274,7 @@ test('a graph that cannot carry a run on fails the task instead of leaving it wo
 
   const second = a2aHandler(graph, { card: CARD, store, lease: { ms: 100 } });
   const reader = a2aClient({ url: CARD.url, fetch: async (input, init) => second(new Request(input, init)) });
-  await sleep(150);
+  await lapsed(store, started.id);
   assert.deepEqual((await second.recover()).tookOver, [started.id]);
   const failed = await settled(reader, started.id);
   assert.equal(failed.status.state, 'TASK_STATE_FAILED');

@@ -268,6 +268,8 @@ async function killed(point: KillPoint, store: BudgetUsageStore, uncertain: 'cha
   await doomed.work().catch(() => undefined);
   assert.equal(life.dead, true, `${point}: the doomed worker died`);
   close(await budget.spent('default'), 0.05, `${point}: the dead worker left its estimate charged`);
+  // Its reservation was made before now, so it lapses by the wall clock within its lease from now.
+  const diedAt = Date.now();
 
   const survivor = onlineEvaluationWorker({
     source: 'quality',
@@ -284,8 +286,9 @@ async function killed(point: KillPoint, store: BudgetUsageStore, uncertain: 'cha
   const report = await survivor.drain();
   assert.equal(report.stoppedBy, 'idle', point);
   // A reservation the dead worker held and never recorded lapses after its lease, and the next pass
-  // settles it.
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  // settles it. The lease is kept by the wall clock, which a timer does not run on: a virtual machine's,
+  // stepped back as it is synced with its host's, can be a few hundred milliseconds behind a timer.
+  while (Date.now() <= diedAt + 200) await new Promise((resolve) => setTimeout(resolve, 10));
   await survivor.work();
   for (let index = 0; index < 20; index += 1) {
     const feedback = traces.get(`run-${String(index).padStart(2, '0')}`)?.feedback ?? [];
