@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-10-22
+
 Span events and links, media that knows its length, a tenant's threads and runs listed and paged
 across all of its regions, MCP servers that reconnect and change their tools mid-session, and videos
 made after reference videos.
@@ -66,6 +68,9 @@ made after reference videos.
 - `McpServer` says its tools change, as `tools.listChanged`, and `register()` tells a connected
   client.
 - `VideoInputKind` has `reference-videos`; a `switch` over it that names every kind needs the new one.
+- Tested on Node.js 26 as well as 22 and 24: CI runs the release gate on each, on the newest patch of
+  its line, so a Node.js security release, such as 2026-10-21's, is what the package is tested and
+  published on the day it ships.
 
 ### Fixed
 
@@ -3174,7 +3179,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.17.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.18.0...HEAD
+[2.18.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.15.1...v2.16.0
 [2.15.1]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.15.0...v2.15.1

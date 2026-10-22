@@ -327,12 +327,16 @@ Shipped so far:
   as it is written;
 - 2.17 the editor's MCP servers over every transport, and video you can extend or edit: an ACP agent
   connects stdio, HTTP, and SSE servers and decides each tool by what its server says it does, and a
-  video is extended from its own job or edited on Gemini Omni Flash, Veo, and Runway.
+  video is extended from its own job or edited on Gemini Omni Flash, Veo, and Runway;
+- 2.18 span events and links, as OpenTelemetry has them, media that knows its length from its own
+  headers, a tenant's threads and runs listed and paged across all of its regions, MCP servers that
+  reconnect and change their tools within a session, and videos made after reference videos.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.18 records events and links on spans, as OpenTelemetry has them, and reads the length of
-compressed audio and video, so an evaluation holds a clip to its duration. Pinecone, images, the Gemini
+Next, 2.19 reads a service's own API description into emulated tools, and lets an emulator hold
+what a whole evaluation did, so examples that build on each other are evaluated with nothing sent.
+Pinecone, images, the Gemini
 embedding batch tier, media understanding, video, Gemini Live, SIP, and both phone providers
 graduate once the live workflow passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order

@@ -4,13 +4,13 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.17.0**. 195 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.18.0**. 195 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 completion batch providers and 2 embedding batch tiers, 3 image
 providers plus a mock, 2 media providers plus a mock, 2 video providers plus a mock, 2 realtime
 providers plus a mock, 2 telephony providers, 5 workspaces, 6 secret sources, OTLP over HTTP and
 gRPC, and 98 completion registry models plus 60 aliases, verified against each provider's
-documentation on 2026-10-02. 1,283 unit tests and 30 studio tests pass; coverage sits at **96.3%
-lines / 82.6% branches / 92.2% functions** against gates of 82/67/73. CI verifies lint,
+documentation on 2026-10-02. 1,308 unit tests and 31 studio tests pass; coverage sits at **96.3%
+lines / 82.8% branches / 92.1% functions** against gates of 82/67/73. CI verifies lint,
 format, build, tests, coverage, registry drift, `llms.txt` drift, per-subpath size, documentation
 and guide coverage, the root import, a graph benchmark with a durability budget, runtime and
 memory-retention budgets, turn-latency and session-load budgets for realtime, load and soak budgets
@@ -39,15 +39,18 @@ later call by a job's ref, a community adapter's record turned red by a contract
 meet before the release that makes it, the adapters this repository ships verified again against
 every build, one agent served over A2A's three bindings and driven by the reference client on each,
 with a task started on one continued on another, an editor's MCP servers over stdio, HTTP, and SSE
-each tool decided by what its server says it does, a video extended from its own job and one of the
-application's edited on every video provider, ten online-evaluation workers
+each tool decided by what its server says it does, an editor's MCP server that drops its stream and
+adds a tool between two turns, a video extended from its own job and one of the application's edited
+on every video provider, spans with events and links read back by the OpenTelemetry Collector, the
+length of every audio and video container matching its encoder's, a tenant's threads paged across two
+regions each exactly once, ten online-evaluation workers
 through a crash and through 4,000 runs started in one millisecond on every trace store, a worker killed holding a budget reservation at
 each point of its call on every usage store, an adversarial dataset against an unguarded and a
 guarded agent, the agent protocols driven from the other side of the wire and against the published
 2.5.0 in both directions, a tool's progress on every stream, every studio route called by every role
 and with hostile input, the imports of every entry point for anything Node-only, the portable kernel
 on Node, Deno, Bun, an edge runtime, and headless Chromium, mock conformance, packed-package smoke,
-API contract, consumer type resolution, and clean install on Node 22 and 24. Every night, each agent
+API contract, consumer type resolution, and clean install on Node 22, 24, and 26. Every night, each agent
 protocol is driven by the reference client of its own project. Every week, the vector stores run
 their contract and graduation checklist against the real servers, and media understanding, the
 Gemini embedding batch tier, and video run their conformance suites against the live services.
@@ -103,24 +106,24 @@ it passes its conformance suite against the live service every week.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release: 2.18, or
+Each gap is written down in a guide's limitations today, and each is closed by one release: 2.19, or
 the theme after it that owns it.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.18 |
-| Images have not recorded live conformance on all three backends | API stability | 2.18 |
-| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.18 |
-| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.18 |
-| Video generation has not passed its conformance suite against Gemini Omni Flash, Veo, and Runway | Video guide | 2.18 |
-| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.18 |
-| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.18 |
-| Spans carry no events or links: a run is one span, with its attributes | Tracing guide | 2.18 |
-| `mediaChecks()` reads the length of WAV audio only, not of compressed audio or video | Evaluation guide | 2.18 |
+| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.19 |
+| Images have not recorded live conformance on all three backends | API stability | 2.19 |
+| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.19 |
+| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.19 |
+| Video generation has not passed its conformance suite against Gemini Omni Flash, Veo, and Runway | Video guide | 2.19 |
+| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.19 |
+| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.19 |
+| An emulated tool is one the application defined; a service's API description is not read into tools | Evaluation guide | 2.19 |
+| An emulator holds what one run did, not what a whole evaluation did | Evaluation guide | 2.19 |
 
 ---
 
-## 2.18.0: Span events and links, and media that knows its length
+## 2.19.0: Tools emulated from an API description, and an emulator that remembers the evaluation
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
 understanding, video, Gemini Live, SIP call control, and both phone providers graduate when the
@@ -128,19 +131,19 @@ scheduled live workflow passes against each, published with their checklists. Ev
 there now; what stands in the way is the repository's live credentials, and for video, the variable
 that lets it spend seconds of video.
 
-**Span events and links.** A run is one span today, with its attributes. 2.18 records what happens
-inside a span as timed events, such as a retry, a guardrail's verdict, or a tool's progress, and links
-a span to the runs it came from beyond its parent, so a fan-out's joined step points back at each
-branch. Both reach OTLP as OpenTelemetry has them, on HTTP and on gRPC, and the studio shows them.
+**Tools from an API description.** An emulated tool is one the application defined today. 2.19 reads
+a service's own API description, an OpenAPI document, into tools whose names, parameters, and answers
+are the service's, so an agent is evaluated against a service before it is wired to it, with nothing
+sent.
 
-**Media that knows its length.** `mediaChecks()` reads the length of WAV audio and nothing else.
-2.18 reads it from compressed audio and video too, MP4, WebM, MP3, and Ogg, from the file's own
-headers, so an evaluation holds a clip to its duration, and a video longer than a provider takes to
-extend or edit is refused before it is sent.
+**An emulator that remembers the evaluation.** An emulator holds what one run did; the next run starts
+again from its scenario. 2.19 lets it hold the world across a whole evaluation, so an order one example
+refunds is refunded for the next, as a staging copy would have it, and lets each run start instead
+from a snapshot of it.
 
-**Proof.** A trace with events and links, exported over OTLP, is read back by the OpenTelemetry
-Collector with both intact; the length read from each container matches the one its encoder wrote,
-and a clip too long for Gemini Omni Flash is refused before any upload.
+**Proof.** An agent over tools read from a stand-in service's OpenAPI document reaches the verdict it
+reaches over the stand-in itself, with nothing sent; and an evaluation whose examples build on each
+other's changes reaches the stand-in's verdict, run in order and again from a snapshot.
 
 ---
 
@@ -148,16 +151,10 @@ and a clip too long for Gemini Omni Flash is refused before any upload.
 
 Not yet placed, roughly in order of what applications ask for:
 
-1. A gateway that lists a tenant's threads and runs across all of its regions.
-2. Tools emulated from a service's own API description, and an emulator that holds state across a
-   whole evaluation, not only one run.
-3. Compatibility records published from community adapters' own CI, gathered onto the page by a
+1. Compatibility records published from community adapters' own CI, gathered onto the page by a
    scheduled workflow rather than by pull request.
-4. A2A requests routed by their tenant, and an agent card's security schemes and signatures read
+2. A2A requests routed by their tenant, and an agent card's security schemes and signatures read
    over gRPC.
-5. Reference videos in the video contract, for Seedance and Hailuo, and Gemini Omni Flash on Vertex AI.
-6. An MCP server whose stream ends reconnected within the session, and the tools a server adds or
-   removes picked up as it announces them.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:

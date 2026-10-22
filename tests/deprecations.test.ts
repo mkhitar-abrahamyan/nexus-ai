@@ -8,9 +8,16 @@ import { OllamaProvider } from '../src/providers/ollama.js';
 import { SecurityPipeline } from '../src/security/index.js';
 import { warnDeprecated } from '../src/utils/deprecation.js';
 
+/**
+ * Node.js 26 deprecates `module.register()` (DEP0205), which the test loader calls once as it starts,
+ * and the warning can arrive while a test listens. It is the loader's, not this package's.
+ */
+const LOADER_WARNINGS = new Set(['DEP0205']);
+
 test('a deprecation warns once per code, through the DeprecationWarning channel', async () => {
   const seen: Array<{ name: string; code?: string; message: string }> = [];
   const listener = (warning: Error & { code?: string }) => {
+    if (warning.code && LOADER_WARNINGS.has(warning.code)) return;
     seen.push({ name: warning.name, code: warning.code, message: warning.message });
   };
   process.on('warning', listener);
@@ -29,7 +36,9 @@ test('a deprecation warns once per code, through the DeprecationWarning channel'
 
 test('the options 2.0 removed are gone and warn about nothing', async () => {
   const seen: unknown[] = [];
-  const listener = (warning: Error) => seen.push(warning);
+  const listener = (warning: Error & { code?: string }) => {
+    if (!(warning.code && LOADER_WARNINGS.has(warning.code))) seen.push(warning);
+  };
   process.on('warning', listener);
   // A JavaScript caller that still passes them is not refused: they never did anything.
   const removed = {

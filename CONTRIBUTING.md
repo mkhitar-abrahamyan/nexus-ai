@@ -4,7 +4,7 @@ Thanks for improving `nexus-ai-pro`.
 
 ## Development setup
 
-Use Node.js 22 or 24 and the npm version declared in `package.json`.
+Use Node.js 22, 24, or 26 and the npm version declared in `package.json`.
 
 ```bash
 npm ci

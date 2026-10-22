@@ -749,6 +749,10 @@ regression in a test, not to judging content in production; use a model judge fo
 - An emulated tool is as faithful as its scenario and its emulator. Check a suite against the real
   tools, or a staging copy, once, and keep the answers; a verdict that differs is a scenario to fix.
 - `emulatedTools()` replaces `execute` and drops `stream`: an emulated tool reports no progress.
+- An emulated tool is one the application defined. A service's own API description, such as an
+  OpenAPI document, is not read into tools.
+- An emulator holds what one run did. The next run of an evaluation starts again from its scenario, so
+  a change one example makes is not there for the next.
 - `mediaChecks()` reads the dimensions of PNG, JPEG, GIF, WebP, and BMP images, and the length of
   WAV, MP4 and MOV, WebM and Matroska, MP3, Ogg (Vorbis and Opus), and FLAC. Other audio and video are
   checked for kind, type, and size; a judge can watch them, on a provider that takes them. A file cut
