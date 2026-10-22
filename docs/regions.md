@@ -146,6 +146,11 @@ reads a request's tenant, such as from a verified token; `health`; `lists`; a `f
   `incomplete`, each `RegionListGap`: a region that was down, or that failed or answered an error, and
   why. A refusal every region gives, such as a missing credential, is the answer; with no region
   answering, it is 503, `REGION_DOWN`. `lists: 'home'` asks the home region alone, as before 2.18.
+  While more follow, the answer has a `nextCursor`, and `?cursor=` asks for the page after it. A
+  cursor names a place in the order every region lists by, last written then id, so each region is
+  asked for its own page after that place, and the merged page is exact: each record once, in order,
+  however the records fall between regions. A region that does not page by the cursor, as one before
+  2.18, contributes only what comes after it.
 - Every answer carries `x-nexus-region`, the region that gave it, or, for a merged list, each that
   did.
 
@@ -270,8 +275,8 @@ its refusal is found in no error, stack, cause, audit event, log, trace, or heal
 ## Limitations
 
 - `ai.plan()` shows the route before placement: the provider routing chose, not its twin.
-- A merged list pages by `limit` only, as each server does: a tenant with more threads than a page
-  reads the newest, across its regions.
+- A region missing from one page of a merged list, as `incomplete` names it, is not caught up on the
+  pages after: its records newer than the cursor are on a fresh first page.
 - The gateway decides by its own health checks and the requests it forwards; a region that answers but
   cannot do the work behind it is up until a check or a request says otherwise.
 - A cache, a checkpointer, or any other store the application gives the client is wherever the

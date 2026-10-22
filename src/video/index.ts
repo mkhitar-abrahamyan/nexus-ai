@@ -26,10 +26,10 @@ const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 // ── Requests ───────────────────────────────────────────────────────
 
 /**
- * What a video can be made from beside its prompt: a first frame, a last frame, reference images, or
- * a video to continue (`extend`) or to change as the prompt says (`edit`).
+ * What a video can be made from beside its prompt: a first frame, a last frame, reference images,
+ * reference videos, or a video to continue (`extend`) or to change as the prompt says (`edit`).
  */
-export type VideoInputKind = 'image' | 'last-frame' | 'references' | 'extend' | 'edit';
+export type VideoInputKind = 'image' | 'last-frame' | 'references' | 'reference-videos' | 'extend' | 'edit';
 
 /**
  * A video to work from: one to continue from its end, or one to change as the prompt says. Give the
@@ -62,6 +62,8 @@ export interface VideoGenerateRequest {
   lastFrame?: AssetInput;
   /** Images whose subject, character, or style the video keeps. */
   references?: readonly AssetInput[];
+  /** Videos whose motion, subject, or look the video takes after; their sound is ignored. */
+  referenceVideos?: readonly AssetInput[];
   /** A video to extend or edit. */
   video?: VideoSource;
   /** Length in seconds; for `extend`, how much is added. Defaults to the model's. */
@@ -114,6 +116,8 @@ export interface VideoProviderRequest {
   lastFrame?: AssetInput;
   /** Reference images. */
   references?: readonly AssetInput[];
+  /** Reference videos, resolved to bytes or URLs. */
+  referenceVideos?: readonly AssetInput[];
   /** A video to extend or edit, its input resolved to bytes or a URL. */
   video?: VideoSource;
   /** Length in seconds; for `extend`, how much is added. */
@@ -237,6 +241,10 @@ export interface VideoModelCapabilities {
   continuesJobs?: boolean;
   /** The longest video it extends or edits, in seconds, read from the video's headers when it is bytes. */
   maxInputVideoSeconds?: number;
+  /** Most reference videos it takes. */
+  maxReferenceVideos?: number;
+  /** How long reference videos may be, in seconds: each, and all together. Read from the bytes' headers. */
+  referenceVideoSeconds?: { each?: number; total?: number };
 }
 
 /** What a video provider supports: its models, and what each makes. */
@@ -476,10 +484,14 @@ interface RefNotes {
 type SerializedInput = Omit<AssetInput, 'location'> & {
   location: AssetLocation | { kind: 'base64'; data: string };
 };
-type SerializedRequest = Omit<VideoProviderRequest, 'image' | 'lastFrame' | 'references' | 'video'> & {
+type SerializedRequest = Omit<
+  VideoProviderRequest,
+  'image' | 'lastFrame' | 'references' | 'referenceVideos' | 'video'
+> & {
   image?: SerializedInput;
   lastFrame?: SerializedInput;
   references?: SerializedInput[];
+  referenceVideos?: SerializedInput[];
   video?: Omit<VideoSource, 'input'> & { input?: SerializedInput };
 };
 
@@ -960,10 +972,22 @@ export class VideoManager {
     if (caps.maxReferences !== undefined && references.length > caps.maxReferences) {
       throw unsupported(providerName, `${references.length} reference images`, `at most ${caps.maxReferences}`);
     }
+    const referenceVideos = request.referenceVideos ?? [];
+    if (referenceVideos.length && !caps.inputs.includes('reference-videos')) {
+      throw unsupported(providerName, `reference videos for "${model}"`);
+    }
+    if (caps.maxReferenceVideos !== undefined && referenceVideos.length > caps.maxReferenceVideos) {
+      throw unsupported(
+        providerName,
+        `${referenceVideos.length} reference videos`,
+        `at most ${caps.maxReferenceVideos}`,
+      );
+    }
     const given: Record<VideoInputKind, boolean> = {
       image: request.image !== undefined,
       'last-frame': request.lastFrame !== undefined,
       references: references.length > 0,
+      'reference-videos': referenceVideos.length > 0,
       extend: video?.mode === 'extend',
       edit: video?.mode === 'edit',
     };
@@ -975,12 +999,37 @@ export class VideoManager {
     const tenantId = request.tenantId ?? this.config.tenantId ?? 'default';
     const resolve = (input: AssetInput, option: string, kind: 'image' | 'video' = 'image') =>
       this.resolveInput(input, option, providerName, capabilities, tenantId, kind);
-    const [image, lastFrame, resolvedReferences, videoInput] = await Promise.all([
+    const [image, lastFrame, resolvedReferences, videoInput, resolvedVideos] = await Promise.all([
       request.image ? resolve(request.image, 'image') : undefined,
       request.lastFrame ? resolve(request.lastFrame, 'lastFrame') : undefined,
       Promise.all(references.map((input, index) => resolve(input, `references[${index}]`))),
       video?.input ? resolve(video.input, 'video.input', 'video') : undefined,
+      Promise.all(referenceVideos.map((input, index) => resolve(input, `referenceVideos[${index}]`, 'video'))),
     ]);
+    // Reference videos given as bytes say their lengths, each and together.
+    const limits = caps.referenceVideoSeconds;
+    if (limits && resolvedVideos.length) {
+      let total = 0;
+      for (const [index, input] of resolvedVideos.entries()) {
+        const length = input.location.kind === 'bytes' ? readMediaDuration(input.location.data)?.durationMs : undefined;
+        if (length === undefined) continue;
+        if (limits.each !== undefined && length > limits.each * 1000) {
+          throw unsupported(
+            providerName,
+            `referenceVideos[${index}], ${(length / 1000).toFixed(1)} seconds long, for "${model}"`,
+            `at most ${limits.each} seconds each`,
+          );
+        }
+        total += length;
+      }
+      if (limits.total !== undefined && total > limits.total * 1000) {
+        throw unsupported(
+          providerName,
+          `${(total / 1000).toFixed(1)} seconds of reference videos for "${model}"`,
+          `at most ${limits.total} seconds together`,
+        );
+      }
+    }
     // A video given as bytes says its own length; one longer than the model takes goes nowhere.
     if (videoInput?.location.kind === 'bytes' && caps.maxInputVideoSeconds !== undefined) {
       const length = readMediaDuration(videoInput.location.data)?.durationMs;
@@ -998,6 +1047,7 @@ export class VideoManager {
       ...ifDefined('image', image),
       ...ifDefined('lastFrame', lastFrame),
       ...(resolvedReferences.length ? { references: resolvedReferences } : {}),
+      ...(resolvedVideos.length ? { referenceVideos: resolvedVideos } : {}),
       ...(video
         ? {
             video: videoInput
@@ -1199,23 +1249,25 @@ function deserializeInput(input: SerializedInput): AssetInput {
 
 /** A request as JSON, its image bytes as base64, so it can wait in an operation store for any worker. */
 function serializeRequest(request: VideoProviderRequest): SerializedRequest {
-  const { image, lastFrame, references, video, ...rest } = request;
+  const { image, lastFrame, references, referenceVideos, video, ...rest } = request;
   return {
     ...rest,
     ...(image ? { image: serializeInput(image) } : {}),
     ...(lastFrame ? { lastFrame: serializeInput(lastFrame) } : {}),
     ...(references ? { references: references.map(serializeInput) } : {}),
+    ...(referenceVideos ? { referenceVideos: referenceVideos.map(serializeInput) } : {}),
     ...(video ? { video: { ...video, ...(video.input ? { input: serializeInput(video.input) } : {}) } } : {}),
   };
 }
 
 function deserializeRequest(request: SerializedRequest): VideoProviderRequest {
-  const { image, lastFrame, references, video, ...rest } = request;
+  const { image, lastFrame, references, referenceVideos, video, ...rest } = request;
   return {
     ...rest,
     ...(image ? { image: deserializeInput(image) } : {}),
     ...(lastFrame ? { lastFrame: deserializeInput(lastFrame) } : {}),
     ...(references ? { references: references.map(deserializeInput) } : {}),
+    ...(referenceVideos ? { referenceVideos: referenceVideos.map(deserializeInput) } : {}),
     ...(video
       ? { video: { ...video, ...(video.input ? { input: deserializeInput(video.input) } : {}) } as VideoSource }
       : {}),
@@ -1253,6 +1305,8 @@ export interface VideoConformanceOptions {
    * model that continues its own jobs is also asked to extend the first job it made.
    */
   video?: { mode: 'extend' | 'edit'; input: AssetInput };
+  /** A short video of the provider's limits, to check making a video from reference videos where a model takes them. */
+  referenceVideo?: AssetInput;
   /** Submits and cancels a second job, on a provider that can cancel. Off by default: it costs a job. */
   checkCancel?: boolean;
   /** How often to poll. Defaults to 5 seconds. */
@@ -1425,6 +1479,13 @@ export async function runVideoConformance(
         if (state.status !== 'completed') throw new Error(`the job ended ${state.status}`);
       });
     }
+  }
+  if (options.referenceVideo && caps.inputs.includes('reference-videos')) {
+    const referenceVideos = [options.referenceVideo];
+    await check('reference videos', async () => {
+      const state = await settle(await provider.submit({ ...request, referenceVideos }, context()));
+      if (state.status !== 'completed') throw new Error(`the job ended ${state.status}`);
+    });
   }
   if (options.checkCancel && capabilities.supportsCancel && provider.cancel) {
     const cancel = provider.cancel.bind(provider);

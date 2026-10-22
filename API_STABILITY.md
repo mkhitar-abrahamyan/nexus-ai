@@ -56,10 +56,25 @@ New and stable:
 - in `nexus-ai-pro/evaluate/media`: `readMediaDuration()` and `MediaDuration`;
 - in `nexus-ai-pro/video`, experimental with the family: `VideoModelCapabilities.maxInputVideoSeconds`;
 - in `nexus-ai-pro/server/regions`: `RegionalGatewayOptions.lists`, `RegionListGap`, and a merged
-  list's `regions` and `incomplete`.
+  list's `regions`, `incomplete`, and `nextCursor`;
+- in `nexus-ai-pro/server`: `ListPage`, `RunManager.listThreads()` and `listRuns()`, and the lists'
+  `cursor` and `nextCursor`;
+- in `nexus-ai-pro/mcp`: `McpClientOptions.reconnect`, `McpClient.onToolsChanged()`, and
+  `SseClientOptions.reopen`;
+- in `nexus-ai-pro/video`, experimental with the family: `VideoGenerateRequest.referenceVideos` and
+  `VideoProviderRequest.referenceVideos`, the `reference-videos` input kind,
+  `VideoModelCapabilities.maxReferenceVideos` and `referenceVideoSeconds`, and
+  `VideoConformanceOptions.referenceVideo`;
+- in `nexus-ai-pro/video/google`, experimental with the family:
+  `GoogleVideoProviderConfig.interactionsBaseUrl`, and Gemini Omni Flash on Vertex AI.
 
-Changed on purpose: a list through the regional gateway is merged from every region the tenant may
-reach; `lists: 'home'` keeps the earlier answer.
+Changed on purpose:
+- a list through the regional gateway is merged from every region the tenant may reach;
+  `lists: 'home'` keeps the earlier answer;
+- an agent server's lists are ordered by last write, then id, and a `limit` that is not a whole
+  number above 0 is refused;
+- `McpServer` says `tools.listChanged`, and `register()` sends the notification;
+- `VideoInputKind` widens with `reference-videos`.
 
 ## 2.17 stage (2.17.0)
 

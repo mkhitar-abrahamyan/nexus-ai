@@ -76,6 +76,13 @@ beneath it: give the server the tracer its clients use, through `traceModelClien
 | `GET /usage` | The caller's tenant usage, when `tenants` is set |
 | `/deployments`, `/replicas` | Revisions, traffic splits, and replicas, when `deployments` is set |
 
+A list, `GET /threads`, `GET /runs`, or `GET /threads/:id/runs`, holds the caller's tenant's
+records, by when each was last written, newest first, then by id. It reads until the page is full, so
+another tenant's newer records never crowd it out. `?limit=` sets the page (50), a whole number
+above 0. While more follow, the answer has a `nextCursor`, and `?cursor=` asks for the page after it.
+A record written while a client pages moves to a fresh first page, rather than appearing twice.
+`RunManager.listThreads()` and `listRuns()` return the same `ListPage`.
+
 Mount them under a prefix with `basePath`. A run is accepted with `202` and a `RunRecord`; add
 `"stream": true` (or `?stream=true`) to start it and stream it in one request instead. Add
 `"revision"` to run one revision of an assistant that has several.
@@ -454,6 +461,10 @@ const graph = createGraph({ channels })
 - The `enqueue` busy policy waits in the request that is queued, so a queued run holds a connection.
   The worker `queue` does not: a run waiting for a worker holds nothing.
 - Cron resolution is one minute, and schedules are UTC.
+- A list's page deep in a long list reads every record before it, as the state store lists from the
+  newest. A record a client had not reached when it was written again moves to the first page, so a
+  walk of a list that changes does not see it. Two records written by replicas whose clocks disagree,
+  closer together than that, may be listed in the order the store wrote them.
 - Authentication is a hook, not an implementation: there is no bundled token format, user store, or
   session handling.
 
@@ -484,6 +495,7 @@ specific entry point that provides it.
 | `graphAssistant` | function | Serves a compiled graph as an assistant. |
 | `GraphAssistantOptions` | interface | Options for `graphAssistant()`. |
 | `GraphLike` | interface | The part of a compiled graph the adapter uses. |
+| `ListPage` | interface | A page of a list, newest first, and the cursor of the page after it. |
 | `MemoryRunEventLog` | class | Run events in process memory, with waiters woken as events arrive. |
 | `MemoryRunEventLogOptions` | interface | Options for the in-memory run event log. |
 | `MemoryServerStore` | class | Threads, runs, and cron jobs in process memory. |

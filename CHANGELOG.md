@@ -4,8 +4,9 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-Span events and links, media that knows its length, and a tenant's threads and runs listed across all
-of its regions.
+Span events and links, media that knows its length, a tenant's threads and runs listed and paged
+across all of its regions, MCP servers that reconnect and change their tools mid-session, and videos
+made after reference videos.
 
 ### Added
 
@@ -14,8 +15,8 @@ of its regions.
   the run in scope, `RunHandle.event()` and `link()` on one run; `StartRunOptions.links` take a link
   or a W3C `traceparent`, and `FinishRunOptions` take the `events` and `links` a run learns as it
   ends. `maxEventsPerRun` (128) keeps a run's events bounded, counting the rest as `droppedEvents`.
-  Both reach OTLP as span events and links, in JSON, in protobuf, and over gRPC, and the studio shows
-  them.
+  Both reach OTLP as span events and links, in JSON, in protobuf, and over gRPC. The studio shows them
+  on a run, each link opening the run it names, and `#/traces/<trace>/<run>` opens one run of a trace.
 - **Events where they happen.** A graph's retry is a `retry` event of its task's run, a tool's
   progress a `progress` event of the tool's, and a task after a step of several, such as a fan-out's
   join, links to each of them. A model run has the attempts that failed before its answer, as `retry`
@@ -32,11 +33,47 @@ of its regions.
   region the tenant may reach, merged newest first and cut to the limit, naming the regions that
   answered and, as `RegionListGap` values under `incomplete`, those that were down or failed. A
   refusal every region gives is the answer. `lists: 'home'` keeps the home region's list alone.
+- **Lists that page.** An agent server's `GET /threads`, `GET /runs`, and `GET /threads/:id/runs`
+  take a `cursor` and answer with a `nextCursor` while more follow; `RunManager.listThreads()` and
+  `listRuns()` return a `ListPage`. A cursor names a place in the order every region lists by, so the
+  regional gateway pages a merged list with it too, each record once, in order, however the records
+  fall between regions. A region that does not page by it contributes only what comes after it.
+- **MCP that reconnects.** With `McpClientOptions.reconnect`, a client whose connection closed opens
+  it again at the next request and greets the server again: an SSE stream that ended, with
+  `SseClientOptions.reopen`, or a stdio server that exited, started again. A stream that cannot open,
+  or names no endpoint in time, is let go at once, so the next request tries again.
+- **Tools that change.** `McpClient.onToolsChanged()` hears a server's
+  `notifications/tools/list_changed`. `McpServer.register()` sends one to a connected client, and the
+  server says it will. The editor bridge reconnects an editor's SSE servers within a session and lists
+  a server's tools again before the turn after it says they changed, keeping the last list when that
+  fails.
+- **Reference videos.** `VideoGenerateRequest.referenceVideos` gives a model videos to take after.
+  Models declare `reference-videos` among their inputs, with `maxReferenceVideos` and
+  `referenceVideoSeconds`, each and together, read from a video's headers before it is sent. Gemini
+  Omni Flash takes three of three seconds each, as does Runway's `gemini_omni_flash_1.1`; Runway's
+  Seedance 2 models, `hailuo3`, and `wan3` take 15 seconds together, beside reference images. The
+  conformance suite checks them with `referenceVideo`.
+- **Gemini Omni Flash on Vertex AI.** `GoogleVideoProvider` serves `gemini-omni-1.1-flash-preview` on
+  Vertex AI's Interactions API, at the global location for the project its `baseUrl` names, or at
+  `interactionsBaseUrl`.
 
 ### Changed
 
 - A list of threads or runs through the regional gateway comes from every region the tenant may
   reach, not its home region alone; `RegionalGatewayOptions.lists: 'home'` keeps the 2.17 answer.
+- An agent server lists threads and runs by when each was last written, then by id, the order its
+  cursor pages by. A `limit` that is not a whole number above 0 is refused with a 400.
+- `McpServer` says its tools change, as `tools.listChanged`, and `register()` tells a connected
+  client.
+- `VideoInputKind` has `reference-videos`; a `switch` over it that names every kind needs the new one.
+
+### Fixed
+
+- A tenant's threads and runs on a server several tenants share: a list read the newest records of
+  every tenant and then kept the tenant's, so another tenant's newer ones could crowd its page out,
+  down to an empty one. A list now reads until the tenant's page is full.
+- The studio showed a run's metadata, its feedback, and a tool's progress as
+  `[object HTMLHeadingElement]` rather than their content.
 
 ## [2.17.0] - 2026-10-21
 

@@ -158,6 +158,10 @@ recorded at its own time and read in order with the rest. Once a run finishes, i
 more, so an exporter holding it sees what it ended with. Redaction's `redact` hook sees the events
 and links too.
 
+The studio shows a run's events, each at its time with its attributes, and its links, each opening
+the run it names, in the trace it belongs to. A trace's address, `#/traces/<trace>/<run>`, opens that
+run of the trace, so a link can be shared.
+
 ### Writing as it runs
 
 By default a trace is written when its root finishes. That lets sampling decide with the whole trace

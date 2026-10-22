@@ -204,20 +204,20 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
     const thread = await runs.createThread({ ...body, assistant: body.assistant, principal });
     return json(thread, 201);
   });
-  read('GET', '/threads', async ({ principal, url }) =>
-    json({ threads: await runs.threads(principal, numberParam(url, 'limit')) }),
-  );
+  read('GET', '/threads', async ({ principal, url }) => {
+    const page = await runs.listThreads(principal, listParams(url));
+    return json({ threads: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
+  });
   read('GET', '/threads/:threadId', async ({ params, principal }) =>
     json(await runs.thread(params.threadId as string, principal)),
   );
   read('GET', '/threads/:threadId/state', async ({ params, principal }) =>
     json({ threadId: params.threadId, state: await runs.threadState(params.threadId as string, principal) }),
   );
-  read('GET', '/threads/:threadId/runs', async ({ params, principal, url }) =>
-    json({
-      runs: await runs.runs(principal, { threadId: params.threadId as string, limit: numberParam(url, 'limit') }),
-    }),
-  );
+  read('GET', '/threads/:threadId/runs', async ({ params, principal, url }) => {
+    const page = await runs.listRuns(principal, { threadId: params.threadId as string, ...listParams(url) });
+    return json({ runs: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
+  });
   write('DELETE', '/threads/:threadId', async ({ params, principal }) => {
     await runs.deleteThread(params.threadId as string, principal);
     return new Response(null, { status: 204 });
@@ -253,9 +253,10 @@ export function createAgentServer(options: AgentServerOptions): AgentServer {
     });
     return body.stream || url.searchParams.get('stream') === 'true' ? streamRun(run.id) : json(run, 202);
   });
-  read('GET', '/runs', async ({ principal, url }) =>
-    json({ runs: await runs.runs(principal, { limit: numberParam(url, 'limit') }) }),
-  );
+  read('GET', '/runs', async ({ principal, url }) => {
+    const page = await runs.listRuns(principal, listParams(url));
+    return json({ runs: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
+  });
   read('GET', '/runs/:runId', async ({ params, principal }) => json(await runs.run(params.runId as string, principal)));
   write('POST', '/runs/:runId/cancel', async ({ request, params, principal }) => {
     const body = await readJson<{ reason?: string }>(request);
@@ -444,6 +445,13 @@ function numberParam(url: URL, name: string): number | undefined {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) throw new ServerError(`"${name}" must be a number`, 'BAD_REQUEST', 400);
   return parsed;
+}
+
+/** A list's `limit` and `cursor`, from its query; an empty cursor is none. */
+function listParams(url: URL): { limit?: number; cursor?: string } {
+  const limit = numberParam(url, 'limit');
+  const cursor = url.searchParams.get('cursor');
+  return { ...(limit === undefined ? {} : { limit }), ...(cursor ? { cursor } : {}) };
 }
 
 function isFinishedStatus(status: RunRecord['status']): boolean {

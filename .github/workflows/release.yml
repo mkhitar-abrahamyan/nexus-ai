@@ -21,6 +21,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          check-latest: true
 
       - name: Use the trusted-publishing npm client
         run: npm install --global npm@11.14.0

@@ -48,6 +48,12 @@ function append(parent, children) {
   }
 }
 
+/** Replaces an element's children, lists flattened and empty values left out, as `h()` takes them. */
+function replace(parent, ...children) {
+  parent.replaceChildren();
+  append(parent, children);
+}
+
 function pretty(value) {
   return h('pre', {}, value === undefined ? '' : JSON.stringify(value, null, 2));
 }
@@ -132,12 +138,12 @@ function post(path, body) {
 function action(output, run) {
   return async (event) => {
     event?.preventDefault?.();
-    output.replaceChildren(h('p', { class: 'muted' }, 'Working…'));
+    replace(output, h('p', { class: 'muted' }, 'Working…'));
     try {
       const result = await run();
-      output.replaceChildren(notice('Done.'), result === undefined ? '' : pretty(result));
+      replace(output, notice('Done.'), result === undefined ? '' : pretty(result));
     } catch (error) {
-      output.replaceChildren(notice(error.message, 'error'), error.detail ? pretty(error.detail) : '');
+      replace(output, notice(error.message, 'error'), error.detail ? pretty(error.detail) : '');
     }
   };
 }
@@ -161,7 +167,8 @@ function commentsPanel(subject) {
   const load = async () => {
     try {
       const { comments } = await api(`/api/comments?subject=${encodeURIComponent(subject)}`);
-      list.replaceChildren(
+      replace(
+        list,
         comments.length === 0
           ? h('p', { class: 'muted' }, 'No comments yet.')
           : comments.map((comment) =>
@@ -176,7 +183,7 @@ function commentsPanel(subject) {
             ),
       );
     } catch (error) {
-      list.replaceChildren(notice(error.message, 'error'));
+      replace(list, notice(error.message, 'error'));
     }
   };
   void load();
@@ -230,7 +237,8 @@ function available() {
 }
 
 function renderNav(active) {
-  nav.replaceChildren(
+  replace(
+    nav,
     ...available().map((entry) =>
       h('a', { href: `#/${entry.id}`, class: entry.id === active ? 'active' : '' }, entry.label),
     ),
@@ -243,25 +251,26 @@ async function route() {
   const current = views.find((entry) => entry.id === id) ?? views[0];
   renderNav(current?.id);
   if (!current) {
-    view.replaceChildren(
+    replace(
+      view,
       h('h1', {}, 'Nothing to show'),
       notice('The studio was started without any sources. Pass traces, graphs, prompts, or experiments in the config.'),
     );
     return;
   }
-  view.replaceChildren(h('p', { class: 'muted' }, 'Loading…'));
+  replace(view, h('p', { class: 'muted' }, 'Loading…'));
   try {
     await current.render(rest.map(decodeURIComponent));
   } catch (error) {
-    view.replaceChildren(h('h1', {}, current.label), notice(error.message, 'error'));
+    replace(view, h('h1', {}, current.label), notice(error.message, 'error'));
   }
   view.focus();
 }
 
 // ── Traces ──────────────────────────────────────────────────────────
 
-async function renderTraces([traceId]) {
-  if (traceId) return renderTrace(traceId);
+async function renderTraces([traceId, runId]) {
+  if (traceId) return renderTrace(traceId, runId);
   const filters = {
     status: h(
       'select',
@@ -288,7 +297,8 @@ async function renderTraces([traceId]) {
       query.set(key, key === 'since' ? new Date(input.value).toISOString() : input.value);
     }
     const { runs } = await api(`/api/traces?${query}`);
-    results.replaceChildren(
+    replace(
+      results,
       table(
         [
           { label: 'Started', value: (run) => when(run.startedAt) },
@@ -305,7 +315,8 @@ async function renderTraces([traceId]) {
       ),
     );
   };
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Traces'),
     h('form', { class: 'inline', onsubmit: load }, Object.values(filters), h('button', { class: 'primary' }, 'Filter')),
     results,
@@ -313,7 +324,8 @@ async function renderTraces([traceId]) {
   await load();
 }
 
-async function renderTrace(traceId) {
+/** A trace's runs as a tree, and one run's details; `#/traces/<trace>/<run>` opens it on that run. */
+async function renderTrace(traceId, runId) {
   const { tree, text } = await api(`/api/traces/${encodeURIComponent(traceId)}`);
   const detail = h('div');
   let selected;
@@ -340,7 +352,8 @@ async function renderTrace(traceId) {
     const key = h('input', { placeholder: 'key, such as correctness', required: true });
     const score = h('input', { type: 'number', step: 'any', placeholder: 'score', required: true });
     const comment = h('input', { placeholder: 'comment' });
-    detail.replaceChildren(
+    replace(
+      detail,
       h('h2', {}, run.name, ' ', badge(run.status)),
       h(
         'p',
@@ -402,7 +415,7 @@ async function renderTrace(traceId) {
                   {},
                   h(
                     'a',
-                    { href: `#/traces/${encodeURIComponent(link.traceId)}` },
+                    { href: `#/traces/${encodeURIComponent(link.traceId)}/${encodeURIComponent(link.runId)}` },
                     link.traceId === run.traceId && byId.has(link.runId)
                       ? `${byId.get(link.runId).name} (${link.runId})`
                       : `${link.traceId} / ${link.runId}`,
@@ -438,6 +451,8 @@ async function renderTrace(traceId) {
     );
   };
 
+  // The label of each run, so a link to one opens with it selected.
+  const labels = new Map();
   const renderNode = (node) => {
     const label = h(
       'span',
@@ -448,12 +463,14 @@ async function renderTrace(traceId) {
       h('span', { class: 'muted' }, ` ${ms(node.latencyMs)}${node.cost ? ` · ${money(node.cost)}` : ''}`),
     );
     label.addEventListener('click', () => select(node, label));
+    labels.set(node.id, label);
     return h('li', {}, label, node.children?.length ? h('ul', { class: 'tree' }, node.children.map(renderNode)) : '');
   };
 
   const other = h('input', { placeholder: 'another trace id' });
   const comparison = h('div');
-  view.replaceChildren(
+  replace(
+    view,
     h('p', {}, h('a', { href: '#/traces' }, '← Traces')),
     h('h1', {}, `Trace ${traceId}`),
     h(
@@ -473,9 +490,9 @@ async function renderTrace(traceId) {
             const { comparison: result } = await api(
               `/api/compare/traces?left=${encodeURIComponent(traceId)}&right=${encodeURIComponent(other.value)}`,
             );
-            comparison.replaceChildren(renderTraceComparison(result));
+            replace(comparison, renderTraceComparison(result));
           } catch (error) {
-            comparison.replaceChildren(notice(error.message, 'error'));
+            replace(comparison, notice(error.message, 'error'));
           }
         },
       },
@@ -484,8 +501,12 @@ async function renderTrace(traceId) {
     ),
     comparison,
   );
-  const first = view.querySelector('.tree-node');
-  if (first) select(tree, first);
+  // The run a link named, or else the root.
+  if (runId && labels.has(runId)) select(byId.get(runId), labels.get(runId));
+  else {
+    const first = view.querySelector('.tree-node');
+    if (first) select(tree, first);
+  }
 }
 
 function renderTraceComparison(result) {
@@ -590,7 +611,8 @@ async function renderThreads([graphName, threadId]) {
   const chosen = all.find((graph) => graph.name === graphName) ?? all[0];
   const { threads, listed } = await api(`/api/graphs/${encodeURIComponent(chosen.name)}/threads`);
   const open = h('input', { placeholder: 'thread id' });
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Threads'),
     h(
       'div',
@@ -656,7 +678,8 @@ async function renderThread(graphName, threadId, step) {
   const editValues = h('textarea', {}, JSON.stringify(checkpoint.state, null, 2));
   const asNode = h('input', { placeholder: 'as node (optional)' });
 
-  view.replaceChildren(
+  replace(
+    view,
     h('p', {}, h('a', { href: `#/threads/${encodeURIComponent(graphName)}` }, `← ${graphName}`)),
     h('h1', {}, `Thread ${threadId} `, badge(latest.status)),
     h(
@@ -763,7 +786,8 @@ async function renderThread(graphName, threadId, step) {
 async function renderInbox() {
   const { interrupts, reviews, proposals = [] } = await api('/api/inbox');
   const waiting = reviews.reduce((total, queue) => total + queue.items.length, interrupts.length + proposals.length);
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, `Inbox (${waiting})`),
     overview.sources.proposals
       ? [
@@ -922,7 +946,8 @@ function reviewCard(queue, item) {
 async function renderExperiments([id]) {
   if (id) {
     const { experiment } = await api(`/api/experiments/${encodeURIComponent(id)}`);
-    view.replaceChildren(
+    replace(
+      view,
       h('p', {}, h('a', { href: '#/experiments' }, '← Experiments')),
       h('h1', {}, experiment.name),
       pretty(experiment.metrics),
@@ -950,7 +975,8 @@ async function renderExperiments([id]) {
     baseline.value = experiments[1].id;
   }
   const result = h('div');
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Experiments'),
     datasets.length
       ? [
@@ -975,9 +1001,9 @@ async function renderExperiments([id]) {
             const { comparison, text } = await api(
               `/api/compare/experiments?baseline=${encodeURIComponent(baseline.value)}&candidate=${encodeURIComponent(candidate.value)}`,
             );
-            result.replaceChildren(renderExperimentComparison(comparison, text));
+            replace(result, renderExperimentComparison(comparison, text));
           } catch (error) {
-            result.replaceChildren(notice(error.message, 'error'));
+            replace(result, notice(error.message, 'error'));
           }
         },
       },
@@ -1039,7 +1065,8 @@ function renderExperimentComparison(comparison, text) {
 async function renderPrompts([name]) {
   if (name) return renderPrompt(name);
   const { prompts } = await api('/api/prompts');
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Prompts'),
     table(
       [
@@ -1091,7 +1118,8 @@ async function renderPrompt(name) {
   const playModel = h('input', { placeholder: 'model override' });
   const playOutput = h('div');
 
-  view.replaceChildren(
+  replace(
+    view,
     h('p', {}, h('a', { href: '#/prompts' }, '← Prompts')),
     h('h1', {}, name),
     h('h2', {}, 'Labels'),
@@ -1135,9 +1163,9 @@ async function renderPrompt(name) {
                 const { diff } = await api(
                   `${base}/diff?from=${encodeURIComponent(diffFrom.value)}&to=${encodeURIComponent(diffTo.value)}`,
                 );
-                diffOutput.replaceChildren(renderPromptDiff(diff));
+                replace(diffOutput, renderPromptDiff(diff));
               } catch (error) {
-                diffOutput.replaceChildren(notice(error.message, 'error'));
+                replace(diffOutput, notice(error.message, 'error'));
               }
             },
           },
@@ -1207,7 +1235,7 @@ async function renderPrompt(name) {
             variables: parseJson(playVariables.value, {}),
             model: playModel.value || undefined,
           });
-          playOutput.replaceChildren();
+          replace(playOutput);
           return result;
         }),
       },
@@ -1267,7 +1295,8 @@ function renderPromptDiff(diff) {
 async function renderContexts([name]) {
   if (name) return renderContext(name);
   const { contexts } = await api('/api/contexts');
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Context bundles'),
     table(
       [
@@ -1300,7 +1329,8 @@ async function renderContext(name) {
     labels.map((label) => h('option', { value: label.label }, label.label)),
   );
   const rollbackOutput = h('div');
-  view.replaceChildren(
+  replace(
+    view,
     h('p', {}, h('a', { href: '#/contexts' }, '← Bundles')),
     h('h1', {}, name),
     h('h2', {}, 'Labels'),
@@ -1343,9 +1373,9 @@ async function renderContext(name) {
             const { text } = await api(
               `${base}/diff?from=${encodeURIComponent(diffFrom.value)}&to=${encodeURIComponent(diffTo.value)}`,
             );
-            diffOutput.replaceChildren(h('pre', {}, text));
+            replace(diffOutput, h('pre', {}, text));
           } catch (error) {
-            diffOutput.replaceChildren(notice(error.message, 'error'));
+            replace(diffOutput, notice(error.message, 'error'));
           }
         },
       },
@@ -1414,7 +1444,8 @@ async function renderContext(name) {
 
 async function renderIssues([hours = '24']) {
   const { issues, regressions } = await api(`/api/issues?hours=${encodeURIComponent(hours)}`);
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Issues'),
     h(
       'div',
@@ -1448,7 +1479,8 @@ async function renderIssues([hours = '24']) {
 
 async function renderAudit() {
   const { entries } = await api('/api/audit?limit=500');
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Audit log'),
     table(
       [
@@ -1487,7 +1519,8 @@ async function renderCosts([days = '7']) {
       s('text', { x: index * (barWidth + 8), y: 132 }, day.day.slice(5)),
     );
   });
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Costs'),
     h(
       'div',
@@ -1570,7 +1603,8 @@ async function renderHealth() {
   const health = await api('/api/health');
   const providers = Array.isArray(health.providers) ? health.providers : [];
   const circuits = Array.isArray(health.circuits) ? health.circuits : [];
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Health'),
     providers.length
       ? [
@@ -1627,7 +1661,8 @@ async function renderOperations([status = '']) {
       : null,
     overview.sources.assets ? api('/api/assets') : null,
   ]);
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Operations'),
     operations
       ? [
@@ -1717,7 +1752,8 @@ async function renderDeployments([assistant]) {
     if (!deployment) throw new Error(`No deployment for "${assistant}"`);
     return renderDeployment(deployment, replicas);
   }
-  view.replaceChildren(
+  replace(
+    view,
     h('h1', {}, 'Deployments'),
     queue
       ? h(
@@ -1835,7 +1871,8 @@ function renderDeployment(deployment, replicas) {
       return result.deployment.traffic;
     });
 
-  view.replaceChildren(
+  replace(
+    view,
     h('p', {}, h('a', { href: '#/deployments' }, '← Deployments')),
     h('h1', {}, deployment.assistant),
     h(
@@ -1965,7 +2002,8 @@ async function start() {
     overview = await api('/api/overview');
     if (overview.accounts) who.textContent = `${session.user.name ?? session.user.id} · ${session.user.role}`;
   } catch (error) {
-    view.replaceChildren(
+    replace(
+      view,
       h('h1', {}, 'Nexus studio'),
       notice(`The studio could not start: ${error.message}. Open the link it printed.`, 'error'),
     );

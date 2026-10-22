@@ -59,6 +59,16 @@ export interface AcpEditor extends AcpEditorBridge {
   close(): Promise<void>;
 }
 
+/** One MCP server of a session: its client, its tools as last listed, and how to list them again. */
+interface ServerTools {
+  name: string;
+  client: McpClient;
+  tools: ToolDefinition[];
+  /** Set when the server said its tools changed, until they are listed again. */
+  stale: boolean;
+  list(): Promise<ToolDefinition[]>;
+}
+
 /** An MCP server the editor offers, as ACP describes it. */
 interface OfferedServer {
   name?: string;
@@ -73,16 +83,16 @@ interface OfferedServer {
 /** The editor's files, terminal, and MCP servers, as tools an agent's `toolSource` supplies per session. */
 export function acpEditor(options: AcpEditorOptions = {}): AcpEditor {
   let connection: AcpConnection | undefined;
-  const servers = new Map<string, Promise<{ clients: McpClient[]; tools: ToolDefinition[] }>>();
+  /** Each session's MCP servers: the client, its tools as last listed, and whether its server changed them since. */
+  const servers = new Map<string, Promise<ServerTools[]>>();
   const maxOutput = options.maxOutputBytes ?? 65_536;
 
-  /** Connects a session's MCP servers once, keeping those that start. */
+  /** Connects a session's MCP servers once, keeping those that start, and lists each one's tools. */
   const mcpTools = (session: AcpSessionInfo) => {
     let connected = servers.get(session.id);
     if (!connected) {
       connected = (async () => {
-        const clients: McpClient[] = [];
-        const tools: ToolDefinition[] = [];
+        const entries: ServerTools[] = [];
         const declare = options.mcpToolCapabilities ?? true;
         for (const offered of session.mcpServers as OfferedServer[]) {
           const name = String(offered.name ?? 'mcp');
@@ -95,6 +105,7 @@ export function acpEditor(options: AcpEditorOptions = {}): AcpEditor {
                   ...(options.mcpFetch ? { fetch: options.mcpFetch } : {}),
                 }
               : undefined;
+            const sse = remote && offered.type === 'sse';
             const transport = offered.command
               ? createStdioTransport({
                   command: offered.command,
@@ -102,26 +113,40 @@ export function acpEditor(options: AcpEditorOptions = {}): AcpEditor {
                   env: Object.fromEntries((offered.env ?? []).map((item) => [item.name, item.value])),
                   ...(session.cwd ? { cwd: session.cwd } : {}),
                 })
-              : remote && offered.type === 'sse'
-                ? createSseTransport({ ...remote, timeoutMs: options.mcpTimeoutMs ?? 30_000 })
+              : sse
+                ? // A stream that ends is opened again, and the server greeted again, within the session.
+                  createSseTransport({ ...remote, timeoutMs: options.mcpTimeoutMs ?? 30_000, reopen: true })
                 : remote && (offered.type === 'http' || offered.type === undefined)
                   ? createHttpTransport(remote)
                   : undefined;
             if (!transport) throw new Error(`MCP server "${name}" uses a transport this agent does not speak`);
-            const client = new McpClient(transport, { timeoutMs: options.mcpTimeoutMs ?? 30_000 });
-            clients.push(client);
-            tools.push(
-              ...(await client.toNexusTools({
-                prefix,
-                server: prefix,
-                capabilities: typeof declare === 'function' ? (tool) => declare(tool, prefix) : declare,
-              })),
-            );
+            const client = new McpClient(transport, {
+              timeoutMs: options.mcpTimeoutMs ?? 30_000,
+              ...(sse ? { reconnect: true } : {}),
+            });
+            const entry: ServerTools = {
+              name,
+              client,
+              tools: [],
+              stale: false,
+              list: () =>
+                client.toNexusTools({
+                  prefix,
+                  server: prefix,
+                  capabilities: typeof declare === 'function' ? (tool) => declare(tool, prefix) : declare,
+                }),
+            };
+            entries.push(entry);
+            // A server that says its tools changed has them listed again before the next turn.
+            client.onToolsChanged(() => {
+              entry.stale = true;
+            });
+            entry.tools = await entry.list();
           } catch (error) {
             options.onError?.(error, name);
           }
         }
-        return { clients, tools };
+        return entries;
       })();
       servers.set(session.id, connected);
     }
@@ -248,13 +273,28 @@ export function acpEditor(options: AcpEditorOptions = {}): AcpEditor {
       if (!connection || !session) return [];
       const own = tools(session);
       if (options.mcp === false || session.mcpServers.length === 0) return own;
-      return [...own, ...(await mcpTools(session)).tools];
+      const entries = await mcpTools(session);
+      await Promise.all(
+        entries
+          .filter((entry) => entry.stale)
+          .map(async (entry) => {
+            entry.stale = false;
+            try {
+              entry.tools = await entry.list();
+            } catch (error) {
+              // Its tools as last listed stay, and the change is tried again at the next turn.
+              entry.stale = true;
+              options.onError?.(error, entry.name);
+            }
+          }),
+      );
+      return [...own, ...entries.flatMap((entry) => entry.tools)];
     },
     async close() {
       const connected = [...servers.values()];
       servers.clear();
-      for (const { clients } of await Promise.all(connected)) {
-        await Promise.all(clients.map((client) => client.close().catch(() => undefined)));
+      for (const entries of await Promise.all(connected)) {
+        await Promise.all(entries.map((entry) => entry.client.close().catch(() => undefined)));
       }
     },
   };

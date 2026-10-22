@@ -45,6 +45,16 @@ const RUNWAY_MODELS = [
 ] as const;
 /** What Omni adds when it extends a video, in seconds. */
 const OMNI_LENGTHS = [3, 4, 5, 6, 7, 8, 9, 10];
+/** Models that take reference images and reference videos, up to 15 seconds of video together. */
+const REFERENCED: Partial<VideoModelCapabilities> = {
+  inputs: ['image', 'references', 'reference-videos'],
+  maxReferences: 9,
+  referenceVideoSeconds: { total: 15 },
+};
+/** Reference videos Runway names by their type; Omni's are bare. */
+const BARE_REFERENCE_VIDEOS = new Set(['gemini_omni_flash_1.1']);
+/** The image-to-video models that take reference videos too. */
+const IMAGE_REFERENCE_VIDEOS = new Set(['wan3', 'wan3_prime']);
 const VEO: Partial<VideoModelCapabilities> = {
   durations: [4, 6, 8],
   defaultDurationSeconds: 8,
@@ -62,8 +72,18 @@ const BY_MODEL: Record<string, Partial<VideoModelCapabilities>> = {
   },
   'veo3.1': VEO,
   'veo3.1_fast': VEO,
+  seedance2: REFERENCED,
+  seedance2_fast: REFERENCED,
+  seedance2_mini: REFERENCED,
+  seedance2_5: REFERENCED,
+  hailuo3: REFERENCED,
+  wan3: { ...REFERENCED, maxReferences: 10 },
+  wan3_prime: { ...REFERENCED, maxReferences: 10 },
+  grok_imagine_1_5: { inputs: ['image', 'references'] },
   'gemini_omni_flash_1.1': {
-    inputs: ['image', 'extend', 'edit'],
+    inputs: ['image', 'references', 'reference-videos', 'extend', 'edit'],
+    maxReferenceVideos: 3,
+    referenceVideoSeconds: { each: 3 },
     durations: OMNI_LENGTHS,
     extendDurations: OMNI_LENGTHS,
     audio: 'none',
@@ -182,6 +202,20 @@ export class RunwayVideoProvider implements VideoProvider {
     if (request.audio !== undefined) body.audio = request.audio;
     if (request.seed !== undefined) body.seed = request.seed;
     if (request.image) body.promptImage = imageUri(request.image);
+    // Image to video takes no reference images, and reference videos on Wan alone.
+    if (request.image && request.references?.length) {
+      throw new VideoError(
+        "Runway's image to video takes no reference images; send them without a first frame",
+        'VIDEO_UNSUPPORTED',
+      );
+    }
+    if (request.image && request.referenceVideos?.length && !IMAGE_REFERENCE_VIDEOS.has(request.model)) {
+      throw new VideoError(
+        `Runway's image to video takes reference videos only on Wan, not "${request.model}"`,
+        'VIDEO_UNSUPPORTED',
+      );
+    }
+    this.references(request, body);
     Object.assign(body, request.providerOptions);
     const path = request.image ? '/v1/image_to_video' : '/v1/text_to_video';
     const task = await this.call<RunwayTask>(path, { method: 'POST', body: JSON.stringify(body) }, context);
@@ -209,8 +243,7 @@ export class RunwayVideoProvider implements VideoProvider {
       if (ratio) body.ratio = ratio;
     }
     if (request.seed !== undefined) body.seed = request.seed;
-    if (request.references?.length)
-      body.references = request.references.map((reference) => ({ uri: imageUri(reference) }));
+    this.references(request, body);
     Object.assign(body, request.providerOptions);
     const task = await this.call<RunwayTask>(
       '/v1/video_to_video',
@@ -239,13 +272,20 @@ export class RunwayVideoProvider implements VideoProvider {
         throw new VideoError(`Runway task ${video.from.ref.id} has no video ${index} to continue`, 'VIDEO_INVALID');
       return url;
     }
-    const input = video.input as AssetInput;
-    if (input.location.kind === 'bytes' && input.location.data.byteLength > MAX_INLINE_VIDEO_BYTES) {
-      throw new VideoError('Runway takes a video inline up to 5 MB; give a larger one by URL', 'VIDEO_UNSUPPORTED');
+    return videoInputUri(video.input as AssetInput);
+  }
+
+  /** A request's reference images and reference videos, as the model names them. */
+  private references(request: VideoProviderRequest, body: Record<string, unknown>): void {
+    if (request.references?.length) {
+      body.references = request.references.map((reference) => ({ uri: imageUri(reference) }));
     }
-    if (input.location.kind === 'url') return input.location.url;
-    if (input.location.kind === 'bytes') return `data:${input.mimeType};base64,${encodeBase64(input.location.data)}`;
-    throw new VideoError('Runway takes a video as bytes or by URL', 'VIDEO_UNSUPPORTED');
+    if (request.referenceVideos?.length) {
+      const bare = BARE_REFERENCE_VIDEOS.has(request.model);
+      body.referenceVideos = request.referenceVideos.map((reference) =>
+        bare ? { uri: videoInputUri(reference) } : { type: 'video', uri: videoInputUri(reference) },
+      );
+    }
   }
 
   /** Reads the task. */
@@ -354,6 +394,16 @@ function ratioOf(aspectRatio: string | undefined, resolution: string | undefined
     );
   }
   return ratio;
+}
+
+/** A video given to Runway: by URL, or inline as a data URI up to 5 MB. */
+function videoInputUri(input: AssetInput): string {
+  if (input.location.kind === 'bytes' && input.location.data.byteLength > MAX_INLINE_VIDEO_BYTES) {
+    throw new VideoError('Runway takes a video inline up to 5 MB; give a larger one by URL', 'VIDEO_UNSUPPORTED');
+  }
+  if (input.location.kind === 'url') return input.location.url;
+  if (input.location.kind === 'bytes') return `data:${input.mimeType};base64,${encodeBase64(input.location.data)}`;
+  throw new VideoError('Runway takes a video as bytes or by URL', 'VIDEO_UNSUPPORTED');
 }
 
 function imageUri(input: AssetInput): string {

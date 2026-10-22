@@ -265,7 +265,9 @@ import {
   fromStore as serverStateFromStore,
   RedisRunEventLog,
   type AgentServer,
+  type ListPage,
   type RunRecord as ServerRunRecord,
+  type ThreadRecord as ServerThreadRecord,
 } from 'nexus-ai-pro/server';
 import { createRemoteGraph, type RemoteRunResult } from 'nexus-ai-pro/server/remote';
 import {
@@ -311,7 +313,14 @@ import { MediaManager, modelMediaProvider, type MediaText } from 'nexus-ai-pro/m
 import { MistralOcrProvider } from 'nexus-ai-pro/media/mistral';
 import { MockMediaProvider } from 'nexus-ai-pro/media/mock';
 import { answerFromMedia, createMediaIndex, type MediaHit } from 'nexus-ai-pro/media/rag';
-import { priceVideo, VideoManager, type VideoJobRef, type VideoResult, type VideoSource } from 'nexus-ai-pro/video';
+import {
+  priceVideo,
+  VideoManager,
+  type VideoInputKind,
+  type VideoJobRef,
+  type VideoResult,
+  type VideoSource,
+} from 'nexus-ai-pro/video';
 import { GoogleVideoProvider } from 'nexus-ai-pro/video/google';
 import { MockVideoProvider } from 'nexus-ai-pro/video/mock';
 import { RunwayVideoProvider } from 'nexus-ai-pro/video/runway';
@@ -680,7 +689,12 @@ const agentListener = toNodeListener(agents);
 const remoteAgent = createRemoteGraph({ url: 'https://agents.internal', assistant: 'demo' });
 const remoteResult: Promise<RemoteRunResult> = remoteAgent.invoke({ topic: 'batteries' });
 const agentRuns: Promise<ServerRunRecord[]> = agents.runs.runs(undefined, { limit: 5 });
-void [agentListener, remoteResult, agentRuns, remoteAgent.asNode(), serverStateFromStore];
+// A page of a list, and the page after it.
+const threadPage: Promise<ListPage<ServerThreadRecord>> = agents.runs.listThreads(undefined, { limit: 10 });
+const nextRuns: Promise<ListPage<ServerRunRecord>> = threadPage.then((page) =>
+  agents.runs.listRuns(undefined, { limit: 10, ...(page.nextCursor ? { cursor: page.nextCursor } : {}) }),
+);
+void [agentListener, remoteResult, agentRuns, threadPage, nextRuns, remoteAgent.asNode(), serverStateFromStore];
 const deployments = new Deployments({ heartbeatMs: 5_000 });
 const tenants = tenantLimits({
   default: { maxActiveRuns: 5, rate: { runs: 60, windowMs: 60_000 }, budget: { usd: 10, period: 'day' } },
@@ -763,6 +777,12 @@ const lookupCapabilities: string[] | undefined = mcpToolCapabilities(
 const servedAnnotations: McpToolAnnotations | undefined = mcpToolAnnotations({ capabilities: ['filesystem:read'] });
 const consumerEditor = acpEditor({ mcpToolCapabilities: (tool, server) => (tool.annotations ? ['mcp.read:' + server] : undefined) });
 const editorTransports: { http: boolean; sse: boolean } = consumerEditor.mcpCapabilities;
+// A client that opens its stream again when it ends, and hears that its server's tools changed.
+const reconnecting = new McpClient(createSseTransport({ url: 'https://mcp.example.com/sse', reopen: true }), {
+  reconnect: true,
+});
+const stopHearing: () => void = reconnecting.onToolsChanged(() => undefined);
+void stopHearing;
 void [declaredTools, lookupCapabilities, servedAnnotations, editorTransports];
 const traceStore: TraceStore = new MemoryTraceStore({ maxRuns: 500 });
 const tracer = new Tracer({ store: traceStore, sampling: { rate: 0.1, keepErrors: true }, redaction: { hideFields: ['apiKey'] } });
@@ -948,6 +968,21 @@ const editedVideo: Promise<VideoJobRef> = videoManager.start({
 });
 const omniCost: number | undefined = priceVideo('gemini-omni-1.1-flash', 6)?.amount;
 void [continuedVideo, editedVideo, omniCost];
+// A video made after reference videos, and Gemini Omni Flash on Vertex AI.
+const referencedVideo: Promise<VideoJobRef> = videoManager.start({
+  provider: 'runway',
+  model: 'seedance2',
+  prompt: 'dance as the clip does',
+  referenceVideos: [{ location: { kind: 'url', url: 'https://example.com/dance.mp4' }, mimeType: 'video/mp4' }],
+});
+const vertexOmni = new GoogleVideoProvider({
+  accessToken: async () => 'token',
+  baseUrl: 'https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1',
+  interactionsBaseUrl: 'https://aiplatform.googleapis.com/v1beta1/projects/p/locations/global',
+  models: ['gemini-omni-1.1-flash-preview'],
+});
+const referenceKind: VideoInputKind = 'reference-videos';
+void [referencedVideo, vertexOmni, referenceKind];
 const readPages: Promise<number> = mediaManager
   .read({ media: { type: 'document', source: { url: 'https://example.com/a.pdf' } } })
   .then((text: MediaText) => text.pages.length);

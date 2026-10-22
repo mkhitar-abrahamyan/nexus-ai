@@ -112,6 +112,14 @@ export interface McpClientOptions {
   clientInfo?: { name: string; version: string };
   /** How long a request waits before failing. Defaults to 30 seconds. */
   timeoutMs?: number;
+  /**
+   * When the transport closes, as an SSE stream that ends or a server process that exits does, the
+   * next request opens it again and repeats the handshake, since the server's session went with it.
+   * Requests in flight still fail, and a client closed with `close()` stays closed. Needs a transport
+   * that can open again: `createStdioTransport` starts a new process, `createSseTransport` with
+   * `reopen` a new stream.
+   */
+  reconnect?: boolean;
 }
 
 /**
@@ -135,13 +143,31 @@ export class McpClient {
   private initialized = false;
   private connecting: Promise<{ name?: string; version?: string }> | undefined;
   private serverInfo: { name?: string; version?: string } = {};
+  /** Who hears that the server's tools changed. */
+  private readonly toolsChanged = new Set<() => void>();
+  private stopped = false;
 
   constructor(
     private readonly transport: McpTransport,
     private readonly options: McpClientOptions = {},
   ) {
     transport.onMessage((message) => this.receive(message));
-    transport.onClose?.(() => this.failAll(new McpError('The MCP connection closed')));
+    transport.onClose?.(() => {
+      this.failAll(new McpError('The MCP connection closed'));
+      // Reconnecting, the next request opens the transport and greets the server again.
+      if (this.options.reconnect && !this.stopped) this.initialized = false;
+    });
+  }
+
+  /**
+   * Hears each `notifications/tools/list_changed` the server sends: its tools are no longer what
+   * `listTools()` returned. Returns a function that stops hearing.
+   */
+  onToolsChanged(handler: () => void): () => void {
+    this.toolsChanged.add(handler);
+    return () => {
+      this.toolsChanged.delete(handler);
+    };
   }
 
   /**
@@ -273,6 +299,7 @@ export class McpClient {
 
   /** Closes the connection and rejects every request still waiting. */
   async close(): Promise<void> {
+    this.stopped = true;
     this.failAll(new McpError('The MCP client was closed'));
     await this.transport.close();
   }
@@ -307,6 +334,16 @@ export class McpClient {
         message.result,
         message.error ? new McpError(message.error.message, message.error.code, message.error.data) : undefined,
       );
+      return;
+    }
+    if (isNotification(message) && message.method === 'notifications/tools/list_changed') {
+      for (const handler of this.toolsChanged) {
+        try {
+          handler();
+        } catch {
+          // One listener's failure does not keep the others from hearing it.
+        }
+      }
       return;
     }
     if (isNotification(message) && message.method === 'notifications/progress') {
@@ -442,7 +479,8 @@ export function serverEnvironment(
  * Runs an MCP server as a child process and speaks to it over its stdin and stdout.
  *
  * The transport most MCP servers ship with. `node:child_process` is imported lazily, so a browser
- * or edge build that only uses the HTTP transport never reaches for it.
+ * or edge build that only uses the HTTP transport never reaches for it. When the process exits, the
+ * transport closes; started again, it runs a new one.
  */
 export function createStdioTransport(options: StdioClientOptions): McpTransport {
   let child:
@@ -455,12 +493,13 @@ export function createStdioTransport(options: StdioClientOptions): McpTransport 
         once(event: 'close', listener: () => void): void;
       }
     | undefined;
-  const decoder = new LineDecoder();
   let onMessage: (message: JsonRpcMessage) => void = () => undefined;
   let onClose: () => void = () => undefined;
 
   return {
     async start() {
+      // Each process reads its own lines, so a line one left unfinished never joins the next one's.
+      const decoder = new LineDecoder();
       const { spawn } = await import('node:child_process');
       const spawned = spawn(options.command, options.args ?? [], {
         cwd: options.cwd,
@@ -563,13 +602,19 @@ export interface SseClientOptions {
   fetch?: typeof globalThis.fetch;
   /** How long to wait for the server to name where messages go, in milliseconds. Defaults to 10 seconds. */
   timeoutMs?: number;
+  /**
+   * Opens a new stream when the next message is sent after the stream ended, rather than staying
+   * closed. The server starts a new session on it, so an `McpClient` with `reconnect` greets it again.
+   */
+  reopen?: boolean;
 }
 
 /**
  * Speaks to an MCP server over HTTP with Server-Sent Events, as MCP's 2024-11-05 transport: one
  * long `GET` the server answers on, and a `POST` per message to the endpoint the stream names
  * first. The endpoint must be on the stream's own origin, so a server cannot send the messages, and
- * their headers, anywhere else. When the stream ends, the transport closes.
+ * their headers, anywhere else. When the stream ends, the transport closes; with `reopen`, the next
+ * message opens a new one.
  */
 export function createSseTransport(options: SseClientOptions): McpTransport {
   const fetchImplementation = options.fetch ?? globalThis.fetch;
@@ -578,63 +623,80 @@ export function createSseTransport(options: SseClientOptions): McpTransport {
   let endpoint: string | undefined;
   let opening: Promise<void> | undefined;
   let closed = false;
-  const stream = new AbortController();
-  const ended = () => {
-    if (closed) return;
+  /** Set by `close()`: a transport closed on purpose never opens again. */
+  let stopped = false;
+  let stream = new AbortController();
+  /** The transport closes when its current stream ends; a stream already replaced closes nothing. */
+  const ended = (from: AbortController) => {
+    if (closed || from !== stream) return;
     closed = true;
     for (const handler of onClose) handler();
   };
 
   const open = async () => {
-    const response = await fetchImplementation(options.url, {
-      headers: { accept: 'text/event-stream', ...options.headers },
-      signal: stream.signal,
-    });
-    if (!response.ok || !response.body) throw new McpError(`MCP SSE transport failed with ${response.status}`);
-    const reader = response.body.getReader();
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new McpError(`The MCP server named no endpoint within ${options.timeoutMs ?? 10_000}ms`));
-        stream.abort();
-      }, options.timeoutMs ?? 10_000);
-      const event = (name: string, data: string) => {
-        if (name === 'endpoint') {
-          if (endpoint) return;
-          const target = new URL(data.trim(), options.url);
-          if (target.origin !== new URL(options.url).origin) {
+    const own = new AbortController();
+    stream = own;
+    try {
+      const response = await fetchImplementation(options.url, {
+        headers: { accept: 'text/event-stream', ...options.headers },
+        signal: own.signal,
+      });
+      if (!response.ok || !response.body) throw new McpError(`MCP SSE transport failed with ${response.status}`);
+      const reader = response.body.getReader();
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new McpError(`The MCP server named no endpoint within ${options.timeoutMs ?? 10_000}ms`)),
+          options.timeoutMs ?? 10_000,
+        );
+        const event = (name: string, data: string) => {
+          if (name === 'endpoint') {
+            if (endpoint) return;
+            const target = new URL(data.trim(), options.url);
+            if (target.origin !== new URL(options.url).origin) {
+              clearTimeout(timer);
+              reject(new McpError(`The MCP server named an endpoint on another origin, ${target.origin}`));
+              return;
+            }
+            endpoint = target.href;
             clearTimeout(timer);
-            reject(new McpError(`The MCP server named an endpoint on another origin, ${target.origin}`));
-            stream.abort();
-            return;
+            resolve();
+          } else if (name === 'message') {
+            try {
+              onMessage(JSON.parse(data) as JsonRpcMessage);
+            } catch {
+              // A frame that is not JSON-RPC is skipped, not fatal.
+            }
           }
-          endpoint = target.href;
-          clearTimeout(timer);
-          resolve();
-        } else if (name === 'message') {
-          try {
-            onMessage(JSON.parse(data) as JsonRpcMessage);
-          } catch {
-            // A frame that is not JSON-RPC is skipped, not fatal.
-          }
-        }
-      };
-      void readEvents(reader, event).then(
-        () => {
-          clearTimeout(timer);
-          reject(new McpError('The MCP event stream ended'));
-          ended();
-        },
-        (error: unknown) => {
-          clearTimeout(timer);
-          reject(error instanceof McpError ? error : new McpError(`The MCP event stream failed: ${String(error)}`));
-          ended();
-        },
-      );
-    });
+        };
+        void readEvents(reader, event).then(
+          () => {
+            clearTimeout(timer);
+            reject(new McpError('The MCP event stream ended'));
+            ended(own);
+          },
+          (error: unknown) => {
+            clearTimeout(timer);
+            reject(error instanceof McpError ? error : new McpError(`The MCP event stream failed: ${String(error)}`));
+            ended(own);
+          },
+        );
+      });
+    } catch (error) {
+      // A stream that never named its endpoint is over at once, so with `reopen` the next message tries again.
+      own.abort();
+      ended(own);
+      throw error;
+    }
   };
 
   /** Opens the stream once, for the first caller; later callers wait on the same opening. */
   const started = () => {
+    // A stream that ended opens anew, when the transport reopens and was not closed on purpose.
+    if (closed && options.reopen && !stopped) {
+      closed = false;
+      endpoint = undefined;
+      opening = undefined;
+    }
     opening ??= open();
     return opening;
   };
@@ -660,8 +722,9 @@ export function createSseTransport(options: SseClientOptions): McpTransport {
       onClose.push(handler);
     },
     close() {
+      stopped = true;
       stream.abort();
-      ended();
+      ended(stream);
     },
   };
 }

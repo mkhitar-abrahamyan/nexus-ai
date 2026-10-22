@@ -499,6 +499,12 @@ rule naming either. The bridge asks the editor through an
 `AcpConnection`, which `serveAcp()` attaches. When the editor closes its end, the bridge closes the
 MCP servers it started.
 
+A session's servers can change while it lasts. An SSE server whose stream ends, as a proxy's timeout
+or a restart ends it, is reached again at its next call, on a new stream, and greeted again. A server
+that says its tools changed has them listed again before the agent's next turn, so a tool it adds
+between turns is offered at the next one. When listing them again fails, the agent keeps the tools as
+last listed, `onError` hears why, and they are listed again at the turn after.
+
 `AcpEditorOptions` turns off `files`, `terminal`, or `mcp`, and sets `mcpTimeoutMs` (30 seconds),
 `mcpFetch`, `maxOutputBytes` (64 KB), and `onError` for a server that fails to start.
 `mcpToolCapabilities` decides what MCP tools declare: `true`, the default, reads their annotations, a
@@ -555,6 +561,9 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
   one over SSE. The agent says it connects HTTP and SSE, calls a tool on each, and a policy that only
   lets MCP tools read refuses each server's destructive tool before the server sees it, with no rule
   naming a tool.
+- **ACP, with an MCP server that changes.** Between two turns, an editor's SSE server adds a tool,
+  says so, and its stream drops, and its sessions are its streams, so a new stream not greeted again
+  is refused. At the next turn the agent is offered the new tool and calls it over a new stream.
 
 Each protocol is also tested across releases and against the reference client of its own project:
 - **The previous minor.** A 2.5 client drives this release's server, and this release's client a
@@ -592,7 +601,8 @@ Each protocol is also tested across releases and against the reference client of
   the agent stopped runs again, so a tool with side effects needs an idempotency key.
 - **The editor's MCP servers.** A tool's capabilities are what its server says of it. The editor
   chose the server, so the agent takes its word; for a server you trust less, decide with
-  `mcpToolCapabilities`. An SSE server whose stream ends is not reconnected within the session.
+  `mcpToolCapabilities`. A call in flight when a server's stream drops fails, and the agent sees the
+  failed call. A stdio server that exits is not started again within the session.
 
 <!-- reference:start -->
 ## Reference

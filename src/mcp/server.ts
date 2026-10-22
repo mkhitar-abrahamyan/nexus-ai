@@ -74,9 +74,14 @@ export class McpServer {
     for (const item of options.tools ?? []) this.tools.set(item.name, item);
   }
 
-  /** Adds a tool. Returns the server, for chaining. */
+  /** Adds a tool, and tells a connected client its tools changed. Returns the server, for chaining. */
   register(tool: ToolDefinition): this {
     this.tools.set(tool.name, tool);
+    if (this.transport) {
+      void Promise.resolve(this.transport.send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' })).catch(
+        () => undefined,
+      );
+    }
     return this;
   }
 
@@ -121,7 +126,7 @@ export class McpServer {
         return {
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: {
-            tools: { listChanged: false },
+            tools: { listChanged: true },
             ...(this.options.resources?.length ? { resources: { listChanged: false } } : {}),
           },
           serverInfo: { name: this.options.name ?? 'nexus-ai-pro', version: this.options.version ?? '1.x' },

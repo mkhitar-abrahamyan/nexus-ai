@@ -4,6 +4,7 @@
  * may reach.
  */
 import { ResidencyError } from '../residency/errors.js';
+import { cursorAfter, isAfter, newestFirst, readCursor } from './list-page.js';
 import type { ResidencyDecision, ResidencyPolicy } from '../types/residency.js';
 
 /** One region's agent server: its base URL, or a handler in this process, such as `server.handle`. */
@@ -177,8 +178,14 @@ export function regionalGateway(options: RegionalGatewayOptions): RegionalGatewa
   /**
    * A list gathered from every region the tenant may reach: each asked for the same page, the answers
    * merged newest first and cut to the limit, with the regions that answered and those that could not.
+   * A cursor names a place in the order every region lists by, so each region's own next page is the
+   * part of the merged next page it holds.
    */
   const merged = async (kind: 'threads' | 'runs', request: Request, allowed: string[]): Promise<Response> => {
+    const query = new URL(request.url).searchParams;
+    const cursor = query.get('cursor') || undefined;
+    const after = cursor === undefined ? undefined : readCursor(cursor);
+    if (cursor !== undefined && !after) return refuse(400, 'BAD_REQUEST', '"cursor" is not one a list gave');
     const gaps: RegionListGap[] = allowed
       .filter((region) => !isUp(region))
       .map((region) => ({ region, reason: 'down' }));
@@ -192,7 +199,11 @@ export function regionalGateway(options: RegionalGatewayOptions): RegionalGatewa
           }
           succeeded(region);
           const body = (await response.json()) as Record<string, unknown>;
-          return { region, items: Array.isArray(body[kind]) ? (body[kind] as Array<Record<string, unknown>>) : [] };
+          return {
+            region,
+            items: Array.isArray(body[kind]) ? (body[kind] as Array<Record<string, unknown>>) : [],
+            more: typeof body.nextCursor === 'string',
+          };
         } catch (error) {
           options.onError?.(error, region);
           failed(region, error instanceof Error ? error.message : String(error));
@@ -213,17 +224,23 @@ export function regionalGateway(options: RegionalGatewayOptions): RegionalGatewa
         'retry-after': String(Math.ceil((options.health?.everyMs ?? 10_000) / 1000)),
       });
     }
-    const requested = Number(new URL(request.url).searchParams.get('limit'));
+    const requested = Number(query.get('limit'));
     const limit = Number.isInteger(requested) && requested > 0 ? requested : 50;
-    const items = answers
+    // Only what comes after the cursor, even from a region that did not page by it.
+    const all = answers
       .flatMap((answer) => answer.items ?? [])
-      .sort((a, b) => {
-        const time = String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? ''));
-        return time || String(a.id ?? '').localeCompare(String(b.id ?? ''));
-      })
-      .slice(0, limit);
+      .filter((item) => !after || isAfter(item, after))
+      .sort(newestFirst);
+    const items = all.slice(0, limit);
+    const more = all.length > limit || answers.some((answer) => answer.more);
+    const last = items[items.length - 1];
     return new Response(
-      JSON.stringify({ [kind]: items, regions: answered, ...(gaps.length ? { incomplete: gaps } : {}) }),
+      JSON.stringify({
+        [kind]: items,
+        ...(more && last ? { nextCursor: cursorAfter(last) } : {}),
+        regions: answered,
+        ...(gaps.length ? { incomplete: gaps } : {}),
+      }),
       {
         status: 200,
         headers: { 'content-type': 'application/json; charset=utf-8', 'x-nexus-region': answered.join(',') },

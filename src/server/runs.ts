@@ -36,6 +36,7 @@ import {
   ThreadBusyError,
 } from './errors.js';
 import { MemoryRunEventLog } from './events.js';
+import { type ListPage, pageOf, readCursor } from './list-page.js';
 import { gauge, gauges, ServerMetrics } from './metrics.js';
 import { MemoryServerStore, RUNS_NAMESPACE } from './state.js';
 
@@ -334,8 +335,35 @@ export class RunManager {
 
   /** Threads of a tenant, newest written first. */
   async threads(principal?: Principal, limit?: number): Promise<ThreadRecord[]> {
-    const all = await this.state.list<ThreadRecord>(THREADS, { limit: limit ?? 50 });
-    return all.filter((thread) => sameTenant(thread.tenantId, principal));
+    return (await this.listThreads(principal, { limit })).items;
+  }
+
+  /**
+   * A page of a tenant's threads, newest written first, 50 unless `limit` says otherwise. `cursor` is
+   * a page's `nextCursor`, and asks for the page after it.
+   */
+  async listThreads(
+    principal?: Principal,
+    options: { limit?: number; cursor?: string } = {},
+  ): Promise<ListPage<ThreadRecord>> {
+    return this.page<ThreadRecord>(THREADS, (thread) => sameTenant(thread.tenantId, principal), options);
+  }
+
+  /**
+   * Reads a namespace, newest written first, until a page of the records `keep` takes is full or the
+   * namespace ends, so another tenant's newer records never crowd a tenant's page out. A page deep in
+   * a long list reads every record before it.
+   */
+  private async page<R extends { id: string; updatedAt?: string; createdAt?: string }>(
+    namespace: readonly string[],
+    keep: (record: R) => boolean,
+    options: { limit?: number; cursor?: string },
+  ): Promise<ListPage<R>> {
+    const limit = options.limit ?? 50;
+    if (!Number.isInteger(limit) || limit < 1) throw new BadRequestError('"limit" must be a whole number above 0');
+    const after = options.cursor === undefined ? undefined : readCursor(options.cursor);
+    if (options.cursor !== undefined && !after) throw new BadRequestError('"cursor" is not one a list gave');
+    return pageOf((window) => this.state.list<R>(namespace, { limit: window }), keep, limit, after);
   }
 
   /** Deletes a thread's record. The assistant's own checkpoints are left alone. */
@@ -363,9 +391,21 @@ export class RunManager {
 
   /** Runs of a tenant, newest written first, optionally for one thread. */
   async runs(principal?: Principal, options: { threadId?: string; limit?: number } = {}): Promise<RunRecord[]> {
-    const all = await this.state.list<RunRecord>(RUNS, { limit: options.limit ?? 50 });
-    return all.filter(
+    return (await this.listRuns(principal, options)).items;
+  }
+
+  /**
+   * A page of a tenant's runs, newest written first, optionally for one thread, 50 unless `limit` says
+   * otherwise. `cursor` is a page's `nextCursor`, and asks for the page after it.
+   */
+  async listRuns(
+    principal?: Principal,
+    options: { threadId?: string; limit?: number; cursor?: string } = {},
+  ): Promise<ListPage<RunRecord>> {
+    return this.page<RunRecord>(
+      RUNS,
       (run) => sameTenant(run.tenantId, principal) && (!options.threadId || run.threadId === options.threadId),
+      options,
     );
   }
 

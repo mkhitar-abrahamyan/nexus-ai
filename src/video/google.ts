@@ -21,7 +21,13 @@ const STORAGE_BASE_URL = 'https://storage.googleapis.com/storage/v1';
 /** The Gemini API's video model since the Veo 3.1 previews shut down on 2026-10-22. */
 const OMNI_MODEL = 'gemini-omni-1.1-flash';
 /** Veo on Vertex AI, as generally available: the standard, Fast, and Lite (in preview) models. */
-const VERTEX_MODELS = ['veo-3.1-generate-001', 'veo-3.1-fast-generate-001', 'veo-3.1-lite-generate-001'] as const;
+const VERTEX_MODELS = [
+  'veo-3.1-generate-001',
+  'veo-3.1-fast-generate-001',
+  'veo-3.1-lite-generate-001',
+  // Gemini Omni Flash, in preview on Vertex AI, through the Interactions API at the global location.
+  'gemini-omni-1.1-flash-preview',
+] as const;
 const VEO_31: VideoModelCapabilities = {
   inputs: ['image', 'last-frame', 'references'],
   durations: [4, 6, 8],
@@ -37,7 +43,10 @@ const VEO_31: VideoModelCapabilities = {
 /** Omni makes 3 to 10 seconds, and adds as much when it extends. */
 const OMNI_LENGTHS = [3, 4, 5, 6, 7, 8, 9, 10];
 const OMNI: VideoModelCapabilities = {
-  inputs: ['image', 'references', 'extend', 'edit'],
+  inputs: ['image', 'references', 'reference-videos', 'extend', 'edit'],
+  // Up to three clips, each three seconds at most; their sound is ignored.
+  maxReferenceVideos: 3,
+  referenceVideoSeconds: { each: 3 },
   durations: OMNI_LENGTHS,
   defaultDurationSeconds: 8,
   extendDurations: OMNI_LENGTHS,
@@ -87,6 +96,12 @@ export interface GoogleVideoProviderConfig {
   byModel?: Record<string, Partial<VideoModelCapabilities>>;
   /** `dont_allow`, `allow_adult`, or `allow_all`, sent to Veo as `personGeneration`. Some regions allow only `allow_adult`. */
   personGeneration?: string;
+  /**
+   * Vertex AI only: where Gemini Omni Flash's interactions are, such as
+   * `https://aiplatform.googleapis.com/v1beta1/projects/P/locations/global`. Defaults to that URL for the
+   * project `baseUrl` names, since Omni is served at the global location alone.
+   */
+  interactionsBaseUrl?: string;
   /** Headers added to every request. */
   defaultHeaders?: Record<string, string>;
   /** Replaces the global `fetch`. */
@@ -310,26 +325,52 @@ export class GoogleVideoProvider implements VideoProvider {
   /** Cancels a running interaction. A Veo operation runs to its end. */
   async cancel(ref: VideoJobRef, context: VideoCallContext): Promise<void> {
     if (!isInteraction(ref)) throw new VideoError('A Veo operation cannot be cancelled here', 'VIDEO_UNSUPPORTED');
-    await this.call(`${this.baseUrl}/interactions/${encodeURIComponent(ref.id)}/cancel`, { method: 'POST' }, context);
+    await this.call(
+      `${this.interactionsBase()}/interactions/${encodeURIComponent(ref.id)}/cancel`,
+      { method: 'POST' },
+      context,
+    );
   }
 
   /** Deletes a finished interaction, and its video, from Google. */
   async remove(ref: VideoJobRef, context: VideoCallContext): Promise<void> {
     if (!isInteraction(ref)) throw new VideoError('A Veo video expires on its own', 'VIDEO_UNSUPPORTED');
     this.finished.delete(ref.id);
-    await this.call(`${this.baseUrl}/interactions/${encodeURIComponent(ref.id)}`, { method: 'DELETE' }, context);
+    await this.call(
+      `${this.interactionsBase()}/interactions/${encodeURIComponent(ref.id)}`,
+      { method: 'DELETE' },
+      context,
+    );
   }
 
   // ── Gemini Omni Flash, through the Interactions API ──
 
+  /** Where interactions are: the Gemini API itself, or Vertex AI's global location for the project. */
+  private interactionsBase(): string {
+    if (!this.vertex) return this.baseUrl;
+    if (this.config.interactionsBaseUrl) return this.config.interactionsBaseUrl.replace(/\/+$/, '');
+    const project = /\/projects\/([^/]+)\//.exec(`${this.baseUrl}/`)?.[1];
+    if (!project) {
+      throw new VideoError(
+        'Gemini Omni Flash on Vertex AI needs interactionsBaseUrl, or a baseUrl that names the project',
+        'VIDEO_INVALID',
+      );
+    }
+    return `https://aiplatform.googleapis.com/v1beta1/projects/${project}/locations/global`;
+  }
+
   private async startInteraction(request: VideoProviderRequest, context: VideoCallContext): Promise<VideoJobRef> {
-    if (this.vertex) {
-      throw new VideoError('Gemini Omni Flash is reached through the Gemini API, not Vertex AI', 'VIDEO_UNSUPPORTED');
+    if (request.video && request.referenceVideos?.length) {
+      throw new VideoError(
+        'Gemini Omni Flash takes a video to work from or reference videos, not both',
+        'VIDEO_UNSUPPORTED',
+      );
     }
     const parts: Array<Record<string, unknown>> = [];
     if (request.video?.input) parts.push(media('video', request.video.input));
     if (request.image) parts.push(media('image', request.image));
     for (const reference of request.references ?? []) parts.push(media('image', reference));
+    for (const reference of request.referenceVideos ?? []) parts.push(media('video', reference));
     if (request.prompt.trim()) parts.push({ type: 'text', text: request.prompt });
     const format: Record<string, unknown> = { type: 'video' };
     if (request.aspectRatio) format.aspect_ratio = request.aspectRatio;
@@ -356,7 +397,7 @@ export class GoogleVideoProvider implements VideoProvider {
     }
     const task = request.video
       ? request.video.mode
-      : request.references?.length
+      : request.references?.length || request.referenceVideos?.length
         ? 'reference_to_video'
         : request.image
           ? 'image_to_video'
@@ -364,7 +405,7 @@ export class GoogleVideoProvider implements VideoProvider {
     if (task) body.generation_config = { video_config: { task } };
     Object.assign(body, request.providerOptions);
     const interaction = await this.call<Interaction>(
-      `${this.baseUrl}/interactions`,
+      `${this.interactionsBase()}/interactions`,
       { method: 'POST', body: JSON.stringify(body) },
       context,
     );
@@ -421,7 +462,11 @@ export class GoogleVideoProvider implements VideoProvider {
   }
 
   private interaction(id: string, context: VideoCallContext): Promise<Interaction> {
-    return this.call<Interaction>(`${this.baseUrl}/interactions/${encodeURIComponent(id)}`, { method: 'GET' }, context);
+    return this.call<Interaction>(
+      `${this.interactionsBase()}/interactions/${encodeURIComponent(id)}`,
+      { method: 'GET' },
+      context,
+    );
   }
 
   /** Keeps the last few finished interactions, whose video the download reads. */

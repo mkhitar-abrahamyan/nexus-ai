@@ -67,7 +67,9 @@ export class MockVideoProvider implements VideoProvider {
     this.info = {
       name: options.name ?? 'mock',
       capabilities: {
-        inputs: ['image', 'last-frame', 'references', 'extend', 'edit'],
+        inputs: ['image', 'last-frame', 'references', 'reference-videos', 'extend', 'edit'],
+        maxReferenceVideos: 2,
+        referenceVideoSeconds: { total: 15 },
         durations: [4, 8],
         extendDurations: [4],
         continuesJobs: true,

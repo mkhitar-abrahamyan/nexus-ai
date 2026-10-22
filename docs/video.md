@@ -2,10 +2,10 @@
 
 <!-- covers: ./video ./video/google ./video/runway ./video/mock -->
 
-Videos from a prompt, a first or last frame, reference images, or a video to extend or edit, from
-`nexus-ai-pro/video`. One contract covers Google's models, Gemini Omni Flash on the Gemini API and Veo
-on Vertex AI, and Runway, whose task API also serves Veo, Gemini Omni Flash, Seedance, and the other
-models it hosts. A generation is a durable job: it survives the process that submitted it, streams
+Videos from a prompt, a first or last frame, reference images or videos, or a video to extend or
+edit, from `nexus-ai-pro/video`. One contract covers Google's models, Gemini Omni Flash on the Gemini
+API and on Vertex AI, and Veo on Vertex AI, and Runway, whose task API also serves Veo, Gemini Omni
+Flash, Seedance, and the other models it hosts. A generation is a durable job: it survives the process that submitted it, streams
 its video into an asset store, and is priced per second of video.
 
 ```ts
@@ -41,6 +41,7 @@ A `VideoGenerateRequest` holds the prompt and, as the model allows:
 | --- | --- |
 | `model`, `provider` | The model and provider. Default to the provider's model and the manager's default provider. |
 | `image`, `lastFrame`, `references` | A first frame, a last frame, and images whose subject or style the video keeps, as an `AssetInput`: bytes, a URL, or an asset in the manager's store. |
+| `referenceVideos` | Videos whose motion, subject, or look the video takes after, as `AssetInput` values of a video type. Their sound is ignored. |
 | `video` | A video to extend or edit, as a `VideoSource`: below. |
 | `durationSeconds`, `aspectRatio`, `resolution` | Its length, shape (`16:9`, `9:16`), and size (`720p`, `1080p`, `4k`). Extending, the length is what is added. |
 | `audio`, `negativePrompt`, `seed`, `count` | Sound, what it must not show, repeatability, and how many videos. |
@@ -51,8 +52,8 @@ A `VideoGenerateRequest` holds the prompt and, as the model allows:
 Before any job is submitted, the request is checked against the model's capabilities. A
 `VideoProviderCapabilities` declares the provider's models and what they take, a
 `VideoModelCapabilities` for each model where it differs (`byModel`), and `capabilitiesOf()` merges
-the two for one model. A `VideoInputKind` is `image`, `last-frame`, `references`, `extend`, or
-`edit`; a `VideoAudioSupport` is `always`, `optional`, or `none`. A length, shape, size, input, seed, or count
+the two for one model. A `VideoInputKind` is `image`, `last-frame`, `references`,
+`reference-videos`, `extend`, or `edit`; a `VideoAudioSupport` is `always`, `optional`, or `none`. A length, shape, size, input, seed, or count
 the model does not take is refused with a `VideoError` of code `VIDEO_UNSUPPORTED`, naming what it
 does take. A provider receives a `VideoProviderRequest`: the model chosen, and a stored input read
 into bytes.
@@ -96,6 +97,31 @@ input travels with a durable generation, so a worker that takes it over sends th
 | Veo 3.1 on Vertex AI | 7 seconds, a video in Cloud Storage, up to 37 seconds in all | No | When `storageUri` keeps its videos in Cloud Storage |
 | Runway's `gemini_omni_flash_1.1` | 3 to 10 seconds | Yes | By its task's signed URL |
 | Runway's `gemini_omni_flash` and `aleph2` | No | Yes, and `aleph2` only edits | By its task's signed URL |
+
+### Reference videos
+
+`referenceVideos` gives a model videos to take after: a motion to follow, a subject to keep, a look to
+match. A model that takes them lists `reference-videos` in its `inputs`, the most it takes as
+`maxReferenceVideos`, and how long they may be as `referenceVideoSeconds`, each and together. A
+video given as bytes says its length in its headers, so one too long is refused before anything is
+sent.
+
+| Model | Reference videos |
+| --- | --- |
+| Gemini Omni Flash, on the Gemini API and Vertex AI | Up to three, of three seconds each; not with a `video` to extend or edit |
+| Runway's `gemini_omni_flash_1.1` | Up to three, of three seconds each |
+| Runway's Seedance 2 models and `hailuo3` | Up to 15 seconds together, beside up to nine reference images |
+| Runway's `wan3` and `wan3_prime` | Up to 15 seconds together, beside up to ten reference images, with or without a first frame |
+
+```ts
+const dance = await video.generate({
+  provider: 'runway',
+  model: 'seedance2',
+  prompt: 'The robot dances as the woman in the clip does',
+  references: [{ location: { kind: 'url', url: robotPng }, mimeType: 'image/png' }],
+  referenceVideos: [{ location: { kind: 'url', url: danceClip }, mimeType: 'video/mp4' }],
+});
+```
 
 ## Durable jobs
 
@@ -165,7 +191,10 @@ frame, or reference images, and extends and edits videos. `cancel()` and `remove
 delete the interaction, which the free tier keeps a day.
 
 With an `accessToken`, a string or a function that returns a fresh one, and a Vertex AI `baseUrl`, it
-serves Veo 3.1 on Vertex: `veo-3.1-generate-001`, Fast, and Lite, in preview. A job is a long-running
+serves Veo 3.1 on Vertex: `veo-3.1-generate-001`, Fast, and Lite, in preview. It serves Gemini Omni
+Flash there too, as `gemini-omni-1.1-flash-preview`, on the same Interactions API at Vertex AI's
+global location, the only one that serves it, for the project `baseUrl` names;
+`interactionsBaseUrl` names another. A job is a long-running
 operation, polled with `fetchPredictOperation`, and each video is read from Cloud Storage, under
 `storageUri`, or from the bytes Vertex returns inline. Veo makes 4, 6, or 8 seconds with sound, up to
 four videos a request, and extends a video in Cloud Storage by seven seconds. Fast and Lite make no 4k
@@ -174,7 +203,8 @@ name beginning `gemini-omni` is reached through the Interactions API and any oth
 protocol, `byModel`, and `personGeneration`.
 
 `RunwayVideoProvider` speaks Runway's task API: a prompt alone is text to video, a first frame
-makes it image to video, and a video makes it video to video. A request's shape and size become Runway's `ratio`, such as `1280:720`, and a
+makes it image to video, and a video makes it video to video. Reference images and videos go with a
+prompt alone, and reference videos with a first frame on Wan only. A request's shape and size become Runway's `ratio`, such as `1280:720`, and a
 ratio of Runway's own passes through as `aspectRatio`. Each video is read from the signed URL the
 finished task lists, which is fetched without the API secret. `cancel()` and `remove()` delete the
 task. A video goes by URL, or inline up to 5 MB. `RunwayVideoProviderConfig` sets the key, the API
@@ -200,8 +230,9 @@ fails, as a `VideoConformanceReport`. Its capabilities must be coherent; its ref
 it would a restart; a job must settle when polled through a ref parsed afresh; and the video must
 stream as non-empty bytes of a video type, an MP4 beginning with its `ftyp` box.
 `VideoConformanceOptions` adds an image-to-video check; a `video` check, which extends or edits the
-video given and, on a model that continues its own jobs, extends the first job too; and a
-cancellation check, which costs a job and is off by default. In the test suite the mock, Omni, Veo on
+video given and, on a model that continues its own jobs, extends the first job too; a
+`referenceVideo` check, which makes a video after the one given, where the model takes reference
+videos; and a cancellation check, which costs a job and is off by default. In the test suite the mock, Omni, Veo on
 the Gemini API and on Vertex AI, and Runway pass it against stand-ins for their APIs.
 
 ## Limitations
@@ -209,15 +240,12 @@ the Gemini API and on Vertex AI, and Runway pass it against stand-ins for their 
 - The family is experimental until Gemini Omni Flash, Veo, and Runway pass the conformance suite
   against the live services.
 - OpenAI removed its Videos API, and the Sora 2 models, on 2026-09-24, so there is no OpenAI adapter.
-- Gemini Omni Flash is served on the Gemini API, not on Vertex AI, where it is in preview on another
-  protocol.
+- Gemini Omni Flash on Vertex AI is in preview, at the global location only.
 - Veo extends videos on Vertex AI only, and edits none. Editing or extending an uploaded video on Omni
   is unavailable in the EEA, Switzerland, and the UK.
-- A video's length is read from its headers when it is given as bytes, and one longer than the model
-  takes is refused before it is sent. A video given by URL, or in Cloud Storage, is refused by its
-  provider when it is too long.
-- Seedance's and Hailuo's reference videos are not part of the contract; pass them in
-  `providerOptions`.
+- A video's length, and a reference video's, is read from its headers when it is given as bytes, and
+  one longer than the model takes is refused before it is sent. A video given by URL, or in Cloud
+  Storage, is refused by its provider when it is too long.
 
 <!-- reference:start -->
 ## Reference
@@ -244,7 +272,7 @@ specific entry point that provides it.
 | `VideoError` | class | Raised for a request no provider can serve, a provider that fails, or a job that does not finish. |
 | `VideoErrorCode` | type | Stable codes for video failures. |
 | `VideoGenerateRequest` | interface | A video to make. |
-| `VideoInputKind` | type | What a video can be made from beside its prompt: a first frame, a last frame, reference images, or a video to continue (`extend`) or to change as the prompt says (`edit`). |
+| `VideoInputKind` | type | What a video can be made from beside its prompt: a first frame, a last frame, reference images, reference videos, or a video to continue (`extend`) or to change as the prompt says (`edit`). |
 | `VideoJobError` | interface | Why a job failed. |
 | `VideoJobFailedError` | class | Raised when a job ends without a video: failed, cancelled, expired, or every video withheld. |
 | `VideoJobRef` | interface | A provider's video job, as JSON: everything after `submit` takes only this, so a worker can collect a job it did not submit. |

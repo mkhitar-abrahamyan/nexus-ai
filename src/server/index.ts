@@ -39,6 +39,7 @@ export {
   type NodeResponseLike,
   toNodeListener,
 } from './node.js';
+export type { ListPage } from './list-page.js';
 export {
   type DrainResult,
   RunManager,

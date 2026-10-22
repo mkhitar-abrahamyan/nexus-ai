@@ -55,7 +55,7 @@ Every source is optional. The studio shows a view for each one it is given, and 
 
 | View | Source | What you can do |
 | --- | --- | --- |
-| Traces | `traces` | Filter runs by status, kind, name, model, and time; open a run tree with inputs, outputs, cost, latency, and a tool's progress; compare two traces; record feedback on a run |
+| Traces | `traces` | Filter runs by status, kind, name, model, and time; open a run tree with inputs, outputs, cost, latency, a tool's progress, and each run's events and links; follow a link to the run it names; compare two traces; record feedback on a run |
 | Threads | `graphs` | See each graph's diagram with the next nodes highlighted; list threads; read state at any step; fork from a step; edit state; answer an interrupt |
 | Inbox | `graphs`, `reviews`, `proposals` | Every thread waiting for a human, every review item waiting for a grade, and every proposed fix waiting for promotion, in one list |
 | Issues | `traces` | Failing and slow runs clustered by what went wrong, and what got worse than the week before |

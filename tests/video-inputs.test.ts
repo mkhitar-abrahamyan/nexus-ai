@@ -8,6 +8,7 @@
  * each request a model cannot make is refused before anything is sent.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { readAssetStream } from '../src/images/asset-support.js';
 import { MemoryAssetStore } from '../src/images/assets.js';
@@ -44,13 +45,15 @@ const recorder = () => {
  * The Interactions API as Gemini Omni Flash answers it: an interaction in the background, in progress
  * on its first read and then done, its video inline, or by a Files API URI when asked.
  */
-function interactionsApi(options: { uri?: boolean; fail?: { code: number; message: string; status: string } } = {}) {
+function interactionsApi(
+  options: { uri?: boolean; fail?: { code: number; message: string; status: string }; base?: string } = {},
+) {
   const { calls, record } = recorder();
   const reads = new Map<string, number>();
   const cancelled = new Set<string>();
   const fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
     const call = record(input, init);
-    const base = 'https://generativelanguage.googleapis.com/v1beta';
+    const base = options.base ?? 'https://generativelanguage.googleapis.com/v1beta';
     if (call.url === `${base}/files/f1:download?alt=media`) {
       return new Response(MP4, { headers: { 'content-type': 'video/mp4', 'content-length': String(MP4.byteLength) } });
     }
@@ -463,4 +466,173 @@ test('the conformance suite checks extending and editing, and continuing a job, 
   const bad = await runVideoConformance(incoherent, { pollIntervalMs: 1 });
   assert.match(bad.failures.join(), /continues jobs, but takes no video/);
   assert.equal(VIDEO_PRICES['gemini-omni-1.1-flash'] !== undefined, true);
+});
+
+/** The ffmpeg fixture clip, its movie header saying it runs `seconds` long. */
+function lasting(seconds: number) {
+  const bytes = new Uint8Array(readFileSync(new URL('./fixtures/media/clip.mp4', import.meta.url)));
+  const at = Buffer.from(bytes).indexOf('mvhd') + 4;
+  const view = new DataView(bytes.buffer);
+  view.setUint32(at + 16, view.getUint32(at + 12) * seconds);
+  return { location: { kind: 'bytes' as const, data: bytes }, mimeType: 'video/mp4' };
+}
+
+test('reference videos: on Seedance, Hailuo, and Omni, as each names them, held to their lengths before anything is sent', async () => {
+  const runway = runwayApi();
+  const omniApi = interactionsApi();
+  const manager = new VideoManager({
+    providers: {
+      runway: new RunwayVideoProvider({ apiKey: 'secret', fetch: runway.fetch }),
+      omni: new GoogleVideoProvider({ apiKey: 'key', fetch: omniApi.fetch }),
+    },
+  });
+  const byUrl = { location: { kind: 'url' as const, url: 'https://cdn.example/dance.mp4' }, mimeType: 'video/mp4' };
+  const short = lasting(2);
+
+  // Seedance: reference images and videos, each video by its type.
+  await manager.start({
+    provider: 'runway',
+    model: 'seedance2',
+    prompt: 'Dance like this',
+    references: [png],
+    referenceVideos: [short, byUrl],
+  });
+  const seedance = runway.calls.find((call) => call.url.endsWith('/v1/text_to_video'))?.body;
+  assert.deepEqual(seedance?.references, [
+    { uri: `data:image/png;base64,${Buffer.from(png.location.data).toString('base64')}` },
+  ]);
+  assert.deepEqual(seedance?.referenceVideos, [
+    { type: 'video', uri: `data:video/mp4;base64,${Buffer.from(short.location.data).toString('base64')}` },
+    { type: 'video', uri: 'https://cdn.example/dance.mp4' },
+  ]);
+  // Omni on Runway names its reference videos bare.
+  await manager.start({
+    provider: 'runway',
+    model: 'gemini_omni_flash_1.1',
+    prompt: 'Like this',
+    referenceVideos: [byUrl],
+  });
+  assert.deepEqual(
+    runway.calls.filter((call) => call.url.endsWith('/v1/text_to_video')).at(-1)?.body?.referenceVideos,
+    [{ uri: 'https://cdn.example/dance.mp4' }],
+  );
+
+  // Omni on the Interactions API: each clip a video part, and the task says what they are.
+  await manager.start({ provider: 'omni', prompt: 'Move like <VIDEO_REF_0>', referenceVideos: [short] });
+  const created = omniApi.calls
+    .filter((call) => call.method === 'POST' && call.url.endsWith('/interactions'))
+    .at(-1)?.body;
+  assert.deepEqual(created?.input, [
+    { type: 'video', data: Buffer.from(short.location.data).toString('base64'), mime_type: 'video/mp4' },
+    { type: 'text', text: 'Move like <VIDEO_REF_0>' },
+  ]);
+  assert.deepEqual(created?.generation_config, { video_config: { task: 'reference_to_video' } });
+
+  const sent = () => runway.calls.length + omniApi.calls.length;
+  const before = sent();
+  const refused: Array<[string, Parameters<VideoManager['start']>[0], RegExp]> = [
+    [
+      '16 seconds together on Hailuo',
+      { provider: 'runway', model: 'hailuo3', prompt: 'x', referenceVideos: [lasting(8), lasting(8)] },
+      /16\.0 seconds of reference videos for "hailuo3"; it takes at most 15 seconds together/,
+    ],
+    [
+      'a 4-second clip on Omni',
+      { provider: 'omni', prompt: 'x', referenceVideos: [lasting(4)] },
+      /referenceVideos\[0\], 4\.0 seconds long, .* at most 3 seconds each/,
+    ],
+    [
+      'four clips on Omni',
+      { provider: 'omni', prompt: 'x', referenceVideos: [short, short, short, short] },
+      /4 reference videos; it takes at most 3/,
+    ],
+    [
+      'reference videos on Gen-4.5',
+      { provider: 'runway', prompt: 'x', referenceVideos: [short] },
+      /reference videos for "gen4\.5"/,
+    ],
+    [
+      'an image as a reference video',
+      { provider: 'runway', model: 'seedance2', prompt: 'x', referenceVideos: [png] },
+      /referenceVideos\[0\] of type image\/png/,
+    ],
+    [
+      'a first frame with reference images on Seedance',
+      { provider: 'runway', model: 'seedance2', prompt: 'x', image: png, references: [png] },
+      /takes no reference images; send them without a first frame/,
+    ],
+    [
+      'a video to edit and reference videos on Omni',
+      { provider: 'omni', prompt: 'x', video: { mode: 'edit', input: short }, referenceVideos: [short] },
+      /a video to work from or reference videos, not both/,
+    ],
+  ];
+  for (const [name, request, pattern] of refused) await assert.rejects(manager.start(request), pattern, name);
+  assert.equal(sent(), before, 'nothing was sent for any of them');
+});
+
+test('reference videos travel with a durable generation, and the conformance suite checks them', async () => {
+  const mock = new MockVideoProvider();
+  const store = new MemoryAssetStore();
+  const manager = new VideoManager(
+    { providers: { mock }, store, pollIntervalMs: 1 },
+    { operations: { store: new MemoryOperationStore<VideoResult>() } },
+  );
+  const result = await (
+    await manager.generate({ prompt: 'Like these', referenceVideos: [lasting(2), lasting(3)] })
+  ).result();
+  const job = mock.jobs.get(result.ref.id);
+  assert.equal(job?.request.referenceVideos?.length, 2);
+  assert.equal(job?.request.referenceVideos?.[0]?.location.kind, 'bytes', 'kept as bytes, through JSON');
+  const report = await runVideoConformance(new MockVideoProvider(), { pollIntervalMs: 1, referenceVideo: lasting(2) });
+  assert.deepEqual(report.failures, []);
+  assert.ok(report.passed.includes('reference videos'));
+});
+
+test('Gemini Omni Flash on Vertex AI: the global location’s interactions, with the access token', async () => {
+  const global = 'https://aiplatform.googleapis.com/v1beta1/projects/acme-video/locations/global';
+  const api = interactionsApi({ base: global });
+  const vertex = new GoogleVideoProvider({
+    accessToken: async () => 'ya29.token',
+    baseUrl:
+      'https://us-central1-aiplatform.googleapis.com/v1/projects/acme-video/locations/us-central1/publishers/google',
+    fetch: api.fetch,
+  });
+  assert.ok(vertex.info.capabilities.models.includes('gemini-omni-1.1-flash-preview'));
+  assert.equal(
+    vertex.info.capabilities.defaultModel,
+    'veo-3.1-generate-001',
+    'Veo stays the default; Omni is in preview',
+  );
+  const manager = new VideoManager({ providers: { vertex }, pollIntervalMs: 1 });
+  const ref = await manager.start({ model: 'gemini-omni-1.1-flash-preview', prompt: 'A lighthouse' });
+  const result = await manager.resume(ref, { delivery: 'bytes' });
+  assert.equal(result.videos.length, 1);
+  assert.equal(api.calls[0]?.url, `${global}/interactions`, 'created at the global location, whatever region Veo uses');
+  assert.ok(api.calls.every((call) => call.headers.get('authorization') === 'Bearer ya29.token'));
+  assert.equal(result.cost, undefined, 'no Vertex price is published for the preview, so it is not called free');
+
+  // The address can be given, and a baseUrl that names no project needs it.
+  const given = interactionsApi({ base: 'https://aiplatform.googleapis.com/v1beta1/projects/other/locations/global' });
+  const explicit = new GoogleVideoProvider({
+    accessToken: 'token',
+    baseUrl: 'https://vertex.example.internal/publishers/google',
+    interactionsBaseUrl: 'https://aiplatform.googleapis.com/v1beta1/projects/other/locations/global/',
+    fetch: given.fetch,
+  });
+  const context = { requestId: 'r', signal: new AbortController().signal, attempt: 1 };
+  await explicit.submit({ prompt: 'x', model: 'gemini-omni-1.1-flash-preview' }, context);
+  assert.equal(
+    given.calls[0]?.url,
+    'https://aiplatform.googleapis.com/v1beta1/projects/other/locations/global/interactions',
+  );
+  const nameless = new GoogleVideoProvider({
+    accessToken: 'token',
+    baseUrl: 'https://vertex.example.internal/publishers/google',
+    fetch: given.fetch,
+  });
+  await assert.rejects(
+    nameless.submit({ prompt: 'x', model: 'gemini-omni-1.1-flash-preview' }, context),
+    /needs interactionsBaseUrl/,
+  );
 });

@@ -34,8 +34,8 @@ client to a server in memory.
 ## The client
 
 `McpClient` takes a transport and `McpClientOptions`: the `clientInfo` name and version it reports,
-and `timeoutMs`, how long a request waits (30 seconds). `connect()` performs the handshake; the first
-request that needs it calls it for you.
+`timeoutMs`, how long a request waits (30 seconds), and `reconnect`. `connect()` performs the
+handshake; the first request that needs it calls it for you.
 
 | Method | Returns |
 | --- | --- |
@@ -45,6 +45,7 @@ request that needs it calls it for you.
 | `readResource()` | One resource, as content parts. |
 | `listPrompts()`, `getPrompt()` | The server's prompts, and one rendered into messages. |
 | `toNexusTools()` | The tools as `ToolDefinition` values an agent or `ToolExecutor` can run. |
+| `onToolsChanged()` | Hears each time the server says its tools changed; returns a function that stops hearing. |
 | `close()` | Closes the transport, rejecting requests still waiting. |
 
 Two kinds of failure are kept apart. A tool that fails answers with `isError`; it does not throw. A
@@ -86,12 +87,36 @@ servers you trust, and decide the others yourself.
 message. A tool from `toNexusTools()` passes them to the agent's `context.progress`, so a remote
 tool's progress reaches the agent's events like a local one's.
 
+### When the connection drops, or the tools change
+
+With `reconnect`, a client whose transport closed opens it again at the next request and greets the
+server again, since the server's session went with the connection:
+- an SSE stream that ends, as a proxy's timeout or a server's restart ends it, is opened anew by
+  `createSseTransport({ reopen: true })`;
+- a stdio server that exits is started again, as a new process.
+
+A request in flight when the connection drops still fails, since it may have run. A client closed with
+`close()` stays closed. Without `reconnect`, a closed transport stays closed, as before 2.18.
+
+```ts
+const client = new McpClient(createSseTransport({ url, reopen: true }), { reconnect: true });
+const stop = client.onToolsChanged(() => {
+  tools = undefined; // list them again before the next turn
+});
+```
+
+A server that says its tools change sends `notifications/tools/list_changed` when they do, and
+`onToolsChanged()` hears each one. What `listTools()` returned is then out of date; the client keeps
+no list of its own, so the next `listTools()` or `toNexusTools()` reads the new one. A listener that
+throws keeps no other from hearing.
+
 ## Transports
 
 `createStdioTransport()` starts a server as a child process and speaks to it over stdin and stdout.
 `StdioClientOptions` gives the `command`, `args`, `env`, `cwd`, and `inheritEnv`. `node:child_process`
 is imported only when the transport starts, so a browser or edge build that uses HTTP never reaches
-for it.
+for it. When the process exits, the transport closes; started again, it runs a new process, which
+reads its own output from the start.
 
 A server is often third-party code, so it does not inherit this process's environment. It starts
 with `env` and only what a process needs to run:
@@ -115,7 +140,10 @@ each message to the endpoint the stream names, and reads every answer from the s
 `SseClientOptions` gives the `url`, `headers` for the stream and every message, a `fetch`, and
 `timeoutMs`, how long to wait for the endpoint (10 seconds). The endpoint must be on the stream's
 origin, so a server cannot send the messages, and their headers, anywhere else. When the stream ends,
-the transport closes and the requests waiting on it fail.
+the transport closes and the requests waiting on it fail. So does a stream that cannot open, or names
+no endpoint in time: the transport lets it go and closes at once. With `reopen`, the next message
+after that opens a new stream; only the current stream's end closes the transport, never one it
+replaced. `close()` closes it at once and for good.
 
 `McpTransport` is the whole contract, for a transport of your own: `send()` a message, `onMessage()`
 to receive them, and optional `start()` and `onClose()` with `close()`. The messages are JSON-RPC:
@@ -128,8 +156,9 @@ skipping a malformed line rather than losing the stream.
 
 `McpServer` takes `McpServerOptions`: a `name` and `version` to report, the `tools` to expose, and
 `resources`, each a URI with a name, description, MIME type, and a `read()` function. `register()`
-adds a tool later. `connect()` starts serving over a transport, `close()` stops, and `handle()` takes
-one message directly, for a host that carries messages itself.
+adds a tool later, and tells a connected client with `notifications/tools/list_changed`, as the
+server's `tools.listChanged` capability promises. `connect()` starts serving over a transport,
+`close()` stops, and `handle()` takes one message directly, for a host that carries messages itself.
 
 Each tool is listed with the annotations its capabilities give it, from `mcpToolAnnotations()`, read
 so a client is never told less than the tool may do. It is read-only only when every capability reads
@@ -217,9 +246,11 @@ with method-not-found, so a client can tell an unsupported feature from a failur
 ## Limitations
 
 - The HTTP transport covers request and response; server-initiated streaming is not implemented.
-- The SSE transport does not reconnect: when its stream ends, open a new client.
+- A request in flight when a connection drops fails, rather than being sent again, since it may have
+  run. A registry's tool lists are read again only after `refresh()`.
 - A tool's capabilities from its annotations are only as true as its server is honest.
-- The server exposes tools and resources. Prompts, sampling, and change notifications are not served.
+- The server exposes tools and resources. Prompts and sampling are not served, and of change
+  notifications only its tools' are sent.
 
 <!-- reference:start -->
 ## Reference
