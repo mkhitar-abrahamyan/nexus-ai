@@ -117,6 +117,70 @@ For a new provider family, start with provider-neutral request and response type
 deterministic mock and a conformance harness before any hosted adapter, and route the family through
 `FamilyTelemetry` so it reports into the same metrics, audit log, and rate limiter as the rest.
 
+## How releases are planned
+
+What is planned is in `ROADMAP.md`; these are the rules it is planned by.
+
+**Fewer, bigger releases.** Each one closes a group of gaps: the work of two or three themes, shipped
+together, each with a proof. A release is not cut to ship one feature.
+
+**Every release ships proof.** A gap counts as closed when a test fails if it reopens: a
+crash-injection test, a race test, a benchmark with a budget, or a conformance suite. Every primitive
+a release touches gets its line in the semantics tables, saying what can repeat after a crash, what is
+durable, and what a side effect must do.
+
+**The 2.x line hardens before it widens.** Most of each release goes to correctness, crash recovery,
+races, and proving what has shipped, and every release also delivers one capability an application
+did not have before: gaps are never shipped alone.
+
+**Families share one model.** Agent protocols, realtime, media, decisions, and online evaluation are
+clients of the same lifecycle, execution context, tenancy, operation store, and lease vocabulary. A
+family that needs durability takes it from there, rather than becoming a runtime of its own.
+
+**Only the next release is numbered.** The themes after it are listed in the order they are planned;
+the grouping holds, the version each lands in does not.
+
+What every release protects:
+
+- No required dependency, and a size budget on every entry point. `npm run size:check` fails the
+  build when an entry point grows past its budget or picks up a dependency; the sizes are in
+  `docs/packaging.md`.
+- A runtime and memory budget. `npm run bench:runtime` fails the release gate when a measured path
+  slows past its budget, relative to the machine it runs on, or when a run leaves memory behind.
+- An upgrade path. Every schema change is a numbered migration that only adds, and a worker of the
+  previous minor runs beside the new one during a rollout.
+- Structural adapter contracts. A vector store, database client, Redis client, or transport is an
+  interface the application fills, never a bundled SDK.
+- TypeScript first, and self-hosted by default. Nothing phones home, model data included.
+- One lifecycle, one execution context, and one durability vocabulary of leases, heartbeats, and
+  takeover. New work plugs into them instead of adding a parallel path.
+- No breaking change before 3.0. New behaviour is opt-in, and defaults keep their meaning.
+
+### Design notes
+
+Decisions that still hold, and that new work is checked against.
+
+**Media stays a separate operation family.** Text completions and generated assets have different
+request shapes, response lifecycles, costs, safety checks, storage needs, and retry semantics. Image
+generation is `ai.images.generate()`, not another `complete()` mode.
+
+**Aliases, not model names, are the durable API.** `auto` and family aliases resolve through
+versioned, verified entries so a model name never becomes part of the public contract.
+
+**Portable media types.** Prefer `Uint8Array`, `Blob`, URLs, and web streams in public types; keep
+Node `Buffer` as a convenience input. Use discriminated asset locations — `{ kind: 'bytes' }`,
+`{ kind: 'url' }`, `{ kind: 'stored' }` — rather than several optional fields.
+
+**Idempotency is not caching.** An idempotency key replays the same accepted operation. Generative
+caching stays opt-in and keys on model version, policy version, parameters, and source-asset hashes.
+
+**Budget is reserved and reconciled**, using provider-appropriate pricing: per token, per image, per
+megapixel, or compute time.
+
+**Nothing runs exactly once.** Every primitive says what it repeats after a crash, and a side effect
+is made safe by an idempotency key on the call that makes it, not by the runtime promising more than
+it can.
+
 ## Manual smoke checklist
 
 `npm run check:release` covers the automated gates. Before publishing, it is still worth exercising a

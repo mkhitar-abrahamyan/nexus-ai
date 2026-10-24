@@ -41,6 +41,32 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## How an item graduates
+
+A new surface starts this way:
+
+1. Provider-neutral types and a deterministic mock land first.
+2. One real adapter proves the contract; conformance fixtures cover it.
+3. A second adapter on a different wire protocol proves portability.
+4. Packed-package, clean-install, and consumer type-resolution tests pass on every supported Node
+   line.
+5. Evaluation appropriate to the modality covers the supported capability matrix.
+
+It leaves experimental status here only when every item below has evidence, published with the
+graduation:
+
+| Requirement | Evidence |
+| --- | --- |
+| API stability | Covered by the 2.x compatibility rules, with no planned breaking change |
+| Conformance | Passes its contract suite on every supported backend |
+| Crash recovery | Crash-injection tests at each durable boundary, where it has one |
+| Concurrency | Race tests with several processes on the same records |
+| Load | A published benchmark with a budget in CI |
+| Tenant isolation | The isolation suite, where it stores tenant data |
+| Security | A written threat review, with its findings closed |
+| Upgrade | A migration test from the previous minor |
+| Soak | A long-running test with flat memory and no leaked handles |
+
 ## 2.19 stage (2.19.0)
 
 Everything 2.19 adds is stable from the start and additive, unless this section says otherwise.
@@ -655,7 +681,7 @@ These security fixes tighten more behavior, each closing a finding of a graduati
 ### Graduation
 
 A surface left experimental status in 2.4 only when every requirement in
-[How an item graduates](./ROADMAP.md#how-an-item-graduates) had evidence. That evidence is below.
+[How an item graduates](#how-an-item-graduates) had evidence. That evidence is below.
 "n/a" names a requirement that does not apply, and says why. Every test named here runs in CI.
 Load and soak budgets are checked by `npm run bench:surfaces` and `npm run bench:runtime`, which are
 part of `check:release`. Upgrade tests run against the published 2.3.0 package, installed as a
