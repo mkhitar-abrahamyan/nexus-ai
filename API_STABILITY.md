@@ -67,6 +67,19 @@ graduation:
 | Upgrade | A migration test from the previous minor |
 | Soak | A long-running test with flat memory and no leaked handles |
 
+## 2.20 stage (Unreleased)
+
+Everything 2.20 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- `nexus-ai-pro/agent/openapi`: `openApiTools()`, `loadOpenApiTools()`, `OpenApiError`,
+  `OpenApiDocument`, `OpenApiOperation`, `OpenApiTools`, `OpenApiToolsOptions`, and
+  `OpenApiHeadersRequest`;
+- the capabilities `api.read`, `api.write`, and `api.destructive`;
+- in `nexus-ai-pro/evaluate/emulate`: `EmulatedWorld`, `EmulatedWorldCall`, `EmulatedWorldSnapshot`,
+  `EmulatedToolsOptions.world` and `reads`, and `emulationKey()`'s `world`. A key without a world is
+  the key of every earlier release.
+
 ## 2.19 stage (2.19.0)
 
 Everything 2.19 adds is stable from the start and additive, unless this section says otherwise.

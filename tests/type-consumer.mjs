@@ -360,7 +360,8 @@ import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-
 import { a2aClient, a2aErrorStatus, a2aHandler, type A2aCallOutcome } from 'nexus-ai-pro/protocols/a2a';
 import { a2aGrpcClient, a2aGrpcService, type A2aGrpcClient } from 'nexus-ai-pro/protocols/a2a/grpc';
 import { mediaChecks, mediaJudge, readMediaDuration, resolveMedia, type MediaDuration, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
-import { emulatedTools, MemoryEmulationStore, type EmulatedToolCall } from 'nexus-ai-pro/evaluate/emulate';
+import { emulatedTools, EmulatedWorld, MemoryEmulationStore, type EmulatedToolCall, type EmulatedWorldSnapshot } from 'nexus-ai-pro/evaluate/emulate';
+import { loadOpenApiTools, openApiTools, OpenApiError, type OpenApiDocument, type OpenApiTools } from 'nexus-ai-pro/agent/openapi';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
 import {
   automationRules,
@@ -1318,6 +1319,25 @@ const playedTools = emulatedTools([], {
 });
 void playedTools;
 void emulationStore.toJSON();
+// Tools read from an OpenAPI document, emulated in a world the whole evaluation shares.
+const shopDocument: OpenApiDocument = { openapi: '3.1.0', info: { title: 'Shop' }, paths: {} };
+const shopApi: OpenApiTools = openApiTools(shopDocument, {
+  baseUrl: 'https://shop.example.com/api',
+  headers: ({ operation, context }) => ({ authorization: 'Bearer ' + (context?.tenantId ?? operation.name) }),
+  include: (operation) => operation.access !== 'destructive',
+  maxResponseBytes: 100_000,
+});
+const shopWorld = new EmulatedWorld({ scenario: 'Order 1042 was delivered.' });
+const worldTools = emulatedTools(shopApi.tools, {
+  client: { complete: async () => ({}) as never },
+  results: shopApi.results,
+  world: shopWorld.fork(),
+  reads: ['getOrder'],
+});
+const savedWorld: EmulatedWorldSnapshot = shopWorld.snapshot();
+const loadedApi: Promise<OpenApiTools> = loadOpenApiTools('https://shop.example.com/openapi.json');
+const apiRefused: number | undefined = new OpenApiError('no', 'OPENAPI_REQUEST', 404).status;
+void [worldTools, savedWorld, loadedApi, apiRefused, shopWorld.digest()];
 void grpcExporter.close();
 const encoded: Uint8Array = encodeOtlpTraceRequest({ resourceSpans: [] });
 void encoded;

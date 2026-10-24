@@ -54,6 +54,7 @@ const KERNEL = [
   './agent',
   './agent/permissions',
   './agent/middleware',
+  './agent/openapi',
   './protocols/ag-ui',
   './protocols/a2a',
   './protocols/acp',

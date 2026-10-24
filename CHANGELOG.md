@@ -4,6 +4,32 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Tools read from a service's OpenAPI document, and an emulator that remembers the evaluation.
+
+### Added
+
+- **Tools from an OpenAPI document.** `openApiTools()` and `loadOpenApiTools()`, on
+  `nexus-ai-pro/agent/openapi`, read an OpenAPI 3.0 or 3.1 document into one tool per operation: its
+  name, description, and parameters the API's, its body's fields flattened, references followed, and
+  each declaring `api.read`, `api.write`, or `api.destructive` as its method says, with `network` for
+  the API's host. Given where the API lives, each tool calls it, the path encoded, the application's
+  headers sent, no redirect followed, and an answer read only up to a limit; a refusal is an
+  `OpenApiError` in the API's own words. `results` holds the schema of what each returns.
+- **An emulator that remembers the evaluation.** An `EmulatedWorld`, given to `emulatedTools()` as
+  `world`, holds the scenario and every call across the runs of an evaluation, so a change one example
+  makes is there for the next; the emulator is told every change. `snapshot()` writes it as JSON,
+  `fork()` and `new EmulatedWorld(snapshot)` start runs from it, and the key of each answer kept carries
+  the world's `digest()`, so a recorded evaluation replays only after the same changes. `reads` names
+  tools that change nothing, beside those whose capabilities only read.
+- **Capabilities for an API's operations:** `api.read:<api>/<operation>`, `api.write`, and
+  `api.destructive`, decided by a permission policy as MCP's are.
+
+### Fixed
+
+- A test of a call that never answers, and the unit, coverage, and studio runs, no longer let a hung
+  test hold the release gate: every synchronous child the tests start has a timeout, and a test that
+  runs past five minutes fails.
+
 ## [2.19.0] - 2026-10-24
 
 Typed decisions: a yes or no, a choice, or a score, answered with probabilities and a confidence read

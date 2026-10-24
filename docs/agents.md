@@ -1,6 +1,6 @@
 # Agents and tools
 
-<!-- covers: ./agent ./agent/middleware ./agent/permissions ./agent/workspace ./agent/sandbox ./agent/sandbox/container ./agent/interpreter ./connectors -->
+<!-- covers: ./agent ./agent/middleware ./agent/permissions ./agent/workspace ./agent/sandbox ./agent/sandbox/container ./agent/interpreter ./agent/openapi ./connectors -->
 <!-- sources: src/agent src/connectors -->
 
 Tool-calling agents, from `nexus-ai-pro/agent`. There are two:
@@ -215,6 +215,9 @@ the policy sees the path, host, or command the call actually uses:
 | `mcp.read:<server>/<tool>` | An MCP tool its server says only reads |
 | `mcp.write:<server>/<tool>` | An MCP tool its server says changes things but destroys nothing |
 | `mcp.destructive:<server>/<tool>` | An MCP tool its server says may destroy or overwrite |
+| `api.read:<api>/<operation>` | An operation of an OpenAPI document whose method only reads |
+| `api.write:<api>/<operation>` | One whose method changes things |
+| `api.destructive:<api>/<operation>` | One whose method deletes |
 | `<name>`, `<name>:<detail>` | An effect of your own, such as `payments:refund` |
 
 `capabilities: []` says a tool changes nothing; a tool with no list is undeclared. From
@@ -674,6 +677,57 @@ thrown error, so one bad call does not end a run. An unknown tool name is report
   `WebResolvedAddress` values.
 - `createSearchTool()` wraps a search function you supply, so the search provider stays yours.
 
+## Tools from an OpenAPI document
+
+`openApiTools()`, from `nexus-ai-pro/agent/openapi`, reads a service's own API description into tools: an
+`OpenApiDocument`, OpenAPI 3.0 or 3.1, as parsed JSON (parse a YAML one first). `loadOpenApiTools()`
+fetches one as JSON and reads it, resolving a relative server against where it came from.
+
+```ts
+import { loadOpenApiTools } from 'nexus-ai-pro/agent/openapi';
+
+const shop = await loadOpenApiTools('https://shop.example.com/openapi.json', {
+  headers: ({ context }) => ({ authorization: `Bearer ${tokens.for(context?.tenantId)}` }),
+});
+const agent = createAgent({
+  client: ai,
+  tools: shop.tools,
+  permissions: permissionPolicy({ custom: { 'api.read': 'allow', 'api.write': 'ask' }, network: { allow: ['shop.example.com'] } }),
+});
+```
+
+Each operation becomes one tool, described as an `OpenApiOperation`:
+- its name is its `operationId`, or its method and path, such as `get_orders_orderId`; two the same
+  get a number, and `prefix` keeps two APIs' apart;
+- its description is the operation's summary and description;
+- its parameters are its path, query, and header parameters, and the fields of a JSON or form body,
+  flattened, unless one is named as a parameter, when the body is one `body` parameter. A property
+  the API marks `readOnly` is left out. Cookies, and the `Accept`, `Content-Type`, and
+  `Authorization` headers, are the client's, as OpenAPI says;
+- it declares `api.read`, `api.write`, or `api.destructive` with the API's name and its own, as its
+  method says, and `network` for the API's host when it runs, so a permission policy decides it as it
+  decides any tool.
+
+References within the document are followed, a schema that refers back to itself is described rather
+than repeated, and OpenAPI 3.0's `nullable` and `example` become JSON Schema's. An `OpenApiTools` holds
+the tools, their operations, `results`, the schema of what each returns, from its first success
+response, which `emulatedTools()` shows the emulator, and `skipped`: operations whose body is of a type
+the tools do not send, such as `multipart/form-data`, and why.
+
+`OpenApiToolsOptions` sets `baseUrl`, where the API lives, which defaults to the document's first
+server; without one, the tools describe the API and run nowhere, as an emulated tool wants them.
+`headers` are sent with every call, or chosen per call from an `OpenApiHeadersRequest`, the operation
+and the call's context with its tenant, and win over a header the model sets. `include` chooses
+operations, and `timeoutMs` (30 seconds), `maxResponseBytes` (1 MB), and `fetch` bound each call.
+
+A call encodes each path parameter, so none can reach another path, and refuses one that is only dots.
+It is never sent when its call was stopped first, never follows a redirect, reads no more of an answer
+than the limit, and returns the JSON, the text, or `null` for nothing. A refusal, or a call that
+cannot be made, throws an `OpenApiError` in the API's own words, such as `createRefund answered 409:
+already refunded`, with its `status`, which the agent sees as the tool's failure. A document that
+cannot be read throws one too: `OPENAPI_UNSUPPORTED` for Swagger 2.0 or a reference outside the
+document, and `OPENAPI_INVALID` for a malformed one.
+
 ## The pieces, by name
 
 | Name | What it is |
@@ -698,6 +752,11 @@ The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven 
   not on every pass.
 - Tool search uses the agent's own ranking, not a provider's server-side search, so it works the same
   on every provider; Anthropic loads what it finds through tool references.
+- An OpenAPI document's security schemes are not read: the application sends its credentials as
+  `headers`. Neither are references to other files, Swagger 2.0, request bodies other than JSON and
+  form, or callbacks and webhooks.
+- A query parameter is sent as OpenAPI's default form, an array as the parameter repeated; an object in
+  a query or a header is sent as JSON.
 
 <!-- reference:start -->
 ## Reference
@@ -802,6 +861,19 @@ specific entry point that provides it.
 | `ToolSelectionContext` | interface | What a rule chooses tools from. |
 | `toolSelector` | function | Sends a model only the tools relevant to the turn. |
 | `ToolSelectorOptions` | interface | Options for `toolSelector()`. |
+
+### `nexus-ai-pro/agent/openapi`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `loadOpenApiTools` | function | Fetches an OpenAPI document, as JSON, and reads it into tools, resolving its servers against where it came from. |
+| `OpenApiDocument` | interface | An OpenAPI 3 document, as parsed JSON. |
+| `OpenApiError` | class | Why an API could not be read into tools, or a call to it failed. |
+| `OpenApiHeadersRequest` | interface | What a tool's headers are chosen from: the operation, and the call's context. |
+| `OpenApiOperation` | interface | One operation of the API, as a tool reads it. |
+| `openApiTools` | function | Reads an OpenAPI 3 document into tools, one per operation: named by its `operationId`, or its method and path; described by its summary; its path, query, and header parameters, and the fields of a JSON body, as the tool's parameters. |
+| `OpenApiTools` | interface | An API's operations as tools, with what each returns. |
+| `OpenApiToolsOptions` | interface | Options for `openApiTools()`. |
 
 ### `nexus-ai-pro/agent/permissions`
 

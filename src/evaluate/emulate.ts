@@ -3,6 +3,7 @@
  * charge a card or write to a production database runs against a model playing each tool instead,
  * with nothing sent, and the emulator's answers recorded so a run replays them exactly.
  */
+import { capabilitiesOf, parseCapability } from '../agent/capabilities.js';
 import type { CompletionRequest, Message, ToolContext, ToolDefinition } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
 import { sha256Hex } from '../utils/sha256.js';
@@ -92,6 +93,120 @@ export interface EmulatedToolsOptions {
   maxTokens?: number;
   /** Called after each call, with who answered it. */
   onCall?: (call: EmulatedToolCall) => void;
+  /**
+   * The world the tools act in, held across every run that shares it: each call made in it, and the
+   * changes they made, so an order one example refunds is refunded for the next. The emulator is
+   * told every change, and the latest `history` calls; its scenario is the tools' when they name
+   * none. Share one world among runs made one at a time, in order; or start each run from a
+   * `fork()`, or from a `snapshot()` read back.
+   */
+  world?: EmulatedWorld;
+  /**
+   * Tools that change nothing, by name, beside those whose every capability reads: `filesystem:read`,
+   * `mcp.read`, or `api.read`, or none at all. A world counts what any other tool did, when it did
+   * not fail, as a change.
+   */
+  reads?: readonly string[];
+}
+
+/** One call made in an emulated world. */
+export interface EmulatedWorldCall extends EmulatedResult {
+  /** Whether it changed the world: it succeeded, and its tool does more than read. */
+  changed: boolean;
+}
+
+/** An emulated world as plain JSON, to write to a file and start runs from. */
+export interface EmulatedWorldSnapshot {
+  /** The world the tools act on, before any call. */
+  scenario?: string;
+  /** Every call made in it, oldest first. */
+  calls: EmulatedWorldCall[];
+}
+
+/**
+ * A world emulated tools act in, kept across the runs of an evaluation: the scenario it started
+ * from, and every call made in it, so what one run changes is there for the next, as on a staging
+ * copy of a service. `snapshot()` writes it as JSON, `new EmulatedWorld(snapshot)` reads it back,
+ * and `fork()` starts a world from this one's present whose changes stay its own.
+ *
+ * ```ts
+ * const world = new EmulatedWorld({ scenario: 'Order 1042 is delivered and cost $59.' });
+ * await evaluate(
+ *   (inputs) => agentOver(emulatedTools(shop.tools, { client: ai, results: shop.results, world })).invoke(agentInput(inputs.request)),
+ *   dataset,
+ *   evaluators,
+ *   { concurrency: 1 },
+ * );
+ * ```
+ */
+export class EmulatedWorld {
+  /** The world the tools act on, before any call. */
+  readonly scenario?: string;
+  private readonly log: EmulatedWorldCall[];
+
+  constructor(start: { scenario?: string; calls?: readonly EmulatedWorldCall[] } = {}) {
+    if (start.scenario !== undefined) this.scenario = start.scenario;
+    this.log = JSON.parse(JSON.stringify(start.calls ?? [])) as EmulatedWorldCall[];
+  }
+
+  /** Every call made in it, oldest first. */
+  get calls(): readonly EmulatedWorldCall[] {
+    // Copies, so what it gives out cannot change it.
+    return JSON.parse(JSON.stringify(this.log)) as EmulatedWorldCall[];
+  }
+
+  /** The calls that changed it, oldest first. */
+  get changes(): readonly EmulatedWorldCall[] {
+    return JSON.parse(JSON.stringify(this.log.filter((call) => call.changed))) as EmulatedWorldCall[];
+  }
+
+  /** Records a call made in it, and whether it changed it. */
+  record(call: EmulatedResult, changed: boolean): void {
+    this.log.push({ ...(JSON.parse(JSON.stringify(call)) as EmulatedResult), changed });
+  }
+
+  /**
+   * A digest of its scenario and every change made in it, which the keys of its calls' answers carry:
+   * two worlds that started alike and changed alike have the same digest, however much was read.
+   */
+  digest(): string {
+    return sha256Hex(
+      canonical({
+        scenario: this.scenario ?? '',
+        changes: this.changes.map((call) => ({ tool: call.tool, args: call.args, result: call.result ?? null })),
+      }),
+    );
+  }
+
+  /** How many calls with these arguments it has seen since its last change. */
+  ordinal(tool: string, args: Record<string, unknown>): number {
+    const identity = canonical(args);
+    let count = 0;
+    for (let index = this.log.length - 1; index >= 0; index -= 1) {
+      const call = this.log[index] as EmulatedWorldCall;
+      if (call.changed) break;
+      if (call.tool === tool && canonical(call.args) === identity) count += 1;
+    }
+    return count;
+  }
+
+  /** It as plain JSON, to write to a file and start runs from. */
+  snapshot(): EmulatedWorldSnapshot {
+    return {
+      ...(this.scenario !== undefined ? { scenario: this.scenario } : {}),
+      calls: JSON.parse(JSON.stringify(this.log)) as EmulatedWorldCall[],
+    };
+  }
+
+  /** A world starting from this one's present, whose changes stay its own. */
+  fork(): EmulatedWorld {
+    return new EmulatedWorld(this.snapshot());
+  }
+
+  /** The same as `snapshot()`, so `JSON.stringify(world)` writes it. */
+  toJSON(): EmulatedWorldSnapshot {
+    return this.snapshot();
+  }
 }
 
 /** Raised when a call cannot be emulated: no kept answer in `replay`, or no valid answer from the model. */
@@ -141,16 +256,42 @@ export class MemoryEmulationStore implements EmulationStore {
 
 /**
  * The key of a call: its tool, its arguments, its scenario, and which call with those arguments it
- * is, so an order looked up before and after a refund keeps both answers.
+ * is, so an order looked up before and after a refund keeps both answers. In a world, also the
+ * world's `digest()`, so the same call answers again only after the same changes.
  */
 export function emulationKey(call: {
   tool: string;
   args: Record<string, unknown>;
   scenario?: string;
   ordinal?: number;
+  world?: string;
 }): string {
   return sha256Hex(
-    canonical({ tool: call.tool, args: call.args, scenario: call.scenario ?? '', ordinal: call.ordinal ?? 0 }),
+    canonical({
+      tool: call.tool,
+      args: call.args,
+      scenario: call.scenario ?? '',
+      ordinal: call.ordinal ?? 0,
+      // Absent without a world, so every answer kept before worlds keeps its key.
+      ...(call.world !== undefined ? { world: call.world } : {}),
+    }),
+  );
+}
+
+/**
+ * Whether a call changes nothing: its tool is named in `reads`, declares no capability, or declares
+ * only reads. `network` beside a read is how the read is made, as an API's or an MCP server's tool
+ * declares it; alone, it says nothing of what the call does, so it counts as a change.
+ */
+function onlyReads(definition: ToolDefinition, args: Record<string, unknown>, reads: ReadonlySet<string>): boolean {
+  if (reads.has(definition.name)) return true;
+  const declared = capabilitiesOf(definition, args);
+  if (declared === undefined) return false;
+  const parsed = declared.map((capability) => parseCapability(capability));
+  const isRead = (item: ReturnType<typeof parseCapability>) =>
+    (item.kind === 'filesystem' && item.access === 'read') || item.kind === 'mcp.read' || item.kind === 'api.read';
+  return (
+    parsed.every((item) => isRead(item) || item.kind === 'network') && (parsed.length === 0 || parsed.some(isRead))
   );
 }
 
@@ -172,12 +313,28 @@ export function emulatedTools(tools: readonly ToolDefinition[], options: Emulate
   const limit = Math.max(0, options.history ?? 20);
   const history: EmulatedResult[] = [];
   const ordinals = new Map<string, number>();
+  const world = options.world;
+  const reads = new Set(options.reads ?? []);
+  const scenario = options.scenario ?? world?.scenario;
+  const told: EmulatedToolsOptions = scenario === options.scenario ? options : { ...options, scenario };
   const report = (call: EmulatedToolCall) => {
     try {
       options.onCall?.(call);
     } catch {
       // Observing never fails the call.
     }
+  };
+  /** What the emulator is shown: in a world, every change and the latest calls; otherwise this set's latest calls. */
+  const earlier = (): readonly EmulatedResult[] => {
+    if (!world) return limit === 0 ? [] : history.slice(-limit);
+    const calls = world.calls;
+    return calls
+      .filter((call, index) => call.changed || index >= calls.length - limit)
+      .map(({ changed: _changed, ...call }) => call);
+  };
+  const remember = (definition: ToolDefinition, answer: EmulatedResult) => {
+    history.push(answer);
+    world?.record(answer, answer.error === undefined && !onlyReads(definition, answer.args, reads));
   };
 
   return tools.map((definition): ToolDefinition => {
@@ -188,12 +345,19 @@ export function emulatedTools(tools: readonly ToolDefinition[], options: Emulate
         ...shape,
         // The real tool, observed: its progress still reaches the agent.
         execute: async (args: Record<string, unknown>, context?: ToolContext) => {
-          const key = emulationKey({ tool: definition.name, args, scenario: options.scenario });
+          const key = emulationKey({
+            tool: definition.name,
+            args,
+            scenario,
+            ...(world ? { world: world.digest() } : {}),
+          });
           try {
             const result = run ? await run(args, context) : await drain(definition, args, context);
+            remember(definition, { tool: definition.name, args, result });
             report({ tool: definition.name, args, result, source: 'real', key });
             return result;
           } catch (error) {
+            remember(definition, { tool: definition.name, args, error: messageOf(error) });
             report({ tool: definition.name, args, error: messageOf(error), source: 'real', key });
             throw error;
           }
@@ -203,10 +367,22 @@ export function emulatedTools(tools: readonly ToolDefinition[], options: Emulate
     return {
       ...shape,
       execute: async (args: Record<string, unknown>, context?: ToolContext) => {
-        const identity = `${definition.name}\u0000${canonical(args)}`;
-        const ordinal = ordinals.get(identity) ?? 0;
-        ordinals.set(identity, ordinal + 1);
-        const key = emulationKey({ tool: definition.name, args, scenario: options.scenario, ordinal });
+        let ordinal: number;
+        if (world) {
+          // In a world, counted since its last change, so a world read back from a snapshot keys alike.
+          ordinal = world.ordinal(definition.name, args);
+        } else {
+          const identity = `${definition.name}\u0000${canonical(args)}`;
+          ordinal = ordinals.get(identity) ?? 0;
+          ordinals.set(identity, ordinal + 1);
+        }
+        const key = emulationKey({
+          tool: definition.name,
+          args,
+          scenario,
+          ordinal,
+          ...(world ? { world: world.digest() } : {}),
+        });
 
         let answer: EmulatedResult | undefined;
         let source: EmulatedToolCall['source'] = 'store';
@@ -220,11 +396,11 @@ export function emulatedTools(tools: readonly ToolDefinition[], options: Emulate
               `No kept answer for ${definition.name}(${canonical(args)}), call ${ordinal + 1}: record it first`,
             );
           }
-          answer = await emulate(definition, args, context, limit === 0 ? [] : history.slice(-limit), options);
+          answer = await emulate(definition, args, context, earlier(), told, world !== undefined);
           source = 'model';
           if (mode !== 'emulate') await options.store?.set(key, answer);
         }
-        history.push(answer);
+        remember(definition, answer);
         report({
           tool: definition.name,
           args,
@@ -246,9 +422,10 @@ async function emulate(
   context: ToolContext | undefined,
   earlier: readonly EmulatedResult[],
   options: EmulatedToolsOptions,
+  inWorld: boolean,
 ): Promise<EmulatedResult> {
   const messages: Message[] = [
-    { role: 'system', content: brief(definition, earlier, options) },
+    { role: 'system', content: brief(definition, earlier, options, inWorld) },
     { role: 'user', content: `Arguments: ${JSON.stringify(args)}` },
   ];
   let problem = '';
@@ -282,8 +459,16 @@ async function emulate(
   );
 }
 
-/** What the emulator is told: the tool, its notes, the scenario, real calls, and this run's earlier calls. */
-function brief(definition: ToolDefinition, earlier: readonly EmulatedResult[], options: EmulatedToolsOptions): string {
+/**
+ * What the emulator is told: the tool, its notes, the scenario, real calls, and this run's earlier
+ * calls, or, in a world, what has happened in it.
+ */
+function brief(
+  definition: ToolDefinition,
+  earlier: readonly EmulatedResult[],
+  options: EmulatedToolsOptions,
+  inWorld: boolean,
+): string {
   const lines = [
     `You are emulating the tool "${definition.name}" for a test, in place of the real one.`,
     'Reply with exactly what the real tool would return for the arguments you are given, as JSON:',
@@ -307,7 +492,12 @@ function brief(definition: ToolDefinition, earlier: readonly EmulatedResult[], o
     }
   }
   if (earlier.length > 0) {
-    lines.push('', 'Earlier calls in this run, oldest first:');
+    lines.push(
+      '',
+      inWorld
+        ? 'What has happened in this world, oldest first: every change made in it, and the latest calls. Answer as the world now is.'
+        : 'Earlier calls in this run, oldest first:',
+    );
     for (const call of earlier) {
       const outcome = call.error === undefined ? `returned ${JSON.stringify(call.result)}` : `failed: ${call.error}`;
       lines.push(`- ${call.tool} ${JSON.stringify(call.args)} ${outcome}`);

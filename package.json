@@ -670,6 +670,16 @@
         "default": "./dist-cjs/agent/middleware/index.js"
       }
     },
+    "./agent/openapi": {
+      "import": {
+        "types": "./dist/agent/openapi.d.ts",
+        "default": "./dist/agent/openapi.js"
+      },
+      "require": {
+        "types": "./dist-cjs/agent/openapi.d.ts",
+        "default": "./dist-cjs/agent/openapi.js"
+      }
+    },
     "./deep-agent": {
       "import": {
         "types": "./dist/deep-agent/index.d.ts",
@@ -2411,6 +2421,9 @@
       ],
       "agent/middleware": [
         "dist-cjs/agent/middleware/index.d.ts"
+      ],
+      "agent/openapi": [
+        "dist-cjs/agent/openapi.d.ts"
       ],
       "deep-agent": [
         "dist-cjs/deep-agent/index.d.ts"

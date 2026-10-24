@@ -640,6 +640,57 @@ the shop refuses, and the emulated run sends the shop nothing. Replayed from the
 reaches that verdict again with the emulator never asked; told a different scenario, the evaluation
 reports the different answer it leads to.
 
+### Tools from an API description
+
+A service that publishes an OpenAPI document can be emulated before an agent is wired to it: read the
+document into tools with `openApiTools()`, from the [agents guide](./agents.md), and emulate them,
+showing the emulator what each returns:
+
+```ts
+const shop = openApiTools(JSON.parse(await readFile('shop.openapi.json', 'utf8')));
+const tools = emulatedTools(shop.tools, { client: ai, model: 'gpt-5-mini', results: shop.results, world });
+```
+
+The tools have the service's names, parameters, and descriptions, so the agent is evaluated against
+the service it will call; read without a base URL, they could not reach it if they ran.
+
+### A world across an evaluation
+
+An emulator holds what its tools did in one run; the next run starts again from its scenario. An
+`EmulatedWorld`, given as `EmulatedToolsOptions.world`, holds it across a whole evaluation instead: the
+scenario it started from, and each call made in it as an `EmulatedWorldCall`, so an order one example
+refunds is refunded for the next, as on a staging copy of the service. The emulator is told every
+change made in the world, however long ago, and the latest `history` calls.
+
+```ts
+const world = new EmulatedWorld({ scenario: 'Order 1042 is delivered and cost $59.' });
+await evaluate(
+  (inputs) => agentOver(emulatedTools(shop.tools, { client: ai, results: shop.results, world })).invoke(agentInput(inputs.request)),
+  dataset,
+  evaluators,
+  { concurrency: 1 },
+);
+```
+
+A call is a change when it succeeds and its tool does more than read: a tool named in `reads`, or one
+whose capabilities are all reads, `api.read`, `mcp.read`, or `filesystem:read`, with `network` beside
+them, changes nothing, nor does one that declares none. `changes` lists them, and `calls` everything.
+
+Runs that share a world run one at a time, in order. To run them side by side, start each from the
+same point: `snapshot()` writes the world as an `EmulatedWorldSnapshot`, plain JSON for a file, and
+`new EmulatedWorld(snapshot)` reads it back; `fork()` does both at once. A world's `digest()` names
+its scenario and its changes, and the key of each answer kept carries it, with `ordinal()` counting
+the same call since the last change, so a recorded evaluation replays only after the same changes.
+Without a world, keys are those of every earlier release.
+
+In the test suite, a shop serves its own OpenAPI document. A support agent is evaluated on six
+examples, two of which depend on a refund the first makes: over tools written by hand for the shop,
+over tools read from its document, which send the same requests byte for byte, and over those tools
+emulated in one world, all three reaching the same verdict, the emulated run sending the shop nothing.
+Emulated without a world, the two dependent examples come out otherwise. Started each from a snapshot
+taken after the refund, the other five reach their verdicts side by side, and replayed from the
+answers kept, the six reach them again with the emulator never asked.
+
 ## LLM judges and eval cases
 
 Use a plain assertion for small evals, or add an LLM judge when a rubric is more useful than exact matching:
@@ -749,10 +800,10 @@ regression in a test, not to judging content in production; use a model judge fo
 - An emulated tool is as faithful as its scenario and its emulator. Check a suite against the real
   tools, or a staging copy, once, and keep the answers; a verdict that differs is a scenario to fix.
 - `emulatedTools()` replaces `execute` and drops `stream`: an emulated tool reports no progress.
-- An emulated tool is one the application defined. A service's own API description, such as an
-  OpenAPI document, is not read into tools.
-- An emulator holds what one run did. The next run of an evaluation starts again from its scenario, so
-  a change one example makes is not there for the next.
+- A world tells the emulator every change made in it, so an emulator's prompt grows with an
+  evaluation's changes; start long evaluations' runs from snapshots to keep it short.
+- Runs that share a world must run one at a time: side by side, their calls interleave differently
+  each time, so the world, and the keys of its answers, differ between runs. Fork the world per run.
 - `mediaChecks()` reads the dimensions of PNG, JPEG, GIF, WebP, and BMP images, and the length of
   WAV, MP4 and MOV, WebM and Matroska, MP3, Ogg (Vorbis and Opus), and FLAC. Other audio and video are
   checked for kind, type, and size; a judge can watch them, on a provider that takes them. A file cut
@@ -898,6 +949,9 @@ specific entry point that provides it.
 | `EmulatedToolCall` | interface | One call to an emulated or passed-through tool, as `onCall` reports it. |
 | `emulatedTools` | function | Tools that look the same to the agent, by name, description, parameters, and capabilities, but are answered by a model playing each one, or by the answers a store kept, and never run: nothing they would send is sent. |
 | `EmulatedToolsOptions` | interface | Options for `emulatedTools()`. |
+| `EmulatedWorld` | class | A world emulated tools act in, kept across the runs of an evaluation: the scenario it started from, and every call made in it, so what one run changes is there for the next, as on a staging copy of a service. |
+| `EmulatedWorldCall` | interface | One call made in an emulated world. |
+| `EmulatedWorldSnapshot` | interface | An emulated world as plain JSON, to write to a file and start runs from. |
 | `EmulationError` | class | Raised when a call cannot be emulated: no kept answer in `replay`, or no valid answer from the model. |
 | `emulationKey` | function | The key of a call: its tool, its arguments, its scenario, and which call with those arguments it is, so an order looked up before and after a refund keeps both answers. |
 | `EmulationStore` | interface | Where emulated answers are kept, by `emulationKey()`, so a later run replays them. |

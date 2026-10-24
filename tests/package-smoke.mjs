@@ -154,6 +154,7 @@ const imports = [
     specifier: 'nexus-ai-pro/agent/workspace',
     exports: ['memoryWorkspace', 'fileWorkspace', 'storeWorkspace', 'compositeWorkspace', 'runWorkspaceConformance'],
   },
+  { specifier: 'nexus-ai-pro/agent/openapi', exports: ['openApiTools', 'loadOpenApiTools', 'OpenApiError'] },
   {
     specifier: 'nexus-ai-pro/agent/middleware',
     exports: [

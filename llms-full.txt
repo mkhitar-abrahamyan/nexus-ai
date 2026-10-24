@@ -2898,6 +2898,9 @@ the policy sees the path, host, or command the call actually uses:
 | `mcp.read:<server>/<tool>` | An MCP tool its server says only reads |
 | `mcp.write:<server>/<tool>` | An MCP tool its server says changes things but destroys nothing |
 | `mcp.destructive:<server>/<tool>` | An MCP tool its server says may destroy or overwrite |
+| `api.read:<api>/<operation>` | An operation of an OpenAPI document whose method only reads |
+| `api.write:<api>/<operation>` | One whose method changes things |
+| `api.destructive:<api>/<operation>` | One whose method deletes |
 | `<name>`, `<name>:<detail>` | An effect of your own, such as `payments:refund` |
 
 `capabilities: []` says a tool changes nothing; a tool with no list is undeclared. From
@@ -3357,6 +3360,57 @@ thrown error, so one bad call does not end a run. An unknown tool name is report
   `WebResolvedAddress` values.
 - `createSearchTool()` wraps a search function you supply, so the search provider stays yours.
 
+## Tools from an OpenAPI document
+
+`openApiTools()`, from `nexus-ai-pro/agent/openapi`, reads a service's own API description into tools: an
+`OpenApiDocument`, OpenAPI 3.0 or 3.1, as parsed JSON (parse a YAML one first). `loadOpenApiTools()`
+fetches one as JSON and reads it, resolving a relative server against where it came from.
+
+```ts
+import { loadOpenApiTools } from 'nexus-ai-pro/agent/openapi';
+
+const shop = await loadOpenApiTools('https://shop.example.com/openapi.json', {
+  headers: ({ context }) => ({ authorization: `Bearer ${tokens.for(context?.tenantId)}` }),
+});
+const agent = createAgent({
+  client: ai,
+  tools: shop.tools,
+  permissions: permissionPolicy({ custom: { 'api.read': 'allow', 'api.write': 'ask' }, network: { allow: ['shop.example.com'] } }),
+});
+```
+
+Each operation becomes one tool, described as an `OpenApiOperation`:
+- its name is its `operationId`, or its method and path, such as `get_orders_orderId`; two the same
+  get a number, and `prefix` keeps two APIs' apart;
+- its description is the operation's summary and description;
+- its parameters are its path, query, and header parameters, and the fields of a JSON or form body,
+  flattened, unless one is named as a parameter, when the body is one `body` parameter. A property
+  the API marks `readOnly` is left out. Cookies, and the `Accept`, `Content-Type`, and
+  `Authorization` headers, are the client's, as OpenAPI says;
+- it declares `api.read`, `api.write`, or `api.destructive` with the API's name and its own, as its
+  method says, and `network` for the API's host when it runs, so a permission policy decides it as it
+  decides any tool.
+
+References within the document are followed, a schema that refers back to itself is described rather
+than repeated, and OpenAPI 3.0's `nullable` and `example` become JSON Schema's. An `OpenApiTools` holds
+the tools, their operations, `results`, the schema of what each returns, from its first success
+response, which `emulatedTools()` shows the emulator, and `skipped`: operations whose body is of a type
+the tools do not send, such as `multipart/form-data`, and why.
+
+`OpenApiToolsOptions` sets `baseUrl`, where the API lives, which defaults to the document's first
+server; without one, the tools describe the API and run nowhere, as an emulated tool wants them.
+`headers` are sent with every call, or chosen per call from an `OpenApiHeadersRequest`, the operation
+and the call's context with its tenant, and win over a header the model sets. `include` chooses
+operations, and `timeoutMs` (30 seconds), `maxResponseBytes` (1 MB), and `fetch` bound each call.
+
+A call encodes each path parameter, so none can reach another path, and refuses one that is only dots.
+It is never sent when its call was stopped first, never follows a redirect, reads no more of an answer
+than the limit, and returns the JSON, the text, or `null` for nothing. A refusal, or a call that
+cannot be made, throws an `OpenApiError` in the API's own words, such as `createRefund answered 409:
+already refunded`, with its `status`, which the agent sees as the tool's failure. A document that
+cannot be read throws one too: `OPENAPI_UNSUPPORTED` for Swagger 2.0 or a reference outside the
+document, and `OPENAPI_INVALID` for a malformed one.
+
 ## The pieces, by name
 
 | Name | What it is |
@@ -3381,6 +3435,11 @@ The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven 
   not on every pass.
 - Tool search uses the agent's own ranking, not a provider's server-side search, so it works the same
   on every provider; Anthropic loads what it finds through tool references.
+- An OpenAPI document's security schemes are not read: the application sends its credentials as
+  `headers`. Neither are references to other files, Swagger 2.0, request bodies other than JSON and
+  form, or callbacks and webhooks.
+- A query parameter is sent as OpenAPI's default form, an array as the parameter repeated; an object in
+  a query or a header is sent as JSON.
 
 ---
 
@@ -5753,6 +5812,57 @@ the shop refuses, and the emulated run sends the shop nothing. Replayed from the
 reaches that verdict again with the emulator never asked; told a different scenario, the evaluation
 reports the different answer it leads to.
 
+### Tools from an API description
+
+A service that publishes an OpenAPI document can be emulated before an agent is wired to it: read the
+document into tools with `openApiTools()`, from the [agents guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/agents.md), and emulate them,
+showing the emulator what each returns:
+
+```ts
+const shop = openApiTools(JSON.parse(await readFile('shop.openapi.json', 'utf8')));
+const tools = emulatedTools(shop.tools, { client: ai, model: 'gpt-5-mini', results: shop.results, world });
+```
+
+The tools have the service's names, parameters, and descriptions, so the agent is evaluated against
+the service it will call; read without a base URL, they could not reach it if they ran.
+
+### A world across an evaluation
+
+An emulator holds what its tools did in one run; the next run starts again from its scenario. An
+`EmulatedWorld`, given as `EmulatedToolsOptions.world`, holds it across a whole evaluation instead: the
+scenario it started from, and each call made in it as an `EmulatedWorldCall`, so an order one example
+refunds is refunded for the next, as on a staging copy of the service. The emulator is told every
+change made in the world, however long ago, and the latest `history` calls.
+
+```ts
+const world = new EmulatedWorld({ scenario: 'Order 1042 is delivered and cost $59.' });
+await evaluate(
+  (inputs) => agentOver(emulatedTools(shop.tools, { client: ai, results: shop.results, world })).invoke(agentInput(inputs.request)),
+  dataset,
+  evaluators,
+  { concurrency: 1 },
+);
+```
+
+A call is a change when it succeeds and its tool does more than read: a tool named in `reads`, or one
+whose capabilities are all reads, `api.read`, `mcp.read`, or `filesystem:read`, with `network` beside
+them, changes nothing, nor does one that declares none. `changes` lists them, and `calls` everything.
+
+Runs that share a world run one at a time, in order. To run them side by side, start each from the
+same point: `snapshot()` writes the world as an `EmulatedWorldSnapshot`, plain JSON for a file, and
+`new EmulatedWorld(snapshot)` reads it back; `fork()` does both at once. A world's `digest()` names
+its scenario and its changes, and the key of each answer kept carries it, with `ordinal()` counting
+the same call since the last change, so a recorded evaluation replays only after the same changes.
+Without a world, keys are those of every earlier release.
+
+In the test suite, a shop serves its own OpenAPI document. A support agent is evaluated on six
+examples, two of which depend on a refund the first makes: over tools written by hand for the shop,
+over tools read from its document, which send the same requests byte for byte, and over those tools
+emulated in one world, all three reaching the same verdict, the emulated run sending the shop nothing.
+Emulated without a world, the two dependent examples come out otherwise. Started each from a snapshot
+taken after the refund, the other five reach their verdicts side by side, and replayed from the
+answers kept, the six reach them again with the emulator never asked.
+
 ## LLM judges and eval cases
 
 Use a plain assertion for small evals, or add an LLM judge when a rubric is more useful than exact matching:
@@ -5862,10 +5972,10 @@ regression in a test, not to judging content in production; use a model judge fo
 - An emulated tool is as faithful as its scenario and its emulator. Check a suite against the real
   tools, or a staging copy, once, and keep the answers; a verdict that differs is a scenario to fix.
 - `emulatedTools()` replaces `execute` and drops `stream`: an emulated tool reports no progress.
-- An emulated tool is one the application defined. A service's own API description, such as an
-  OpenAPI document, is not read into tools.
-- An emulator holds what one run did. The next run of an evaluation starts again from its scenario, so
-  a change one example makes is not there for the next.
+- A world tells the emulator every change made in it, so an emulator's prompt grows with an
+  evaluation's changes; start long evaluations' runs from snapshots to keep it short.
+- Runs that share a world must run one at a time: side by side, their calls interleave differently
+  each time, so the world, and the keys of its answers, differ between runs. Fork the world per run.
 - `mediaChecks()` reads the dimensions of PNG, JPEG, GIF, WebP, and BMP images, and the length of
   WAV, MP4 and MOV, WebM and Matroska, MP3, Ogg (Vorbis and Opus), and FLAC. Other audio and video are
   checked for kind, type, and size; a judge can watch them, on a provider that takes them. A file cut
@@ -14623,12 +14733,14 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
+| `nexus-ai-pro/agent/openapi` | 20 KB | 6% | none |
 | `nexus-ai-pro/media/catalog` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 19 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 19 KB | 5% | none |
+| `nexus-ai-pro/evaluate/emulate` | 18 KB | 5% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
@@ -14652,7 +14764,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/residency` | 13 KB | 4% | none |
-| `nexus-ai-pro/evaluate/emulate` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/media` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
@@ -14911,7 +15022,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 198 entry points, 159 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 199 entry points, 160 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

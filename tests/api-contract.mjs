@@ -124,6 +124,7 @@ const expectedSubpaths = [
   './agent/sandbox/container',
   './agent/interpreter',
   './agent/middleware',
+  './agent/openapi',
   './deep-agent',
   './store',
   './store/redis',

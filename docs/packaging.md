@@ -180,12 +180,14 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
+| `nexus-ai-pro/agent/openapi` | 20 KB | 6% | none |
 | `nexus-ai-pro/media/catalog` | 20 KB | 6% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 19 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 19 KB | 5% | none |
+| `nexus-ai-pro/evaluate/emulate` | 18 KB | 5% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
@@ -209,7 +211,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/residency` | 13 KB | 4% | none |
-| `nexus-ai-pro/evaluate/emulate` | 13 KB | 4% | none |
 | `nexus-ai-pro/postgres/store` | 13 KB | 4% | none |
 | `nexus-ai-pro/media` | 13 KB | 4% | none |
 | `nexus-ai-pro/realtime/tools` | 13 KB | 4% | none |
