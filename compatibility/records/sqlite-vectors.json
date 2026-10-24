@@ -18,14 +18,14 @@
     "kind": "vector-store",
     "version": 2
   },
-  "nexusVersion": "2.20.1",
-  "verifiedAt": "2026-10-24T17:13:28.795Z",
+  "nexusVersion": "2.20.2",
+  "verifiedAt": "2026-10-24T18:01:27.093Z",
   "runtime": "node 24.22.1 win32 x64",
   "compatible": true,
   "passed": true,
   "checks": [
     {
-      "name": "declares support for nexus-ai-pro 2.20.1",
+      "name": "declares support for nexus-ai-pro 2.20.2",
       "ok": true
     },
     {
@@ -81,23 +81,23 @@
     "add": {
       "calls": 4,
       "p50Ms": 0.04,
-      "p95Ms": 0.55
+      "p95Ms": 0.49
     },
     "search": {
       "calls": 9,
       "p50Ms": 0.11,
-      "p95Ms": 0.34
+      "p95Ms": 0.3
     },
     "searchVector": {
       "calls": 1,
-      "p50Ms": 0.11,
-      "p95Ms": 0.11
+      "p50Ms": 0.08,
+      "p95Ms": 0.08
     },
     "delete": {
       "calls": 2,
       "p50Ms": 0,
-      "p95Ms": 0.1
+      "p95Ms": 0.09
     }
   },
-  "digest": "aafe7fc0a663ab283a30063883edd2f6f30b967698f3ce71c147b351c251dc29"
+  "digest": "06c99988b26b3f28ee2937bbb3dedd5bbeacd4319d96cc4df550c67e919f1859"
 }
