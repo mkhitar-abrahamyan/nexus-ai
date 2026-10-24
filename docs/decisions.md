@@ -181,8 +181,8 @@ decision, and every ticket it is unsure of reaches a person.
   is sampled.
 - TypeSafe AI's image questions, locating something in a picture, and its long-context mode are
   experimental there, and the image questions are not part of the contract.
-- Jev is in early access; its adapter has passed against a stand-in written from the documentation,
-  not yet against the live service.
+- Jev is in early access; its adapter has passed against a stand-in written from TypeSafe AI's
+  documentation, not yet against the live service.
 
 <!-- reference:start -->
 ## Reference

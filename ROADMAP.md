@@ -4,12 +4,12 @@ What comes next, and why. This is a design proposal, not a compatibility promise
 what is experimental is defined in [API_STABILITY.md](./API_STABILITY.md), and what has shipped is in
 [CHANGELOG.md](./CHANGELOG.md). Work leaves this page when it ships.
 
-Status baseline: **2.18.0**. 195 export subpaths, each held to a size budget in CI, 12 completion
+Status baseline: **2.19.0**. 198 export subpaths, each held to a size budget in CI, 12 completion
 providers, 5 embedding providers, 2 completion batch providers and 2 embedding batch tiers, 3 image
-providers plus a mock, 2 media providers plus a mock, 2 video providers plus a mock, 2 realtime
-providers plus a mock, 2 telephony providers, 5 workspaces, 6 secret sources, OTLP over HTTP and
+providers plus a mock, 2 media providers plus a mock, 2 video providers plus a mock, 2 decision
+providers plus a mock, 2 realtime providers plus a mock, 2 telephony providers, 5 workspaces, 6 secret sources, OTLP over HTTP and
 gRPC, and 98 completion registry models plus 60 aliases, verified against each provider's
-documentation on 2026-10-02. 1,308 unit tests and 31 studio tests pass; coverage sits at **96.3%
+documentation on 2026-10-02. 1,339 unit tests and 31 studio tests pass; coverage sits at **96.4%
 lines / 82.8% branches / 92.1% functions** against gates of 82/67/73. CI verifies lint,
 format, build, tests, coverage, registry drift, `llms.txt` drift, per-subpath size, documentation
 and guide coverage, the root import, a graph benchmark with a durability budget, runtime and
@@ -43,7 +43,9 @@ each tool decided by what its server says it does, an editor's MCP server that d
 adds a tool between two turns, a video extended from its own job and one of the application's edited
 on every video provider, spans with events and links read back by the OpenTelemetry Collector, the
 length of every audio and video container matching its encoder's, a tenant's threads paged across two
-regions each exactly once, ten online-evaluation workers
+regions each exactly once, one decision suite on a decision model's API, on log probabilities, and on
+sampling, a calibrated threshold holding its accuracy on answers it never saw where one taken on trust
+does not, a support graph sending every ticket it is unsure of to a person, ten online-evaluation workers
 through a crash and through 4,000 runs started in one millisecond on every trace store, a worker killed holding a budget reservation at
 each point of its call on every usage store, an adversarial dataset against an unguarded and a
 guarded agent, the agent protocols driven from the other side of the wire and against the published
@@ -106,53 +108,45 @@ it passes its conformance suite against the live service every week.
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release: 2.19, or
+Each gap is written down in a guide's limitations today, and each is closed by one release: 2.20, or
 the theme after it that owns it.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.19 |
-| Images have not recorded live conformance on all three backends | API stability | 2.19 |
-| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.19 |
-| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.19 |
-| Video generation has not passed its conformance suite against Gemini Omni Flash, Veo, and Runway | Video guide | 2.19 |
-| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.19 |
-| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.19 |
-| `classifyRoute()` reports the confidence a model claims of itself, not a probability | Workflows guide | 2.19 |
-| No provider's token log probabilities reach the application | Providers guide | 2.19 |
-| An emulated tool is one the application defined; a service's API description is not read into tools | Evaluation guide | After 2.19 |
-| An emulator holds what one run did, not what a whole evaluation did | Evaluation guide | After 2.19 |
+| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.20 |
+| Images have not recorded live conformance on all three backends | API stability | 2.20 |
+| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.20 |
+| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.20 |
+| Video generation has not passed its conformance suite against Gemini Omni Flash, Veo, and Runway | Video guide | 2.20 |
+| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.20 |
+| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.20 |
+| Typed decisions have passed against a stand-in of TypeSafe AI's API, not the live service | Decisions guide | 2.20 |
+| An emulated tool is one the application defined; a service's API description is not read into tools | Evaluation guide | 2.20 |
+| An emulator holds what one run did, not what a whole evaluation did | Evaluation guide | 2.20 |
 
 ---
 
-## 2.19.0: Typed decisions, from a decision model and from any model
+## 2.20.0: Tools emulated from an API description, and an emulator that remembers the evaluation
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
-understanding, video, Gemini Live, SIP call control, and both phone providers graduate when the
-scheduled live workflow passes against each, published with their checklists. Every check runs
-there now; what stands in the way is the repository's live credentials, and for video, the variable
-that lets it spend seconds of video.
+understanding, video, typed decisions, Gemini Live, SIP call control, and both phone providers
+graduate when the scheduled live workflow passes against each, published with their checklists. Every
+check runs there now; what stands in the way is the repository's live credentials, and for video, the
+variable that lets it spend seconds of video.
 
-**Typed decisions.** Software asks a model many small questions it then acts on: which team takes a
-ticket, whether a message is an attack, how well an answer meets a rubric. Today the package asks a
-chat model for a label and the confidence it claims, which is not a probability. 2.19 adds decisions:
-a question is a yes or no, a choice among up to 255 options, or a score on a rubric of up to ten
-levels, asked of one state, many in a call, each answered with its probabilities and a confidence
-read from them. They come from TypeSafe AI's Jev, a model that answers only such questions, with no
-text to parse, and that TypeSafe AI bills for its input alone; or from any completion model, by its
-token log probabilities where its provider gives them, and by sampling where it does not. A gate
-turns a confidence into what to do: act, ask a person, or refuse, at thresholds a calibration on the
-application's own labelled examples chooses.
+**Tools from an API description.** An emulated tool is one the application defined today. 2.20 reads
+a service's own API description, an OpenAPI document, into tools whose names, parameters, and answers
+are the service's, so an agent is evaluated against a service before it is wired to it, with nothing
+sent.
 
-**Decisions where the package decides.** A graph's branch, an agent's approval, a guardrail's verdict,
-a judge's score, an evaluation sent to people, and a router's choice of model can each be asked as a
-decision: a confident answer acts, and an uncertain one goes to a person. Every decision runs inside
-the lifecycle, budgeted, traced, failed over, cached, and on the tenant's key.
+**An emulator that remembers the evaluation.** An emulator holds what one run did; the next run starts
+again from its scenario. 2.20 lets it hold the world across a whole evaluation, so an order one example
+refunds is refunded for the next, as a staging copy would have it, and lets each run start instead
+from a snapshot of it.
 
-**Proof.** One decision suite passes on Jev's API, against a stand-in written from its documentation
-and then the live service; on a model's log probabilities; and on sampling. On labelled examples, the
-threshold a calibration chooses holds the accuracy it was chosen for on examples it never saw. A
-support graph routes tickets by decision, and every ticket it is unsure of reaches a person.
+**Proof.** An agent over tools read from a stand-in service's OpenAPI document reaches the verdict it
+reaches over the stand-in itself, with nothing sent; and an evaluation whose examples build on each
+other's changes reaches the stand-in's verdict, run in order and again from a snapshot.
 
 ---
 
@@ -160,15 +154,11 @@ support graph routes tickets by decision, and every ticket it is unsure of reach
 
 Not yet placed, roughly in order of what applications ask for:
 
-1. Tools emulated from a service's own API description, an OpenAPI document, so an agent is
-   evaluated against a service before it is wired to it, with nothing sent.
-2. An emulator that holds the world across a whole evaluation, so a change one example makes is there
-   for the next, and that can start each run from a snapshot of it.
-3. Decisions about images: where in a picture something is, and questions asked over the pictures a
+1. Decisions about images: where in a picture something is, and questions asked over the pictures a
    state holds, with the media family.
-4. Compatibility records published from community adapters' own CI, gathered onto the page by a
+2. Compatibility records published from community adapters' own CI, gathered onto the page by a
    scheduled workflow rather than by pull request.
-5. A2A requests routed by their tenant, and an agent card's security schemes and signatures read
+3. A2A requests routed by their tenant, and an agent card's security schemes and signatures read
    over gRPC.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade

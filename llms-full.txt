@@ -343,13 +343,16 @@ Shipped so far:
   video is extended from its own job or edited on Gemini Omni Flash, Veo, and Runway;
 - 2.18 span events and links, as OpenTelemetry has them, media that knows its length from its own
   headers, a tenant's threads and runs listed and paged across all of its regions, MCP servers that
-  reconnect and change their tools within a session, and videos made after reference videos.
+  reconnect and change their tools within a session, and videos made after reference videos;
+- 2.19 typed decisions: a yes or no, a choice, or a score, answered with probabilities and a
+  confidence, from TypeSafe AI's Jev or from any model's log probabilities, gated by thresholds a
+  calibration chooses, so a graph's branch, an approval, or a guardrail acts when it is sure and asks
+  a person when it is not.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.19 adds typed decisions: a yes or no, a choice, or a score, answered with probabilities and
-a calibrated confidence, from TypeSafe AI's Jev or from any model, so a graph's branch, an approval,
-or a guardrail acts when it is sure and asks a person when it is not.
+Next, 2.20 reads a service's own API description into emulated tools, and lets an emulator hold
+what a whole evaluation did, so examples that build on each other are evaluated with nothing sent.
 Pinecone, images, the Gemini
 embedding batch tier, media understanding, video, Gemini Live, SIP, and both phone providers
 graduate once the live workflow passes against each. The
@@ -9647,8 +9650,8 @@ decision, and every ticket it is unsure of reaches a person.
   is sampled.
 - TypeSafe AI's image questions, locating something in a picture, and its long-context mode are
   experimental there, and the image questions are not part of the contract.
-- Jev is in early access; its adapter has passed against a stand-in written from the documentation,
-  not yet against the live service.
+- Jev is in early access; its adapter has passed against a stand-in written from TypeSafe AI's
+  documentation, not yet against the live service.
 
 ---
 

@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-10-24
+
 Typed decisions: a yes or no, a choice, or a score, answered with probabilities and a confidence read
 from them, from TypeSafe AI's Jev or from any model, acted on when sure and sent to a person when not.
 
@@ -3220,7 +3222,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.18.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.19.0...HEAD
+[2.19.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.15.1...v2.16.0
