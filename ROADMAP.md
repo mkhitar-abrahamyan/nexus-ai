@@ -6,31 +6,31 @@ graduate, is defined in [API_STABILITY.md](./API_STABILITY.md); what has shipped
 [CHANGELOG.md](./CHANGELOG.md); how releases are planned is in [CONTRIBUTING.md](./CONTRIBUTING.md).
 Work leaves this page when it ships.
 
-Current release: **2.19.0**.
+Current release: **2.20.0**.
 
 ---
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release: 2.20, or
+Each gap is written down in a guide's limitations today, and each is closed by one release: 2.21, or
 the theme after it that owns it.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.20 |
-| Images have not recorded live conformance on all three backends | API stability | 2.20 |
-| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.20 |
-| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.20 |
-| Video generation has not passed its conformance suite against Gemini Omni Flash, Veo, and Runway | Video guide | 2.20 |
-| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.20 |
-| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.20 |
-| Typed decisions have passed against a stand-in of TypeSafe AI's API, not the live service | Decisions guide | 2.20 |
-| An emulated tool is one the application defined; a service's API description is not read into tools | Evaluation guide | 2.20 |
-| An emulator holds what one run did, not what a whole evaluation did | Evaluation guide | 2.20 |
+| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 2.21 |
+| Images have not recorded live conformance on all three backends | API stability | 2.21 |
+| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 2.21 |
+| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 2.21 |
+| Video generation has not passed its conformance suite against Gemini Omni Flash, Veo, and Runway | Video guide | 2.21 |
+| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.21 |
+| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.21 |
+| Typed decisions have passed against a stand-in of TypeSafe AI's API, not the live service | Decisions guide | 2.21 |
+| A decision is asked of text or JSON, not of a picture | Decisions guide | 2.21 |
+| A community adapter's record reaches the compatibility page by a pull request, not from its own CI | Adapter kit guide | 2.21 |
 
 ---
 
-## 2.20.0: Tools emulated from an API description, an emulator that remembers the evaluation, and A2A for many tenants
+## 2.21.0: Decisions about pictures, and compatibility records from community CI
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
 understanding, video, typed decisions, Gemini Live, SIP call control, and both phone providers
@@ -38,37 +38,25 @@ graduate when the scheduled live workflow passes against each, published with th
 check runs there now; what stands in the way is the repository's live credentials, and for video, the
 variable that lets it spend seconds of video.
 
-**Tools from an API description.** An emulated tool is one the application defined today. 2.20 reads
-a service's own API description, an OpenAPI document, into tools whose names, parameters, and answers
-are the service's, so an agent is evaluated against a service before it is wired to it, with nothing
-sent.
+**Decisions about pictures.** A typed decision is asked of text or JSON today. 2.21 asks it of the
+pictures a state holds too: a yes or no, a choice, or a score about an image, and where in a picture
+something is, as a box, from TypeSafe AI's Jev and from any vision model, with the media family's
+inputs and the same confidence and calibration.
 
-**An emulator that remembers the evaluation.** An emulator holds what one run did; the next run starts
-again from its scenario. 2.20 lets it hold the world across a whole evaluation, so an order one example
-refunds is refunded for the next, as a staging copy would have it, and lets each run start instead
-from a snapshot of it.
+**Compatibility records from community CI.** A community adapter's record reaches the compatibility
+page by a pull request today. 2.21 has an adapter publish its own record from its own CI, sealed as
+`nexus adapters verify` seals it, and a scheduled workflow gathers the records onto the page, turning
+an adapter red when its record says it no longer passes.
 
-**One A2A handler for many tenants.** A request's `tenant` is not routed on today, so each tenant
-needs a handler of its own. 2.20 routes each request by the tenant it names, on every binding, keeps
-each tenant's tasks and conversations its own, and refuses a caller acting for another; and reads a
-card's security schemes and signatures over gRPC too.
-
-**Proof.** An agent over tools read from a stand-in service's OpenAPI document reaches the verdict it
-reaches over the stand-in itself, with nothing sent; and an evaluation whose examples build on each
-other's changes reaches the stand-in's verdict, run in order and again from a snapshot. One handler
-serves two tenants over JSON-RPC, HTTP+JSON, and gRPC, each seeing only its own, and a caller naming
-the other tenant is refused on all three.
+**Proof.** One decision suite passes on pictures, on TypeSafe AI's API against a stand-in written from
+its documentation and on a vision model, a box landing where the picture has it; and a record an
+adapter's CI publishes reaches the page with nothing merged, and a failing one turns it red.
 
 ---
 
 ## Unscheduled
 
-Not yet placed, roughly in order of what applications ask for:
-
-1. Decisions about images: where in a picture something is, and questions asked over the pictures a
-   state holds, with the media family.
-2. Compatibility records published from community adapters' own CI, gathered onto the page by a
-   scheduled workflow rather than by pull request.
+Nothing else is placed yet.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:

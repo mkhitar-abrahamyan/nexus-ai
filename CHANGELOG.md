@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-10-24
+
 Tools read from a service's OpenAPI document, an emulator that remembers the evaluation, and one A2A
 handler serving many tenants.
 
@@ -3263,7 +3265,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.19.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.0...HEAD
+[2.20.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.16.0...v2.17.0

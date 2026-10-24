@@ -194,3 +194,5 @@ A deliberately broken store fails exactly the checks it breaks.
   local stand-in, not in a unit test without one.
 - Credentials belong in the configuration passed to `create()` and `verify()`, never in the
   definition, which an adapter package publishes.
+- A community adapter's record reaches the compatibility page by a pull request: it is not gathered
+  from the adapter's own CI.
