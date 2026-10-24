@@ -93,22 +93,22 @@ declarations, which carry every doc comment to your editor.
 <!-- size-table:start -->
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 363 KB | 100% | none |
+| `nexus-ai-pro` | 364 KB | 100% | none |
 | `nexus-ai-pro/config` | 356 KB | 98% | none |
 | `nexus-ai-pro/core` | 352 KB | 97% | none |
-| `nexus-ai-pro/realtime` | 216 KB | 60% | none |
+| `nexus-ai-pro/realtime` | 216 KB | 59% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 59% | none |
-| `nexus-ai-pro/server/deployments` | 151 KB | 42% | none |
+| `nexus-ai-pro/server/deployments` | 151 KB | 41% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 142 KB | 39% | none |
 | `nexus-ai-pro/server` | 126 KB | 35% | none |
-| `nexus-ai-pro/batch` | 118 KB | 33% | none |
+| `nexus-ai-pro/batch` | 118 KB | 32% | none |
 | `nexus-ai-pro/agent` | 114 KB | 31% | none |
 | `nexus-ai-pro/realtime/session` | 109 KB | 30% | none |
-| `nexus-ai-pro/protocols/a2a/grpc` | 95 KB | 26% | none |
+| `nexus-ai-pro/protocols/a2a/grpc` | 102 KB | 28% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 25% | none |
-| `nexus-ai-pro/providers/groq` | 89 KB | 25% | none |
-| `nexus-ai-pro/providers/mistral` | 89 KB | 25% | none |
-| `nexus-ai-pro/evaluate/online` | 89 KB | 25% | none |
+| `nexus-ai-pro/providers/groq` | 89 KB | 24% | none |
+| `nexus-ai-pro/providers/mistral` | 89 KB | 24% | none |
+| `nexus-ai-pro/evaluate/online` | 89 KB | 24% | none |
 | `nexus-ai-pro/providers/azure-openai` | 88 KB | 24% | none |
 | `nexus-ai-pro/providers/deepseek` | 88 KB | 24% | none |
 | `nexus-ai-pro/providers/llamacpp` | 88 KB | 24% | none |
@@ -121,10 +121,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images` | 81 KB | 22% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 74 KB | 20% | none |
-| `nexus-ai-pro/agent/sandbox/container` | 60 KB | 17% | none |
+| `nexus-ai-pro/protocols/a2a` | 62 KB | 17% | none |
+| `nexus-ai-pro/agent/sandbox/container` | 60 KB | 16% | none |
 | `nexus-ai-pro/providers/cohere` | 59 KB | 16% | none |
 | `nexus-ai-pro/providers/ollama` | 59 KB | 16% | none |
-| `nexus-ai-pro/protocols/a2a` | 59 KB | 16% | none |
 | `nexus-ai-pro/security` | 58 KB | 16% | none |
 | `nexus-ai-pro/video` | 58 KB | 16% | none |
 | `nexus-ai-pro/operations` | 56 KB | 15% | none |
@@ -179,9 +179,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
-| `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
-| `nexus-ai-pro/agent/openapi` | 20 KB | 6% | none |
-| `nexus-ai-pro/media/catalog` | 20 KB | 6% | none |
+| `nexus-ai-pro/images/transform` | 20 KB | 5% | none |
+| `nexus-ai-pro/agent/openapi` | 20 KB | 5% | none |
+| `nexus-ai-pro/media/catalog` | 20 KB | 5% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 5% | none |
@@ -281,13 +281,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/loaders/markdown` | 3 KB | 0.8% | none |
 | `nexus-ai-pro/loaders/json` | 3 KB | 0.8% | none |
 | `nexus-ai-pro/loaders/pdf` | 3 KB | 0.8% | none |
-| `nexus-ai-pro/media/mock` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/decisions/mock` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/cache` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/cache/adapters` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/jobs` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/jobs/durable-adapters` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/jobs/queue` | 2 KB | 0.6% | none |
+| `nexus-ai-pro/media/mock` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/decisions/mock` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/cache` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/cache/adapters` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/jobs` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/jobs/durable-adapters` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/jobs/queue` | 2 KB | 0.5% | none |
 | `nexus-ai-pro/streaming` | 1 KB | 0.3% | none |
 | `nexus-ai-pro/providers/type-guards` | 1 KB | 0.3% | none |
 | `nexus-ai-pro/next` | 1 KB | 0.3% | none |

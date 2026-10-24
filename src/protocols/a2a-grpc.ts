@@ -363,7 +363,10 @@ export function a2aGrpcClient(options: A2aGrpcClientOptions): A2aGrpcClient {
     });
     const abort = () => request.close(http2.constants.NGHTTP2_CANCEL);
     signal?.addEventListener('abort', abort, { once: true });
-    request.end(frame(encodeA2a(shape.request, params)));
+    // Every request names the tenant, when the client has one.
+    request.end(
+      frame(encodeA2a(shape.request, options.tenant ? { tenant: options.tenant, ...(params as object) } : params)),
+    );
     let status: Record<string, unknown> = {};
     request.on('response', (headers) => {
       if (headers['grpc-status'] !== undefined) status = headers as Record<string, unknown>;

@@ -113,6 +113,53 @@ export interface A2aTask {
   metadata?: Record<string, unknown>;
 }
 
+/** One of the OAuth 2.0 flows an `oauth2SecurityScheme` offers: exactly one is set. */
+export type A2aOAuthFlows =
+  | {
+      authorizationCode: {
+        authorizationUrl: string;
+        tokenUrl: string;
+        refreshUrl?: string;
+        scopes: Record<string, string>;
+        pkceRequired?: boolean;
+      };
+    }
+  | { clientCredentials: { tokenUrl: string; refreshUrl?: string; scopes: Record<string, string> } }
+  | {
+      deviceCode: {
+        deviceAuthorizationUrl: string;
+        tokenUrl: string;
+        refreshUrl?: string;
+        scopes: Record<string, string>;
+      };
+    }
+  | { implicit: { authorizationUrl?: string; refreshUrl?: string; scopes?: Record<string, string> } }
+  | { password: { tokenUrl?: string; refreshUrl?: string; scopes?: Record<string, string> } };
+
+/** How a caller authenticates with an agent, as its card names it: exactly one scheme is set. */
+export type A2aSecurityScheme =
+  | { apiKeySecurityScheme: { description?: string; location: 'query' | 'header' | 'cookie'; name: string } }
+  | { httpAuthSecurityScheme: { description?: string; scheme: string; bearerFormat?: string } }
+  | { oauth2SecurityScheme: { description?: string; flows: A2aOAuthFlows; oauth2MetadataUrl?: string } }
+  | { openIdConnectSecurityScheme: { description?: string; openIdConnectUrl: string } }
+  | { mtlsSecurityScheme: { description?: string } };
+
+/** The schemes a call needs, by the names the card gives them, each with the scopes it needs. */
+export interface A2aSecurityRequirement {
+  /** Each scheme's name, with its scopes. */
+  schemes: Record<string, { list: string[] }>;
+}
+
+/** A JSON Web Signature over an agent card, as the card carries it. */
+export interface A2aCardSignature {
+  /** The protected header: base64url-encoded JSON. */
+  protected: string;
+  /** The signature, base64url-encoded. */
+  signature: string;
+  /** The unprotected header's values. */
+  header?: Record<string, unknown>;
+}
+
 /** A skill an agent card advertises. */
 export interface A2aSkill {
   /** Its id. */
@@ -125,6 +172,8 @@ export interface A2aSkill {
   tags: string[];
   /** Example requests. */
   examples?: string[];
+  /** The schemes a call of this skill needs, beyond the card's. */
+  securityRequirements?: A2aSecurityRequirement[];
 }
 
 /** What an agent publishes about itself at `/.well-known/agent-card.json`. */
@@ -147,6 +196,12 @@ export interface A2aAgentCard {
   defaultOutputModes: string[];
   /** What it can do. */
   skills: A2aSkill[];
+  /** How a caller authenticates, each scheme by a name `securityRequirements` use. */
+  securitySchemes?: Record<string, A2aSecurityScheme>;
+  /** The schemes a call needs. */
+  securityRequirements?: A2aSecurityRequirement[];
+  /** Signatures over the card, as given: a signature must be over the card as it is served. */
+  signatures?: A2aCardSignature[];
 }
 
 /** A streamed event: a task, a status change, or a piece of an artifact. */
@@ -172,6 +227,11 @@ export const A2A_ERRORS = {
   unsupportedOperation: -32004,
   extendedCardNotConfigured: -32007,
   versionNotSupported: -32009,
+  /**
+   * This package's own, from the range JSON-RPC leaves to servers: the caller may not act for the
+   * tenant it named. HTTP 403, and `PERMISSION_DENIED` over gRPC.
+   */
+  permissionDenied: -32099,
 } as const;
 
 /** Raised by a client when an agent answers with an error, on any binding, as A2A's code. */
@@ -223,6 +283,8 @@ export interface A2aTaskRecord {
   run?: A2aTaskRun;
   /** Bumped by every claim of the lease, so two replicas claiming one task cannot both win. */
   version?: number;
+  /** The tenant it belongs to, when the handler serves several: no other tenant's request sees it. */
+  tenant?: string;
 }
 
 /** A replica's hold on a working task. */
@@ -251,6 +313,8 @@ export interface A2aTaskQuery {
   contextId?: string;
   /** Only those in this state. */
   state?: A2aTaskState;
+  /** Only this tenant's. A store that serves several tenants must honour it. */
+  tenant?: string;
   /** Most returned. */
   limit: number;
   /** Skipped first, for paging. */
@@ -332,7 +396,8 @@ export class MemoryA2aTaskStore implements A2aTaskStore {
       .filter(
         (record) =>
           (query.contextId === undefined || record.task.contextId === query.contextId) &&
-          (query.state === undefined || record.task.status.state === query.state),
+          (query.state === undefined || record.task.status.state === query.state) &&
+          (query.tenant === undefined || record.tenant === query.tenant),
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return {
@@ -382,6 +447,7 @@ export function storeA2aTasks(store: Store, options: { namespace?: readonly stri
       const filter: Record<string, unknown> = {
         ...(query.contextId === undefined ? {} : { 'task.contextId': query.contextId }),
         ...(query.state === undefined ? {} : { 'task.status.state': query.state }),
+        ...(query.tenant === undefined ? {} : { tenant: query.tenant }),
       };
       const items = await store.search<A2aTaskRecord>(tasks, {
         limit: query.limit,
@@ -449,6 +515,17 @@ export interface A2aPushOptions {
   text?: boolean | { everyMs?: number };
 }
 
+/** How one handler serves several tenants, each request routed by the `tenant` it names. */
+export interface A2aTenancyOptions {
+  /**
+   * Whether a caller may act for the tenant its request names. Defaults to its principal's `tenantId`
+   * being that tenant, so a caller nobody authenticated may act for none.
+   */
+  authorize?: (tenant: string, principal: Principal | undefined) => boolean | Promise<boolean>;
+  /** Whether every request must name a tenant. Defaults to true. */
+  required?: boolean;
+}
+
 /** Options for `a2aHandler()`. */
 export interface A2aServerOptions {
   /** The card's content: the endpoint `url` is where this handler is mounted. */
@@ -508,6 +585,15 @@ export interface A2aServerOptions {
    * protocolBinding: 'GRPC' }`, or a binding of your own.
    */
   interfaces?: ReadonlyArray<{ url: string; protocolBinding: string; protocolVersion?: string; tenant?: string }>;
+  /**
+   * Serves several tenants from this one handler, each request routed by the tenant it names: in its
+   * params over JSON-RPC, as its path's first segment over HTTP+JSON (`/{tenant}/message:send`), and in
+   * its message over gRPC. Each tenant's tasks and conversations are its own, and its runs carry the
+   * tenant on their principal, for its credentials and budget. A caller that may not act for the tenant
+   * it names is refused with `A2A_ERRORS.permissionDenied`. `true` takes the defaults. Off by default:
+   * a request's tenant is not read.
+   */
+  tenants?: A2aTenancyOptions | boolean;
 }
 
 /** The binding a call arrived on. */
@@ -552,6 +638,7 @@ const ERROR_STATUS: Record<number, A2aErrorStatus> = {
   [-32007]: { httpStatus: 400, grpcStatus: 'FAILED_PRECONDITION', reason: 'EXTENDED_AGENT_CARD_NOT_CONFIGURED' },
   [-32008]: { httpStatus: 400, grpcStatus: 'FAILED_PRECONDITION', reason: 'EXTENSION_SUPPORT_REQUIRED' },
   [-32009]: { httpStatus: 400, grpcStatus: 'UNIMPLEMENTED', reason: 'VERSION_NOT_SUPPORTED' },
+  [-32099]: { httpStatus: 403, grpcStatus: 'PERMISSION_DENIED', reason: 'PERMISSION_DENIED' },
   [-32700]: { httpStatus: 400, grpcStatus: 'INVALID_ARGUMENT', reason: 'INVALID_PARAMS' },
   [-32600]: { httpStatus: 400, grpcStatus: 'INVALID_ARGUMENT', reason: 'INVALID_PARAMS' },
   [-32601]: { httpStatus: 404, grpcStatus: 'UNIMPLEMENTED', reason: 'METHOD_NOT_FOUND' },
@@ -666,7 +753,14 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
     defaultInputModes: options.card.defaultInputModes ?? ['text/plain', 'application/json'],
     defaultOutputModes: options.card.defaultOutputModes ?? ['text/plain'],
     skills: options.card.skills,
+    ...(options.card.securitySchemes ? { securitySchemes: options.card.securitySchemes } : {}),
+    ...(options.card.securityRequirements ? { securityRequirements: options.card.securityRequirements } : {}),
+    ...(options.card.signatures ? { signatures: options.card.signatures } : {}),
   };
+  const tenancy = options.tenants ? (options.tenants === true ? {} : options.tenants) : undefined;
+  /** A conversation's key in the store: its context's id, within its tenant's when it has one. */
+  const conversationKey = (record: A2aTaskRecord) =>
+    record.tenant === undefined ? record.task.contextId : `${record.tenant}\u0000${record.task.contextId}`;
   const store = options.store ?? new MemoryA2aTaskStore({ maxTasks: options.maxTasks ?? 10_000 });
   const owner = options.lease?.owner ?? protocolId('replica');
   const leaseMs = options.lease?.ms ?? 30_000;
@@ -897,9 +991,9 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
         const text = answerOf(result.state);
         const reply = agentMessage(task, text);
         record.history.push(reply);
-        const before = (await store.conversation(task.contextId)) ?? [];
+        const before = (await store.conversation(conversationKey(record))) ?? [];
         await store.saveConversation(
-          task.contextId,
+          conversationKey(record),
           transcriptOf(result.state, [...before, messageOf('assistant', text)]),
         );
         task.artifacts = [{ artifactId: `${task.id}:answer`, name: 'answer', parts: [{ text }] }];
@@ -949,13 +1043,13 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
     message: A2aMessage,
     runOptions: ProtocolRunOptions,
   ): Promise<ProtocolResult> => {
-    const history = (await store.conversation(record.task.contextId)) ?? [];
+    const history = (await store.conversation(conversationKey(record))) ?? [];
     const said = messageOf('user', textOfParts(message.parts));
     const result = await graph.invoke(
       options.input ? options.input(message, history) : { messages: [...history, said] },
       runOptions,
     );
-    await store.saveConversation(record.task.contextId, [...history, said]);
+    await store.saveConversation(conversationKey(record), [...history, said]);
     return result;
   };
 
@@ -1027,10 +1121,14 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
   const taskFor = async (
     message: A2aMessage,
     principal: Principal | undefined,
+    mine: (record: A2aTaskRecord) => boolean,
+    tenant: string | undefined,
   ): Promise<A2aTaskRecord | { error: number; message: string }> => {
     if (message.taskId) {
       const existing = await store.get(message.taskId);
-      if (!existing) return { error: A2A_ERRORS.taskNotFound, message: `Task ${message.taskId} was not found` };
+      if (!existing || !mine(existing)) {
+        return { error: A2A_ERRORS.taskNotFound, message: `Task ${message.taskId} was not found` };
+      }
       if (existing.task.status.state !== 'TASK_STATE_INPUT_REQUIRED') {
         return { error: A2A_ERRORS.unsupportedOperation, message: `Task ${message.taskId} is not waiting for input` };
       }
@@ -1049,6 +1147,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
       history: [said],
       run: { kind: 'invoke', message: said, ...(principal ? { principal } : {}) },
       updatedAt: new Date().toISOString(),
+      ...(tenant !== undefined ? { tenant } : {}),
     };
     await store.put(record);
     return record;
@@ -1155,9 +1254,28 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
     params: Record<string, unknown>,
     context: A2aCallContext = {},
   ): Promise<A2aCallOutcome> => {
-    const principal = context.principal;
+    let principal = context.principal;
     const binding = context.binding ?? 'JSONRPC';
     const pushOn = Boolean(options.pushNotifications);
+    const named = typeof params.tenant === 'string' && params.tenant !== '' ? params.tenant : undefined;
+    if (tenancy) {
+      if (named === undefined) {
+        if (tenancy.required !== false) return fail(-32602, 'This agent serves several tenants: name one as tenant');
+      } else {
+        const allowed = tenancy.authorize ? await tenancy.authorize(named, principal) : principal?.tenantId === named;
+        if (!allowed) return fail(A2A_ERRORS.permissionDenied, `This caller may not act for tenant ${named}`);
+        // The run is the tenant's: its credentials and budget follow it.
+        if (principal?.tenantId !== named) principal = { ...principal, tenantId: named };
+      }
+    }
+    /** The tenant this call is within: none when the handler serves one. */
+    const tenant = tenancy ? named : undefined;
+    const mine = (record: A2aTaskRecord) => !tenancy || record.tenant === tenant;
+    /** A task this call may see: another tenant's is not found. */
+    const own = async (id: string) => {
+      const record = await store.get(id);
+      return record && mine(record) ? record : undefined;
+    };
     try {
       switch (method) {
         case 'SendMessage':
@@ -1174,7 +1292,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           if (pushConfig && !pushOn) {
             return fail(A2A_ERRORS.pushNotificationNotSupported, 'This agent does not push notifications');
           }
-          const record = await taskFor(message, principal);
+          const record = await taskFor(message, principal, mine, tenant);
           if ('error' in record) return fail(record.error, record.message);
           if (pushConfig) {
             addPush(record, pushConfig);
@@ -1189,7 +1307,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           return { events: follow(record, () => execute(record, message, principal), context.signal) };
         }
         case 'GetTask': {
-          const record = await store.get(String(params.id ?? ''));
+          const record = await own(String(params.id ?? ''));
           if (!record) return fail(A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
           return { result: view(record, typeof params.historyLength === 'number' ? params.historyLength : undefined) };
         }
@@ -1205,6 +1323,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           const listed = await store.list({
             ...(typeof params.contextId === 'string' && params.contextId !== '' ? { contextId: params.contextId } : {}),
             ...(filtered ? { state: status as A2aTaskState } : {}),
+            ...(tenant !== undefined ? { tenant } : {}),
             limit: pageSize,
             offset,
           });
@@ -1215,6 +1334,8 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           return {
             result: {
               tasks: listed.records
+                // Within the tenant, whatever a store of the application's own returned.
+                .filter(mine)
                 .filter((record) => !after || (record.task.status.timestamp ?? '') >= after)
                 .map((record) => view(record, historyLength))
                 .map(({ artifacts, ...task }) =>
@@ -1227,7 +1348,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           };
         }
         case 'SubscribeToTask': {
-          const record = await store.get(String(params.id ?? ''));
+          const record = await own(String(params.id ?? ''));
           if (!record) return fail(A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
           if (TERMINAL.has(record.task.status.state)) {
             return fail(A2A_ERRORS.unsupportedOperation, `Task ${record.task.id} has already finished`);
@@ -1238,7 +1359,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           return { events: follow(record, undefined, context.signal) };
         }
         case 'CancelTask': {
-          const record = await store.get(String(params.id ?? ''));
+          const record = await own(String(params.id ?? ''));
           if (!record) return fail(A2A_ERRORS.taskNotFound, `Task ${String(params.id)} was not found`);
           if (TERMINAL.has(record.task.status.state)) {
             return fail(A2A_ERRORS.taskNotCancelable, `Task ${record.task.id} has already finished`);
@@ -1256,7 +1377,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
         case 'DeleteTaskPushNotificationConfig': {
           if (!pushOn) return fail(A2A_ERRORS.pushNotificationNotSupported, 'This agent does not push notifications');
           const taskId = String(params.taskId ?? params.id ?? '');
-          const record = await store.get(taskId);
+          const record = await own(taskId);
           if (!record) return fail(A2A_ERRORS.taskNotFound, `Task ${taskId} was not found`);
           if (method === 'CreateTaskPushNotificationConfig') {
             const config = pushConfigOf(params);
@@ -1342,8 +1463,21 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
    * and the body, a stream as Server-Sent Events of each event, an error as AIP-193's JSON. `undefined`
    * for a request that is not one of its routes.
    */
-  const httpJson = async (request: Request, route: string): Promise<Response | undefined> => {
+  const httpJson = async (request: Request, path: string): Promise<Response | undefined> => {
     const verb = request.method;
+    // Each route also comes under its tenant, `/{tenant}/message:send`, as protocol 1.0 maps them.
+    const known = /^\/(?:message:send$|message:stream$|tasks(?:$|\/)|extendedAgentCard$)/;
+    let route = path;
+    let routedTenant: string | undefined;
+    const prefixed = /^\/([^/]+)(\/.*)$/.exec(path);
+    if (!known.test(path) && prefixed && known.test(prefixed[2] as string)) {
+      try {
+        routedTenant = decodeURIComponent(prefixed[1] as string);
+      } catch {
+        return restError(-32602, 'The tenant in the path is not valid percent-encoding');
+      }
+      route = prefixed[2] as string;
+    }
     const query = new URL(request.url).searchParams;
     const number = (name: string) => (query.has(name) ? Number(query.get(name)) : undefined);
     const id = (value: string | undefined) => decodeURIComponent(value ?? '');
@@ -1386,6 +1520,8 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
 
     const refused = versionRefused(request);
     if (refused) return restError(A2A_ERRORS.versionNotSupported, refused);
+    // The path's tenant stands over the body's, as its ids do.
+    if (routedTenant !== undefined) params = { ...params, tenant: routedTenant };
     if (body) {
       const text = await request.text();
       try {
@@ -1623,6 +1759,11 @@ export interface A2aClientOptions {
    * on `nexus-ai-pro/protocols/a2a/grpc`.
    */
   binding?: 'JSONRPC' | 'HTTP+JSON';
+  /**
+   * The tenant every request names. Defaults to the `tenant` of the interface the card lists for the
+   * binding, as protocol 1.0 requires a client to send it.
+   */
+  tenant?: string;
 }
 
 /** What to send: text, and optionally data, a conversation, or the paused task it answers. */
@@ -1709,29 +1850,37 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
     );
     return cached;
   };
-  const endpoint = async () =>
-    isCard
-      ? ((await card()).supportedInterfaces.find((item) => item.protocolBinding === binding)?.url ?? options.url)
-      : options.url;
+  /** Where calls go, and the tenant they name: the card's interface for the binding, when given the card. */
+  const target = async (): Promise<{ url: string; tenant?: string }> => {
+    if (!isCard) return { url: options.url, ...(options.tenant ? { tenant: options.tenant } : {}) };
+    const chosen = (await card()).supportedInterfaces.find((item) => item.protocolBinding === binding);
+    const tenant = options.tenant ?? chosen?.tenant;
+    return { url: chosen?.url ?? options.url, ...(tenant ? { tenant } : {}) };
+  };
   const headers = { 'content-type': 'application/json', 'a2a-version': A2A_PROTOCOL_VERSION, ...options.headers };
 
   let ids = 0;
   /** A JSON-RPC call, POSTed to the endpoint. */
-  const rpc = async (method: string, params: unknown, signal?: AbortSignal) =>
-    fetcher(await endpoint(), {
+  const rpc = async (method: string, params: Record<string, unknown>, signal?: AbortSignal) => {
+    const { url, tenant } = await target();
+    return fetcher(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ jsonrpc: '2.0', id: ++ids, method, params }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++ids, method, params: tenant ? { tenant, ...params } : params }),
       ...(signal ? { signal } : {}),
     });
+  };
   /** An HTTP+JSON call: its route under the endpoint, a body for a POST. */
-  const route = async (verb: string, path: string, body?: unknown, signal?: AbortSignal) =>
-    fetcher(`${(await endpoint()).replace(/\/+$/, '')}${path}`, {
+  const route = async (verb: string, path: string, body?: unknown, signal?: AbortSignal) => {
+    const { url, tenant } = await target();
+    const under = tenant ? `/${encodeURIComponent(tenant)}` : '';
+    return fetcher(`${url.replace(/\/+$/, '')}${under}${path}`, {
       method: verb,
       headers: body === undefined ? { ...headers, 'content-type': 'application/json' } : headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       ...(signal ? { signal } : {}),
     });
+  };
   /** The HTTP+JSON binding's error, AIP-193's JSON, as an `A2aError` with the protocol's code. */
   const restFailure = async (response: Response): Promise<A2aError> => {
     const body = (await response.json().catch(() => ({}))) as {

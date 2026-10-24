@@ -4,7 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-Tools read from a service's OpenAPI document, and an emulator that remembers the evaluation.
+Tools read from a service's OpenAPI document, an emulator that remembers the evaluation, and one A2A
+handler serving many tenants.
 
 ### Added
 
@@ -23,9 +24,23 @@ Tools read from a service's OpenAPI document, and an emulator that remembers the
   tools that change nothing, beside those whose capabilities only read.
 - **Capabilities for an API's operations:** `api.read:<api>/<operation>`, `api.write`, and
   `api.destructive`, decided by a permission policy as MCP's are.
+- **A2A for several tenants.** `a2aHandler({ tenants })` routes each request by the `tenant` it names,
+  in its params, its path (`/{tenant}/message:send`), or its gRPC message. Each tenant's tasks and
+  conversations are its own, its runs carry the tenant on their principal, and a caller that may not
+  act for the tenant it names is refused with `A2A_ERRORS.permissionDenied`, HTTP 403 and
+  `PERMISSION_DENIED` over gRPC. `A2aTenancyOptions` sets who may, and whether a tenant is required.
+  Task stores keep and list by tenant. A client names its interface's tenant, or its `tenant` option,
+  on every request, as protocol 1.0 requires.
+- **A card's security.** `securitySchemes` (`A2aSecurityScheme`, with `A2aOAuthFlows`),
+  `securityRequirements` (`A2aSecurityRequirement`, on the card and on a skill), and `signatures`
+  (`A2aCardSignature`) are part of the card, and the gRPC binding writes and reads them, which it read
+  past before.
 
 ### Fixed
 
+- The prompt densifier joined a code block's fences to the text around them, so a block it meant to
+  keep stopped being one; it shortened phrases inside other words, turning "in order today" into
+  "today"; and it lowercased a phrase that began a sentence.
 - A test of a call that never answers, and the unit, coverage, and studio runs, no longer let a hung
   test hold the release gate: every synchronous child the tests start has a timeout, and a test that
   runs past five minutes fails.

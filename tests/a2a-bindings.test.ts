@@ -509,16 +509,22 @@ test('the gRPC codec reads and writes the specification’s messages', () => {
     { tasks: [], pageSize: 50, totalSize: -1 },
     'a list the specification requires is read as empty',
   );
-  // A field the agent does not know, such as a card's security schemes, is read past.
+  // A field the agent does not know, such as a card's field 15, is read past; field 8, a card's
+  // security schemes, is read, here a scheme named x with nothing set.
   const known = encodeA2a('AgentCard', { name: 'A', version: '1' });
-  const unknown = Uint8Array.from([...known, 0x42, 0x03, 0x0a, 0x01, 0x78]);
-  assert.deepEqual(decodeA2a('AgentCard', unknown), {
+  const unknown = Uint8Array.from([...known, 0x7a, 0x03, 0x0a, 0x01, 0x78]);
+  const bare = {
     name: 'A',
     version: '1',
     supportedInterfaces: [],
     defaultInputModes: [],
     defaultOutputModes: [],
     skills: [],
+  };
+  assert.deepEqual(decodeA2a('AgentCard', unknown), bare);
+  assert.deepEqual(decodeA2a('AgentCard', Uint8Array.from([...known, 0x42, 0x03, 0x0a, 0x01, 0x78])), {
+    ...bare,
+    securitySchemes: { x: {} },
   });
   // The bytes the specification's proto gives a Message.
   assert.deepEqual(

@@ -78,7 +78,16 @@ New and stable:
 - the capabilities `api.read`, `api.write`, and `api.destructive`;
 - in `nexus-ai-pro/evaluate/emulate`: `EmulatedWorld`, `EmulatedWorldCall`, `EmulatedWorldSnapshot`,
   `EmulatedToolsOptions.world` and `reads`, and `emulationKey()`'s `world`. A key without a world is
-  the key of every earlier release.
+  the key of every earlier release;
+- in `nexus-ai-pro/protocols/a2a`: `A2aServerOptions.tenants`, `A2aTenancyOptions`,
+  `A2aClientOptions.tenant`, `A2aTaskRecord.tenant`, `A2aTaskQuery.tenant`, `A2A_ERRORS.permissionDenied`,
+  the card's `securitySchemes`, `securityRequirements`, and `signatures`, `A2aSkill.securityRequirements`,
+  `A2aSecurityScheme`, `A2aOAuthFlows`, `A2aSecurityRequirement`, and `A2aCardSignature`.
+
+Changed on purpose: the gRPC binding writes and reads a card's security schemes, requirements, and
+signatures, which it read past; without `tenants`, a request's tenant is still not read. A custom
+`A2aTaskStore` serving several tenants should honour `A2aTaskQuery.tenant`, for full pages; the handler
+filters by tenant either way.
 
 ## 2.19 stage (2.19.0)
 

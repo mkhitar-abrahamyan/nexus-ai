@@ -2,8 +2,8 @@
  * A2A's messages in Protocol Buffers, as `specification/a2a.proto` of protocol 1.0 numbers them
  * (package `lf.a2a.v1`): each turned into, and read from, the JSON the other bindings carry, so the
  * gRPC binding calls the same methods with the same params. With `google.protobuf.Struct`, `Value`,
- * `Timestamp`, and `google.rpc.Status`. Fields the agent never sends, such as a card's security
- * schemes, are read past and not written.
+ * `Timestamp`, and `google.rpc.Status`. A card's security schemes, requirements, and signatures are
+ * written and read as the card's JSON has them.
  */
 
 type FieldType =
@@ -16,7 +16,9 @@ type FieldType =
   | 'timestamp'
   | 'stringMap'
   | { enum: readonly string[] }
-  | { message: string };
+  | { message: string }
+  /** A `map<string, Message>`: each entry its key and the message. */
+  | { map: string };
 
 /** One field: its JSON name, its number, its type, and whether it repeats or tracks its presence. */
 interface Field {
@@ -130,10 +132,56 @@ const MESSAGES: Record<string, readonly Field[]> = {
     f('version', 5, 'string'),
     f('documentationUrl', 6, 'string', present),
     f('capabilities', 7, { message: 'AgentCapabilities' }),
+    f('securitySchemes', 8, { map: 'SecurityScheme' }),
+    f('securityRequirements', 9, { message: 'SecurityRequirement' }, many),
     f('defaultInputModes', 10, 'string', all),
     f('defaultOutputModes', 11, 'string', all),
     f('skills', 12, { message: 'AgentSkill' }, all),
+    f('signatures', 13, { message: 'AgentCardSignature' }, many),
     f('iconUrl', 14, 'string', present),
+  ],
+  AgentCardSignature: [f('protected', 1, 'string'), f('signature', 2, 'string'), f('header', 3, 'struct')],
+  // A requirement's scopes: none is an empty list, as the card's JSON writes it.
+  StringList: [f('list', 1, 'string', all)],
+  SecurityRequirement: [f('schemes', 1, { map: 'StringList' })],
+  SecurityScheme: [
+    f('apiKeySecurityScheme', 1, { message: 'APIKeySecurityScheme' }),
+    f('httpAuthSecurityScheme', 2, { message: 'HTTPAuthSecurityScheme' }),
+    f('oauth2SecurityScheme', 3, { message: 'OAuth2SecurityScheme' }),
+    f('openIdConnectSecurityScheme', 4, { message: 'OpenIdConnectSecurityScheme' }),
+    f('mtlsSecurityScheme', 5, { message: 'MutualTlsSecurityScheme' }),
+  ],
+  APIKeySecurityScheme: [f('description', 1, 'string'), f('location', 2, 'string'), f('name', 3, 'string')],
+  HTTPAuthSecurityScheme: [f('description', 1, 'string'), f('scheme', 2, 'string'), f('bearerFormat', 3, 'string')],
+  OAuth2SecurityScheme: [
+    f('description', 1, 'string'),
+    f('flows', 2, { message: 'OAuthFlows' }),
+    f('oauth2MetadataUrl', 3, 'string'),
+  ],
+  OpenIdConnectSecurityScheme: [f('description', 1, 'string'), f('openIdConnectUrl', 2, 'string')],
+  MutualTlsSecurityScheme: [f('description', 1, 'string')],
+  OAuthFlows: [
+    f('authorizationCode', 1, { message: 'AuthorizationCodeOAuthFlow' }),
+    f('clientCredentials', 2, { message: 'ClientCredentialsOAuthFlow' }),
+    f('implicit', 3, { message: 'ImplicitOAuthFlow' }),
+    f('password', 4, { message: 'PasswordOAuthFlow' }),
+    f('deviceCode', 5, { message: 'DeviceCodeOAuthFlow' }),
+  ],
+  AuthorizationCodeOAuthFlow: [
+    f('authorizationUrl', 1, 'string'),
+    f('tokenUrl', 2, 'string'),
+    f('refreshUrl', 3, 'string'),
+    f('scopes', 4, 'stringMap'),
+    f('pkceRequired', 5, 'bool'),
+  ],
+  ClientCredentialsOAuthFlow: [f('tokenUrl', 1, 'string'), f('refreshUrl', 2, 'string'), f('scopes', 3, 'stringMap')],
+  ImplicitOAuthFlow: [f('authorizationUrl', 1, 'string'), f('refreshUrl', 2, 'string'), f('scopes', 3, 'stringMap')],
+  PasswordOAuthFlow: [f('tokenUrl', 1, 'string'), f('refreshUrl', 2, 'string'), f('scopes', 3, 'stringMap')],
+  DeviceCodeOAuthFlow: [
+    f('deviceAuthorizationUrl', 1, 'string'),
+    f('tokenUrl', 2, 'string'),
+    f('refreshUrl', 3, 'string'),
+    f('scopes', 4, 'stringMap'),
   ],
   AgentProvider: [f('url', 1, 'string'), f('organization', 2, 'string')],
   AgentCapabilities: [
@@ -156,6 +204,7 @@ const MESSAGES: Record<string, readonly Field[]> = {
     f('examples', 5, 'string', many),
     f('inputModes', 6, 'string', many),
     f('outputModes', 7, 'string', many),
+    f('securityRequirements', 8, { message: 'SecurityRequirement' }, many),
   ],
   TaskPushNotificationConfig: [
     f('tenant', 1, 'string'),
@@ -371,6 +420,19 @@ function writeField(writer: Writer, field: Field, item: unknown, always: boolean
       writer.tag(field.number, 2);
       writer.bytes(inner.finish());
     }
+  } else if ('map' in type) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return;
+    for (const [key, entry] of Object.entries(item as Record<string, unknown>)) {
+      const inner = new Writer();
+      inner.tag(1, 2);
+      inner.bytes(utf8.encode(key));
+      const value = new Writer();
+      writeMessage(value, type.map, (entry ?? {}) as Record<string, unknown>);
+      inner.tag(2, 2);
+      inner.bytes(value.finish());
+      writer.tag(field.number, 2);
+      writer.bytes(inner.finish());
+    }
   } else if ('enum' in type) {
     const index = typeof item === 'number' ? item : type.enum.indexOf(String(item));
     if (index < 0 || (!always && index === 0)) return;
@@ -488,8 +550,9 @@ export function decodeA2a(type: string, bytes: Uint8Array): Record<string, unkno
     if (!field) continue;
     const value = readField(field, raw);
     if (value === undefined) continue;
-    if (field.type === 'stringMap') out[field.json] = { ...(out[field.json] as object), ...(value as object) };
-    else if (field.repeated) {
+    if (field.type === 'stringMap' || (typeof field.type === 'object' && 'map' in field.type)) {
+      out[field.json] = { ...(out[field.json] as object), ...(value as object) };
+    } else if (field.repeated) {
       const list = (out[field.json] as unknown[] | undefined) ?? [];
       list.push(value);
       out[field.json] = list;
@@ -526,6 +589,16 @@ function readField(field: Field, raw: RawField): unknown {
       if (inner.number === 2 && inner.bytes) value = fromUtf8.decode(inner.bytes);
     }
     return { [key]: value };
+  }
+  if ('map' in type) {
+    if (!raw.bytes) return undefined;
+    let key = '';
+    let value: Uint8Array = new Uint8Array();
+    for (const inner of rawFields(raw.bytes)) {
+      if (inner.number === 1 && inner.bytes) key = fromUtf8.decode(inner.bytes);
+      if (inner.number === 2 && inner.bytes) value = inner.bytes;
+    }
+    return { [key]: decodeA2a(type.map, value) };
   }
   if ('enum' in type) {
     if (raw.varint === undefined) return undefined;

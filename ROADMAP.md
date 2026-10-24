@@ -30,7 +30,7 @@ the theme after it that owns it.
 
 ---
 
-## 2.20.0: Tools emulated from an API description, and an emulator that remembers the evaluation
+## 2.20.0: Tools emulated from an API description, an emulator that remembers the evaluation, and A2A for many tenants
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
 understanding, video, typed decisions, Gemini Live, SIP call control, and both phone providers
@@ -48,9 +48,16 @@ again from its scenario. 2.20 lets it hold the world across a whole evaluation, 
 refunds is refunded for the next, as a staging copy would have it, and lets each run start instead
 from a snapshot of it.
 
+**One A2A handler for many tenants.** A request's `tenant` is not routed on today, so each tenant
+needs a handler of its own. 2.20 routes each request by the tenant it names, on every binding, keeps
+each tenant's tasks and conversations its own, and refuses a caller acting for another; and reads a
+card's security schemes and signatures over gRPC too.
+
 **Proof.** An agent over tools read from a stand-in service's OpenAPI document reaches the verdict it
 reaches over the stand-in itself, with nothing sent; and an evaluation whose examples build on each
-other's changes reaches the stand-in's verdict, run in order and again from a snapshot.
+other's changes reaches the stand-in's verdict, run in order and again from a snapshot. One handler
+serves two tenants over JSON-RPC, HTTP+JSON, and gRPC, each seeing only its own, and a caller naming
+the other tenant is refused on all three.
 
 ---
 
@@ -62,8 +69,6 @@ Not yet placed, roughly in order of what applications ask for:
    state holds, with the media family.
 2. Compatibility records published from community adapters' own CI, gathered onto the page by a
    scheduled workflow rather than by pull request.
-3. A2A requests routed by their tenant, and an agent card's security schemes and signatures read
-   over gRPC.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
 does. In 3.0 they become defaults, each with a migration note:

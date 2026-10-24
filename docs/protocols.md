@@ -343,6 +343,46 @@ the address it connects to, or send deliveries through an egress proxy.
 `extendedCard` gives an authenticated caller more of the card, such as skills only partners see. It
 is called with the caller's principal, and `GetExtendedAgentCard` refuses a caller without one.
 
+A card says how a caller authenticates. `securitySchemes` names each `A2aSecurityScheme`: an API key in
+a header, a query, or a cookie; HTTP authentication, such as a bearer token; OAuth 2.0, with its
+`A2aOAuthFlows`, authorization code, client credentials, or device code; OpenID Connect; or mutual
+TLS. `securityRequirements`, on the card or on one skill, list each `A2aSecurityRequirement`: the
+schemes a call needs, by name, with their scopes. `signatures` carry each `A2aCardSignature`, a JSON
+Web Signature over the card, as given. Every binding carries them, the gRPC card included.
+
+### Several tenants behind one handler
+
+`tenants` serves several tenants from one handler, each request routed by the `tenant` it names, as
+protocol 1.0 carries it: in its params over JSON-RPC, as the first segment of its path over HTTP+JSON,
+such as `/acme/message:send`, and in its message over gRPC.
+
+```ts
+const handler = a2aHandler(agent, {
+  card,
+  principal: (request) => verify(request.headers.get('authorization')), // { tenantId, ... }
+  tenants: true,
+});
+```
+
+Each tenant's tasks and conversations are its own. Another tenant's task is not found, however a
+request names it, and a conversation's context id is the tenant's alone. A run carries the tenant on
+its principal, so its credentials and its budget are the tenant's.
+
+`A2aTenancyOptions` decides who may act for which tenant. `authorize`, given the tenant and the
+caller's principal, defaults to the principal's `tenantId` being that tenant, so a caller nobody
+authenticated acts for none; an operator's role can be let in by an `authorize` of your own.
+`required` (true) refuses a request that names no tenant. A caller refused is answered with
+`A2A_ERRORS.permissionDenied`, this package's own code from the range JSON-RPC leaves to servers:
+HTTP 403, and `PERMISSION_DENIED` over gRPC. Nothing runs.
+
+A store keeps each record's `tenant`, and lists one tenant's when `A2aTaskQuery.tenant` names it, as
+the memory store and `storeA2aTasks()` do, so a tenant pages through full pages of its own. The handler
+filters what any store lists by tenant too, so a store of your own that ignores it leaks nothing.
+
+A client names a tenant on every request, as the specification requires: `A2aClientOptions.tenant`, or
+else the tenant of the interface the card lists for its binding. `a2aGrpcClient()` takes the same
+option.
+
 ### Calling other agents
 
 `a2aClient()` talks to any A2A agent, over JSON-RPC or, with `binding: 'HTTP+JSON'`, over HTTP+JSON.
@@ -548,6 +588,10 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
   the same, with the same history. A webhook asked for text receives, piece by piece, the text a
   stream receives. Each binding's errors carry the protocol's codes, and a gRPC message is written
   byte for byte as the specification's proto numbers it.
+- **A2A, for several tenants.** One handler serves two tenants over all three bindings. Each lists,
+  reads, and continues only its own tasks and conversations, in full pages, and each run is its
+  tenant's. A caller naming another tenant is refused on every binding, with nothing run. Over gRPC, a
+  card's every security scheme, OAuth flow, requirement, and signature reads as its JSON has them.
 - **ACP.** An editor's end of the connection, written line by line, does the following:
   - it initializes;
   - it opens a session;
@@ -593,9 +637,9 @@ Each protocol is also tested across releases and against the reference client of
   process stopped runs again on the replica that takes it over, as a graph's steps do after any
   crash, so a tool with side effects needs an idempotency key. A slow replica that loses its lease
   stops its run, but a tool already running finishes.
-- **A2A coverage.** A request's `tenant` is not routed on: serve each tenant from a handler of its
-  own. Over gRPC, a card's security schemes and signatures are read past; `card()` reads them from
-  the `cardUrl` as JSON.
+- **A2A cards.** A card's signatures are carried as given, neither computed nor checked: a signature
+  must be over the card as it is served, its interfaces included. One handler serves one card; with
+  `tenants`, list an interface naming a tenant in `interfaces` when its callers need one.
 - **ACP turns.** A turn goes on when the editor reopens its session, not before; one the agent stops
   in again while carrying it on goes on at the next reopening. A step that was halfway through when
   the agent stopped runs again, so a tool with side effects needs an idempotency key.
@@ -621,6 +665,7 @@ specific entry point that provides it.
 | `A2aBinding` | type | The binding a call arrived on. |
 | `A2aCallContext` | interface | Who a call is for, and what carries it. |
 | `A2aCallOutcome` | type | What one A2A call answers, whatever binding carries it: a result, an error, or a stream of events. |
+| `A2aCardSignature` | interface | A JSON Web Signature over an agent card, as the card carries it. |
 | `a2aClient` | function | A client for an A2A agent, by its card or endpoint URL. |
 | `A2aClient` | interface | A client for one A2A agent. |
 | `A2aClientOptions` | interface | Options for `a2aClient()`. |
@@ -632,11 +677,14 @@ specific entry point that provides it.
 | `A2aHandler` | interface | An A2A agent's HTTP handler, with what keeps its tasks alive across replicas: `recover()` takes over the working tasks whose replica stopped renewing their lease, and `close()` stops the recovery timer. |
 | `A2aListTasksOptions` | interface | Which tasks `A2aClient.listTasks()` asks for. |
 | `A2aMessage` | interface | A message between agents. |
+| `A2aOAuthFlows` | type | One of the OAuth 2.0 flows an `oauth2SecurityScheme` offers: exactly one is set. |
 | `A2aPart` | interface | One part of a message or an artifact: text, structured data, or a file by URL or bytes. |
 | `A2aPushNotificationConfig` | interface | Where a task's updates are pushed: a webhook the calling agent gave. |
 | `A2aPushOptions` | interface | Options for pushing task updates to the webhooks callers give. |
 | `A2aRecoveryReport` | interface | What one `recover()` did. |
 | `A2aRole` | type | Who a message is from. |
+| `A2aSecurityRequirement` | interface | The schemes a call needs, by the names the card gives them, each with the scopes it needs. |
+| `A2aSecurityScheme` | type | How a caller authenticates with an agent, as its card names it: exactly one scheme is set. |
 | `A2aSendOptions` | interface | What to send: text, and optionally data, a conversation, or the paused task it answers. |
 | `A2aServerOptions` | interface | Options for `a2aHandler()`. |
 | `A2aSkill` | interface | A skill an agent card advertises. |
@@ -649,6 +697,7 @@ specific entry point that provides it.
 | `A2aTaskRun` | interface | A working run, as kept with its task: started by a message, or answering the task's questions. |
 | `A2aTaskState` | type | Where a task stands. |
 | `A2aTaskStore` | interface | Where an A2A agent keeps its tasks and conversations. |
+| `A2aTenancyOptions` | interface | How one handler serves several tenants, each request routed by the `tenant` it names. |
 | `a2aTool` | function | A remote A2A agent as a tool another agent can call. |
 | `A2aToolOptions` | interface | Options for `a2aTool()`. |
 | `MemoryA2aTaskStore` | class | Tasks and conversations in this process: the default, for one replica. |

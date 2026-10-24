@@ -1,6 +1,17 @@
 import type { CompletionRequest } from '../types/messages.js';
 import type { DensificationConfig } from '../types/optimizer.js';
 
+/** Wordy phrases and their shorter equivalents, matched as whole words in any case. */
+const PHRASES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bplease make sure that\b/gi, 'ensure'],
+  [/\byou should\b/gi, 'do'],
+  [/\bit is important to\b/gi, 'must'],
+  [/\bin order to\b/gi, 'to'],
+  [/\bdue to the fact that\b/gi, 'because'],
+  [/\bat this point in time\b/gi, 'now'],
+  [/\bas soon as possible\b/gi, 'ASAP'],
+];
+
 /** Rewrites prompts to use fewer tokens without changing what they say. */
 export class PromptDensifier {
   /** Densifies every text message in a request. */
@@ -38,7 +49,7 @@ export class PromptDensifier {
   densifyText(text: string, techniques: string[], applied: Set<string>, config: DensificationConfig): string {
     const segments = this.splitCodeBlocks(text, config.preserveCodeBlocks !== false);
 
-    return segments
+    const joined = segments
       .map((segment) => {
         if (segment.type === 'code') return segment.value;
 
@@ -46,24 +57,22 @@ export class PromptDensifier {
 
         if (techniques.includes('whitespace-cleanup')) {
           const before = output;
+          // Not trimmed here: the line breaks around a code block keep its fences on lines of their own.
           output = output
             .replace(/[ \t]+/g, ' ')
             .replace(/\n{3,}/g, '\n\n')
-            .replace(/[ \t]+\n/g, '\n')
-            .trim();
+            .replace(/[ \t]+\n/g, '\n');
           if (output !== before) applied.add('whitespace-cleanup');
         }
 
         if (techniques.includes('phrase-compression')) {
           const before = output;
-          output = output
-            .replace(/please make sure that/gi, 'ensure')
-            .replace(/you should/gi, 'do')
-            .replace(/it is important to/gi, 'must')
-            .replace(/in order to/gi, 'to')
-            .replace(/due to the fact that/gi, 'because')
-            .replace(/at this point in time/gi, 'now')
-            .replace(/as soon as possible/gi, 'ASAP');
+          for (const [phrase, shorter] of PHRASES) {
+            // Whole words only, so "in order today" keeps its "today"; a capital stays a capital.
+            output = output.replace(phrase, (match) =>
+              /^[A-Z]/.test(match) ? `${shorter.charAt(0).toUpperCase()}${shorter.slice(1)}` : shorter,
+            );
+          }
           if (output !== before) applied.add('phrase-compression');
         }
 
@@ -76,6 +85,10 @@ export class PromptDensifier {
         return output;
       })
       .join('');
+    if (!techniques.includes('whitespace-cleanup')) return joined;
+    const trimmed = joined.trim();
+    if (trimmed !== joined) applied.add('whitespace-cleanup');
+    return trimmed;
   }
 
   private splitCodeBlocks(text: string, preserveCodeBlocks: boolean): Array<{ type: 'text' | 'code'; value: string }> {

@@ -4394,6 +4394,46 @@ the address it connects to, or send deliveries through an egress proxy.
 `extendedCard` gives an authenticated caller more of the card, such as skills only partners see. It
 is called with the caller's principal, and `GetExtendedAgentCard` refuses a caller without one.
 
+A card says how a caller authenticates. `securitySchemes` names each `A2aSecurityScheme`: an API key in
+a header, a query, or a cookie; HTTP authentication, such as a bearer token; OAuth 2.0, with its
+`A2aOAuthFlows`, authorization code, client credentials, or device code; OpenID Connect; or mutual
+TLS. `securityRequirements`, on the card or on one skill, list each `A2aSecurityRequirement`: the
+schemes a call needs, by name, with their scopes. `signatures` carry each `A2aCardSignature`, a JSON
+Web Signature over the card, as given. Every binding carries them, the gRPC card included.
+
+### Several tenants behind one handler
+
+`tenants` serves several tenants from one handler, each request routed by the `tenant` it names, as
+protocol 1.0 carries it: in its params over JSON-RPC, as the first segment of its path over HTTP+JSON,
+such as `/acme/message:send`, and in its message over gRPC.
+
+```ts
+const handler = a2aHandler(agent, {
+  card,
+  principal: (request) => verify(request.headers.get('authorization')), // { tenantId, ... }
+  tenants: true,
+});
+```
+
+Each tenant's tasks and conversations are its own. Another tenant's task is not found, however a
+request names it, and a conversation's context id is the tenant's alone. A run carries the tenant on
+its principal, so its credentials and its budget are the tenant's.
+
+`A2aTenancyOptions` decides who may act for which tenant. `authorize`, given the tenant and the
+caller's principal, defaults to the principal's `tenantId` being that tenant, so a caller nobody
+authenticated acts for none; an operator's role can be let in by an `authorize` of your own.
+`required` (true) refuses a request that names no tenant. A caller refused is answered with
+`A2A_ERRORS.permissionDenied`, this package's own code from the range JSON-RPC leaves to servers:
+HTTP 403, and `PERMISSION_DENIED` over gRPC. Nothing runs.
+
+A store keeps each record's `tenant`, and lists one tenant's when `A2aTaskQuery.tenant` names it, as
+the memory store and `storeA2aTasks()` do, so a tenant pages through full pages of its own. The handler
+filters what any store lists by tenant too, so a store of your own that ignores it leaks nothing.
+
+A client names a tenant on every request, as the specification requires: `A2aClientOptions.tenant`, or
+else the tenant of the interface the card lists for its binding. `a2aGrpcClient()` takes the same
+option.
+
 ### Calling other agents
 
 `a2aClient()` talks to any A2A agent, over JSON-RPC or, with `binding: 'HTTP+JSON'`, over HTTP+JSON.
@@ -4599,6 +4639,10 @@ Each protocol is tested from the other side of the wire, with no Nexus client co
   the same, with the same history. A webhook asked for text receives, piece by piece, the text a
   stream receives. Each binding's errors carry the protocol's codes, and a gRPC message is written
   byte for byte as the specification's proto numbers it.
+- **A2A, for several tenants.** One handler serves two tenants over all three bindings. Each lists,
+  reads, and continues only its own tasks and conversations, in full pages, and each run is its
+  tenant's. A caller naming another tenant is refused on every binding, with nothing run. Over gRPC, a
+  card's every security scheme, OAuth flow, requirement, and signature reads as its JSON has them.
 - **ACP.** An editor's end of the connection, written line by line, does the following:
   - it initializes;
   - it opens a session;
@@ -4644,9 +4688,9 @@ Each protocol is also tested across releases and against the reference client of
   process stopped runs again on the replica that takes it over, as a graph's steps do after any
   crash, so a tool with side effects needs an idempotency key. A slow replica that loses its lease
   stops its run, but a tool already running finishes.
-- **A2A coverage.** A request's `tenant` is not routed on: serve each tenant from a handler of its
-  own. Over gRPC, a card's security schemes and signatures are read past; `card()` reads them from
-  the `cardUrl` as JSON.
+- **A2A cards.** A card's signatures are carried as given, neither computed nor checked: a signature
+  must be over the card as it is served, its interfaces included. One handler serves one card; with
+  `tenants`, list an interface naming a tenant in `interfaces` when its callers need one.
 - **ACP turns.** A turn goes on when the editor reopens its session, not before; one the agent stops
   in again while carrying it on goes on at the next reopening. A step that was halfway through when
   the agent stopped runs again, so a tool with side effects needs an idempotency key.
@@ -14646,22 +14690,22 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 363 KB | 100% | none |
+| `nexus-ai-pro` | 364 KB | 100% | none |
 | `nexus-ai-pro/config` | 356 KB | 98% | none |
 | `nexus-ai-pro/core` | 352 KB | 97% | none |
-| `nexus-ai-pro/realtime` | 216 KB | 60% | none |
+| `nexus-ai-pro/realtime` | 216 KB | 59% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 59% | none |
-| `nexus-ai-pro/server/deployments` | 151 KB | 42% | none |
+| `nexus-ai-pro/server/deployments` | 151 KB | 41% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 142 KB | 39% | none |
 | `nexus-ai-pro/server` | 126 KB | 35% | none |
-| `nexus-ai-pro/batch` | 118 KB | 33% | none |
+| `nexus-ai-pro/batch` | 118 KB | 32% | none |
 | `nexus-ai-pro/agent` | 114 KB | 31% | none |
 | `nexus-ai-pro/realtime/session` | 109 KB | 30% | none |
-| `nexus-ai-pro/protocols/a2a/grpc` | 95 KB | 26% | none |
+| `nexus-ai-pro/protocols/a2a/grpc` | 102 KB | 28% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 25% | none |
-| `nexus-ai-pro/providers/groq` | 89 KB | 25% | none |
-| `nexus-ai-pro/providers/mistral` | 89 KB | 25% | none |
-| `nexus-ai-pro/evaluate/online` | 89 KB | 25% | none |
+| `nexus-ai-pro/providers/groq` | 89 KB | 24% | none |
+| `nexus-ai-pro/providers/mistral` | 89 KB | 24% | none |
+| `nexus-ai-pro/evaluate/online` | 89 KB | 24% | none |
 | `nexus-ai-pro/providers/azure-openai` | 88 KB | 24% | none |
 | `nexus-ai-pro/providers/deepseek` | 88 KB | 24% | none |
 | `nexus-ai-pro/providers/llamacpp` | 88 KB | 24% | none |
@@ -14674,10 +14718,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images` | 81 KB | 22% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 74 KB | 20% | none |
-| `nexus-ai-pro/agent/sandbox/container` | 60 KB | 17% | none |
+| `nexus-ai-pro/protocols/a2a` | 62 KB | 17% | none |
+| `nexus-ai-pro/agent/sandbox/container` | 60 KB | 16% | none |
 | `nexus-ai-pro/providers/cohere` | 59 KB | 16% | none |
 | `nexus-ai-pro/providers/ollama` | 59 KB | 16% | none |
-| `nexus-ai-pro/protocols/a2a` | 59 KB | 16% | none |
 | `nexus-ai-pro/security` | 58 KB | 16% | none |
 | `nexus-ai-pro/video` | 58 KB | 16% | none |
 | `nexus-ai-pro/operations` | 56 KB | 15% | none |
@@ -14732,9 +14776,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
-| `nexus-ai-pro/images/transform` | 20 KB | 6% | none |
-| `nexus-ai-pro/agent/openapi` | 20 KB | 6% | none |
-| `nexus-ai-pro/media/catalog` | 20 KB | 6% | none |
+| `nexus-ai-pro/images/transform` | 20 KB | 5% | none |
+| `nexus-ai-pro/agent/openapi` | 20 KB | 5% | none |
+| `nexus-ai-pro/media/catalog` | 20 KB | 5% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 5% | none |
@@ -14834,13 +14878,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/loaders/markdown` | 3 KB | 0.8% | none |
 | `nexus-ai-pro/loaders/json` | 3 KB | 0.8% | none |
 | `nexus-ai-pro/loaders/pdf` | 3 KB | 0.8% | none |
-| `nexus-ai-pro/media/mock` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/decisions/mock` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/cache` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/cache/adapters` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/jobs` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/jobs/durable-adapters` | 2 KB | 0.6% | none |
-| `nexus-ai-pro/jobs/queue` | 2 KB | 0.6% | none |
+| `nexus-ai-pro/media/mock` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/decisions/mock` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/cache` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/cache/adapters` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/jobs` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/jobs/durable-adapters` | 2 KB | 0.5% | none |
+| `nexus-ai-pro/jobs/queue` | 2 KB | 0.5% | none |
 | `nexus-ai-pro/streaming` | 1 KB | 0.3% | none |
 | `nexus-ai-pro/providers/type-guards` | 1 KB | 0.3% | none |
 | `nexus-ai-pro/next` | 1 KB | 0.3% | none |

@@ -357,7 +357,7 @@ import {
   recordStatus,
 } from 'nexus-ai-pro/adapter-kit';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
-import { a2aClient, a2aErrorStatus, a2aHandler, type A2aCallOutcome } from 'nexus-ai-pro/protocols/a2a';
+import { A2A_ERRORS, a2aClient, a2aErrorStatus, a2aHandler, type A2aCallOutcome, type A2aSecurityScheme, type A2aTenancyOptions } from 'nexus-ai-pro/protocols/a2a';
 import { a2aGrpcClient, a2aGrpcService, type A2aGrpcClient } from 'nexus-ai-pro/protocols/a2a/grpc';
 import { mediaChecks, mediaJudge, readMediaDuration, resolveMedia, type MediaDuration, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { emulatedTools, EmulatedWorld, MemoryEmulationStore, type EmulatedToolCall, type EmulatedWorldSnapshot } from 'nexus-ai-pro/evaluate/emulate';
@@ -1304,6 +1304,25 @@ const a2aOverGrpc = a2aGrpcService(a2aAgent, { maxMessageBytes: 4_000_000 });
 const a2aCaller: A2aGrpcClient = a2aGrpcClient({ url: 'agents.example.com:443' });
 const a2aRest = a2aClient({ url: 'https://agents.example.com/a2a', binding: 'HTTP+JSON' });
 const notFoundOverHttp: number = a2aErrorStatus(-32001).httpStatus;
+// One handler for several tenants, and a card that says how to authenticate.
+const tenancy: A2aTenancyOptions = { authorize: (tenant, principal) => principal?.tenantId === tenant, required: true };
+const bearerScheme: A2aSecurityScheme = { httpAuthSecurityScheme: { scheme: 'Bearer', bearerFormat: 'JWT' } };
+const tenantAgent = a2aHandler(createAgent({ client: { complete: async () => ({}) as never } }), {
+  card: {
+    name: 'Mailer',
+    description: 'Sends mail',
+    version: '1.0.0',
+    url: 'https://agents.example.com/a2a',
+    skills: [{ id: 'mail', name: 'Mail', description: 'Sends mail', tags: [], securityRequirements: [{ schemes: { bearer: { list: [] } } }] }],
+    securitySchemes: { bearer: bearerScheme },
+    securityRequirements: [{ schemes: { bearer: { list: [] } } }],
+    signatures: [{ protected: 'e30', signature: 'c2ln' }],
+  },
+  tenants: tenancy,
+});
+const tenantCaller = a2aClient({ url: 'https://agents.example.com/a2a', tenant: 'acme' });
+const refusedForTenant: number = A2A_ERRORS.permissionDenied;
+void [tenantAgent, tenantCaller, refusedForTenant];
 void [a2aOutcome, a2aOverGrpc.listen, a2aCaller.close, a2aRest.getTask, notFoundOverHttp];
 // Tools a model plays, its answers kept for the next run.
 const emulationStore = new MemoryEmulationStore();
