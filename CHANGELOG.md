@@ -4,7 +4,18 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-## [2.20.0] - 2026-10-24
+## [2.20.1] - 2026-10-24
+
+The first published release of 2.20. The package is 2.20.0's: 2.20.0 was tagged, but its publish
+stopped at a studio test that failed by chance, so it never reached npm.
+
+### Fixed
+
+- The studio's load budget is measured as the median of five passes, as the surface budgets are,
+  rather than one: a single slow pass on a busy runner failed the 2.20.0 publish at 2.56 calibration
+  loops against a budget of 2.55, where the test measures 0.77. A real slowdown still fails it.
+
+## [2.20.0] - 2026-10-24 (not published)
 
 Tools read from a service's OpenAPI document, an emulator that remembers the evaluation, and one A2A
 handler serving many tenants.
@@ -3265,7 +3276,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.1...HEAD
+[2.20.1]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.0...v2.20.1
 [2.20.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.17.0...v2.18.0

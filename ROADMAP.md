@@ -6,7 +6,7 @@ graduate, is defined in [API_STABILITY.md](./API_STABILITY.md); what has shipped
 [CHANGELOG.md](./CHANGELOG.md); how releases are planned is in [CONTRIBUTING.md](./CONTRIBUTING.md).
 Work leaves this page when it ships.
 
-Current release: **2.20.0**.
+Current release: **2.20.1**.
 
 ---
 
