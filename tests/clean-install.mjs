@@ -116,16 +116,21 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // binding shares, in both builds and their declarations. 2.14's policy file and emulated tools and
 // 2.15's compatibility records had already brought it to 1,570,521 packed. None is loaded by the
 // root. Measured at 1,590,573 bytes packed and 9,498,226 unpacked.
-const MAX_PACKED_BYTES = 1_670_000;
-const MAX_UNPACKED_BYTES = 9_850_000;
+// Raised again in 2.19.0 for three opt-in entry points (typed decisions, TypeSafe AI's adapter, and
+// the mock), with decisions from any completion model and in graphs, agents, and evaluations, and
+// log probabilities in the providers. 2.17's and 2.18's editor MCP, video inputs, span events, and
+// lists that page had already brought it close to the caps. None is loaded by the root. Measured at
+// 1,651,508 bytes packed and 9,881,023 unpacked.
+const MAX_PACKED_BYTES = 1_750_000;
+const MAX_UNPACKED_BYTES = 10_350_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
 // came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0 and
 // 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0 and 2.10.0 and 2.11.0 and 2.12.0 and 2.13.0
-// and 2.16.0, for the same reasons, and still nothing but the package itself: 6,908,187 bytes in
-// 2.4.0.
-const MAX_INSTALLED_BYTES = 9_950_000;
+// and 2.16.0 and 2.19.0, for the same reasons, and still nothing but the package itself: 6,908,187
+// bytes in 2.4.0.
+const MAX_INSTALLED_BYTES = 10_450_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
