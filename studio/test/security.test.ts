@@ -379,11 +379,20 @@ test('load: 500 signed-in reads of the overview and traces stay within their bud
     }
   };
   await read();
-  const started = performance.now();
-  await read();
-  const elapsed = performance.now() - started;
+  // The median of five timed passes, as the surface budgets measure: one slow pass on a busy runner is
+  // noise, and a real slowdown slows every pass.
+  const passes: number[] = [];
+  for (let pass = 0; pass < 5; pass += 1) {
+    const started = performance.now();
+    await read();
+    passes.push(performance.now() - started);
+  }
+  const elapsed = [...passes].sort((a, b) => a - b)[2] as number;
   const ratio = elapsed / (await calibrate());
-  assert.ok(ratio <= LOAD_RATIO * TOLERANCE, `500 reads took ${ratio.toFixed(2)} calibration loops`);
+  assert.ok(
+    ratio <= LOAD_RATIO * TOLERANCE,
+    `500 reads took ${ratio.toFixed(2)} calibration loops (passes: ${passes.map((ms) => ms.toFixed(0)).join(', ')} ms)`,
+  );
 });
 
 test('soak: 2,000 sign-in, read, and change cycles leave memory flat, and 200 servers leave no handle', async () => {
