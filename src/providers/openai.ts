@@ -13,7 +13,7 @@ import {
   wireDocument,
   wireImage,
 } from './content.js';
-import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
+import type { NexusResponse, NexusStream, StreamChunk, TokenLogprob, ToolCall } from '../types/response.js';
 import type { OpenAIProviderConfig } from '../types/config.js';
 import { buildMeta, type UsageInput } from '../core/usage.js';
 import { generateRequestId } from '../utils/ids.js';
@@ -56,6 +56,8 @@ interface OpenAIChatCompletionParams {
   presence_penalty?: number;
   seed?: number;
   logit_bias?: Record<string, number>;
+  logprobs?: boolean;
+  top_logprobs?: number;
   stop?: string | string[];
   response_format?: unknown;
   tools?: unknown[];
@@ -99,6 +101,13 @@ interface OpenAIChatChoice {
     tool_calls?: unknown[];
   };
   finish_reason?: string | null;
+  logprobs?: {
+    content?: Array<{
+      token?: string;
+      logprob?: number;
+      top_logprobs?: Array<{ token?: string; logprob?: number }>;
+    }> | null;
+  } | null;
 }
 
 interface OpenAIChatCompletionChunk {
@@ -304,11 +313,13 @@ export class OpenAIProvider extends BaseProvider {
         throw new Error('OpenAI chat response did not include a message choice');
       }
 
+      const logprobs = chatLogprobs(choice.logprobs?.content);
       return {
         content: choice.message.content || '',
         role: 'assistant',
         toolCalls: this.extractChatToolCalls(choice.message.tool_calls),
         finishReason: this.mapFinishReason(choice.finish_reason),
+        ...(logprobs ? { logprobs } : {}),
         meta: this.createMeta(result.model, Date.now() - startTime, chatUsage(result.usage)),
       };
     } catch (error) {
@@ -442,7 +453,21 @@ export class OpenAIProvider extends BaseProvider {
 
     if (request.reasoning?.effort) params.reasoning_effort = request.reasoning.effort;
 
+    if (request.logprobs && this.reportsLogprobs()) {
+      params.logprobs = true;
+      if (request.logprobs.top) params.top_logprobs = Math.min(20, Math.max(0, Math.floor(request.logprobs.top)));
+    }
+
     return params;
+  }
+
+  /**
+   * Whether the server reports token log probabilities, so a request that asks for them sends
+   * `logprobs`. Groq and Mistral refuse the option, so it is not sent to them; a model that cannot
+   * report them is told so by declaring `logprobs: false`.
+   */
+  protected reportsLogprobs(): boolean {
+    return this.info.name !== 'groq' && this.info.name !== 'mistral';
   }
 
   /**
@@ -905,4 +930,26 @@ function mapResponsesToolChoice(choice: ToolChoice | undefined): unknown {
   if (choice === undefined) return undefined;
   if (typeof choice === 'string') return choice;
   return { type: 'function', name: choice.name };
+}
+
+/** A chat completion's token log probabilities, in the package's shape. */
+function chatLogprobs(
+  content:
+    | Array<{ token?: string; logprob?: number; top_logprobs?: Array<{ token?: string; logprob?: number }> }>
+    | null
+    | undefined,
+): TokenLogprob[] | undefined {
+  if (!content?.length) return undefined;
+  return content.map((item) => ({
+    token: item.token ?? '',
+    logprob: item.logprob ?? Number.NEGATIVE_INFINITY,
+    ...(item.top_logprobs?.length
+      ? {
+          top: item.top_logprobs.map((alternative) => ({
+            token: alternative.token ?? '',
+            logprob: alternative.logprob ?? Number.NEGATIVE_INFINITY,
+          })),
+        }
+      : {}),
+  }));
 }

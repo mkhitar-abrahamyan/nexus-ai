@@ -3,7 +3,7 @@ import { BaseProvider, type ProviderInfo } from './base.js';
 import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest, ContentPart, Message } from '../types/messages.js';
 import type { GoogleProviderConfig } from '../types/config.js';
-import type { NexusResponse, NexusStream, StreamChunk, ToolCall } from '../types/response.js';
+import type { NexusResponse, NexusStream, StreamChunk, TokenLogprob, ToolCall } from '../types/response.js';
 import type { ReasoningEffort } from '../types/providers.js';
 import { buildMeta, type UsageInput } from '../core/usage.js';
 import { generateRequestId } from '../utils/ids.js';
@@ -50,6 +50,10 @@ interface GeminiContent {
 interface GeminiCandidate {
   content?: GeminiContent;
   finishReason?: string;
+  logprobsResult?: {
+    topCandidates?: Array<{ candidates?: Array<{ token?: string; logProbability?: number }> }>;
+    chosenCandidates?: Array<{ token?: string; logProbability?: number }>;
+  };
 }
 
 interface GeminiUsageMetadata {
@@ -114,12 +118,14 @@ export class GoogleProvider extends BaseProvider {
       const content = this.extractText(candidate?.content);
       const toolCalls = this.extractToolCalls(candidate?.content);
       const assets = this.extractAssets(candidate?.content);
+      const logprobs = geminiLogprobs(candidate?.logprobsResult);
 
       return {
         content,
         role: 'assistant',
         toolCalls: toolCalls.length ? toolCalls : undefined,
         ...(assets.length ? { assets } : {}),
+        ...(logprobs ? { logprobs } : {}),
         finishReason: toolCalls.length ? 'tool_calls' : this.mapFinishReason(candidate?.finishReason),
         meta: buildMeta({
           provider: 'google',
@@ -246,6 +252,12 @@ export class GoogleProvider extends BaseProvider {
       maxOutputTokens: request.maxTokens,
       stopSequences: request.stop ? (Array.isArray(request.stop) ? request.stop : [request.stop]) : undefined,
       thinkingConfig: this.thinkingConfig(request),
+      ...(request.logprobs
+        ? {
+            responseLogprobs: true,
+            ...(request.logprobs.top ? { logprobs: Math.min(20, Math.max(0, Math.floor(request.logprobs.top))) } : {}),
+          }
+        : {}),
     };
 
     if (request.responseFormat?.type === 'json') {
@@ -444,4 +456,28 @@ export class GoogleProvider extends BaseProvider {
   private compact<T extends Record<string, unknown>>(value: T): T {
     return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
   }
+}
+
+/**
+ * Gemini's token log probabilities, in the package's shape: each chosen token, with the alternatives
+ * Gemini lists at its step.
+ */
+function geminiLogprobs(result: GeminiCandidate['logprobsResult']): TokenLogprob[] | undefined {
+  const chosen = result?.chosenCandidates;
+  if (!chosen?.length) return undefined;
+  return chosen.map((item, index) => {
+    const alternatives = result?.topCandidates?.[index]?.candidates;
+    return {
+      token: item.token ?? '',
+      logprob: item.logProbability ?? Number.NEGATIVE_INFINITY,
+      ...(alternatives?.length
+        ? {
+            top: alternatives.map((alternative) => ({
+              token: alternative.token ?? '',
+              logprob: alternative.logProbability ?? Number.NEGATIVE_INFINITY,
+            })),
+          }
+        : {}),
+    };
+  });
 }

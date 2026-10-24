@@ -168,6 +168,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/retrieval.md) | Hybrid search, reranking, MMR, parent documents, and Redis, Pinecone, Weaviate, and Chroma stores |
 | [Embeddings and retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/embeddings.md) | Embeddings as a routed operation family, and RAG helpers |
 | [Media understanding](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/media.md) | Reading documents and images page by page, describing images, and answering questions about them, through any vision model or OCR |
+| [Typed decisions](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/decisions.md) | A yes or no, a choice, or a score, answered with probabilities and a calibrated confidence, from TypeSafe AI's Jev or any model, so a graph, an approval, or a guardrail acts when it is sure and asks a person when not |
 | [Video generation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/video.md) | Videos from a prompt or a first frame, on Google Veo and Runway, as durable jobs streamed into an asset store and priced per second |
 | [Images (experimental)](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/images.md) | Generation and masked edits over three backends, input safety, moderation, asset stores |
 | [Voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/voice.md) | Transcription, speech, voice turns, and voice sessions |
@@ -513,7 +514,10 @@ as a path, receives one line naming the part instead.
   whether it was a cache hit, the guardrails applied, and the `PipelineTrace` when tracing is on;
 - `failedAttempts`, when the first attempt did not answer: each `ResponseAttempt` that failed before
   it, retried on the same provider or failed over to the next, with its provider, model, error,
-  category, and the time it failed. A stream's last chunk carries them in its `meta`.
+  category, and the time it failed. A stream's last chunk carries them in its `meta`;
+- `logprobs`, when the request asked for them and the provider reported them: each `TokenLogprob` of
+  the answer, its log probability, and its most likely alternatives, as the
+  [providers guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/providers.md) describes.
 
 After running a tool, you send back a `ToolCallResult`. `NexusStream` and `StreamChunk` are the
 streaming equivalents.
@@ -1044,6 +1048,7 @@ your callback, the budget, and your hooks receive.
 | `agent` | `agent` for `ai.agent()`, and `agent.<name>` for `createAgent()` |
 | `job` | `job`, once per attempt |
 | `batch` | `batch.submit`, from submission to collection |
+| `decision` | `decision.decide`, a typed decision's questions about one state |
 
 ## Authorization
 
@@ -1368,6 +1373,16 @@ Every adapter sends a conversation's tool calls and results back the way its API
 
 An asset part in a message is sent as one reference line, never as its bytes.
 
+### Log probabilities
+
+A request's `logprobs` asks for each token of the answer with its log probability, and with `top`,
+its most likely alternatives, up to 20; `response.logprobs` carries them, each a `TokenLogprob`.
+OpenAI's Chat Completions, the OpenAI-compatible adapters that report them (Azure OpenAI, OpenRouter,
+DeepSeek, LM Studio, and llama.cpp), Gemini, and Ollama send it. Groq and Mistral refuse the option, so
+it is not sent to them, and a model whose `ModelCapabilities` declare `logprobs: false` has it removed,
+with a capability warning. A model that reports none leaves `response.logprobs` absent. Typed
+decisions read a model's probabilities this way; see the [decisions guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/decisions.md).
+
 ## Writing a provider
 
 `BaseProvider`, on `/providers/base`, is the contract for a provider that is not bundled. Implement
@@ -1500,7 +1515,7 @@ nothing reads. Both live in the repository, where a diff is what you want.
 | Modalities | What it accepts and what it produces. See below. |
 | Features | Streaming, tool calling, structured output and JSON mode, reasoning and the efforts it takes. |
 | Caching | A `PromptCachingCapability`: whether it takes caller-placed breakpoints, which `CacheTtl` lifetimes, the minimum prefix, and how many breakpoints. |
-| Options honoured | Forced tool choice, parallel tool calls, non-default sampling (temperature and top-p), seed, top-k, penalties. |
+| Options honoured | Forced tool choice, parallel tool calls, non-default sampling (temperature and top-p), seed, top-k, penalties, log probabilities. |
 | Limits and cost | Context and output limits, prices, quality and speed scores. |
 | Serving | The `ModelEndpoint` values it is served on. |
 | Provenance | When and where the entry was verified. |
@@ -1594,8 +1609,8 @@ price raised tenfold in a supplied file makes the next call cost ten times as mu
   models, and a changed price is still checked against the provider's pricing page.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
-- No provider's token log probabilities reach the application: a response carries the answer, not how
-  likely the model found it.
+- Log probabilities come from `complete()` through Chat Completions, Gemini, or Ollama: not from a
+  stream, the Responses API, Anthropic, Cohere, Groq, or Mistral.
 
 ---
 
@@ -4668,7 +4683,7 @@ A `Run` is one unit of work.
 | Field | Contents |
 | --- | --- |
 | id, trace id, parent id | Which trace it belongs to, and the run it ran inside. |
-| name, kind | A `RunKind`: `chain`, `model`, `tool`, `graph`, `node`, `agent`, `retriever`, `embedding`, `image`, `voice`, `realtime`, or `operation`. |
+| name, kind | A `RunKind`: `chain`, `model`, `tool`, `graph`, `node`, `agent`, `retriever`, `embedding`, `image`, `voice`, `realtime`, `operation`, or `decision`, a typed decision with its answers. |
 | status | A `RunStatus`: `running`, `ok`, or `error`. |
 | times, latency | When it started and ended. |
 | inputs, outputs, error | After redaction. |
@@ -9448,6 +9463,195 @@ purged with their assets.
 
 ---
 
+Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/decisions.md
+
+# Typed decisions
+
+
+Software asks a model many small questions it then acts on: which team takes a ticket, whether a
+message is an attack, how well an answer meets a rubric. A decision, from `nexus-ai-pro/decisions`, is
+such a question asked as a type: a yes or no, a choice among options, or a score on a rubric, about one
+state. Each answer comes back with its probabilities and a confidence read from them, so the
+application acts on it without parsing text, and knows when not to.
+
+```ts
+import { NexusAI } from 'nexus-ai-pro';
+import { completionDecisions, DecisionManager, gate } from 'nexus-ai-pro/decisions';
+import { TypeSafeDecisionProvider } from 'nexus-ai-pro/decisions/typesafe';
+
+const ai = new NexusAI({ providers: { openai: { apiKey: process.env.OPENAI_API_KEY! } } });
+const decisions = new DecisionManager(
+  {
+    providers: {
+      jev: new TypeSafeDecisionProvider({ apiKey: process.env.TYPESAFE_API_KEY! }),
+      gpt: completionDecisions(ai, { model: 'gpt-4.1-mini' }),
+    },
+    fallbacks: ['gpt'],
+  },
+  { lifecycle: ai.lifecycle },
+);
+
+const { answers } = await decisions.decide({
+  state: ticket,
+  questions: {
+    team: { type: 'choice', options: { billing: 'Charges and invoices', technical: 'Errors and outages' } },
+    urgent: { type: 'yes-no', question: 'Does the customer need an answer today?' },
+    severity: { type: 'score', levels: ['Cosmetic', 'Degraded', 'Blocking'] },
+  },
+});
+if (gate(answers.team, { act: 0.8 }) === 'act') route(answers.team.choice); // 'billing' | 'technical'
+```
+
+## Questions and answers
+
+A `DecisionRequest` holds a `DecisionState`, text or any JSON value, and `DecisionQuestions`: each a
+`DecisionQuestion` under the name its answer comes back by, asked in isolation against the same state.
+A `DecisionQuestionType` is one of three:
+
+| Question | What it asks | Its answer |
+| --- | --- | --- |
+| `YesNoQuestion` | A yes or no, with `criteria` for what counts as each | A `YesNoAnswer`: `yes`, its `probability`, and `confidence` |
+| `ChoiceQuestion` | One of its `options`, by name, with what each means, up to 255 | A `ChoiceAnswer`: the `choice`, every option's `probabilities`, and `confidence` |
+| `ScoreQuestion` | A level of its `levels`, lowest first, two to ten | A `ScoreAnswer`: the weighted `score`, the most probable `level`, each level's `probabilities`, and `confidence` |
+
+The answers are typed by their questions: `AnswerOf` gives a question's `DecisionAnswer`, and
+`DecisionAnswers` the whole set, so a choice's answer names only its own options, and a misspelt one
+fails to compile. A request also names its `provider` and `model`, its `tenantId`, a `signal`,
+`metadata` for the trace, and `cache: false` to ask afresh. A `DecisionResult` holds the answers, the
+`provider` and `model` that gave them, its `DecisionUsage`, its `cost`, how long it took, and whether
+it was `cached`.
+
+Confidence is read from the probabilities the same way whichever provider gave them, as TypeSafe AI
+documents it for its own:
+- `yesNoConfidence()`: how far the probability is from an even chance, `|2p - 1|`;
+- `choiceConfidence()`: how far the top probability is above an even split, `(pmax - 1/n) / (1 - 1/n)`;
+- `scoreConfidence()`: one less the probability-weighted distance from the most probable level, over
+  that distance for an even spread, and 0 at an even spread or wider.
+
+Confidence is a margin, not a probability: a yes at 0.75 has confidence 0.5. `answerProbability()` is
+the probability an answer gives its own answer, which is what calibration compares with accuracy.
+
+## Gates and calibration
+
+`gate()` turns a confidence into a `GateOutcome`: `act` at or above `GateThresholds.act`, `review` (a
+person decides) at or above `review`, and `abstain` below. Thresholds belong to the risk of what the
+answer does: a low bar to route a ticket, a high one to refund an order.
+
+Choose them from data. `calibrate()` takes `CalibrationSample` values, each an answer and whether it
+was right, as `answeredRight()` reads it, and returns a `CalibrationReport`:
+- `expectedCalibrationError`, the gap between the probability answers gave themselves and how often
+  they were right, from the `CalibrationBin` ranges it counts in;
+- with `CalibrateOptions.targetAccuracy`, the `threshold`: the lowest confidence at which the answers
+  at or above it hold the target, keeping at least `minSamples`, and the `coverage` it acts on.
+
+```ts
+const samples = labelled.map(({ answer, expected }) => ({ answer, correct: answeredRight(answer, expected) }));
+const { threshold, coverage } = calibrate(samples, { targetAccuracy: 0.95, minSamples: 100 });
+```
+
+A model whose confidence runs high is chosen a higher threshold, and the threshold holds on answers
+like the ones it was chosen from, not on a different kind of question or state.
+
+## The manager
+
+`DecisionManager` sends each request to the provider it names, the `DecisionConfig.defaultProvider`,
+or the first registered, and checks it first: a malformed question, or one the provider cannot take,
+is refused with a `DecisionError` before anything is sent. Its `DecisionErrorCode` is
+`DECISION_INVALID`, `DECISION_UNSUPPORTED`, `DECISION_NO_PROVIDER`, or `DECISION_FAILED`, and
+`retryable` says whether another provider may help. `fallbacks` are asked in order when one is: a
+timeout, a refused connection, or an overloaded service, never a malformed request or a refused key.
+`registerDecisionProvider()`, `hasDecisionProvider()`, and `listDecisionProviders()` manage providers
+by name, and `decide()` asks one provider with none of this.
+
+`DecisionConfig.cache` keeps each decision's answers in any cache adapter, the memory, Redis, or SQLite
+one, as `CachedDecision` values, so the same questions about the same state, for the same tenant, are
+answered once. `prices` add `DecisionPrice` rates, per million tokens, to `DECISION_PRICES`, which holds
+TypeSafe AI's published price for Jev, $42 per billion input tokens with output free, and
+`priceDecision()` prices a decision's usage, leaving one without a price unpriced, never free.
+
+`DecisionRuntime.lifecycle` runs every decision as an operation of the client, family `decision`:
+authorized, rate limited, audited, on the tenant's own key, and held against the budget at its model's
+price before it is sent. `DecisionRuntime.tracer` records each one as a run of kind `decision`, with its
+answers, usage, and cost, and the provider's own calls nested beneath; `DecisionTracerLike` and
+`DecisionRunLike` are the parts of a tracer it uses.
+
+## Providers
+
+`TypeSafeDecisionProvider`, from `nexus-ai-pro/decisions/typesafe`, speaks TypeSafe AI's System One API,
+`POST /v1/systemone`. Its model, Jev (`jev-latest`, `jev-preview`, or a version), answers only typed
+questions, all of a decision in one call, each in isolation, with no text to parse.
+`TypeSafeDecisionProviderOptions` sets the `apiKey`, a `baseUrl` (a proxy that passes the API through
+works), the `model`, `longContext`, which sends the header TypeSafe AI requires for a long state, a
+`timeoutMs` (30 seconds), `headers`, and a `fetch`. A refusal of a field names it, from the API's
+validation error; `listModels()` reads `GET /v1/models`.
+
+`completionDecisions()` makes any completion model a provider, through a client's own `complete()`, so
+every call is routed, budgeted, traced, and priced as every completion is. Each question is asked on its
+own, at temperature 0, to answer with one code: a letter per option, Y or N, or a level's digit. Its
+probabilities are read from the log probabilities of that token's alternatives, on a provider that
+reports them; elsewhere it is asked `samples` times and each answer counted.
+`CompletionDecisionsOptions.method`, a `CompletionDecisionMethod`, is `logprobs`, `sampling`, or `auto`,
+the default, which samples a model that reports none or refuses them, and remembers it. A
+`DecisionCompletionClient` is anything with `complete()`, such as `NexusAI`. Its calls are charged
+where they are made, so its decisions charge nothing again.
+
+`MockDecisionProvider`, from `nexus-ai-pro/decisions/mock`, answers as `MockDecisionProviderOptions.answer`
+says, or with an even spread, and keeps every request it was asked.
+
+A provider of your own implements `DecisionProvider`: `decide()` takes a `DecisionProviderRequest`, its
+model, state, and each `DecisionProviderQuestion`, and a `DecisionCallContext`, and returns a
+`DecisionProviderResult` of each question's `DecisionDistribution`. The manager reads every answer from
+those with `decisionAnswer()`, so confidence is the same everywhere. Its `DecisionProviderInfo` names it
+and declares its `DecisionProviderCapabilities`: the question types, options, levels, and questions it
+takes, and its default model.
+
+## Decisions where the package decides
+
+Each takes a `DecisionManagerLike`, such as a `DecisionManager`, and `DecisionRequestOptions` for whom
+and what to ask:
+
+| Function | Where it decides | What an uncertain answer does |
+| --- | --- | --- |
+| `decisionRoute()` | A graph's branch, for `addConditionalEdges()`, by a choice whose options name nodes, or by `routes` | Goes to `review`, such as a node that asks a person with `interrupt()` |
+| `decisionPermissions()` | An agent's tool calls, after a `base` policy: what it allows or refuses stands | Still asks a person |
+| `decisionGuard()` | Agent middleware asking a yes or no of each message and each answer: a confident yes stops it | Waits for a person, who answers a `DecisionGuardReview` |
+| `decisionModel()` | Agent middleware sending each turn to a model by a choice about its message, every call of the turn | Keeps the agent's own model |
+| `decisionEvaluator()` | A judge's score, with the answer's confidence in its metadata | Goes to people with `reviewUnsure()`, as online evaluation's `reviewWhen` |
+
+`DecisionRouteOptions`, `DecisionPermissionsOptions`, `DecisionGuardOptions`, `DecisionModelOptions`, and
+`DecisionEvaluatorOptions` set each one's question, threshold, and state. `classifyRoute()`, from the
+workflows, takes `decisions` too, and then answers with every label's probability.
+
+## Conformance
+
+`runDecisionConformance()` checks any provider against the contract and lists what fails, as a
+`DecisionConformanceReport`: its capabilities are coherent, each question type it declares comes back
+as probabilities that fit, several questions in one decision each get their own answer, a stopped call
+is not answered, and each `DecisionConformanceCase` of `DecisionConformanceOptions.cases`, a question
+whose answer is known, is answered right.
+
+In the test suite, one decision suite passes on TypeSafe AI's API, against a stand-in written from its
+documentation, on a model's log probabilities, and on sampling. On 2,000 labelled invoices, the
+threshold a calibration chooses holds its accuracy on 2,000 it never saw, for a calibrated model and for
+an overconfident one, where a threshold taken on trust does not. A support graph routes tickets by
+decision, and every ticket it is unsure of reaches a person.
+
+## Limitations
+
+- The family is experimental until the live workflow passes against TypeSafe AI's Jev and a model that
+  reports log probabilities.
+- Confidence is only as calibrated as the model is; choose thresholds from the application's own
+  labelled answers, and choose them again when the model or the questions change.
+- A completion model's decision costs a call per question, or `samples` calls where it reports no log
+  probabilities, and sampled probabilities come in steps of one sample. A choice of more than 20 options
+  is sampled.
+- TypeSafe AI's image questions, locating something in a picture, and its long-context mode are
+  experimental there, and the image questions are not part of the contract.
+- Jev is in early access; its adapter has passed against a stand-in written from the documentation,
+  not yet against the live service.
+
+---
+
 Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/video.md
 
 # Video generation
@@ -13936,7 +14140,7 @@ The client also offers `ai.summarizeVerifyFormat()` directly.
 | --- | --- | --- |
 | `ragAnswer()` | Answers a question from retrieved passages, citing them by id. | `RagAnswerOptions`: `model`, `question`, `chunks`, and `verify`, which repairs claims the passages do not support. A repair costs a second completion. |
 | `extractStructured()` | Pulls data matching a JSON Schema out of text. The client validates the output. | `ExtractStructuredOptions`: `model`, `input`, `schema`, and an optional `instruction`. |
-| `classifyRoute()` | Picks exactly one label, at temperature 0, answering `{ label, confidence }`. | `ClassifyRouteOptions`: `labels`, and an optional `instruction`. |
+| `classifyRoute()` | Picks exactly one label, at temperature 0, answering `{ label, confidence }`; with `decisions`, a typed decision's choice, with every label's `probabilities`. | `ClassifyRouteOptions`: `labels`, an optional `instruction`, and `decisions`, a decision manager and its provider and model. |
 | `compareAndDecide()` | Weighs options against criteria and chooses one, reasoning privately first. | `CompareOptions`: `input`, `options`, and `criteria`. |
 | `summarizeVerifyFormat()` | Summarizes, checks the summary against sources, and formats the result. | `SummarizeVerifyFormatOptions`, below. |
 
@@ -13983,8 +14187,9 @@ a fixed product.
   `extractStructured()` when a field's shape matters.
 - Verification compares claims with the sources as text; see the [grounding guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/grounding.md)
   for how, and for what it cannot catch.
-- `classifyRoute()`'s `confidence` is what the model says of its own answer, not a probability. A
-  model's word on its certainty is not calibrated, so a threshold on it is not a level of risk.
+- Without `decisions`, `classifyRoute()`'s `confidence` is what the model says of its own answer, not
+  a probability. With them, it is read from every label's probability, as the
+  [decisions guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/decisions.md) describes.
 
 ---
 
@@ -14329,8 +14534,8 @@ declarations, which carry every doc comment to your editor.
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
 | `nexus-ai-pro` | 363 KB | 100% | none |
-| `nexus-ai-pro/config` | 355 KB | 98% | none |
-| `nexus-ai-pro/core` | 351 KB | 97% | none |
+| `nexus-ai-pro/config` | 356 KB | 98% | none |
+| `nexus-ai-pro/core` | 352 KB | 97% | none |
 | `nexus-ai-pro/realtime` | 216 KB | 60% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 59% | none |
 | `nexus-ai-pro/server/deployments` | 151 KB | 42% | none |
@@ -14341,25 +14546,25 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/session` | 109 KB | 30% | none |
 | `nexus-ai-pro/protocols/a2a/grpc` | 95 KB | 26% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 25% | none |
+| `nexus-ai-pro/providers/groq` | 89 KB | 25% | none |
+| `nexus-ai-pro/providers/mistral` | 89 KB | 25% | none |
 | `nexus-ai-pro/evaluate/online` | 89 KB | 25% | none |
-| `nexus-ai-pro/providers/groq` | 88 KB | 24% | none |
-| `nexus-ai-pro/providers/mistral` | 88 KB | 24% | none |
-| `nexus-ai-pro/providers/azure-openai` | 87 KB | 24% | none |
-| `nexus-ai-pro/providers/deepseek` | 87 KB | 24% | none |
-| `nexus-ai-pro/providers/llamacpp` | 87 KB | 24% | none |
-| `nexus-ai-pro/providers/lmstudio` | 87 KB | 24% | none |
-| `nexus-ai-pro/providers/openai` | 87 KB | 24% | none |
-| `nexus-ai-pro/providers/openrouter` | 87 KB | 24% | none |
+| `nexus-ai-pro/providers/azure-openai` | 88 KB | 24% | none |
+| `nexus-ai-pro/providers/deepseek` | 88 KB | 24% | none |
+| `nexus-ai-pro/providers/llamacpp` | 88 KB | 24% | none |
+| `nexus-ai-pro/providers/lmstudio` | 88 KB | 24% | none |
+| `nexus-ai-pro/providers/openai` | 88 KB | 24% | none |
+| `nexus-ai-pro/providers/openrouter` | 88 KB | 24% | none |
 | `nexus-ai-pro/policy` | 85 KB | 23% | none |
 | `nexus-ai-pro/router` | 83 KB | 23% | none |
 | `nexus-ai-pro/graph` | 82 KB | 23% | none |
 | `nexus-ai-pro/images` | 81 KB | 22% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
-| `nexus-ai-pro/providers/google` | 73 KB | 20% | none |
+| `nexus-ai-pro/providers/google` | 74 KB | 20% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 17% | none |
 | `nexus-ai-pro/providers/cohere` | 59 KB | 16% | none |
+| `nexus-ai-pro/providers/ollama` | 59 KB | 16% | none |
 | `nexus-ai-pro/protocols/a2a` | 59 KB | 16% | none |
-| `nexus-ai-pro/providers/ollama` | 58 KB | 16% | none |
 | `nexus-ai-pro/security` | 58 KB | 16% | none |
 | `nexus-ai-pro/video` | 58 KB | 16% | none |
 | `nexus-ai-pro/operations` | 56 KB | 15% | none |
@@ -14372,6 +14577,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/telephony` | 50 KB | 14% | none |
 | `nexus-ai-pro/agent/sandbox` | 48 KB | 13% | none |
 | `nexus-ai-pro/ops` | 48 KB | 13% | none |
+| `nexus-ai-pro/decisions` | 47 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 12% | none |
@@ -14384,6 +14590,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/workspace` | 38 KB | 10% | none |
 | `nexus-ai-pro/tracing` | 38 KB | 10% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 10% | none |
+| `nexus-ai-pro/decisions/typesafe` | 38 KB | 10% | none |
 | `nexus-ai-pro/models` | 37 KB | 10% | none |
 | `nexus-ai-pro/tracing/otlp-grpc` | 36 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
@@ -14418,13 +14625,13 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/operations/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 19 KB | 5% | none |
+| `nexus-ai-pro/workflows` | 19 KB | 5% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
 | `nexus-ai-pro/agent/interpreter` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/retrievers` | 17 KB | 5% | none |
 | `nexus-ai-pro/rag/pipeline` | 17 KB | 5% | none |
-| `nexus-ai-pro/workflows` | 17 KB | 5% | none |
 | `nexus-ai-pro/images/comfyui` | 16 KB | 4% | none |
 | `nexus-ai-pro/testing/record` | 16 KB | 4% | none |
 | `nexus-ai-pro/sqlite/operations` | 15 KB | 4% | none |
@@ -14514,6 +14721,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/loaders/json` | 3 KB | 0.8% | none |
 | `nexus-ai-pro/loaders/pdf` | 3 KB | 0.8% | none |
 | `nexus-ai-pro/media/mock` | 2 KB | 0.6% | none |
+| `nexus-ai-pro/decisions/mock` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/cache` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/cache/adapters` | 2 KB | 0.6% | none |
 | `nexus-ai-pro/jobs` | 2 KB | 0.6% | none |
@@ -14700,7 +14908,7 @@ The table is generated from the built package's import graph, so it is exact. A 
 compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, runs these too.
 
 
-Of 195 entry points, 156 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 198 entry points, 159 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |

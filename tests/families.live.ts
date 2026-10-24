@@ -3,13 +3,16 @@
  * understanding through a vision model and through Mistral's OCR, the Gemini embedding batch tier,
  * video generation on Veo and on Runway, which costs a few seconds of video and so runs only when
  * `NEXUS_LIVE_VIDEO` is set too, a Gemini Live session that calls a tool, OpenAI's SIP call control,
- * and the phone numbers of Twilio and Telnyx, read only. Each check is what graduation asks for: the family's conformance
+ * the phone numbers of Twilio and Telnyx, read only, and typed decisions on TypeSafe AI's Jev and from
+ * OpenAI's and Gemini's log probabilities. Each check is what graduation asks for: the family's conformance
  * suite, passed against the real service. Writes what it measured to `NEXUS_LIVE_REPORT` when set.
  *
  *   node --import tsx tests/families.live.ts
  */
 import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
+import { completionDecisions, type DecisionConformanceCase, runDecisionConformance } from '../src/decisions/index.js';
+import { TypeSafeDecisionProvider } from '../src/decisions/typesafe.js';
 import { EmbeddingBatchManager } from '../src/embeddings/batch.js';
 import { GoogleEmbeddingBatchProvider } from '../src/embeddings/batch-google.js';
 import { type MediaInput, modelMediaProvider, runMediaConformance } from '../src/media/index.js';
@@ -318,6 +321,71 @@ if (env.TELNYX_API_KEY) {
     return `${numbers.length} numbers`;
   });
 } else skip('telephony: Telnyx', 'no TELNYX_API_KEY');
+
+// ── Typed decisions ──────────────────────────────────────────────────
+
+/** Questions whose answers any reader of the state agrees on. */
+const decisionCases: DecisionConformanceCase[] = [
+  {
+    state: 'Invoice 17 for 42 EUR was paid in full on 2026-10-01.',
+    question: { type: 'yes-no', question: 'Was the invoice paid?' },
+    expected: true,
+  },
+  {
+    state: 'The app crashes every time I open the settings page.',
+    question: {
+      type: 'choice',
+      question: 'Which team should handle this?',
+      options: { billing: 'Charges and invoices', technical: 'Errors and crashes' },
+    },
+    expected: 'technical',
+  },
+  {
+    state: 'Nothing works at all, and there is no way around it.',
+    question: { type: 'score', question: 'How severe is it?', levels: ['Cosmetic', 'Degraded', 'Blocking'] },
+    expected: 2,
+  },
+];
+if (env.TYPESAFE_API_KEY) {
+  await check("decisions: TypeSafe AI's Jev passes the conformance suite", async () => {
+    const report = await runDecisionConformance(
+      new TypeSafeDecisionProvider({ apiKey: env.TYPESAFE_API_KEY as string }),
+      {
+        cases: decisionCases,
+      },
+    );
+    if (report.failures.length) throw new Error(report.failures.join('; '));
+    return report.passed.join(', ');
+  });
+} else skip("decisions: TypeSafe AI's Jev", 'no TYPESAFE_API_KEY');
+const deciders: Array<{ name: string; client: OpenAIProvider | GoogleProvider; model: string }> = [];
+if (env.OPENAI_API_KEY) {
+  deciders.push({
+    name: 'openai',
+    client: new OpenAIProvider({ apiKey: env.OPENAI_API_KEY }),
+    model: env.OPENAI_DECISION_MODEL || 'gpt-4.1-mini',
+  });
+}
+if (env.GOOGLE_API_KEY) {
+  deciders.push({
+    name: 'google',
+    client: new GoogleProvider({ apiKey: env.GOOGLE_API_KEY }),
+    model: env.GOOGLE_DECISION_MODEL || 'gemini-2.5-flash',
+  });
+}
+for (const { name, client, model } of deciders) {
+  await check(
+    `decisions: ${name} passes the conformance suite, from its log probabilities where it reports them`,
+    async () => {
+      const provider = completionDecisions(client, { model });
+      const report = await runDecisionConformance(provider, { cases: decisionCases });
+      if (report.failures.length) throw new Error(report.failures.join('; '));
+      return provider.sampledModels.has(model)
+        ? `${model}: sampled, as it reported no log probabilities`
+        : `${model}: log probabilities`;
+    },
+  );
+}
 
 // ── Report ───────────────────────────────────────────────────────────
 

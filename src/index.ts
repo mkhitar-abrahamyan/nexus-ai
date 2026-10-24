@@ -89,6 +89,7 @@ export type {
   ResponseCost,
   ResponseMeta,
   StreamChunk,
+  TokenLogprob,
   TokenUsage,
   ToolCall,
 } from './types/response.js';

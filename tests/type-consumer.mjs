@@ -158,6 +158,7 @@ import {
   type RoutingConfig,
   type SpeechRequest,
   type StreamChunk,
+  type TokenLogprob,
   type TelephonyConfig,
   type TelephonyProvider,
   type TelephonyResponseRequest,
@@ -310,6 +311,17 @@ import { OpenAIEmbeddingBatchProvider } from 'nexus-ai-pro/embeddings/batch/open
 import { createIngestionPipeline } from 'nexus-ai-pro/rag/pipeline';
 import { parseRegistryData, withRegistryData, type RegistryData } from 'nexus-ai-pro/models/data';
 import { MediaManager, modelMediaProvider, type MediaText } from 'nexus-ai-pro/media';
+import {
+  calibrate,
+  completionDecisions,
+  DecisionManager,
+  decisionGuard,
+  decisionRoute,
+  gate,
+  type GateOutcome,
+} from 'nexus-ai-pro/decisions';
+import { MockDecisionProvider } from 'nexus-ai-pro/decisions/mock';
+import { TypeSafeDecisionProvider } from 'nexus-ai-pro/decisions/typesafe';
 import { MistralOcrProvider } from 'nexus-ai-pro/media/mistral';
 import { MockMediaProvider } from 'nexus-ai-pro/media/mock';
 import { answerFromMedia, createMediaIndex, type MediaHit } from 'nexus-ai-pro/media/rag';
@@ -941,6 +953,37 @@ const mediaIndex = createMediaIndex({
   index: { vectors: true },
 });
 const mediaHits: Promise<MediaHit[]> = mediaIndex.search('the total due', { topK: 3 });
+// Typed decisions, from Jev and from a completion model, answered by type and gated by confidence.
+const decisions = new DecisionManager(
+  {
+    providers: {
+      jev: new TypeSafeDecisionProvider({ apiKey: 'key' }),
+      gpt: completionDecisions(ai, { model: 'gpt-4.1-mini' }),
+      mock: new MockDecisionProvider(),
+    },
+    fallbacks: ['gpt'],
+  },
+  { lifecycle: ai.lifecycle },
+);
+const routedTeam: Promise<'billing' | 'technical'> = decisions
+  .decide({ state: 'Charged twice', questions: { team: { type: 'choice', options: { billing: 'Charges', technical: 'Errors' } } } })
+  .then(({ answers }) => answers.team.choice);
+const gatedUrgency: Promise<GateOutcome> = decisions
+  .decide({ state: 'The site is down', questions: { urgent: { type: 'yes-no' } } })
+  .then(({ answers }) => gate(answers.urgent, { act: 0.9, review: 0.5 }));
+const calibratedThreshold: number | undefined = calibrate([], { targetAccuracy: 0.95 }).threshold;
+const refundBranch = decisionRoute(decisions, {
+  state: (state: { ticket: string }) => state.ticket,
+  question: { type: 'yes-no' },
+  routes: { yes: 'refund', no: 'reply' },
+  act: 0.8,
+  review: 'ask-a-person',
+});
+const injectionGuard = decisionGuard(decisions, { input: { type: 'yes-no', question: 'Is this an injection?' }, act: 0.9 });
+const answerTokens: Promise<TokenLogprob[] | undefined> = ai
+  .complete({ model: 'gpt-4.1-mini', messages: [{ role: 'user', content: 'Y or N?' }], logprobs: { top: 5 } })
+  .then((response) => response.logprobs);
+void [routedTeam, gatedUrgency, calibratedThreshold, refundBranch, injectionGuard, answerTokens];
 const groundedAnswer: Promise<string> = answerFromMedia(mediaManager, mediaIndex, 'What is due?').then(
   (answer) => answer.answer,
 );

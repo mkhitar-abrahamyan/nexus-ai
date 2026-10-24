@@ -40,7 +40,7 @@ The client also offers `ai.summarizeVerifyFormat()` directly.
 | --- | --- | --- |
 | `ragAnswer()` | Answers a question from retrieved passages, citing them by id. | `RagAnswerOptions`: `model`, `question`, `chunks`, and `verify`, which repairs claims the passages do not support. A repair costs a second completion. |
 | `extractStructured()` | Pulls data matching a JSON Schema out of text. The client validates the output. | `ExtractStructuredOptions`: `model`, `input`, `schema`, and an optional `instruction`. |
-| `classifyRoute()` | Picks exactly one label, at temperature 0, answering `{ label, confidence }`. | `ClassifyRouteOptions`: `labels`, and an optional `instruction`. |
+| `classifyRoute()` | Picks exactly one label, at temperature 0, answering `{ label, confidence }`; with `decisions`, a typed decision's choice, with every label's `probabilities`. | `ClassifyRouteOptions`: `labels`, an optional `instruction`, and `decisions`, a decision manager and its provider and model. |
 | `compareAndDecide()` | Weighs options against criteria and chooses one, reasoning privately first. | `CompareOptions`: `input`, `options`, and `criteria`. |
 | `summarizeVerifyFormat()` | Summarizes, checks the summary against sources, and formats the result. | `SummarizeVerifyFormatOptions`, below. |
 
@@ -87,8 +87,9 @@ a fixed product.
   `extractStructured()` when a field's shape matters.
 - Verification compares claims with the sources as text; see the [grounding guide](./grounding.md)
   for how, and for what it cannot catch.
-- `classifyRoute()`'s `confidence` is what the model says of its own answer, not a probability. A
-  model's word on its certainty is not calibrated, so a threshold on it is not a level of risk.
+- Without `decisions`, `classifyRoute()`'s `confidence` is what the model says of its own answer, not
+  a probability. With them, it is read from every label's probability, as the
+  [decisions guide](./decisions.md) describes.
 
 <!-- reference:start -->
 ## Reference

@@ -159,8 +159,23 @@ export interface NexusResponse {
    * error.
    */
   finishReason: 'stop' | 'tool_calls' | 'length' | 'content_filter' | 'error';
+  /**
+   * Each token of the answer with its log probability, and its most likely alternatives, when the
+   * request asked for `logprobs` and the provider reported them.
+   */
+  logprobs?: TokenLogprob[];
   /** How the completion was produced. */
   meta: ResponseMeta;
+}
+
+/** One token of an answer: its text, its log probability, and the alternatives most likely in its place. */
+export interface TokenLogprob {
+  /** The token's text. */
+  token: string;
+  /** Its natural log probability, 0 or below. */
+  logprob: number;
+  /** The most likely tokens at its place, itself among them, most likely first, when they were asked for. */
+  top?: Array<{ token: string; logprob: number }>;
 }
 
 // ── Streaming ──────────────────────────────────────────────────────

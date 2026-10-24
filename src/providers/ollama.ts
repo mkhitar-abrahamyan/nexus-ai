@@ -15,6 +15,8 @@ interface OllamaChatParams {
   stream?: boolean;
   format?: string | Record<string, unknown>;
   signal?: AbortSignal;
+  logprobs?: boolean;
+  top_logprobs?: number;
   options?: {
     temperature?: number;
     top_p?: number;
@@ -36,6 +38,7 @@ interface OllamaChatResponse {
   message?: {
     content?: string;
   };
+  logprobs?: Array<{ token?: string; logprob?: number; top_logprobs?: Array<{ token?: string; logprob?: number }> }>;
   done?: boolean;
   prompt_eval_count?: number;
   eval_count?: number;
@@ -91,6 +94,14 @@ export class OllamaProvider extends BaseProvider {
         messages: this.formatMessages(request.messages),
         format: this.formatResponseFormat(request),
         signal: request.signal,
+        ...(request.logprobs
+          ? {
+              logprobs: true,
+              ...(request.logprobs.top
+                ? { top_logprobs: Math.min(20, Math.max(0, Math.floor(request.logprobs.top))) }
+                : {}),
+            }
+          : {}),
         options: {
           ...this.samplingOptions(request),
           stop: request.stop ? (Array.isArray(request.stop) ? request.stop : [request.stop]) : undefined,
@@ -98,11 +109,26 @@ export class OllamaProvider extends BaseProvider {
       });
 
       const latency = Date.now() - startTime;
+      const logprobs = result.logprobs?.length
+        ? result.logprobs.map((item) => ({
+            token: item.token ?? '',
+            logprob: item.logprob ?? Number.NEGATIVE_INFINITY,
+            ...(item.top_logprobs?.length
+              ? {
+                  top: item.top_logprobs.map((alternative) => ({
+                    token: alternative.token ?? '',
+                    logprob: alternative.logprob ?? Number.NEGATIVE_INFINITY,
+                  })),
+                }
+              : {}),
+          }))
+        : undefined;
 
       return {
         content: result.message?.content || '',
         role: 'assistant',
         finishReason: 'stop',
+        ...(logprobs ? { logprobs } : {}),
         meta: buildMeta({
           provider: 'ollama',
           model,

@@ -156,6 +156,7 @@ from the doc comments. The guides live in the repository, so these links go to G
 | [Retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/retrieval.md) | Hybrid search, reranking, MMR, parent documents, and Redis, Pinecone, Weaviate, and Chroma stores |
 | [Embeddings and retrieval](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/embeddings.md) | Embeddings as a routed operation family, and RAG helpers |
 | [Media understanding](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/media.md) | Reading documents and images page by page, describing images, and answering questions about them, through any vision model or OCR |
+| [Typed decisions](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/decisions.md) | A yes or no, a choice, or a score, answered with probabilities and a calibrated confidence, from TypeSafe AI's Jev or any model, so a graph, an approval, or a guardrail acts when it is sure and asks a person when not |
 | [Video generation](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/video.md) | Videos from a prompt or a first frame, on Google Veo and Runway, as durable jobs streamed into an asset store and priced per second |
 | [Images (experimental)](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/images.md) | Generation and masked edits over three backends, input safety, moderation, asset stores |
 | [Voice](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/voice.md) | Transcription, speech, voice turns, and voice sessions |

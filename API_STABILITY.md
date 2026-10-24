@@ -41,6 +41,21 @@ Both are covered by this policy:
 Deep imports into `dist`, `dist-cjs`, or `src` are not supported. Import only from `nexus-ai-pro` or
 one of its explicit subpaths.
 
+## 2.19 stage (Unreleased)
+
+Everything 2.19 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable:
+- in the root: `CompletionRequest.logprobs`, `NexusResponse.logprobs`, `TokenLogprob`, and
+  `ModelCapabilities.logprobs`;
+- in `nexus-ai-pro/workflows`: `ClassifyRouteOptions.decisions`.
+
+New and experimental, until the live workflow passes against TypeSafe AI's Jev and a model that
+reports log probabilities: the typed decisions family, `nexus-ai-pro/decisions`,
+`nexus-ai-pro/decisions/typesafe`, and `nexus-ai-pro/decisions/mock`.
+
+Changed on purpose: `OperationFamily` and `RunKind` widen with `decision`.
+
 ## 2.18 stage (2.18.0)
 
 Everything 2.18 adds is stable from the start and additive, unless this section says otherwise.

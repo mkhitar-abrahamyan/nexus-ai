@@ -349,6 +349,13 @@ export interface CompletionRequest {
   seed?: number;
   /** Adjusts the likelihood of specific tokens, by token id. */
   logitBias?: Record<string, number>;
+  /**
+   * Asks for each answer token's log probability, and with `top`, its most likely alternatives, up
+   * to 20, on `response.logprobs`. OpenAI and the OpenAI-compatible providers that report them,
+   * Gemini, and Ollama send it; a model that declares `logprobs: false` has it removed. A provider
+   * that reports none leaves `response.logprobs` absent, and a stream reports none.
+   */
+  logprobs?: { top?: number };
   /** Timeout per provider attempt, in milliseconds, overriding the client's. */
   timeoutMs?: number;
   /** Refuses or flags this request when its estimated cost exceeds this many US dollars. */

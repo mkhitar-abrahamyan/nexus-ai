@@ -1,6 +1,7 @@
 import { withFactualDefaults } from '../hallucination/factual.js';
 import { type RagChunk, withRagContext } from '../hallucination/rag.js';
 import { completeVerified, type VerificationOptions } from '../hallucination/verification.js';
+import type { DecisionManagerLike } from '../decisions/integrations.js';
 import type { ResponseFormatConfig } from '../types/config.js';
 import type { CompletionRequest } from '../types/messages.js';
 import type { NexusResponse } from '../types/response.js';
@@ -82,6 +83,12 @@ export interface ClassifyRouteOptions {
   labels: string[];
   /** Replaces the default classification instruction. */
   instruction?: string;
+  /**
+   * Classifies by decision instead: the label as a choice, answered with every label's probability and
+   * a confidence read from them, not the confidence a model claims. `model` is then the decision's
+   * model only when `decisions.model` names none, and the client is not called.
+   */
+  decisions?: { manager: DecisionManagerLike; provider?: string; model?: string };
 }
 
 /** Options for `compareAndDecide`. */
@@ -222,9 +229,51 @@ export async function extractStructured(
 
 /**
  * Picks exactly one label for the input, at temperature 0, returning `{ label, confidence }` as
- * JSON.
+ * JSON. With `decisions`, the label is a decision's choice, and the JSON carries every label's
+ * `probabilities` and the confidence read from them.
  */
 export async function classifyRoute(client: WorkflowClient, options: ClassifyRouteOptions): Promise<WorkflowResult> {
+  if (options.decisions) {
+    const started = Date.now();
+    const { manager, provider, model } = options.decisions;
+    const result = await manager.decide({
+      state: options.input,
+      questions: {
+        label: {
+          type: 'choice',
+          question: options.instruction || 'Classify the input into exactly one label.',
+          options: options.labels,
+        },
+      },
+      ...(provider ? { provider } : {}),
+      model: model ?? options.model,
+    });
+    const answer = result.answers.label;
+    const content = JSON.stringify({
+      label: answer.choice,
+      confidence: answer.confidence,
+      probabilities: answer.probabilities,
+    });
+    // The decision's own meta, as a response carries it, so the step reads as every other does.
+    const response: NexusResponse = {
+      content,
+      role: 'assistant',
+      finishReason: 'stop',
+      meta: {
+        requestId: `decision-${started}`,
+        providerUsed: result.provider,
+        modelUsed: result.model,
+        latencyMs: result.latencyMs,
+        tokensInput: result.usage?.inputTokens ?? 0,
+        tokensOutput: result.usage?.outputTokens ?? 0,
+        tokensSaved: 0,
+        ...(result.cost ? { cost: result.cost } : {}),
+        cacheHit: result.cached === true,
+        guardrailsApplied: [],
+      },
+    };
+    return { content, response, steps: [{ step: 'classify-route', response }] };
+  }
   const response = await client.complete({
     model: options.model,
     messages: [

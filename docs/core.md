@@ -140,7 +140,10 @@ as a path, receives one line naming the part instead.
   whether it was a cache hit, the guardrails applied, and the `PipelineTrace` when tracing is on;
 - `failedAttempts`, when the first attempt did not answer: each `ResponseAttempt` that failed before
   it, retried on the same provider or failed over to the next, with its provider, model, error,
-  category, and the time it failed. A stream's last chunk carries them in its `meta`.
+  category, and the time it failed. A stream's last chunk carries them in its `meta`;
+- `logprobs`, when the request asked for them and the provider reported them: each `TokenLogprob` of
+  the answer, its log probability, and its most likely alternatives, as the
+  [providers guide](./providers.md) describes.
 
 After running a tool, you send back a `ToolCallResult`. `NexusStream` and `StreamChunk` are the
 streaming equivalents.
@@ -752,6 +755,7 @@ specific entry point that provides it.
 | `RoutingConfig` | interface | How requests with `model: 'auto'` are routed. |
 | `RoutingRule` | interface | A routing rule: when a request matches, route it to a model. |
 | `RoutingStrategy` | type | What the auto-router optimizes for: price, latency, quality, or keeping data on local models. |
+| `TokenLogprob` | interface | One token of an answer: its text, its log probability, and the alternatives most likely in its place. |
 | `TokenOptimizerConfig` | interface | Token optimization applied before a request is sent. |
 | `TokenUsageSnapshot` | interface | Token counts before and after optimization. |
 | `UsageInput` | interface | Token counts as a provider reported them, for `buildUsage()`. |

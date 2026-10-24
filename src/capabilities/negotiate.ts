@@ -175,6 +175,12 @@ export function negotiateCompletionRequest(
     });
   }
 
+  if (request.logprobs !== undefined && capabilities.logprobs === false) {
+    refuse('logprobs', request.logprobs, 'the model does not report token log probabilities', (target) => {
+      target.logprobs = undefined;
+    });
+  }
+
   if (request.topK !== undefined && capabilities.topK === false) {
     refuse('topK', request.topK, 'the model does not support top-k sampling', (target) => {
       target.topK = undefined;

@@ -22,7 +22,8 @@ export type OperationFamily =
   | 'agent'
   | 'media'
   | 'video'
-  | 'messaging';
+  | 'messaging'
+  | 'decision';
 
 /**
  * The stages every operation passes through, in this order. A family skips a stage it has nothing

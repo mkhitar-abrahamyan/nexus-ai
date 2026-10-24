@@ -88,6 +88,16 @@ Every adapter sends a conversation's tool calls and results back the way its API
 
 An asset part in a message is sent as one reference line, never as its bytes.
 
+### Log probabilities
+
+A request's `logprobs` asks for each token of the answer with its log probability, and with `top`,
+its most likely alternatives, up to 20; `response.logprobs` carries them, each a `TokenLogprob`.
+OpenAI's Chat Completions, the OpenAI-compatible adapters that report them (Azure OpenAI, OpenRouter,
+DeepSeek, LM Studio, and llama.cpp), Gemini, and Ollama send it. Groq and Mistral refuse the option, so
+it is not sent to them, and a model whose `ModelCapabilities` declare `logprobs: false` has it removed,
+with a capability warning. A model that reports none leaves `response.logprobs` absent. Typed
+decisions read a model's probabilities this way; see the [decisions guide](./decisions.md).
+
 ## Writing a provider
 
 `BaseProvider`, on `/providers/base`, is the contract for a provider that is not bundled. Implement
@@ -220,7 +230,7 @@ nothing reads. Both live in the repository, where a diff is what you want.
 | Modalities | What it accepts and what it produces. See below. |
 | Features | Streaming, tool calling, structured output and JSON mode, reasoning and the efforts it takes. |
 | Caching | A `PromptCachingCapability`: whether it takes caller-placed breakpoints, which `CacheTtl` lifetimes, the minimum prefix, and how many breakpoints. |
-| Options honoured | Forced tool choice, parallel tool calls, non-default sampling (temperature and top-p), seed, top-k, penalties. |
+| Options honoured | Forced tool choice, parallel tool calls, non-default sampling (temperature and top-p), seed, top-k, penalties, log probabilities. |
 | Limits and cost | Context and output limits, prices, quality and speed scores. |
 | Serving | The `ModelEndpoint` values it is served on. |
 | Provenance | When and where the entry was verified. |
@@ -314,8 +324,8 @@ price raised tenfold in a supplied file makes the next call cost ten times as mu
   models, and a changed price is still checked against the provider's pricing page.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
-- No provider's token log probabilities reach the application: a response carries the answer, not how
-  likely the model found it.
+- Log probabilities come from `complete()` through Chat Completions, Gemini, or Ollama: not from a
+  stream, the Responses API, Anthropic, Cohere, Groq, or Mistral.
 
 <!-- reference:start -->
 ## Reference

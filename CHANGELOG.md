@@ -4,6 +4,47 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+Typed decisions: a yes or no, a choice, or a score, answered with probabilities and a confidence read
+from them, from TypeSafe AI's Jev or from any model, acted on when sure and sent to a person when not.
+
+### Added
+
+- **Typed decisions.** `nexus-ai-pro/decisions` asks a `DecisionRequest`'s questions of one state: a
+  `YesNoQuestion`, a `ChoiceQuestion` of up to 255 options, or a `ScoreQuestion` of up to ten levels,
+  each answered in isolation with its probabilities and a confidence read the same way from any
+  provider. Answers are typed by their questions, so a choice's answer names only its options.
+  `DecisionManager` refuses a malformed question before it is sent, fails over, caches, traces each
+  decision as a run of kind `decision`, and runs it as an operation of the client, family
+  `decision`, budgeted at its model's price and on the tenant's key.
+- **TypeSafe AI's Jev.** `TypeSafeDecisionProvider`, on `nexus-ai-pro/decisions/typesafe`, speaks the
+  System One API: every question of a decision in one call, its refusals naming the field at fault,
+  priced at $42 per billion input tokens with output free.
+- **Decisions from any model.** `completionDecisions()` asks a completion model each question for a
+  one-token code, and reads its probabilities from that token's log probabilities where the provider
+  reports them, or counts them over samples where it does not, or refuses to.
+- **Gates and calibration.** `gate()` acts, sends to a person, or abstains by confidence; `calibrate()`
+  measures how answers' probabilities track how often they are right, and chooses the threshold that
+  holds a target accuracy on the application's own labelled answers.
+- **Decisions where the package decides.** `decisionRoute()` for a graph's branch, `decisionPermissions()`
+  for an agent's tool calls, `decisionGuard()` and `decisionModel()` as agent middleware,
+  `decisionEvaluator()` and `reviewUnsure()` for evaluation, and `classifyRoute()`'s `decisions`:
+  an uncertain answer goes to a person.
+- **Log probabilities.** `CompletionRequest.logprobs` asks for each answer token's log probability and
+  its alternatives, on `NexusResponse.logprobs` as `TokenLogprob` values, from OpenAI's Chat
+  Completions, the OpenAI-compatible adapters that report them, Gemini, and Ollama;
+  `ModelCapabilities.logprobs` declares a model that cannot.
+- `MockDecisionProvider`, on `nexus-ai-pro/decisions/mock`, and `runDecisionConformance()`.
+
+### Changed
+
+- `OperationFamily` and `RunKind` have `decision`; a `switch` over either that names every one needs
+  the new one.
+
+### Fixed
+
+- A test that waits forever fails at five minutes, and every child process the tests start
+  synchronously has a timeout of its own: the 2.18.0 publish's first attempt waited two hours on one.
+
 ## [2.18.0] - 2026-10-22
 
 Span events and links, media that knows its length, a tenant's threads and runs listed and paged

@@ -21,7 +21,8 @@ export type RunKind =
   | 'image'
   | 'voice'
   | 'realtime'
-  | 'operation';
+  | 'operation'
+  | 'decision';
 
 /** Where a run stands: still going, finished, or failed. */
 export type RunStatus = 'running' | 'ok' | 'error';

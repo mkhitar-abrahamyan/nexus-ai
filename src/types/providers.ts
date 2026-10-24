@@ -79,6 +79,8 @@ export interface ModelCapabilities {
   topK?: boolean;
   /** Whether it accepts frequency and presence penalties. */
   penalties?: boolean;
+  /** Whether it reports token log probabilities. */
+  logprobs?: boolean;
   /** Context window, in tokens. */
   maxContextTokens: number;
   /** Longest output, in tokens. */

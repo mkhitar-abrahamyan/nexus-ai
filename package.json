@@ -1430,6 +1430,36 @@
         "default": "./dist-cjs/media/catalog.js"
       }
     },
+    "./decisions": {
+      "import": {
+        "types": "./dist/decisions/index.d.ts",
+        "default": "./dist/decisions/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/decisions/index.d.ts",
+        "default": "./dist-cjs/decisions/index.js"
+      }
+    },
+    "./decisions/typesafe": {
+      "import": {
+        "types": "./dist/decisions/typesafe.d.ts",
+        "default": "./dist/decisions/typesafe.js"
+      },
+      "require": {
+        "types": "./dist-cjs/decisions/typesafe.d.ts",
+        "default": "./dist-cjs/decisions/typesafe.js"
+      }
+    },
+    "./decisions/mock": {
+      "import": {
+        "types": "./dist/decisions/mock.d.ts",
+        "default": "./dist/decisions/mock.js"
+      },
+      "require": {
+        "types": "./dist-cjs/decisions/mock.d.ts",
+        "default": "./dist-cjs/decisions/mock.js"
+      }
+    },
     "./media/rag": {
       "import": {
         "types": "./dist/media/rag.d.ts",
@@ -2588,6 +2618,15 @@
       ],
       "media/catalog": [
         "dist-cjs/media/catalog.d.ts"
+      ],
+      "decisions": [
+        "dist-cjs/decisions/index.d.ts"
+      ],
+      "decisions/typesafe": [
+        "dist-cjs/decisions/typesafe.d.ts"
+      ],
+      "decisions/mock": [
+        "dist-cjs/decisions/mock.d.ts"
       ],
       "video": [
         "dist-cjs/video/index.d.ts"

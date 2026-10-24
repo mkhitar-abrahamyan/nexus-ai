@@ -65,6 +65,7 @@ your callback, the budget, and your hooks receive.
 | `agent` | `agent` for `ai.agent()`, and `agent.<name>` for `createAgent()` |
 | `job` | `job`, once per attempt |
 | `batch` | `batch.submit`, from submission to collection |
+| `decision` | `decision.decide`, a typed decision's questions about one state |
 
 ## Authorization
 

@@ -85,7 +85,7 @@ A `Run` is one unit of work.
 | Field | Contents |
 | --- | --- |
 | id, trace id, parent id | Which trace it belongs to, and the run it ran inside. |
-| name, kind | A `RunKind`: `chain`, `model`, `tool`, `graph`, `node`, `agent`, `retriever`, `embedding`, `image`, `voice`, `realtime`, or `operation`. |
+| name, kind | A `RunKind`: `chain`, `model`, `tool`, `graph`, `node`, `agent`, `retriever`, `embedding`, `image`, `voice`, `realtime`, `operation`, or `decision`, a typed decision with its answers. |
 | status | A `RunStatus`: `running`, `ok`, or `error`. |
 | times, latency | When it started and ended. |
 | inputs, outputs, error | After redaction. |
