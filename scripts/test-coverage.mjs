@@ -17,6 +17,8 @@ const args = [
   '--import',
   'tsx',
   '--test',
+  // A test that awaits forever fails at five minutes, rather than holding the run.
+  '--test-timeout=300000',
   '--experimental-test-coverage',
   '--test-coverage-include=src/**/*.ts',
   '--test-coverage-lines=82',

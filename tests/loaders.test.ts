@@ -295,6 +295,7 @@ test('a Git repository loads its tracked text files, locally or cloned at a ref'
     execFileSync('git', ['-c', 'user.email=test@example.test', '-c', 'user.name=Test', ...args], {
       cwd: repository,
       stdio: 'pipe',
+      timeout: 60_000,
     });
   git('init', '-q', '-b', 'main');
   writeFileSync(path.join(repository, 'README.md'), '# Project\nreadme');
@@ -349,6 +350,7 @@ test('a Git repository never reads through a tracked symbolic link, cloned or in
       {
         cwd: repository,
         stdio: 'pipe',
+        timeout: 60_000,
       },
     );
   git('init', '-q', '-b', 'main');

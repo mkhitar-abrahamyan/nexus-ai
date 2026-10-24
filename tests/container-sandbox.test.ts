@@ -197,6 +197,10 @@ test('dispose removes the container', { skip, timeout }, async () => {
   const id = (await sandbox.exec('hostname')).stdout.trim();
   assert.match(id, /^[0-9a-f]{12}$/);
   await sandbox.dispose?.();
-  const listed = spawnSync(binary, ['ps', '--all', '--quiet', '--no-trunc'], { encoding: 'utf8', windowsHide: true });
+  const listed = spawnSync(binary, ['ps', '--all', '--quiet', '--no-trunc'], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 60_000,
+  });
   assert.ok(!listed.stdout.split('\n').some((line) => line.startsWith(id)), 'the container is gone');
 });

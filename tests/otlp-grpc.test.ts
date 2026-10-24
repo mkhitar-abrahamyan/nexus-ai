@@ -544,11 +544,15 @@ test('the OpenTelemetry Collector takes the spans over gRPC, and sends on every 
   assert.equal(started.status, 0, started.stderr);
   const container = started.stdout.trim();
   const logs = () => {
-    const read = spawnSync(binary, ['logs', container], { encoding: 'utf8', windowsHide: true });
+    const read = spawnSync(binary, ['logs', container], { encoding: 'utf8', windowsHide: true, timeout: 60_000 });
     return `${read.stdout}${read.stderr}`;
   };
   try {
-    const port = spawnSync(binary, ['port', container, '4317/tcp'], { encoding: 'utf8', windowsHide: true })
+    const port = spawnSync(binary, ['port', container, '4317/tcp'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 60_000,
+    })
       .stdout.trim()
       .split('\n')[0]
       ?.split(':')

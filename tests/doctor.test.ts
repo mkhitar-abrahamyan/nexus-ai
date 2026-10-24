@@ -175,6 +175,7 @@ test('nexus doctor exits 1 on a failure, and with --strict on a warning', () => 
     spawnSync(process.execPath, ['--import', 'tsx', path.resolve('src/cli.ts'), ...args], {
       encoding: 'utf8',
       env: { ...process.env, NO_COLOR: '1', OPENAI_API_KEY: 'sk-cli-not-printed' },
+      timeout: 120_000,
     });
   const failing = nexus('doctor', '--module', module);
   assert.equal(failing.status, 1, failing.stderr);

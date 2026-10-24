@@ -1998,7 +1998,7 @@
     "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit && tsc -p tsconfig.deploy.json",
     "typecheck:examples:browser": "tsc -p tsconfig.examples.browser.json --noEmit",
     "test": "npm run build && npm run test:unit && npm run test:conformance:mock && npm run test:conformance:images && npm run size:check && npm run test:portable && npm run test:browser && npm run test:browser:realtime && npm run docs:check && npm run docs:guides && npm run test:studio && npm run test:smoke && npm run test:api && npm run test:types && npm run compatibility:check",
-    "test:unit": "node --import tsx --test tests/unit.ts tests/*.test.ts",
+    "test:unit": "node --import tsx --test --test-timeout=300000 tests/unit.ts tests/*.test.ts",
     "compatibility:check": "node scripts/compatibility.mjs",
     "compatibility:update": "node scripts/compatibility.mjs --update",
     "test:coverage": "node scripts/test-coverage.mjs",

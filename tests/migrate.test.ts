@@ -182,6 +182,7 @@ test('nexus migrate reports, checks, and writes', async () => {
     const run = (...args: string[]) =>
       spawnSync(process.execPath, ['--import', 'tsx', path.resolve('src/cli.ts'), 'migrate', ...args], {
         encoding: 'utf8',
+        timeout: 120_000,
       });
 
     const report = run(directory);

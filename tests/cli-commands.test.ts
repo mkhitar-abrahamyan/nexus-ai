@@ -23,6 +23,7 @@ function nexus(args: string[], cwd = process.cwd()) {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, NO_COLOR: '1' },
+    timeout: 120_000,
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -135,7 +136,7 @@ export const summary = [(results) => [{ key: 'runs', score: results.length }]];
         '--fail-on-regression',
         '--json',
       ],
-      { encoding: 'utf8', env: { ...process.env, FACTOR: '3' } },
+      { encoding: 'utf8', env: { ...process.env, FACTOR: '3' }, timeout: 120_000 },
     );
     assert.equal(broken.status, 1, broken.stderr);
     const report = JSON.parse(broken.stdout) as { comparison: { regressed: boolean }; experiment: { runs: number } };

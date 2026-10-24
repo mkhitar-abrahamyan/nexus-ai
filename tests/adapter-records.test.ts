@@ -312,6 +312,7 @@ function nexus(args: string[], cwd: string) {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, NO_COLOR: '1' },
+    timeout: 120_000,
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }

@@ -45,6 +45,7 @@ function nexus(args: string[]) {
   const result = spawnSync(process.execPath, ['--import', 'tsx', path.resolve('src/cli.ts'), ...args], {
     encoding: 'utf8',
     env: { ...process.env, NO_COLOR: '1' },
+    timeout: 120_000,
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }

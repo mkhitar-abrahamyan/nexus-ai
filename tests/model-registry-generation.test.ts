@@ -80,6 +80,7 @@ test('the generator reports the committed output as current', () => {
   const output = execFileSync(process.execPath, ['scripts/generate-model-registry.mjs', '--check'], {
     cwd: repoRoot,
     encoding: 'utf8',
+    timeout: 120_000,
   });
   assert.match(output, /Model registry is current/);
 });

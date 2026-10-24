@@ -145,6 +145,7 @@ function nexus(args: string[]) {
   const result = spawnSync(process.execPath, ['--import', 'tsx', path.resolve('src/cli.ts'), ...args], {
     encoding: 'utf8',
     env: { ...process.env, NO_COLOR: '1' },
+    timeout: 120_000,
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -153,7 +154,7 @@ function git(cwd: string, ...args: string[]) {
   const result = spawnSync(
     'git',
     ['-c', 'user.name=Policy Test', '-c', 'user.email=policy@example.com', '-c', 'commit.gpgsign=false', ...args],
-    { cwd, encoding: 'utf8' },
+    { cwd, encoding: 'utf8', timeout: 60_000 },
   );
   assert.equal(result.status, 0, `git ${args.join(' ')}: ${result.stderr}`);
 }

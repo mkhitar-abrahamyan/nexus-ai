@@ -399,6 +399,7 @@ test('scan JSON redacts raw secret and PII finding values', async (context) => {
   const cli = spawnSync(process.execPath, ['dist/cli.js', 'scan', file, '--json', '--no-fail'], {
     cwd: path.resolve('.'),
     encoding: 'utf8',
+    timeout: 120_000,
   });
   assert.equal(cli.status, 0, cli.stderr);
   assert.doesNotMatch(cli.stdout, new RegExp(secret));

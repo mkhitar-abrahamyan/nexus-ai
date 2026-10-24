@@ -16,6 +16,8 @@ const args =
         '--import',
         'tsx',
         '--test',
+        // A test that awaits forever fails at five minutes, rather than holding the run.
+        '--test-timeout=300000',
         ...readdirSync(path.join(studio, 'test'))
           .filter((file) => file.endsWith('.test.ts'))
           .map((file) => path.join(studio, 'test', file)),
