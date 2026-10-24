@@ -314,6 +314,8 @@ price raised tenfold in a supplied file makes the next call cost ten times as mu
   models, and a changed price is still checked against the provider's pricing page.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
+- No provider's token log probabilities reach the application: a response carries the answer, not how
+  likely the model found it.
 
 <!-- reference:start -->
 ## Reference

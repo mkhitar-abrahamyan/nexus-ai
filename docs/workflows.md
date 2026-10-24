@@ -87,6 +87,8 @@ a fixed product.
   `extractStructured()` when a field's shape matters.
 - Verification compares claims with the sources as text; see the [grounding guide](./grounding.md)
   for how, and for what it cannot catch.
+- `classifyRoute()`'s `confidence` is what the model says of its own answer, not a probability. A
+  model's word on its certainty is not calibrated, so a threshold on it is not a level of risk.
 
 <!-- reference:start -->
 ## Reference

@@ -334,8 +334,9 @@ Shipped so far:
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.19 reads a service's own API description into emulated tools, and lets an emulator hold
-what a whole evaluation did, so examples that build on each other are evaluated with nothing sent.
+Next, 2.19 adds typed decisions: a yes or no, a choice, or a score, answered with probabilities and
+a calibrated confidence, from TypeSafe AI's Jev or from any model, so a graph's branch, an approval,
+or a guardrail acts when it is sure and asks a person when it is not.
 Pinecone, images, the Gemini
 embedding batch tier, media understanding, video, Gemini Live, SIP, and both phone providers
 graduate once the live workflow passes against each. The

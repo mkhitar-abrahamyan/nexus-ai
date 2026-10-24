@@ -118,12 +118,14 @@ the theme after it that owns it.
 | Video generation has not passed its conformance suite against Gemini Omni Flash, Veo, and Runway | Video guide | 2.19 |
 | Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.19 |
 | Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.19 |
-| An emulated tool is one the application defined; a service's API description is not read into tools | Evaluation guide | 2.19 |
-| An emulator holds what one run did, not what a whole evaluation did | Evaluation guide | 2.19 |
+| `classifyRoute()` reports the confidence a model claims of itself, not a probability | Workflows guide | 2.19 |
+| No provider's token log probabilities reach the application | Providers guide | 2.19 |
+| An emulated tool is one the application defined; a service's API description is not read into tools | Evaluation guide | After 2.19 |
+| An emulator holds what one run did, not what a whole evaluation did | Evaluation guide | After 2.19 |
 
 ---
 
-## 2.19.0: Tools emulated from an API description, and an emulator that remembers the evaluation
+## 2.19.0: Typed decisions, from a decision model and from any model
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
 understanding, video, Gemini Live, SIP call control, and both phone providers graduate when the
@@ -131,19 +133,26 @@ scheduled live workflow passes against each, published with their checklists. Ev
 there now; what stands in the way is the repository's live credentials, and for video, the variable
 that lets it spend seconds of video.
 
-**Tools from an API description.** An emulated tool is one the application defined today. 2.19 reads
-a service's own API description, an OpenAPI document, into tools whose names, parameters, and answers
-are the service's, so an agent is evaluated against a service before it is wired to it, with nothing
-sent.
+**Typed decisions.** Software asks a model many small questions it then acts on: which team takes a
+ticket, whether a message is an attack, how well an answer meets a rubric. Today the package asks a
+chat model for a label and the confidence it claims, which is not a probability. 2.19 adds decisions:
+a question is a yes or no, a choice among up to 255 options, or a score on a rubric of up to ten
+levels, asked of one state, many in a call, each answered with its probabilities and a confidence
+read from them. They come from TypeSafe AI's Jev, a model that answers only such questions, with no
+text to parse, and that TypeSafe AI bills for its input alone; or from any completion model, by its
+token log probabilities where its provider gives them, and by sampling where it does not. A gate
+turns a confidence into what to do: act, ask a person, or refuse, at thresholds a calibration on the
+application's own labelled examples chooses.
 
-**An emulator that remembers the evaluation.** An emulator holds what one run did; the next run starts
-again from its scenario. 2.19 lets it hold the world across a whole evaluation, so an order one example
-refunds is refunded for the next, as a staging copy would have it, and lets each run start instead
-from a snapshot of it.
+**Decisions where the package decides.** A graph's branch, an agent's approval, a guardrail's verdict,
+a judge's score, an evaluation sent to people, and a router's choice of model can each be asked as a
+decision: a confident answer acts, and an uncertain one goes to a person. Every decision runs inside
+the lifecycle, budgeted, traced, failed over, cached, and on the tenant's key.
 
-**Proof.** An agent over tools read from a stand-in service's OpenAPI document reaches the verdict it
-reaches over the stand-in itself, with nothing sent; and an evaluation whose examples build on each
-other's changes reaches the stand-in's verdict, run in order and again from a snapshot.
+**Proof.** One decision suite passes on Jev's API, against a stand-in written from its documentation
+and then the live service; on a model's log probabilities; and on sampling. On labelled examples, the
+threshold a calibration chooses holds the accuracy it was chosen for on examples it never saw. A
+support graph routes tickets by decision, and every ticket it is unsure of reaches a person.
 
 ---
 
@@ -151,9 +160,15 @@ other's changes reaches the stand-in's verdict, run in order and again from a sn
 
 Not yet placed, roughly in order of what applications ask for:
 
-1. Compatibility records published from community adapters' own CI, gathered onto the page by a
+1. Tools emulated from a service's own API description, an OpenAPI document, so an agent is
+   evaluated against a service before it is wired to it, with nothing sent.
+2. An emulator that holds the world across a whole evaluation, so a change one example makes is there
+   for the next, and that can start each run from a snapshot of it.
+3. Decisions about images: where in a picture something is, and questions asked over the pictures a
+   state holds, with the media family.
+4. Compatibility records published from community adapters' own CI, gathered onto the page by a
    scheduled workflow rather than by pull request.
-2. A2A requests routed by their tenant, and an agent card's security schemes and signatures read
+5. A2A requests routed by their tenant, and an agent card's security schemes and signatures read
    over gRPC.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
