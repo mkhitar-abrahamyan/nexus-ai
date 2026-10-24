@@ -4,6 +4,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- The studio's load budget is judged by the fastest of five passes, after three warm-up passes
+  rather than one. The median of five failed the 2.20.1 publish at 3.61 calibration loops: its first
+  three passes took 91 to 102 ms and its last two 37 and 48 ms. A busy runner only ever adds time,
+  while a real slowdown slows every pass, so a request made 0.1 ms slower still fails it, at 4.3 loops.
+
 ## [2.20.1] - 2026-10-24
 
 The first published release of 2.20. The package is 2.20.0's: 2.20.0 was tagged, but its publish
