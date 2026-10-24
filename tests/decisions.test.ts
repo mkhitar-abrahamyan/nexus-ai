@@ -522,10 +522,16 @@ test('TypeSafe AI: a refused field is named, an overloaded service may be failed
   const slow = new TypeSafeDecisionProvider({
     apiKey: 'ts-key',
     timeoutMs: 50,
+    // A request in flight holds the process open, as a real one's socket does; the timeout's own
+    // timer does not, so without it Node 22 ends the test before the timeout fires.
     fetch: ((_input: unknown, init: RequestInit = {}) =>
-      new Promise((_resolve, reject) =>
-        init.signal?.addEventListener('abort', () => reject(init.signal?.reason)),
-      )) as typeof fetch,
+      new Promise((_resolve, reject) => {
+        const open = setTimeout(() => undefined, 10_000);
+        init.signal?.addEventListener('abort', () => {
+          clearTimeout(open);
+          reject(init.signal?.reason);
+        });
+      })) as typeof fetch,
   });
   await assert.rejects(
     slow.decide({ model: 'jev-latest', state: 'x', questions: { y: { type: 'yes-no' } } }, context),
