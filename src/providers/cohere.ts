@@ -2,7 +2,7 @@ import { BaseProvider, type ProviderInfo } from './base.js';
 import type { CohereProviderConfig } from '../types/config.js';
 import type { ProviderCallContext } from '../types/lifecycle.js';
 import type { CompletionRequest } from '../types/messages.js';
-import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
+import type { NexusResponse, NexusStream, StreamChunk, TokenLogprob } from '../types/response.js';
 import { buildMeta, priceUsage } from '../core/usage.js';
 import { createProviderHttpError } from './errors.js';
 import { asString, getString, isRecord } from './type-guards.js';
@@ -26,6 +26,8 @@ interface CohereChatResponse {
   usage?: CohereUsage & {
     tokens?: CohereUsage;
   };
+  /** Each piece of text and its tokens' log probabilities, when they were asked for. */
+  logprobs?: Array<{ token_ids?: number[]; text?: string; logprobs?: number[] }>;
 }
 
 /** Cohere's Chat API. */
@@ -67,6 +69,7 @@ export class CohereProvider extends BaseProvider {
           seed: request.seed,
           frequency_penalty: request.frequencyPenalty,
           presence_penalty: request.presencePenalty,
+          ...(request.logprobs ? { logprobs: true } : {}),
         }),
         signal: request.signal,
       });
@@ -90,7 +93,8 @@ export class CohereProvider extends BaseProvider {
       });
       // The registry files Cohere models under the `cohere/` prefix the API does not accept.
       if (meta.usage) meta.cost = priceUsage({ model: `cohere/${model}`, usage: meta.usage });
-      return { content, role: 'assistant', finishReason: 'stop', meta };
+      const logprobs = cohereLogprobs(result.logprobs);
+      return { content, role: 'assistant', finishReason: 'stop', ...(logprobs ? { logprobs } : {}), meta };
     } catch (error) {
       throw this.normalizeProviderError(error, request, { model });
     }
@@ -103,7 +107,11 @@ export class CohereProvider extends BaseProvider {
       try {
         const response = await self.complete(request, context);
         if (response.content) {
-          yield { type: 'text', content: response.content } satisfies StreamChunk;
+          yield {
+            type: 'text',
+            content: response.content,
+            ...(response.logprobs ? { logprobs: response.logprobs } : {}),
+          } satisfies StreamChunk;
         }
         yield { type: 'done', meta: response.meta } satisfies StreamChunk;
       } catch (error) {
@@ -145,4 +153,16 @@ export class CohereProvider extends BaseProvider {
     }
     return result.text || '';
   }
+}
+
+/**
+ * Cohere's log probabilities, a piece of text at a time: each piece, which may be several tokens, is one
+ * entry, its log probability the sum of its tokens'. Cohere reports no alternatives.
+ */
+function cohereLogprobs(items: CohereChatResponse['logprobs']): TokenLogprob[] | undefined {
+  if (!items?.length) return undefined;
+  return items.map((item) => ({
+    token: item.text ?? '',
+    logprob: (item.logprobs ?? []).reduce((sum, value) => sum + value, 0),
+  }));
 }

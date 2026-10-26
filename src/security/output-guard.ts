@@ -212,10 +212,15 @@ export class OutputGuard {
       ? findings.map((finding) => (finding.value === undefined ? finding : { ...finding, value: '[REDACTED]' }))
       : findings;
 
+    // Log probabilities name the tokens the model wrote, so they go wherever the text was changed:
+    // a redacted address would still be spelled out in them.
+    const { logprobs, ...unchanged } = response;
+    const keepLogprobs = logprobs !== undefined && contentTarget.value === response.content;
     return {
       ok: !blocked,
       value: {
-        ...response,
+        ...unchanged,
+        ...(keepLogprobs ? { logprobs } : {}),
         content: contentTarget.value,
         ...(response.toolCalls
           ? {

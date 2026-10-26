@@ -4,6 +4,23 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Log probabilities from a stream.** Each `text` chunk's `StreamChunk.logprobs` holds its tokens'
+  log probabilities, from OpenAI's Chat Completions and Responses API, Gemini, Ollama, and Cohere, so
+  the chunks' together are what `complete()` reports.
+- Cohere reports log probabilities, `complete()` and streamed: a piece of text at a time, each piece's
+  the sum of its tokens', with no alternatives.
+
+### Fixed
+
+- **An answer the output guard redacts keeps no log probabilities.** They name the tokens the model
+  wrote, so a redacted address or connection string was still spelled out in `response.logprobs`; now
+  they are dropped wherever the guard changes or blocks the text, streamed or not.
+- A typed decision asked of a model that reports only the chosen token's log probability, with no
+  alternatives, is sampled, where it was read as certain.
+- An Ollama stream stops at the request's `stop` sequences, as a call does.
+
 ## [2.21.0] - 2026-10-26
 
 Typed decisions about pictures, compatibility records gathered from community adapters' own CI, and

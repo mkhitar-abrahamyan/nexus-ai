@@ -220,6 +220,8 @@ problem, and the matched text. `scanUploads()` is a one-off scan. `ingestFilesAf
 
 - Detection works by pattern and similarity. It catches known phrasings and common formats, not
   every attack or every piece of personal data. Treat it as a layer, not a boundary.
+- An answer whose text the output guard changes keeps no log probabilities, streamed or not: they name
+  the tokens the model wrote, so a redacted address would still be spelled out in them.
 - Blocking applies to critical and high findings. An instruction block (`BEGIN SYSTEM`) or a role tag
   (`<system>`) is medium, so even `strict` records it and lets the request through. Pair the input
   guard with output moderation, `onViolation: 'redact'` for what must never leave. `proprietaryTerms`

@@ -176,7 +176,8 @@ every call is routed, budgeted, traced, and priced as every completion is. Each 
 own, at temperature 0, to answer with one code: a letter per option, Y or N, or a level's digit. Its
 probabilities are read from the log probabilities of that token's alternatives, on a provider that
 reports them, OpenAI's models on its Responses API among them; elsewhere it is asked `samples` times
-and each answer counted.
+and each answer counted. A model that reports the chosen token alone, with no alternatives, as Cohere's
+does, is sampled too: the chosen token's probability says nothing of the others'.
 `CompletionDecisionsOptions.method`, a `CompletionDecisionMethod`, is `logprobs`, `sampling`, or `auto`,
 the default, which samples a model that reports none or refuses them, and remembers it. A
 `DecisionCompletionClient` is anything with `complete()`, such as `NexusAI`. Its calls are charged

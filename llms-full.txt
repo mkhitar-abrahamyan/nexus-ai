@@ -1411,11 +1411,17 @@ An asset part in a message is sent as one reference line, never as its bytes.
 
 A request's `logprobs` asks for each token of the answer with its log probability, and with `top`,
 its most likely alternatives, up to 20; `response.logprobs` carries them, each a `TokenLogprob`.
-OpenAI's Chat Completions, the OpenAI-compatible adapters that report them (Azure OpenAI, OpenRouter,
-DeepSeek, LM Studio, and llama.cpp), Gemini, and Ollama send it. Groq and Mistral refuse the option, so
-it is not sent to them, and a model whose `ModelCapabilities` declare `logprobs: false` has it removed,
-with a capability warning. A model that reports none leaves `response.logprobs` absent. Typed
-decisions read a model's probabilities this way; see the [decisions guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/decisions.md).
+OpenAI's Chat Completions and Responses API, the OpenAI-compatible adapters that report them (Azure
+OpenAI, OpenRouter, DeepSeek, LM Studio, and llama.cpp), Gemini, Ollama, and Cohere send it. Cohere
+reports a piece of text at a time, with no alternatives: each piece is one entry, its log probability
+the sum of its tokens'. Groq and Mistral refuse the option, so it is not sent to them, and a model
+whose `ModelCapabilities` declare `logprobs: false` has it removed, with a capability warning. A model
+that reports none leaves `response.logprobs` absent. Typed decisions read a model's probabilities
+this way; see the [decisions guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/decisions.md).
+
+A stream reports them too: each `text` chunk's `StreamChunk.logprobs` holds its tokens', in order, so
+the chunks' together are what `complete()` reports. Text the output guard changes, such as a redacted
+address, keeps none, streamed or not, since they would spell out what it removed.
 
 ## Writing a provider
 
@@ -1643,8 +1649,8 @@ price raised tenfold in a supplied file makes the next call cost ten times as mu
   models, and a changed price is still checked against the provider's pricing page.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
-- Log probabilities come from `complete()` through Chat Completions, OpenAI's Responses API, Gemini, or
-  Ollama: not from a stream, Anthropic, Cohere, Groq, or Mistral.
+- Log probabilities come from Chat Completions, OpenAI's Responses API, Gemini, Ollama, and Cohere,
+  without alternatives from Cohere: not from Anthropic, Groq, or Mistral, whose APIs report none.
 
 ---
 
@@ -1870,6 +1876,8 @@ problem, and the matched text. `scanUploads()` is a one-off scan. `ingestFilesAf
 
 - Detection works by pattern and similarity. It catches known phrasings and common formats, not
   every attack or every piece of personal data. Treat it as a layer, not a boundary.
+- An answer whose text the output guard changes keeps no log probabilities, streamed or not: they name
+  the tokens the model wrote, so a redacted address would still be spelled out in them.
 - Blocking applies to critical and high findings. An instruction block (`BEGIN SYSTEM`) or a role tag
   (`<system>`) is medium, so even `strict` records it and lets the request through. Pair the input
   guard with output moderation, `onViolation: 'redact'` for what must never leave. `proprietaryTerms`
@@ -9837,7 +9845,8 @@ every call is routed, budgeted, traced, and priced as every completion is. Each 
 own, at temperature 0, to answer with one code: a letter per option, Y or N, or a level's digit. Its
 probabilities are read from the log probabilities of that token's alternatives, on a provider that
 reports them, OpenAI's models on its Responses API among them; elsewhere it is asked `samples` times
-and each answer counted.
+and each answer counted. A model that reports the chosen token alone, with no alternatives, as Cohere's
+does, is sampled too: the chosen token's probability says nothing of the others'.
 `CompletionDecisionsOptions.method`, a `CompletionDecisionMethod`, is `logprobs`, `sampling`, or `auto`,
 the default, which samples a model that reports none or refuses them, and remembers it. A
 `DecisionCompletionClient` is anything with `complete()`, such as `NexusAI`. Its calls are charged

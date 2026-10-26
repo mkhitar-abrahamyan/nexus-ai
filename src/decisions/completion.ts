@@ -362,13 +362,14 @@ function codeOf(token: string): string {
 
 /**
  * Each code's probability from the answer's first token and its alternatives, or `undefined` when
- * none of them is a code.
+ * none of them is a code, or the token came without alternatives: the chosen token alone says nothing
+ * of the others, and would read as certain.
  */
 function weightsFrom(logprobs: readonly TokenLogprob[] | undefined, codes: readonly string[]): number[] | undefined {
   // The first token that is not only space carries the code.
   const first = logprobs?.find((item) => item.token.trim() !== '');
-  if (!first) return undefined;
-  const candidates = first.top?.length ? first.top : [{ token: first.token, logprob: first.logprob }];
+  if (!first?.top?.length) return undefined;
+  const candidates = first.top;
   const weights = codes.map(() => 0);
   let found = false;
   for (const candidate of candidates) {

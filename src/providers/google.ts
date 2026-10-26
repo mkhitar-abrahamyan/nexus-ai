@@ -185,9 +185,16 @@ export class GoogleProvider extends BaseProvider {
             if (parsed.usageMetadata) usage = geminiUsage(parsed.usageMetadata);
 
             const parts = parsed.candidates?.[0]?.content?.parts || [];
+            // A chunk's log probabilities cover its text, so they go with its first text part.
+            let logprobs = geminiLogprobs(parsed.candidates?.[0]?.logprobsResult);
             for (const part of parts) {
               if (typeof part.text !== 'string' || !part.text) continue;
-              yield { type: part.thought ? 'reasoning' : 'text', content: part.text } satisfies StreamChunk;
+              if (part.thought) {
+                yield { type: 'reasoning', content: part.text } satisfies StreamChunk;
+                continue;
+              }
+              yield { type: 'text', content: part.text, ...(logprobs ? { logprobs } : {}) } satisfies StreamChunk;
+              logprobs = undefined;
             }
           }
         }

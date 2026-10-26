@@ -1,6 +1,6 @@
 import { BaseProvider, type ProviderInfo } from './base.js';
 import type { CompletionRequest, Message } from '../types/messages.js';
-import type { NexusResponse, NexusStream, StreamChunk } from '../types/response.js';
+import type { NexusResponse, NexusStream, StreamChunk, TokenLogprob } from '../types/response.js';
 import type { OllamaProviderConfig } from '../types/config.js';
 import { buildMeta } from '../core/usage.js';
 
@@ -94,35 +94,12 @@ export class OllamaProvider extends BaseProvider {
         messages: this.formatMessages(request.messages),
         format: this.formatResponseFormat(request),
         signal: request.signal,
-        ...(request.logprobs
-          ? {
-              logprobs: true,
-              ...(request.logprobs.top
-                ? { top_logprobs: Math.min(20, Math.max(0, Math.floor(request.logprobs.top))) }
-                : {}),
-            }
-          : {}),
-        options: {
-          ...this.samplingOptions(request),
-          stop: request.stop ? (Array.isArray(request.stop) ? request.stop : [request.stop]) : undefined,
-        },
+        ...logprobOptions(request),
+        options: this.samplingOptions(request),
       });
 
       const latency = Date.now() - startTime;
-      const logprobs = result.logprobs?.length
-        ? result.logprobs.map((item) => ({
-            token: item.token ?? '',
-            logprob: item.logprob ?? Number.NEGATIVE_INFINITY,
-            ...(item.top_logprobs?.length
-              ? {
-                  top: item.top_logprobs.map((alternative) => ({
-                    token: alternative.token ?? '',
-                    logprob: alternative.logprob ?? Number.NEGATIVE_INFINITY,
-                  })),
-                }
-              : {}),
-          }))
-        : undefined;
+      const logprobs = ollamaLogprobs(result.logprobs);
 
       return {
         content: result.message?.content || '',
@@ -159,12 +136,18 @@ export class OllamaProvider extends BaseProvider {
           stream: true,
           format: self.formatResponseFormat(request),
           signal: request.signal,
+          ...logprobOptions(request),
           options: self.samplingOptions(request),
         });
 
         for await (const chunk of stream) {
           if (chunk.message?.content) {
-            yield { type: 'text', content: chunk.message.content } satisfies StreamChunk;
+            const logprobs = ollamaLogprobs(chunk.logprobs);
+            yield {
+              type: 'text',
+              content: chunk.message.content,
+              ...(logprobs ? { logprobs } : {}),
+            } satisfies StreamChunk;
           }
 
           if (chunk.done) {
@@ -186,7 +169,7 @@ export class OllamaProvider extends BaseProvider {
     }, request.signal);
   }
 
-  /** Shared sampling options so buffered and streamed calls cannot drift apart. */
+  /** Shared sampling options so buffered and streamed calls cannot drift apart: a stream stops where a call does. */
   private samplingOptions(request: CompletionRequest): OllamaChatParams['options'] {
     return {
       temperature: request.temperature,
@@ -196,6 +179,7 @@ export class OllamaProvider extends BaseProvider {
       frequency_penalty: request.frequencyPenalty,
       presence_penalty: request.presencePenalty,
       num_predict: request.maxTokens,
+      stop: request.stop ? (Array.isArray(request.stop) ? request.stop : [request.stop]) : undefined,
     };
   }
 
@@ -203,4 +187,30 @@ export class OllamaProvider extends BaseProvider {
     if (request.responseFormat?.type === 'json') return 'json';
     return request.responseFormat?.schema;
   }
+}
+
+/** Asks for log probabilities, and up to 20 alternatives a token, when the request does. */
+function logprobOptions(request: CompletionRequest): { logprobs?: boolean; top_logprobs?: number } {
+  if (!request.logprobs) return {};
+  return {
+    logprobs: true,
+    ...(request.logprobs.top ? { top_logprobs: Math.min(20, Math.max(0, Math.floor(request.logprobs.top))) } : {}),
+  };
+}
+
+/** Ollama's log probabilities, as every provider reports them. */
+function ollamaLogprobs(items: OllamaChatResponse['logprobs']): TokenLogprob[] | undefined {
+  if (!items?.length) return undefined;
+  return items.map((item) => ({
+    token: item.token ?? '',
+    logprob: item.logprob ?? Number.NEGATIVE_INFINITY,
+    ...(item.top_logprobs?.length
+      ? {
+          top: item.top_logprobs.map((alternative) => ({
+            token: alternative.token ?? '',
+            logprob: alternative.logprob ?? Number.NEGATIVE_INFINITY,
+          })),
+        }
+      : {}),
+  }));
 }

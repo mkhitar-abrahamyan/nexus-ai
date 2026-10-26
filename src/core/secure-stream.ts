@@ -71,6 +71,8 @@ export function protectStreamOutput(
       security.assertOutputSafe(protectedOutput);
 
       const safeText = protectedOutput.value.content;
+      // Text the guard changed keeps no log probabilities: they would spell out what it removed.
+      const textChanged = safeText !== bufferedText;
       const safeToolCalls = protectedOutput.value.toolCalls || [];
       const applied = protectedOutput.value.meta.guardrailsApplied;
       const textIndexes = chunks
@@ -91,9 +93,11 @@ export function protectStreamOutput(
           const content = safeText.slice(safeOffset, safeOffset + length);
           safeOffset += length;
           if (!content) continue;
+          const { logprobs, ...text } = chunk;
           yield {
-            ...chunk,
+            ...text,
             content,
+            ...(logprobs && !textChanged ? { logprobs } : {}),
             meta: withGuardrails(chunk.meta, applied),
           } satisfies StreamChunk;
           continue;

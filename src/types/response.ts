@@ -200,6 +200,11 @@ export interface StreamChunk {
   meta?: Partial<ResponseMeta>;
   /** What went wrong, for an `error` chunk. */
   error?: string;
+  /**
+   * For a `text` chunk, its tokens' log probabilities, in order, when the request asked for
+   * `logprobs` and the provider streams them: the chunks' together are the response's.
+   */
+  logprobs?: TokenLogprob[];
 }
 
 /** A streamed completion: iterate it for chunks, or abort it. */

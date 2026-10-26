@@ -119,6 +119,7 @@ interface OpenAIChatCompletionChunk {
       tool_calls?: unknown[];
     };
     finish_reason?: string | null;
+    logprobs?: OpenAIChatChoice['logprobs'];
   }>;
   usage?: OpenAIChatUsage;
 }
@@ -372,7 +373,8 @@ export class OpenAIProvider extends BaseProvider {
           }
 
           if (delta.content) {
-            yield { type: 'text', content: delta.content } satisfies StreamChunk;
+            const logprobs = chatLogprobs(choice.logprobs?.content);
+            yield { type: 'text', content: delta.content, ...(logprobs ? { logprobs } : {}) } satisfies StreamChunk;
           }
 
           for (const toolCall of asArray(delta.tool_calls)) {
@@ -551,7 +553,10 @@ export class OpenAIProvider extends BaseProvider {
       switch (event.type) {
         case 'response.output_text.delta': {
           const delta = getString(event, 'delta');
-          if (delta) yield { type: 'text', content: delta } satisfies StreamChunk;
+          const logprobs = request.logprobs
+            ? chatLogprobs(getArray(event, 'logprobs') as Parameters<typeof chatLogprobs>[0])
+            : undefined;
+          if (delta) yield { type: 'text', content: delta, ...(logprobs ? { logprobs } : {}) } satisfies StreamChunk;
           break;
         }
 
