@@ -1,11 +1,15 @@
 /**
  * Decisions from any completion model: each question asked on its own, answered with a one-token code,
  * and its probabilities read from the code token's log probabilities, or counted over samples where
- * the model reports none.
+ * the model reports none; a box read from several samples. A vision model is shown the pictures a
+ * state holds.
  */
-import type { CompletionRequest } from '../types/messages.js';
+import type { MediaPart } from '../types/evaluate.js';
+import type { CompletionRequest, ContentPart, ImageContent } from '../types/messages.js';
 import type { NexusResponse, ResponseCost, TokenLogprob } from '../types/response.js';
 import {
+  boxOverlap,
+  type DecisionBox,
   type DecisionCallContext,
   type DecisionDistribution,
   DecisionError,
@@ -17,6 +21,7 @@ import {
   type DecisionState,
   type DecisionUsage,
 } from './core.js';
+import { replacePictures, statePictures } from './pictures.js';
 
 /** Anything that completes a request, such as a `NexusAI` client. */
 export interface DecisionCompletionClient {
@@ -39,8 +44,14 @@ export interface CompletionDecisionsOptions {
    * a model that reports none or refuses to, which it then asks by sampling from the start.
    */
   method?: CompletionDecisionMethod;
-  /** Calls per question, when sampling. Defaults to 8. */
+  /** Calls per question, when sampling, and per box. Defaults to 8. */
   samples?: number;
+  /**
+   * Whether the model reads pictures, so a decision about the pictures a state holds, or a box, may
+   * be asked of it. Defaults to `true`; set `false` for a text-only model, which such a decision then
+   * passes over to a fallback.
+   */
+  images?: boolean;
   /** The temperature samples are drawn at. Defaults to 1. */
   temperature?: number;
   /** Questions asked at once. Defaults to 8. */
@@ -59,21 +70,25 @@ const LOGPROB_OPTIONS = 20;
  * Its probabilities are read from the log probabilities of that token's alternatives where the model
  * reports them, the way TypeSafe AI's Jev reads its own; elsewhere the question is asked `samples`
  * times, and each answer counted. Sampled probabilities come in steps of one sample, and cost as many
- * calls.
+ * calls. The pictures a state holds are shown to the model after the state, each labelled by its
+ * path; a box is asked `samples` times, and is the median of each edge, its confidence how far the
+ * samples overlap it.
  */
 export function completionDecisions(
   client: DecisionCompletionClient,
   options: CompletionDecisionsOptions,
 ): DecisionProvider & { readonly sampledModels: ReadonlySet<string> } {
   const method = options.method ?? 'auto';
+  const images = options.images !== false;
   // Models that reported no log probabilities, or refused them, are sampled from then on.
   const sampled = new Set<string>();
   const info: DecisionProviderInfo = {
     name: options.name ?? options.model,
     capabilities: {
-      types: ['yes-no', 'choice', 'score'],
+      types: images ? ['yes-no', 'choice', 'score', 'box'] : ['yes-no', 'choice', 'score'],
       maxOptions: 255,
       maxLevels: 10,
+      images,
       defaultModel: options.model,
     },
     chargedByItsCalls: true,
@@ -93,7 +108,10 @@ export function completionDecisions(
       messages: [
         {
           role: 'system',
-          content: 'You answer one question about a state with exactly one of the codes given, and nothing else.',
+          content:
+            question.type === 'box'
+              ? 'You answer where something is in a picture with exactly four numbers, and nothing else.'
+              : 'You answer one question about a state with exactly one of the codes given, and nothing else.',
         },
         { role: 'user', content: prompt },
       ],
@@ -101,6 +119,7 @@ export function completionDecisions(
       ...(context.tenantId !== undefined ? { tenantId: context.tenantId } : {}),
       ...extra,
     });
+    if (question.type === 'box') return askBox(request, model, usage);
     const readable = codes.length <= LOGPROB_OPTIONS && codes.every((code) => code.length === 1);
     if (method !== 'sampling' && readable && !sampled.has(model)) {
       let response: NexusResponse | undefined;
@@ -146,6 +165,42 @@ export function completionDecisions(
       );
     }
     return distributionOf(question, codes, weights);
+  };
+
+  /** A box, from several samples: the median of each edge, and how far the samples overlap it. */
+  const askBox = async (
+    request: (extra: Partial<CompletionRequest>) => CompletionRequest,
+    model: string,
+    usage: Totals,
+  ): Promise<DecisionDistribution> => {
+    if (method === 'logprobs') {
+      throw new DecisionError(
+        'A box is read from several samples of the answer, not from log probabilities',
+        'DECISION_UNSUPPORTED',
+      );
+    }
+    const count = Math.max(1, Math.floor(options.samples ?? 8));
+    const readings = await Promise.all(
+      Array.from({ length: count }, () =>
+        client.complete(request({ temperature: options.temperature ?? 1, maxTokens: 32 })).then((response) => {
+          usage.add(response);
+          return boxIn(response.content);
+        }),
+      ),
+    );
+    const boxes = readings.filter((box): box is DecisionBox => box !== undefined);
+    if (boxes.length === 0) {
+      throw new DecisionError(`"${model}" answered none of ${count} samples with a box`, 'DECISION_FAILED');
+    }
+    const box = {
+      top: median(boxes.map((item) => item.top)),
+      bottom: median(boxes.map((item) => item.bottom)),
+      left: median(boxes.map((item) => item.left)),
+      right: median(boxes.map((item) => item.right)),
+    };
+    // A sample with no box agrees with none.
+    const agreement = boxes.reduce((sum, item) => sum + boxOverlap(item, box), 0) / count;
+    return { type: 'box', box, confidence: agreement };
   };
 
   return {
@@ -202,8 +257,12 @@ class Totals {
   }
 }
 
-/** The one-token codes a question's answers are given as: Y and N, a level's digit, or a letter per option. */
+/**
+ * The one-token codes a question's answers are given as: Y and N, a level's digit, or a letter per
+ * option; a box has none.
+ */
 function codesOf(question: DecisionProviderQuestion): string[] {
+  if (question.type === 'box') return [];
   if (question.type === 'yes-no') return ['Y', 'N'];
   if (question.type === 'score') return question.levels.map((_, level) => String(level));
   // Up to 26 options are letters; more are numbers, read by sampling alone.
@@ -212,16 +271,51 @@ function codesOf(question: DecisionProviderQuestion): string[] {
     : question.options.map((_, index) => String(index + 1));
 }
 
-/** The question, its codes, and the state, as one prompt. */
+/**
+ * The question, its codes, and the state, as one prompt: text alone, or, for a state that holds
+ * pictures, the state's text with each picture's place marked, then each picture labelled by its path,
+ * then the question.
+ */
 function promptOf(
   state: DecisionState,
   question: DecisionProviderQuestion,
   codes: string[],
   instructions?: string,
-): string {
-  const text = typeof state === 'string' ? state : JSON.stringify(state, null, 2);
-  const lines = [`State:\n${text}`, ''];
+): string | ContentPart[] {
+  const pictures = typeof state === 'string' ? [] : statePictures(state);
+  const shown = pictures.length ? replacePictures(state, (picture) => `[picture \`${picture.path}\`]`) : state;
+  const text = typeof shown === 'string' ? shown : JSON.stringify(shown, null, 2);
+  const asked = questionLines(question, codes, instructions).join('\n');
+  if (pictures.length === 0) return `State:\n${text}\n\n${asked}`;
+  return [
+    { type: 'text', text: `State:\n${text}\n\nThe pictures it holds, by path:` },
+    ...pictures.flatMap((picture): ContentPart[] => [
+      { type: 'text', text: `\`${picture.path}\`:` },
+      imagePart(picture.part),
+    ]),
+    { type: 'text', text: asked },
+  ];
+}
+
+/** A picture as a message's image part. */
+function imagePart(part: MediaPart): ImageContent {
+  if (part.type === 'image') return part;
+  if (part.type === 'asset') return { type: 'image', source: { asset: part.asset } };
+  return part as never;
+}
+
+/** The lines that ask the question: any instructions, the question, its codes, and how to answer. */
+function questionLines(question: DecisionProviderQuestion, codes: string[], instructions?: string): string[] {
+  const lines: string[] = [];
   if (instructions) lines.push(instructions, '');
+  if (question.type === 'box') {
+    lines.push(`Find: ${question.question}`);
+    lines.push(
+      '',
+      "Answer with four numbers from 0 to 1, separated by spaces: the top, bottom, left, and right edges of a box around it, each a fraction of the picture's height or width from its top-left corner.",
+    );
+    return lines;
+  }
   if (question.type === 'yes-no') {
     lines.push(`Question: ${question.question ?? 'Is the statement true of the state?'}`);
     lines.push(`Y: yes${question.criteria?.yes ? `, ${question.criteria.yes}` : ''}`);
@@ -238,7 +332,27 @@ function promptOf(
     });
   }
   lines.push('', `Answer with one code: ${codes.join(', ')}.`);
-  return lines.join('\n');
+  return lines;
+}
+
+/**
+ * The box an answer gives: its first four numbers, as top, bottom, left, and right, each from 0 to 1
+ * and the edges in order; otherwise none.
+ */
+function boxIn(content: string): DecisionBox | undefined {
+  const numbers = (content.match(/-?\d*\.?\d+/g) ?? []).slice(0, 4).map(Number);
+  if (numbers.length < 4 || numbers.some((value) => !(value >= 0 && value <= 1))) return undefined;
+  const [top, bottom, left, right] = numbers as [number, number, number, number];
+  return top <= bottom && left <= right ? { top, bottom, left, right } : undefined;
+}
+
+/** The middle of some numbers, or the mean of the middle two. */
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? (sorted[middle] as number)
+    : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
 }
 
 /** A token's text as a code: trimmed of space, quotes, and punctuation, in capitals. */
@@ -295,6 +409,7 @@ function distributionOf(
   const share = (index: number) => (total > 0 ? (weights[index] ?? 0) / total : 1 / codes.length);
   if (question.type === 'yes-no') return { type: 'yes-no', yes: share(0) };
   if (question.type === 'score') return { type: 'score', probabilities: codes.map((_, index) => share(index)) };
+  if (question.type === 'box') throw new DecisionError('A box has no codes to weigh', 'DECISION_INVALID');
   return {
     type: 'choice',
     probabilities: Object.fromEntries(question.options.map((option, index) => [option.name, share(index)])),

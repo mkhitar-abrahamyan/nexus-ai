@@ -4,6 +4,37 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Decisions about pictures.** A decision's state may hold pictures, as image parts or image assets
+  anywhere in it, and a question names each by its path in backticks, such as `photo` or
+  `frames[2].frame`. Every question type may ask about one, and a new `box` question, `BoxQuestion`,
+  asks where something is: its `BoxAnswer` is a `DecisionBox` of four edges, each a fraction of the
+  picture's height or width, with a confidence. `boxOverlap()` measures how far two boxes overlap,
+  `answeredRight()` counts a box right at half or more, `calibrate()` chooses a box's threshold as any
+  answer's, and `decisionEvaluator()` scores a box against `where` the thing is. `statePictures()`
+  lists a state's pictures and `readPicture()` reads one with the media family's readers.
+- TypeSafe AI's Jev is sent a state's pictures as the API's assets, each under a new reference, with
+  the `TypeSafe-Danger-Zone-Images` header that pictures and boxes require, and answers boxes on Jev 1.14
+  and later. A picture it would refuse, outside PNG or JPEG, animated, over 16 MiB, or outside 280 to
+  1,568 pixels a side, or a request over 32 MiB, is refused first, naming the picture's path.
+  `TypeSafeDecisionProviderOptions.media` reads pictures held by file, URL, or stored asset.
+- `completionDecisions()` shows a vision model the pictures a state holds, each labelled by its path,
+  and reads a box as the median of several samples, its confidence how far they agree; `images: false`
+  marks a text-only model.
+- `DecisionProviderCapabilities.images`: a provider that does not read pictures is refused a decision
+  about one, and passed over as a fallback. The mock reads pictures and answers boxes.
+- `DecisionConformanceOptions.picture` runs the conformance checks of pictures and boxes, and
+  `DecisionConformanceReport.skipped` lists the checks that could not run, rather than passing them.
+
+### Changed
+
+- TypeSafe AI's 400 and 413 refuse a decision as `DECISION_INVALID`, as a 422 does, rather than
+  failing it as `DECISION_FAILED`: the request, such as a picture, is what was refused. Neither is
+  retried.
+- A decision's trace and cache key hold a digest of each picture in its place, never its bytes, and the
+  budget holds a picture at 1,600 tokens rather than reading its base64 as text.
+
 ## [2.20.2] - 2026-10-24
 
 The first published release of 2.20. The package is 2.20.0's: the publishes of 2.20.0 and 2.20.1

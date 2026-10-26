@@ -7,18 +7,21 @@ import type { AgentMiddleware } from '../agent/create-agent.js';
 import type { PermissionPolicyLike, PermissionRequest, PermissionVerdict } from '../agent/permissions.js';
 import type { EvaluationContext, EvaluationScore, Evaluator } from '../types/evaluate.js';
 import type { Message } from '../types/messages.js';
-import type {
-  ChoiceAnswer,
-  ChoiceQuestion,
-  DecisionAnswer,
-  DecisionQuestion,
-  DecisionQuestions,
-  DecisionRequest,
-  DecisionResult,
-  DecisionState,
-  ScoreQuestion,
-  YesNoAnswer,
-  YesNoQuestion,
+import {
+  type BoxQuestion,
+  boxOverlap,
+  type ChoiceAnswer,
+  type ChoiceQuestion,
+  type DecisionAnswer,
+  type DecisionBox,
+  type DecisionQuestion,
+  type DecisionQuestions,
+  type DecisionRequest,
+  type DecisionResult,
+  type DecisionState,
+  type ScoreQuestion,
+  type YesNoAnswer,
+  type YesNoQuestion,
 } from './core.js';
 
 /** Anything that answers decisions, such as a `DecisionManager`. */
@@ -280,8 +283,8 @@ export function decisionModel<const K extends string>(
 export interface DecisionEvaluatorOptions<I = unknown, O = unknown> {
   /** The score's key. */
   key: string;
-  /** The question: a yes or no, a score, or a choice. */
-  question: YesNoQuestion | ScoreQuestion | ChoiceQuestion;
+  /** The question: a yes or no, a score, a choice, or a box about a picture the state holds. */
+  question: YesNoQuestion | ScoreQuestion | ChoiceQuestion | BoxQuestion;
   /** What the question is about. Defaults to the example's inputs, the output, and what was expected. */
   state?: (context: EvaluationContext<I, O>) => DecisionState;
   /**
@@ -289,14 +292,23 @@ export interface DecisionEvaluatorOptions<I = unknown, O = unknown> {
    * passes (the top one by default); for a choice, the option that does.
    */
   passing?: boolean | number | string;
+  /**
+   * For a box, where the thing is, such as from the example's expected output: the score is how far
+   * the box overlaps it, `boxOverlap()`, and it passes at `overlap` or more. Without it, the score is
+   * the box's confidence.
+   */
+  where?: (context: EvaluationContext<I, O>) => DecisionBox | undefined;
+  /** The overlap a box passes at, from 0 to 1. Defaults to one half. */
+  overlap?: number;
   /** Whom and what to ask. */
   request?: DecisionRequestOptions;
 }
 
 /**
  * An evaluator that asks a decision: the score is the probability of yes, the score's level as a
- * share of the top one, or the passing option's probability, and its metadata carries the answer's
- * confidence and probabilities, so an uncertain score can go to people with `reviewUnsure()`.
+ * share of the top one, the passing option's probability, or how far a box overlaps where the thing
+ * is, and its metadata carries the answer's confidence and probabilities, or its box, so an uncertain
+ * score can go to people with `reviewUnsure()`.
  */
 export function decisionEvaluator<I = unknown, O = unknown>(
   decisions: DecisionManagerLike,
@@ -315,9 +327,22 @@ export function decisionEvaluator<I = unknown, O = unknown>(
     const answer = answers.judged as DecisionAnswer;
     const metadata = {
       confidence: answer.confidence,
-      probabilities: answer.type === 'yes-no' ? { yes: answer.probability } : answer.probabilities,
+      ...(answer.type === 'box'
+        ? { box: answer.box }
+        : { probabilities: answer.type === 'yes-no' ? { yes: answer.probability } : answer.probabilities }),
       model,
     };
+    if (answer.type === 'box') {
+      const where = options.where?.(context);
+      if (!where) return { key: options.key, score: answer.confidence, metadata } satisfies EvaluationScore;
+      const overlap = boxOverlap(answer.box, where);
+      return {
+        key: options.key,
+        score: overlap,
+        passed: overlap >= (options.overlap ?? 0.5),
+        metadata,
+      } satisfies EvaluationScore;
+    }
     if (answer.type === 'yes-no') {
       const passWhen = options.passing !== false;
       return {

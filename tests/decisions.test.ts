@@ -108,7 +108,7 @@ test('a malformed decision is refused before any provider sees it', async () => 
   );
   await refused({ state: 'x', questions: { a: { type: 'choice', options: ['ok', ' '] } } }, /without a name/);
   await refused({ state: 'x', questions: { a: { type: 'score', levels: ['one'] } } }, /at least two levels/);
-  await refused({ state: 'x', questions: { a: { type: 'box' } } }, /a yes-no, a choice, or a score/);
+  await refused({ state: 'x', questions: { a: { type: 'polygon' } } }, /a yes-no, a choice, a score, or a box/);
   const stopped = new AbortController();
   stopped.abort(new Error('stopped'));
   await assert.rejects(
@@ -457,7 +457,7 @@ test('TypeSafe AI: every question in one call, in the API’s terms, and its ans
     severity: { type: 'score', instructions: 'How bad is it?', criteria: ['Cosmetic', 'Degraded', 'Blocking'] },
     tone: { type: 'choice', criteria: { calm: null, frustrated: null, angry: null } },
   } satisfies Record<string, WireQuestion>);
-  assert.equal(result.model, 'jev-1.13.0', 'the alias, resolved');
+  assert.equal(result.model, 'jev-1.14.0', 'the alias, resolved');
   assert.deepEqual(result.usage, { inputTokens: 160, outputTokens: 12 });
   close(result.cost?.amount ?? -1, (160 / 1_000_000) * 0.042, 'priced');
   assert.equal(result.answers.team.choice, 'billing');

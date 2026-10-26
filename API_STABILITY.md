@@ -67,6 +67,24 @@ graduation:
 | Upgrade | A migration test from the previous minor |
 | Soak | A long-running test with flat memory and no leaked handles |
 
+## 2.21 stage (2.21.0)
+
+Everything 2.21 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable, in `nexus-ai-pro/decisions`: `BoxQuestion`, `BoxAnswer`, `DecisionBox`, `boxOverlap()`,
+`statePictures()`, `readPicture()`, `DecisionPicture`, `ReadDecisionPicture`, the question type `box`
+and its `DecisionDistribution`, `DecisionProviderCapabilities.images`, `answeredRight()`'s box and
+`overlap`, `DecisionEvaluatorOptions.where` and `overlap`, `DecisionConformanceOptions.picture`,
+`DecisionConformanceReport.skipped`, and `CompletionDecisionsOptions.images`; in
+`nexus-ai-pro/decisions/typesafe`, `TypeSafeDecisionProviderOptions.media`. A box from TypeSafe AI rests
+on what it marks as experimental, its pictures and boxes, whose request format may change between its
+releases.
+
+Changed on purpose: TypeSafe AI's 400 and 413 are `DECISION_INVALID`, not `DECISION_FAILED`; neither
+was retried before or is now. A provider of your own that reads pictures declares `images: true`;
+without it, a decision about a picture is not sent to it. A union over `DecisionQuestionType` or
+`DecisionAnswer` that handled three kinds now meets a fourth, `box`.
+
 ## 2.20 stage (2.20.0)
 
 Everything 2.20 adds is stable from the start and additive, unless this section says otherwise.

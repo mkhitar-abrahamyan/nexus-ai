@@ -103,6 +103,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/server` | 126 KB | 35% | none |
 | `nexus-ai-pro/batch` | 118 KB | 32% | none |
 | `nexus-ai-pro/agent` | 114 KB | 31% | none |
+| `nexus-ai-pro/decisions` | 110 KB | 30% | none |
 | `nexus-ai-pro/realtime/session` | 109 KB | 30% | none |
 | `nexus-ai-pro/protocols/a2a/grpc` | 102 KB | 28% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 25% | none |
@@ -121,6 +122,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images` | 81 KB | 22% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 74 KB | 20% | none |
+| `nexus-ai-pro/decisions/typesafe` | 70 KB | 19% | none |
 | `nexus-ai-pro/protocols/a2a` | 62 KB | 17% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 16% | none |
 | `nexus-ai-pro/providers/cohere` | 59 KB | 16% | none |
@@ -137,7 +139,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/telephony` | 50 KB | 14% | none |
 | `nexus-ai-pro/agent/sandbox` | 48 KB | 13% | none |
 | `nexus-ai-pro/ops` | 48 KB | 13% | none |
-| `nexus-ai-pro/decisions` | 47 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 12% | none |
@@ -150,7 +151,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/workspace` | 38 KB | 10% | none |
 | `nexus-ai-pro/tracing` | 38 KB | 10% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 10% | none |
-| `nexus-ai-pro/decisions/typesafe` | 38 KB | 10% | none |
 | `nexus-ai-pro/models` | 37 KB | 10% | none |
 | `nexus-ai-pro/tracing/otlp-grpc` | 36 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |

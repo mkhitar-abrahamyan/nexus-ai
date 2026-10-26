@@ -1,8 +1,8 @@
 /**
- * Typed decisions: questions a model answers with a yes or no, a choice, or a score, each with its
- * probabilities and a confidence read from them, so software acts on an answer without parsing text.
- * The contract, its manager, gates, and calibration; decisions from any completion model; and
- * decisions in graphs, agents, and evaluations.
+ * Typed decisions: questions a model answers with a yes or no, a choice, a score, or a box around
+ * something in a picture, each with a confidence read alike from any provider, so software acts on an
+ * answer without parsing text. The contract, its manager, gates, and calibration; the pictures a state
+ * holds; decisions from any completion model; and decisions in graphs, agents, and evaluations.
  */
 export {
   type CompletionDecisionMethod,
@@ -30,6 +30,9 @@ export {
   answeredRight,
   type AnswerOf,
   answerProbability,
+  type BoxAnswer,
+  boxOverlap,
+  type BoxQuestion,
   type CachedDecision,
   calibrate,
   type CalibrateOptions,
@@ -44,6 +47,7 @@ export {
   decisionAnswer,
   type DecisionAnswer,
   type DecisionAnswers,
+  type DecisionBox,
   type DecisionCallContext,
   type DecisionConfig,
   type DecisionConformanceCase,
@@ -82,3 +86,4 @@ export {
   yesNoConfidence,
   type YesNoQuestion,
 } from './core.js';
+export { type DecisionPicture, type ReadDecisionPicture, readPicture, statePictures } from './pictures.js';

@@ -17,8 +17,9 @@ export interface MockDecisionProviderOptions {
   /** The model it reports. Defaults to `mock-decision`. */
   model?: string;
   /**
-   * Answers each question with its probabilities, from the question's name, the question, and the
-   * state. Returning `undefined`, or leaving it out, answers with an even spread: confidence 0.
+   * Answers each question with its probabilities, or a box, from the question's name, the question,
+   * and the state, pictures and all. Returning `undefined`, or leaving it out, answers with an even
+   * spread, and a box with the whole picture: confidence 0.
    */
   answer?: (name: string, question: DecisionProviderQuestion, state: DecisionState) => DecisionDistribution | undefined;
   /** Fails every call with this error, or the error the function returns. */
@@ -29,7 +30,8 @@ export interface MockDecisionProviderOptions {
 
 /**
  * Answers decisions as `answer` says, without a model, and keeps every request it was asked in
- * `requests`. It takes every question type, 255 options, and 10 levels, as TypeSafe AI's Jev does.
+ * `requests`. It takes every question type, pictures, 255 options, and 10 levels, as TypeSafe AI's Jev
+ * does.
  */
 export class MockDecisionProvider implements DecisionProvider {
   /** Its name and what it takes. */
@@ -41,9 +43,10 @@ export class MockDecisionProvider implements DecisionProvider {
     this.info = {
       name: options.name ?? 'mock',
       capabilities: {
-        types: ['yes-no', 'choice', 'score'],
+        types: ['yes-no', 'choice', 'score', 'box'],
         maxOptions: 255,
         maxLevels: 10,
+        images: true,
         defaultModel: options.model ?? 'mock-decision',
       },
     };
@@ -70,9 +73,10 @@ export class MockDecisionProvider implements DecisionProvider {
   }
 }
 
-/** An even spread over a question's answers: no answer more likely than another. */
+/** An even spread over a question's answers, no answer more likely than another; a box, the whole picture. */
 function evenly(question: DecisionProviderQuestion): DecisionDistribution {
   if (question.type === 'yes-no') return { type: 'yes-no', yes: 0.5 };
+  if (question.type === 'box') return { type: 'box', box: { top: 0, bottom: 1, left: 0, right: 1 }, confidence: 0 };
   if (question.type === 'choice') {
     return {
       type: 'choice',

@@ -312,13 +312,16 @@ import { createIngestionPipeline } from 'nexus-ai-pro/rag/pipeline';
 import { parseRegistryData, withRegistryData, type RegistryData } from 'nexus-ai-pro/models/data';
 import { MediaManager, modelMediaProvider, type MediaText } from 'nexus-ai-pro/media';
 import {
+  boxOverlap,
   calibrate,
   completionDecisions,
+  type DecisionBox,
   DecisionManager,
   decisionGuard,
   decisionRoute,
   gate,
   type GateOutcome,
+  statePictures,
 } from 'nexus-ai-pro/decisions';
 import { MockDecisionProvider } from 'nexus-ai-pro/decisions/mock';
 import { TypeSafeDecisionProvider } from 'nexus-ai-pro/decisions/typesafe';
@@ -973,6 +976,17 @@ const gatedUrgency: Promise<GateOutcome> = decisions
   .decide({ state: 'The site is down', questions: { urgent: { type: 'yes-no' } } })
   .then(({ answers }) => gate(answers.urgent, { act: 0.9, review: 0.5 }));
 const calibratedThreshold: number | undefined = calibrate([], { targetAccuracy: 0.95 }).threshold;
+// A decision about a picture the state holds: a box comes back typed as a box.
+const markedBox: Promise<DecisionBox> = decisions
+  .decide({
+    state: { photo: { type: 'image', source: { base64: 'iVBORw0KGgo=', mimeType: 'image/png' } } },
+    questions: { mark: { type: 'box', question: 'the mark in the photo' } },
+  })
+  .then(({ answers }) => answers.mark.box);
+const markOverlap: number = boxOverlap({ top: 0, bottom: 0.5, left: 0, right: 0.5 }, { top: 0, bottom: 1, left: 0, right: 1 });
+const picturePaths: string[] = statePictures({ photo: { type: 'image', source: { url: 'https://example.com/a.png' } } }).map(
+  (picture) => picture.path,
+);
 const refundBranch = decisionRoute(decisions, {
   state: (state: { ticket: string }) => state.ticket,
   question: { type: 'yes-no' },
@@ -984,7 +998,7 @@ const injectionGuard = decisionGuard(decisions, { input: { type: 'yes-no', quest
 const answerTokens: Promise<TokenLogprob[] | undefined> = ai
   .complete({ model: 'gpt-4.1-mini', messages: [{ role: 'user', content: 'Y or N?' }], logprobs: { top: 5 } })
   .then((response) => response.logprobs);
-void [routedTeam, gatedUrgency, calibratedThreshold, refundBranch, injectionGuard, answerTokens];
+void [routedTeam, gatedUrgency, calibratedThreshold, markedBox, markOverlap, picturePaths, refundBranch, injectionGuard, answerTokens];
 const groundedAnswer: Promise<string> = answerFromMedia(mediaManager, mediaIndex, 'What is due?').then(
   (answer) => answer.answer,
 );

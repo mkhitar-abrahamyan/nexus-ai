@@ -9630,9 +9630,10 @@ Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/decisions.
 
 Software asks a model many small questions it then acts on: which team takes a ticket, whether a
 message is an attack, how well an answer meets a rubric. A decision, from `nexus-ai-pro/decisions`, is
-such a question asked as a type: a yes or no, a choice among options, or a score on a rubric, about one
-state. Each answer comes back with its probabilities and a confidence read from them, so the
-application acts on it without parsing text, and knows when not to.
+such a question asked as a type: a yes or no, a choice among options, a score on a rubric, or where
+something is in a picture, about one state, text, JSON, or the pictures it holds. Each answer comes back
+with its probabilities, or its box, and a confidence, so the application acts on it without parsing
+text, and knows when not to.
 
 ```ts
 import { NexusAI } from 'nexus-ai-pro';
@@ -9666,13 +9667,14 @@ if (gate(answers.team, { act: 0.8 }) === 'act') route(answers.team.choice); // '
 
 A `DecisionRequest` holds a `DecisionState`, text or any JSON value, and `DecisionQuestions`: each a
 `DecisionQuestion` under the name its answer comes back by, asked in isolation against the same state.
-A `DecisionQuestionType` is one of three:
+A `DecisionQuestionType` is one of four:
 
 | Question | What it asks | Its answer |
 | --- | --- | --- |
 | `YesNoQuestion` | A yes or no, with `criteria` for what counts as each | A `YesNoAnswer`: `yes`, its `probability`, and `confidence` |
 | `ChoiceQuestion` | One of its `options`, by name, with what each means, up to 255 | A `ChoiceAnswer`: the `choice`, every option's `probabilities`, and `confidence` |
 | `ScoreQuestion` | A level of its `levels`, lowest first, two to ten | A `ScoreAnswer`: the weighted `score`, the most probable `level`, each level's `probabilities`, and `confidence` |
+| `BoxQuestion` | Where something is in a picture the state holds, its `question` naming the picture | A `BoxAnswer`: the `box`, a `DecisionBox`, and `confidence` |
 
 The answers are typed by their questions: `AnswerOf` gives a question's `DecisionAnswer`, and
 `DecisionAnswers` the whole set, so a choice's answer names only its own options, and a misspelt one
@@ -9690,6 +9692,48 @@ documents it for its own:
 
 Confidence is a margin, not a probability: a yes at 0.75 has confidence 0.5. `answerProbability()` is
 the probability an answer gives its own answer, which is what calibration compares with accuracy.
+
+## Decisions about pictures
+
+A state that is an object or a list may hold pictures anywhere in it: image parts,
+`{ type: 'image', source }`, held as bytes, base64, a file, a URL, or an asset, and the assets an image
+operation returns. A question names each by its path in backticks, `photo`, `faces.happy`, or
+`frames[2].frame`, and every question type may ask about one.
+
+```ts
+import { readFile } from 'node:fs/promises';
+
+const photo = { type: 'image', source: { buffer: await readFile('claims/7.jpg'), mimeType: 'image/jpeg' } } as const;
+const { answers } = await decisions.decide({
+  state: { claim: 'Water damage to the kitchen door', photo },
+  questions: {
+    damaged: { type: 'yes-no', question: 'Does `photo` show damage to a door?' },
+    where: { type: 'box', question: 'the damage in `photo`' },
+  },
+});
+if (answers.damaged.yes && gate(answers.where, { act: 0.7 }) === 'act') crop(answers.where.box);
+```
+
+A box question always gets a box, even for something the picture does not show, so ask a yes or no
+beside it, as above. A `DecisionBox` has four edges, each a fraction from 0 to 1 of the picture's
+height or width from its top-left corner; an answer whose edges fall outside that, or cross, is refused
+as malformed. `boxOverlap()` measures how far two boxes overlap, the area they share over the area they
+cover together, and `answeredRight()` counts a box right when it overlaps the expected one by half or
+more, or by its `overlap` option. A box has no probabilities, so its confidence stands in for one, and
+`calibrate()` chooses a threshold for boxes as it does for any answer.
+
+The manager refuses a picture that is the whole state, which no path names, and a box asked of a state
+with no picture. A provider declares `DecisionProviderCapabilities.images` when it reads pictures; one
+that does not is refused a decision about a picture, and passed over as a fallback. A picture is never
+written into a trace or a cache key: both hold a digest of its bytes, or its path or URL, in its place.
+The budget holds each picture at 1,600 tokens, what one within 1,568 pixels a side costs at most, and
+never reads its base64 as text.
+
+`statePictures()` lists a state's pictures, each a `DecisionPicture` with its path, and `readPicture()`
+reads one into a `ReadDecisionPicture`, with its bytes, its MIME type as its bytes say, and its size, by
+the media family's readers: a file only with `readFile`, a URL only with `fetch`, and a stored asset
+from an asset store. A picture it cannot read, or whose bytes are not an image, fails the decision,
+naming its path.
 
 ## Gates and calibration
 
@@ -9741,9 +9785,17 @@ answers, usage, and cost, and the provider's own calls nested beneath; `Decision
 `POST /v1/systemone`. Its model, Jev (`jev-latest`, `jev-preview`, or a version), answers only typed
 questions, all of a decision in one call, each in isolation, with no text to parse.
 `TypeSafeDecisionProviderOptions` sets the `apiKey`, a `baseUrl` (a proxy that passes the API through
-works), the `model`, `longContext`, which sends the header TypeSafe AI requires for a long state, a
-`timeoutMs` (30 seconds), `headers`, and a `fetch`. A refusal of a field names it, from the API's
-validation error; `listModels()` reads `GET /v1/models`.
+works), the `model`, `longContext`, which sends the header TypeSafe AI requires for a long state,
+`media`, the readers for pictures held by reference, a `timeoutMs` (30 seconds), `headers`, and a
+`fetch`. A refusal of a field names it, from the API's validation error, and a 400 or 413 is a refused
+decision, not a failure to try again; `listModels()` reads `GET /v1/models`.
+
+The pictures a state holds go to Jev as the API's assets, each under a new reference in its place in
+the state, with the `TypeSafe-Danger-Zone-Images` header that pictures and boxes require. TypeSafe AI
+takes a still PNG or JPEG of at most 16 MiB, from 280 to 1,568 pixels a side, in a request of at most
+32 MiB, and refuses one outside them rather than resize it, so the adapter refuses it first, naming its
+path, before anything is sent. A box needs Jev 1.14 or later, which `jev-latest` serves; a decision
+asking one of an earlier version is refused as unsupported.
 
 `completionDecisions()` makes any completion model a provider, through a client's own `complete()`, so
 every call is routed, budgeted, traced, and priced as every completion is. Each question is asked on its
@@ -9755,6 +9807,12 @@ the default, which samples a model that reports none or refuses them, and rememb
 `DecisionCompletionClient` is anything with `complete()`, such as `NexusAI`. Its calls are charged
 where they are made, so its decisions charge nothing again.
 
+A vision model is shown the pictures a state holds: the state's text with each picture's place marked,
+then each picture labelled by its path, then the question. A box is asked `samples` times at the
+sampling temperature, and is the median of each edge; its confidence is how far the samples overlap
+that box, a sample with no box agreeing with nothing, and `method: 'logprobs'` refuses one. Set
+`images: false` for a text-only model, which takes no box and no picture.
+
 `MockDecisionProvider`, from `nexus-ai-pro/decisions/mock`, answers as `MockDecisionProviderOptions.answer`
 says, or with an even spread, and keeps every request it was asked.
 
@@ -9763,7 +9821,8 @@ model, state, and each `DecisionProviderQuestion`, and a `DecisionCallContext`, 
 `DecisionProviderResult` of each question's `DecisionDistribution`. The manager reads every answer from
 those with `decisionAnswer()`, so confidence is the same everywhere. Its `DecisionProviderInfo` names it
 and declares its `DecisionProviderCapabilities`: the question types, options, levels, and questions it
-takes, and its default model.
+takes, whether it reads pictures, and its default model. Its state holds the pictures themselves, for
+`statePictures()` and `readPicture()`, and a box comes back as `{ type: 'box', box, confidence }`.
 
 ## Decisions where the package decides
 
@@ -9779,22 +9838,29 @@ and what to ask:
 | `decisionEvaluator()` | A judge's score, with the answer's confidence in its metadata | Goes to people with `reviewUnsure()`, as online evaluation's `reviewWhen` |
 
 `DecisionRouteOptions`, `DecisionPermissionsOptions`, `DecisionGuardOptions`, `DecisionModelOptions`, and
-`DecisionEvaluatorOptions` set each one's question, threshold, and state. `classifyRoute()`, from the
+`DecisionEvaluatorOptions` set each one's question, threshold, and state. An evaluator may ask a box,
+and given `where` the thing is, such as from the example's expected output, scores how far the box
+overlaps it, passing at `overlap`, one half by default. `classifyRoute()`, from the
 workflows, takes `decisions` too, and then answers with every label's probability.
 
 ## Conformance
 
 `runDecisionConformance()` checks any provider against the contract and lists what fails, as a
 `DecisionConformanceReport`: its capabilities are coherent, each question type it declares comes back
-as probabilities that fit, several questions in one decision each get their own answer, a stopped call
-is not answered, and each `DecisionConformanceCase` of `DecisionConformanceOptions.cases`, a question
-whose answer is known, is answered right.
+as probabilities, or a box, that fit, a provider that reads pictures answers about one, several
+questions in one decision each get their own answer, a stopped call is not answered, and each
+`DecisionConformanceCase` of `DecisionConformanceOptions.cases`, a question whose answer is known, is
+answered right; a case's `expected` may be a box. The checks of pictures and boxes need a `picture`;
+without one they are listed as `skipped`, not passed.
 
 In the test suite, one decision suite passes on TypeSafe AI's API, against a stand-in written from its
 documentation, on a model's log probabilities, and on sampling. On 2,000 labelled invoices, the
 threshold a calibration chooses holds its accuracy on 2,000 it never saw, for a calibrated model and for
 an overconfident one, where a threshold taken on trust does not. A support graph routes tickets by
-decision, and every ticket it is unsure of reaches a person.
+decision, and every ticket it is unsure of reaches a person. One decision suite about pictures, of yes
+or no, choice, score, and box cases, passes on TypeSafe AI's API, against a stand-in that checks its
+documented asset rules and looks at the pixels, and on a vision model, with each box landing where the
+picture has it; a model that reads only the text fails it.
 
 ## Limitations
 
@@ -9805,8 +9871,12 @@ decision, and every ticket it is unsure of reaches a person.
 - A completion model's decision costs a call per question, or `samples` calls where it reports no log
   probabilities, and sampled probabilities come in steps of one sample. A choice of more than 20 options
   is sampled.
-- TypeSafe AI's image questions, locating something in a picture, and its long-context mode are
-  experimental there, and the image questions are not part of the contract.
+- TypeSafe AI marks pictures, boxes, and its long-context mode as experimental, and their request
+  format and limits may change between its releases.
+- A completion model's box costs `samples` calls, and its confidence is how far they agree, not a
+  probability the model gave it.
+- The adapter does not resize a picture TypeSafe AI would refuse, nor send pictures as multipart parts;
+  a decision's pictures travel as base64 within the 32 MiB a request may hold.
 - Jev is in early access; its adapter has passed against a stand-in written from TypeSafe AI's
   documentation, not yet against the live service.
 
@@ -14705,6 +14775,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/server` | 126 KB | 35% | none |
 | `nexus-ai-pro/batch` | 118 KB | 32% | none |
 | `nexus-ai-pro/agent` | 114 KB | 31% | none |
+| `nexus-ai-pro/decisions` | 110 KB | 30% | none |
 | `nexus-ai-pro/realtime/session` | 109 KB | 30% | none |
 | `nexus-ai-pro/protocols/a2a/grpc` | 102 KB | 28% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 25% | none |
@@ -14723,6 +14794,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images` | 81 KB | 22% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 74 KB | 20% | none |
+| `nexus-ai-pro/decisions/typesafe` | 70 KB | 19% | none |
 | `nexus-ai-pro/protocols/a2a` | 62 KB | 17% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 16% | none |
 | `nexus-ai-pro/providers/cohere` | 59 KB | 16% | none |
@@ -14739,7 +14811,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/telephony` | 50 KB | 14% | none |
 | `nexus-ai-pro/agent/sandbox` | 48 KB | 13% | none |
 | `nexus-ai-pro/ops` | 48 KB | 13% | none |
-| `nexus-ai-pro/decisions` | 47 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 12% | none |
@@ -14752,7 +14823,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/workspace` | 38 KB | 10% | none |
 | `nexus-ai-pro/tracing` | 38 KB | 10% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 10% | none |
-| `nexus-ai-pro/decisions/typesafe` | 38 KB | 10% | none |
 | `nexus-ai-pro/models` | 37 KB | 10% | none |
 | `nexus-ai-pro/tracing/otlp-grpc` | 36 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |

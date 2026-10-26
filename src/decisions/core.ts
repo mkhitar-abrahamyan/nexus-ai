@@ -1,20 +1,27 @@
 /**
- * Typed decisions: questions a model answers with a yes or no, a choice, or a score, each with its
- * probabilities and a confidence read from them, so software acts on an answer without parsing text.
+ * Typed decisions: questions a model answers with a yes or no, a choice, a score, or a box around
+ * something in a picture, each with a confidence read alike from any provider, so software acts on an
+ * answer without parsing text.
  */
 import type { CacheAdapter } from '../cache/adapters.js';
 import { createCacheKey } from '../cache/memory-cache.js';
 import { withLifecycle } from '../lifecycle/run.js';
+import type { ImageContent } from '../types/messages.js';
 import type { OperationLifecycleLike, ProviderCallContext } from '../types/lifecycle.js';
 import type { ResponseCost } from '../types/response.js';
 import type { RunKind } from '../types/tracing.js';
 import { generateRequestId } from '../utils/ids.js';
 import { sha256Hex } from '../utils/sha256.js';
+import { DecisionError } from './errors.js';
+import { type DecisionPicture, pictureDigest, replacePictures, statePictures } from './pictures.js';
 
 // ── Questions ───────────────────────────────────────────────────────
 
-/** The kinds of question there are: a yes or no, a choice among options, or a score on levels. */
-export type DecisionQuestionType = 'yes-no' | 'choice' | 'score';
+/**
+ * The kinds of question there are: a yes or no, a choice among options, a score on levels, or a box
+ * around something in a picture.
+ */
+export type DecisionQuestionType = 'yes-no' | 'choice' | 'score' | 'box';
 
 /** A question answered yes or no, with the probability that it is yes. */
 export interface YesNoQuestion {
@@ -46,14 +53,44 @@ export interface ScoreQuestion {
   levels: readonly string[];
 }
 
+/** A question answered with where something is in a picture of the state: a box around it. */
+export interface BoxQuestion {
+  /** Discriminates the question. */
+  type: 'box';
+  /**
+   * What to find, and in which picture, by its path in backticks, such as "the dent in `photo`". A box
+   * is given even for something the picture does not show: ask a yes or no beside it whether it does.
+   */
+  question: string;
+}
+
 /** Any question. */
-export type DecisionQuestion = YesNoQuestion | ChoiceQuestion | ScoreQuestion;
+export type DecisionQuestion = YesNoQuestion | ChoiceQuestion | ScoreQuestion | BoxQuestion;
 
 /** Questions by the names their answers come back under. */
 export type DecisionQuestions = Record<string, DecisionQuestion>;
 
-/** What every question of a decision is about: text, or any JSON value. */
+/**
+ * What every question of a decision is about: text, or any JSON value. An object or a list may hold
+ * pictures, as image parts (`{ type: 'image', source }`) or image assets, anywhere in it; a question
+ * names each by its path in backticks, such as `photo` or `frames[2].frame`.
+ */
 export type DecisionState = string | Record<string, unknown> | readonly unknown[];
+
+/**
+ * Where something is in a picture: each edge a fraction, from 0 to 1, of the picture's height (`top`,
+ * `bottom`) or width (`left`, `right`), measured from its top-left corner.
+ */
+export interface DecisionBox {
+  /** The top edge, from the picture's top. */
+  top: number;
+  /** The bottom edge, from the picture's top: at least `top`. */
+  bottom: number;
+  /** The left edge, from the picture's left. */
+  left: number;
+  /** The right edge, from the picture's left: at least `left`. */
+  right: number;
+}
 
 // ── Answers ─────────────────────────────────────────────────────────
 
@@ -102,8 +139,21 @@ export interface ScoreAnswer {
   confidence: number;
 }
 
+/** A box question's answer. */
+export interface BoxAnswer {
+  /** Discriminates the answer. */
+  type: 'box';
+  /** Where it is. */
+  box: DecisionBox;
+  /**
+   * How sure the answer is, from 0 to 1: the provider's own, such as TypeSafe AI's Jev gives, or how
+   * far several readings of the box agree, for a model asked more than once.
+   */
+  confidence: number;
+}
+
 /** Any answer. */
-export type DecisionAnswer = YesNoAnswer | ChoiceAnswer | ScoreAnswer;
+export type DecisionAnswer = YesNoAnswer | ChoiceAnswer | ScoreAnswer | BoxAnswer;
 
 /** The options of a choice question, as a union of their names. */
 type OptionsOf<O> = O extends readonly (infer K)[] ? K : keyof O;
@@ -115,7 +165,9 @@ export type AnswerOf<Q> = Q extends YesNoQuestion
     ? ChoiceAnswer<Extract<OptionsOf<O>, string>>
     : Q extends ScoreQuestion
       ? ScoreAnswer
-      : DecisionAnswer;
+      : Q extends BoxQuestion
+        ? BoxAnswer
+        : DecisionAnswer;
 
 /** Answers by their questions' names, each typed by its question. */
 export type DecisionAnswers<Q extends DecisionQuestions> = { [K in keyof Q]: AnswerOf<Q[K]> };
@@ -176,13 +228,14 @@ export interface DecisionResult<Q extends DecisionQuestions = DecisionQuestions>
 export type DecisionProviderQuestion =
   | YesNoQuestion
   | { type: 'choice'; question?: string; options: Array<{ name: string; description?: string }> }
-  | ScoreQuestion;
+  | ScoreQuestion
+  | BoxQuestion;
 
 /** What a provider is asked. */
 export interface DecisionProviderRequest {
   /** The model to ask. */
   model: string;
-  /** What every question is about. */
+  /** What every question is about, with any pictures it holds, which `statePictures()` lists. */
   state: DecisionState;
   /** The questions, by name. */
   questions: Record<string, DecisionProviderQuestion>;
@@ -192,7 +245,8 @@ export interface DecisionProviderRequest {
 export type DecisionDistribution =
   | { type: 'yes-no'; yes: number }
   | { type: 'choice'; probabilities: Record<string, number> }
-  | { type: 'score'; probabilities: readonly number[] };
+  | { type: 'score'; probabilities: readonly number[] }
+  | { type: 'box'; box: DecisionBox; confidence: number };
 
 /** What a provider answers. */
 export interface DecisionProviderResult {
@@ -216,6 +270,8 @@ export interface DecisionProviderCapabilities {
   maxLevels: number;
   /** Most questions one decision may ask, when it has a limit. */
   maxQuestions?: number;
+  /** Whether it reads the pictures a state holds. A provider without it is not asked about a picture. */
+  images?: boolean;
   /** The model asked when a request names none. */
   defaultModel: string;
   /** The models it serves, when it lists them. */
@@ -258,31 +314,7 @@ export interface DecisionProvider {
   decide(request: DecisionProviderRequest, context: DecisionCallContext): Promise<DecisionProviderResult>;
 }
 
-/** Why a decision failed. */
-export type DecisionErrorCode =
-  | 'DECISION_NO_PROVIDER'
-  | 'DECISION_UNSUPPORTED'
-  | 'DECISION_INVALID'
-  | 'DECISION_FAILED';
-
-/** Raised for a decision no provider can serve, a question that is malformed, or a provider's failure. */
-export class DecisionError extends Error {
-  constructor(
-    message: string,
-    /**
-     * A stable code: `DECISION_NO_PROVIDER`, `DECISION_UNSUPPORTED` (a provider cannot take the
-     * question), `DECISION_INVALID` (the request, or an answer, is malformed), or `DECISION_FAILED`.
-     */
-    readonly code: DecisionErrorCode,
-    /** Whether asking again, or another provider, may help: a timeout or an overloaded service may. */
-    readonly retryable = false,
-    /** The HTTP status a provider answered with, when it did. */
-    readonly status?: number,
-  ) {
-    super(message);
-    this.name = 'DecisionError';
-  }
-}
+export { DecisionError, type DecisionErrorCode } from './errors.js';
 
 // ── Confidence ──────────────────────────────────────────────────────
 
@@ -364,7 +396,49 @@ export function decisionAnswer(question: DecisionProviderQuestion, distribution:
       confidence: scoreConfidence(weights),
     };
   }
+  if (question.type === 'box' && distribution.type === 'box') {
+    const edge = (name: keyof DecisionBox) => {
+      const value = distribution.box?.[name];
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+        throw new DecisionError(
+          `The box's ${name} edge is ${String(value)}, not a number from 0 to 1`,
+          'DECISION_INVALID',
+        );
+      }
+      return value;
+    };
+    const box = { top: edge('top'), bottom: edge('bottom'), left: edge('left'), right: edge('right') };
+    if (box.top > box.bottom || box.left > box.right) {
+      throw new DecisionError(
+        `The box's edges cross: top ${box.top} and bottom ${box.bottom}, left ${box.left} and right ${box.right}`,
+        'DECISION_INVALID',
+      );
+    }
+    const confidence = distribution.confidence;
+    if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      throw new DecisionError(
+        `The box's confidence is ${String(confidence)}, not a number from 0 to 1`,
+        'DECISION_INVALID',
+      );
+    }
+    return { type: 'box', box, confidence };
+  }
   throw new DecisionError(`Unknown question type "${(question as { type?: unknown }).type}"`, 'DECISION_INVALID');
+}
+
+/**
+ * How far two boxes overlap, from 0 to 1: the area they share over the area they cover together, the
+ * intersection over union by which a box is judged against where the thing is.
+ */
+export function boxOverlap(a: DecisionBox, b: DecisionBox): number {
+  const width = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+  const height = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+  const shared = width * height;
+  const area = (box: DecisionBox) => Math.max(0, box.right - box.left) * Math.max(0, box.bottom - box.top);
+  const union = area(a) + area(b) - shared;
+  // Two empty boxes at one point are the same box.
+  if (union <= 0) return a.top === b.top && a.left === b.left && a.bottom === b.bottom && a.right === b.right ? 1 : 0;
+  return shared / union;
 }
 
 // ── Gates ───────────────────────────────────────────────────────────
@@ -449,10 +523,12 @@ export interface CalibrationReport {
 /**
  * The probability an answer gives its own answer: a yes or no's `max(p, 1 - p)`, a choice's for its
  * option, and a score's for its level. Its confidence measures how far that is above an even spread.
+ * A box has no probabilities, so its confidence stands for one.
  */
 export function answerProbability(answer: DecisionAnswer): number {
   if (answer.type === 'yes-no') return Math.max(answer.probability, 1 - answer.probability);
   if (answer.type === 'choice') return (answer.probabilities as Record<string, number>)[answer.choice] ?? 0;
+  if (answer.type === 'box') return answer.confidence;
   return answer.probabilities[answer.level] ?? 0;
 }
 
@@ -515,16 +591,21 @@ export function calibrate(samples: readonly CalibrationSample[], options: Calibr
 }
 
 /**
- * Whether an answer is right: a yes-or-no or a choice by its answer, and a score by its most probable
- * level, or by its weighted score within `tolerance` levels when one is given.
+ * Whether an answer is right: a yes-or-no or a choice by its answer, a score by its most probable
+ * level, or by its weighted score within `tolerance` levels when one is given, and a box by how far it
+ * overlaps the expected one, `boxOverlap()`, at least `overlap` (one half by default).
  */
 export function answeredRight(
   answer: DecisionAnswer,
-  expected: boolean | string | number,
-  options: { tolerance?: number } = {},
+  expected: boolean | string | number | DecisionBox,
+  options: { tolerance?: number; overlap?: number } = {},
 ): boolean {
   if (answer.type === 'yes-no') return answer.yes === expected;
   if (answer.type === 'choice') return answer.choice === expected;
+  if (answer.type === 'box') {
+    if (expected === null || typeof expected !== 'object') return false;
+    return boxOverlap(answer.box, expected) >= (options.overlap ?? 0.5);
+  }
   if (typeof expected !== 'number') return false;
   // Within a hair of the tolerance counts, so 1.4 is within 0.6 of 2 as arithmetic says it is.
   return options.tolerance === undefined
@@ -702,6 +783,7 @@ export class DecisionManager {
   async decide<const Q extends DecisionQuestions>(request: DecisionRequest<Q>): Promise<DecisionResult<Q>> {
     request.signal?.throwIfAborted();
     const questions = normalizeQuestions(request.questions);
+    const pictures = picturesOf(request.state, questions);
     const chosen = request.provider ?? this.config.defaultProvider ?? this.providers.keys().next().value;
     if (chosen === undefined) throw new DecisionError('No decision provider is registered', 'DECISION_NO_PROVIDER');
     const order = [chosen, ...(this.config.fallbacks ?? []).filter((name) => name !== chosen)];
@@ -709,14 +791,14 @@ export class DecisionManager {
     for (const [position, name] of order.entries()) {
       const provider = this.providers.get(name);
       if (!provider) throw new DecisionError(`No decision provider is registered as "${name}"`, 'DECISION_NO_PROVIDER');
-      const unfit = unsupported(provider, questions);
+      const unfit = unsupported(provider, questions, pictures);
       if (unfit) {
         // A fallback that cannot take the questions is passed over; the one asked for is refused.
         if (position > 0) continue;
         throw new DecisionError(`Decision provider "${name}" ${unfit}`, 'DECISION_UNSUPPORTED');
       }
       try {
-        return (await this.ask(name, provider, request, questions)) as DecisionResult<Q>;
+        return (await this.ask(name, provider, request, questions, pictures)) as DecisionResult<Q>;
       } catch (error) {
         last = error;
         if (request.signal?.aborted || !retryable(error)) throw error;
@@ -730,12 +812,17 @@ export class DecisionManager {
     provider: DecisionProvider,
     request: DecisionRequest,
     questions: Record<string, DecisionProviderQuestion>,
+    pictures: readonly DecisionPicture[],
   ): Promise<DecisionResult> {
     const model = request.model ?? provider.info.capabilities.defaultModel;
     const started = Date.now();
     const cache = request.cache === false ? undefined : this.config.cache;
+    // The state as keys and traces hold it: each picture by a digest, never its bytes.
+    const described = pictures.length
+      ? replacePictures(request.state, (picture) => ({ picture: pictureDigest(picture.part) }))
+      : request.state;
     const key = cache
-      ? `nexus:decision:${sha256Hex(createCacheKey({ name, model, tenant: request.tenantId, state: request.state, questions }))}`
+      ? `nexus:decision:${sha256Hex(createCacheKey({ name, model, tenant: request.tenantId, state: described, questions }))}`
       : undefined;
     if (cache && key) {
       const hit = await cache.store.get(key);
@@ -755,7 +842,7 @@ export class DecisionManager {
     const run = this.runtime.tracer?.startRun({
       name: `decide ${Object.keys(questions).join(', ')}`,
       kind: 'decision',
-      inputs: { state: request.state, questions },
+      inputs: { state: described, questions },
       model,
       provider: name,
       ...(request.metadata ? { metadata: request.metadata } : {}),
@@ -770,16 +857,25 @@ export class DecisionManager {
           provider: name,
           model,
           ...(request.tenantId !== undefined ? { tenantId: request.tenantId } : {}),
-          metadata: { questions: Object.keys(questions).length, ...request.metadata },
+          metadata: {
+            questions: Object.keys(questions).length,
+            ...(pictures.length ? { pictures: pictures.length } : {}),
+            ...request.metadata,
+          },
         },
         request.signal ? { signal: request.signal } : {},
         async (ticket) => {
-          // Held against the budget at the model's price, for the tokens the request will send.
+          // Held against the budget at the model's price, for the tokens the request will send: its
+          // text, and each picture at what a picture within 1,568 pixels a side costs at most.
           const estimate = charged
             ? undefined
             : priceDecision(
                 model,
-                { inputTokens: Math.ceil(JSON.stringify({ state: request.state, questions }).length / 4) },
+                {
+                  inputTokens:
+                    Math.ceil(JSON.stringify({ state: described, questions }).length / 4) +
+                    pictures.length * PICTURE_TOKENS,
+                },
                 this.prices(),
               );
           if (ticket && estimate) await ticket.reserve(estimate.amount);
@@ -864,8 +960,11 @@ export interface DecisionConformanceCase {
   state: DecisionState;
   /** The question. */
   question: DecisionQuestion;
-  /** The right answer: a yes or no, a choice's option, or a score's level. */
-  expected: boolean | string | number;
+  /**
+   * The right answer: a yes or no, a choice's option, a score's level, or where a box should be, which
+   * an answer overlapping it by half or more matches.
+   */
+  expected: boolean | string | number | DecisionBox;
 }
 
 /** Options for `runDecisionConformance()`. */
@@ -877,6 +976,11 @@ export interface DecisionConformanceOptions {
    * as it is told passes without them; a real model is held to them.
    */
   cases?: readonly DecisionConformanceCase[];
+  /**
+   * A picture for the checks of a provider that reads pictures or answers boxes: it is asked a yes or
+   * no about the picture, and a box around what it shows. Without one, those checks are skipped.
+   */
+  picture?: ImageContent;
 }
 
 /** How a provider did against the decision contract. */
@@ -887,19 +991,21 @@ export interface DecisionConformanceReport {
   passed: string[];
   /** Checks that failed, each with why. */
   failures: string[];
+  /** Checks that were not run, each with why, such as a box with no picture given to ask about. */
+  skipped: string[];
 }
 
 /**
  * Checks a provider against the decision contract: its capabilities are coherent; each question type
- * it declares comes back as probabilities that fit the question; several questions in one decision
- * each get their own answer; a stopped call is not answered; and every case is answered right. Never
- * throws; failures are listed.
+ * it declares comes back as probabilities, or a box, that fit the question; a provider that reads
+ * pictures answers about one; several questions in one decision each get their own answer; a stopped
+ * call is not answered; and every case is answered right. Never throws; failures are listed.
  */
 export async function runDecisionConformance(
   provider: DecisionProvider,
   options: DecisionConformanceOptions = {},
 ): Promise<DecisionConformanceReport> {
-  const report: DecisionConformanceReport = { provider: provider.info.name, passed: [], failures: [] };
+  const report: DecisionConformanceReport = { provider: provider.info.name, passed: [], failures: [], skipped: [] };
   const check = async (name: string, run: () => Promise<void> | void) => {
     try {
       await run();
@@ -918,6 +1024,8 @@ export async function runDecisionConformance(
       throw new Error('a choice needs two options');
     if (capabilities.types.includes('score') && !(capabilities.maxLevels >= 2))
       throw new Error('a score needs two levels');
+    if (capabilities.types.includes('box') && capabilities.images !== true)
+      throw new Error('it answers boxes, and reads no pictures to find them in');
     if (!capabilities.defaultModel.trim()) throw new Error('it names no default model');
   });
   const state = 'The invoice INV-77 for $120 was paid in full on 2026-10-01, a week before it was due.';
@@ -933,33 +1041,56 @@ export async function runDecisionConformance(
       options: { early: 'Before it was due', late: 'After it was due' },
     },
     score: { type: 'score', question: 'How much of it was paid?', levels: ['None', 'Some', 'All'] },
+    box: { type: 'box', question: 'What `photo` shows most, wherever it is' },
   };
+  const picture = options.picture;
+  // A box is asked about the picture, with the invoice beside it.
+  const stateFor = (type: DecisionQuestionType): DecisionState =>
+    type === 'box' && picture ? { invoice: state, photo: picture } : state;
+  // The types that can be asked: a box only with a picture to look in.
+  const askable = capabilities.types.filter((type) => type !== 'box' || picture);
   for (const type of capabilities.types) {
+    if (!askable.includes(type)) {
+      report.skipped.push(`a ${type} question: no picture was given to ask about`);
+      continue;
+    }
     await check(`a ${type} question`, async () => {
       const question = samples[type] as DecisionQuestion;
-      const { answers } = await ask(state, { asked: question });
+      const { answers } = await ask(stateFor(type), { asked: question });
       const answer = answers.asked as DecisionAnswer;
       if (answer.type !== type) throw new Error(`answered as a ${answer.type}`);
       if (!(answer.confidence >= 0 && answer.confidence <= 1)) throw new Error(`confidence ${answer.confidence}`);
     });
   }
+  if (capabilities.images) {
+    if (picture) {
+      await check('a question about a picture', async () => {
+        const { answers } = await ask(
+          { invoice: state, photo: picture },
+          { shown: { type: 'yes-no', question: 'Does `photo` show anything at all?' } },
+        );
+        if (answers.shown.type !== 'yes-no') throw new Error(`answered as a ${answers.shown.type}`);
+      });
+    } else {
+      report.skipped.push('a question about a picture: no picture was given to ask about');
+    }
+  }
   await check('several questions in one decision', async () => {
-    const questions = Object.fromEntries(
-      capabilities.types.map((type) => [`q-${type}`, samples[type] as DecisionQuestion]),
-    );
-    const { answers } = await ask(state, questions);
+    const questions = Object.fromEntries(askable.map((type) => [`q-${type}`, samples[type] as DecisionQuestion]));
+    const { answers } = await ask(askable.includes('box') ? stateFor('box') : state, questions);
     for (const name of Object.keys(questions)) if (!answers[name]) throw new Error(`"${name}" got no answer`);
   });
   await check('a stopped decision is not answered', async () => {
     // Asked directly, as the manager refuses a stopped request before any provider sees it.
     const controller = new AbortController();
     controller.abort(new Error('stopped'));
-    const question = samples[capabilities.types[0] ?? 'yes-no'] as DecisionQuestion;
+    const type = askable[0] ?? 'yes-no';
+    const question = samples[type] as DecisionQuestion;
     const answered = await provider
       .decide(
         {
           model: options.model ?? capabilities.defaultModel,
-          state,
+          state: stateFor(type),
           questions: normalizeQuestions({ asked: question }),
         },
         { signal: controller.signal, requestId: generateRequestId() },
@@ -975,7 +1106,14 @@ export async function runDecisionConformance(
       const { answers } = await ask(item.state, { asked: item.question });
       const answer = answers.asked as DecisionAnswer;
       if (!answeredRight(answer, item.expected)) {
-        const given = answer.type === 'yes-no' ? answer.yes : answer.type === 'choice' ? answer.choice : answer.level;
+        const given =
+          answer.type === 'yes-no'
+            ? answer.yes
+            : answer.type === 'choice'
+              ? answer.choice
+              : answer.type === 'box'
+                ? answer.box
+                : answer.level;
         throw new Error(`expected ${JSON.stringify(item.expected)}, answered ${JSON.stringify(given)}`);
       }
     });
@@ -1016,9 +1154,17 @@ function normalizeQuestions(questions: DecisionQuestions): Record<string, Decisi
         throw new DecisionError(`Score "${name}" needs at least two levels`, 'DECISION_INVALID');
       }
       normalized[name] = question;
+    } else if (question?.type === 'box') {
+      if (typeof question.question !== 'string' || !question.question.trim()) {
+        throw new DecisionError(
+          `Box "${name}" needs a question: what to find, and in which picture`,
+          'DECISION_INVALID',
+        );
+      }
+      normalized[name] = { type: 'box', question: question.question };
     } else {
       throw new DecisionError(
-        `Question "${name}" is a yes-no, a choice, or a score, not ${JSON.stringify((question as { type?: unknown })?.type)}`,
+        `Question "${name}" is a yes-no, a choice, a score, or a box, not ${JSON.stringify((question as { type?: unknown })?.type)}`,
         'DECISION_INVALID',
       );
     }
@@ -1026,15 +1172,44 @@ function normalizeQuestions(questions: DecisionQuestions): Record<string, Decisi
   return normalized;
 }
 
-/** Why a provider cannot take these questions, or `undefined` when it can. */
+/** What a picture is held against a budget at, in tokens: the most one within 1,568 pixels a side costs. */
+const PICTURE_TOKENS = 1_600;
+
+/**
+ * The pictures a decision's state holds, checked: each must be named by a path, and a box question
+ * must have a picture to look in.
+ */
+function picturesOf(state: DecisionState, questions: Record<string, DecisionProviderQuestion>): DecisionPicture[] {
+  const pictures = typeof state === 'string' ? [] : statePictures(state);
+  if (pictures.some((picture) => picture.path === '')) {
+    throw new DecisionError(
+      'A picture that is the whole state has no path for a question to name it by: hold it under a key, such as { photo: picture }',
+      'DECISION_INVALID',
+    );
+  }
+  const box = Object.entries(questions).find(([, question]) => question.type === 'box');
+  if (box && pictures.length === 0) {
+    throw new DecisionError(
+      `Box "${box[0]}" asks where something is in a picture, and the state holds none`,
+      'DECISION_INVALID',
+    );
+  }
+  return pictures;
+}
+
+/** Why a provider cannot take these questions about these pictures, or `undefined` when it can. */
 function unsupported(
   provider: DecisionProvider,
   questions: Record<string, DecisionProviderQuestion>,
+  pictures: readonly DecisionPicture[] = [],
 ): string | undefined {
   const capabilities = provider.info.capabilities;
   const count = Object.keys(questions).length;
   if (capabilities.maxQuestions !== undefined && count > capabilities.maxQuestions) {
     return `takes at most ${capabilities.maxQuestions} questions, not ${count}`;
+  }
+  if (pictures.length > 0 && capabilities.images !== true) {
+    return `does not read pictures, and the state holds ${pictures.length}, such as \`${pictures[0]?.path}\``;
   }
   for (const [name, question] of Object.entries(questions)) {
     if (!capabilities.types.includes(question.type))
