@@ -27,7 +27,7 @@ nexus deploy canary support 2026-09-30 10 --url https://agents.internal
 | `nexus deploy` | Reads and changes an agent server's deployments over HTTP. |
 | `nexus migrate` | Moves imports to the subpaths the 2.0 root import keeps them on. |
 | `nexus graph lint` | Checks a compiled graph's shape for designs that fail in production. |
-| `nexus adapters verify`, `page`, `recheck` | Record an adapter's contract suite and benchmark, list records on one page, and verify each listed adapter again against the installed release. |
+| `nexus adapters verify`, `page`, `recheck`, `gather` | Record an adapter's contract suite and benchmark, list records on one page, verify each listed adapter again against the installed release, and gather the records adapters' own CI publishes. |
 | `nexus policy check` | Validates a policy file, and fails a build on a change that widens what a tenant may reach without an acknowledgment. |
 | `nexus doctor` | Checks a deployment: runtime, credentials, database and migrations, Redis, the queue, the registry, health, and settings that only work in one process. |
 
@@ -211,7 +211,9 @@ such as `--ignore DYNAMIC_ROUTE`. The [graph guide](./graphs.md#linting-a-graph)
 `nexus adapters verify ./verify.mjs --out records/x.json` runs an adapter's contract suite and
 benchmark from its own repository and writes its compatibility record; `nexus adapters page records`
 lists records on one page; `nexus adapters recheck records` verifies each listed adapter again against
-the installed release and exits 1 when one that passed no longer does. The
+the installed release and exits 1 when one that passed no longer does; `nexus adapters gather --out
+community` fetches the records adapters' own CI publishes, found on npm by their keyword, keeps those
+sealed and naming their package, and never runs them. The
 [adapter kit guide](./adapter-kit.md#compatibility-records) describes the module each takes and the
 record each writes.
 

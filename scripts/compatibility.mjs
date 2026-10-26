@@ -18,7 +18,7 @@ const page = [
   '--title',
   'Adapter compatibility',
   '--intro',
-  'Every adapter recorded with `nexus adapters verify`: the contract it passed, against which release of nexus-ai-pro, how fast, and on what runtime. The adapters this repository ships are verified again against every build, so a contract change that would break one fails the build before it ships. To list an adapter of your own, add its record to `compatibility/records`, with the module that verifies it published in its package, as the [adapter kit guide](docs/adapter-kit.md#compatibility-records) describes.',
+  'Every adapter recorded with `nexus adapters verify`: the contract it passed, against which release of nexus-ai-pro, how fast, and on what runtime. The adapters this repository ships are verified again against every build, so a contract change that would break one fails the build before it ships. Community adapters publish their records from their own CI, and are gathered daily onto the [community page](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/compatibility/README.md), as the [adapter kit guide](docs/adapter-kit.md#records-from-an-adapters-own-ci) describes.',
 ];
 
 function nexus(...args) {

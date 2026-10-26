@@ -352,10 +352,13 @@ import { regionalGateway, type RegionHealth, type RegionListGap } from 'nexus-ai
 import { applyPolicy, checkPolicyChange, parsePolicy, type PolicyCheck, type PolicyDocument } from 'nexus-ai-pro/policy';
 import {
   ADAPTER_CONTRACTS,
+  ADAPTER_KEYWORD,
   type CompatibilityRecord,
   type CompatibilityStatus,
   compatibilityPage,
   defineStoreAdapter,
+  type GatherOutcome,
+  gatherRecords,
   readCompatibilityRecord,
   recordStatus,
 } from 'nexus-ai-pro/adapter-kit';
@@ -1302,6 +1305,12 @@ void storeRecord.then((record) => {
   const contractVersion: number = ADAPTER_CONTRACTS[record.adapter.kind].version;
   return [status.state, page, contractVersion];
 });
+// The records adapters' own CI publishes, gathered: what became of each package's.
+const gatheredOutcomes: Promise<GatherOutcome[]> = gatherRecords({
+  keyword: ADAPTER_KEYWORD,
+  sources: [{ package: '@acme/nexus-store', url: 'https://example.com/record.json' }],
+}).then((report) => report.sources.map((source) => source.outcome));
+void gatheredOutcomes;
 const grpcOptions: OtlpGrpcTraceExporterOptions = { endpoint: 'http://localhost:4317', gzip: true, timeoutMs: 5_000 };
 const grpcExporter = new OtlpGrpcTraceExporter(grpcOptions);
 const spooledGrpc = spoolingExporter({ sender: grpcExporter, store: {} as never, drainEveryMs: 0 });

@@ -302,7 +302,9 @@ export interface CompatibilityPageOptions {
 /**
  * One page listing every record: each adapter, its kind and version, the release and contract it was
  * verified against, its state there, its checks, and its p95 per operation, by kind and name. The
- * same records make the same page, so it can be checked for drift.
+ * same records make the same page, so it can be checked for drift. A record is written as text, never
+ * as markup: an adapter links to its repository only at an `http` or `https` address, and the HTML
+ * page colours each row by its state, a failing one red.
  */
 export function compatibilityPage(
   records: readonly CompatibilityRecord[],
@@ -320,7 +322,7 @@ export function compatibilityPage(
       record,
       status,
       cells: [
-        record.adapter.repository
+        record.adapter.repository && /^https?:\/\//i.test(record.adapter.repository)
           ? { text: record.adapter.name, href: record.adapter.repository }
           : { text: record.adapter.name },
         { text: record.adapter.kind },
@@ -349,7 +351,8 @@ export function compatibilityPage(
       item.href ? `<a href="${escapeHtml(item.href)}">${escapeHtml(item.text)}</a>` : escapeHtml(item.text);
     return [
       '<!doctype html>',
-      `<html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body>`,
+      `<html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>`,
+      `<style>${STATE_STYLE}</style></head><body>`,
       `<h1>${escapeHtml(title)}</h1>`,
       ...(options.intro ? [`<p>${escapeHtml(options.intro)}</p>`] : []),
       `<p>States are judged against nexus-ai-pro ${escapeHtml(nexusVersion)}.</p>`,
@@ -376,9 +379,16 @@ export function compatibilityPage(
     ].join('\n');
   }
 
+  // A record's own text, as text: pipes would end a cell, brackets make a link, and stars emphasis.
+  const literal = (text: string) => oneLine(text).replace(/[|[\]*_`\\]/g, (char) => `\\${char}`);
   const cell = (item: { text: string; href?: string }) => {
-    const text = item.text.replace(/\|/g, '\\|');
-    return item.href ? `[${text}](${item.href.replace(/\|/g, '%7C')})` : text;
+    const text = literal(item.text);
+    // An address's pipes, spaces, and brackets, percent-encoded, so none ends the cell or the link.
+    const href = item.href?.replace(
+      /[|\s()]/g,
+      (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`,
+    );
+    return href ? `[${text}](${href})` : text;
   };
   return [
     `# ${title}`,
@@ -390,7 +400,12 @@ export function compatibilityPage(
     `| ${headers.map(() => '---').join(' | ')} |`,
     ...rows.map((row) => `| ${row.cells.map(cell).join(' | ')} |`),
     ...(notes.length > 0
-      ? ['', ...notes.map((row) => `- **${row.record.adapter.name}**: ${row.status.reasons.join('; ')}`)]
+      ? [
+          '',
+          ...notes.map(
+            (row) => `- **${literal(row.record.adapter.name)}**: ${row.status.reasons.map(literal).join('; ')}`,
+          ),
+        ]
       : []),
     '',
   ].join('\n');
@@ -411,6 +426,19 @@ function runtimeName(): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Each state's colour on the HTML page: a failing adapter red. */
+const STATE_STYLE = [
+  'tr[data-state="passing"] td{color:#1a7f37}',
+  'tr[data-state="failing"] td{color:#cf222e;font-weight:600}',
+  'tr[data-state="incompatible"] td{color:#9a6700}',
+  'tr[data-state="stale"] td{color:#57606a}',
+].join('');
+
+/** Text on one line, as a table cell must be: a record's line breaks and runs of space as one space. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 function escapeHtml(text: string): string {

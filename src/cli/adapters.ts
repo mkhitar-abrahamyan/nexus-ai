@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { ADAPTER_KEYWORD, gatherRecords, type RecordSource } from '../adapter-kit/gather.js';
 import type { Adapter } from '../adapter-kit/index.js';
 import {
   type CompatibilityRecord,
@@ -24,18 +25,93 @@ interface VerificationModule {
 }
 
 /**
- * `nexus adapters verify <module>[#export]`, `nexus adapters page <records...>`, and
- * `nexus adapters recheck <records...>`.
+ * `nexus adapters verify <module>[#export]`, `nexus adapters page <records...>`,
+ * `nexus adapters recheck <records...>`, and `nexus adapters gather --out <dir>`.
  *
  * `verify` runs an adapter's contract suite and benchmark from its own repository and writes its
  * compatibility record; `page` lists records on one page; `recheck` verifies each listed adapter again
- * against the installed release and fails when one that passed no longer does.
+ * against the installed release and fails when one that passed no longer does; `gather` fetches the
+ * records adapters' own CI publishes, checked and never run, into a directory a page lists.
  */
 export async function runAdaptersCommand(subcommand: string | undefined, args: ParsedArgs): Promise<void> {
   if (subcommand === 'verify') return verify(args);
   if (subcommand === 'page') return page(args);
   if (subcommand === 'recheck') return recheck(args);
-  throw new CliUsageError(`Unknown adapters command "${subcommand ?? ''}". Use verify, page, or recheck.`);
+  if (subcommand === 'gather') return gather(args);
+  throw new CliUsageError(`Unknown adapters command "${subcommand ?? ''}". Use verify, page, recheck, or gather.`);
+}
+
+/**
+ * Gathers the records adapters' own CI publishes into `--out`: one file per package, the last good
+ * record kept for a package whose record cannot be read now, and a record no longer published removed.
+ */
+async function gather(args: ParsedArgs): Promise<void> {
+  const out = stringFlag(args.flags, 'out');
+  if (!out) throw new CliUsageError('nexus adapters gather needs --out <dir>: where the gathered records are kept.');
+  const sourcesFile = stringFlag(args.flags, 'sources');
+  const sources = sourcesFile ? sourcesFrom(await readFile(sourcesFile, 'utf8'), sourcesFile) : [];
+  // What was gathered last time, read leniently: a file that is not a record is left alone.
+  const previous: Array<{ file: string; record: CompatibilityRecord }> = [];
+  for (const name of existsSync(out) ? (await readdir(out)).sort() : []) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      previous.push({ file: name, record: readCompatibilityRecord(await readFile(path.join(out, name), 'utf8')) });
+    } catch {
+      // Not a record: not ours to keep or remove.
+    }
+  }
+  const registry = stringFlag(args.flags, 'registry');
+  const report = await gatherRecords({
+    keyword: args.flags.keyword === false ? false : (stringFlag(args.flags, 'keyword') ?? ADAPTER_KEYWORD),
+    sources,
+    previous: previous.map((entry) => entry.record),
+    ...(registry ? { registry } : {}),
+  });
+  await mkdir(out, { recursive: true });
+  const written = new Set<string>();
+  for (const source of report.sources) {
+    if (!source.record) continue;
+    const file = `${slug(source.package)}.json`;
+    written.add(file);
+    await writeFile(
+      path.join(out, file),
+      `${JSON.stringify(source.record, null, 2)}
+`,
+    );
+  }
+  for (const { file } of previous) if (!written.has(file)) await rm(path.join(out, file));
+  if (flagBool(args.flags, 'json')) {
+    writeJson(report);
+    return;
+  }
+  printTable(
+    report.sources.map((source) => ({
+      package: source.package,
+      outcome: source.outcome,
+      state: source.record ? recordStatus(source.record).state : '',
+      detail: source.detail ?? '',
+    })),
+    ['package', 'outcome', 'state', 'detail'],
+  );
+  console.log('');
+  console.log(`${report.records.length} records listed in ${out}, of ${report.sources.length} packages.`);
+}
+
+/** Sources listed by hand: a JSON array of `{ package, url }`. */
+function sourcesFrom(text: string, file: string): RecordSource[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new CliUsageError(`${file} is not JSON: ${(error as Error).message}`);
+  }
+  if (!Array.isArray(parsed)) throw new CliUsageError(`${file} must list sources: [{ "package": ..., "url": ... }]`);
+  return parsed.map((item, index) => {
+    if (!isRecord(item) || typeof item.package !== 'string' || typeof item.url !== 'string') {
+      throw new CliUsageError(`${file}, source ${index + 1}: each source names its "package" and its record's "url"`);
+    }
+    return { package: item.package, url: item.url };
+  });
 }
 
 async function verify(args: ParsedArgs): Promise<void> {

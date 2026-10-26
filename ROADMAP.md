@@ -25,7 +25,6 @@ the theme after it that owns it.
 | Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 2.21 |
 | Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.21 |
 | Typed decisions have passed against a stand-in of TypeSafe AI's API, not the live service | Decisions guide | 2.21 |
-| A community adapter's record reaches the compatibility page by a pull request, not from its own CI | Adapter kit guide | 2.21 |
 
 ---
 

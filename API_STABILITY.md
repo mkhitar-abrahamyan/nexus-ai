@@ -76,14 +76,19 @@ New and stable, in `nexus-ai-pro/decisions`: `BoxQuestion`, `BoxAnswer`, `Decisi
 and its `DecisionDistribution`, `DecisionProviderCapabilities.images`, `answeredRight()`'s box and
 `overlap`, `DecisionEvaluatorOptions.where` and `overlap`, `DecisionConformanceOptions.picture`,
 `DecisionConformanceReport.skipped`, and `CompletionDecisionsOptions.images`; in
-`nexus-ai-pro/decisions/typesafe`, `TypeSafeDecisionProviderOptions.media`. A box from TypeSafe AI rests
+`nexus-ai-pro/decisions/typesafe`, `TypeSafeDecisionProviderOptions.media`; in `nexus-ai-pro/adapter-kit`,
+`gatherRecords()`, `GatherRecordsOptions`, `GatherReport`, `GatheredSource`, `GatherOutcome`,
+`RecordSource`, and `ADAPTER_KEYWORD`; the command `nexus adapters gather`; and a package's
+`nexus.compatibility` field, the URL of its record. A box from TypeSafe AI rests
 on what it marks as experimental, its pictures and boxes, whose request format may change between its
 releases.
 
 Changed on purpose: TypeSafe AI's 400 and 413 are `DECISION_INVALID`, not `DECISION_FAILED`; neither
 was retried before or is now. A provider of your own that reads pictures declares `images: true`;
 without it, a decision about a picture is not sent to it. A union over `DecisionQuestionType` or
-`DecisionAnswer` that handled three kinds now meets a fourth, `box`.
+`DecisionAnswer` that handled three kinds now meets a fourth, `box`. `compatibilityPage()` writes a
+repository that is not an `http` or `https` address as text, not a link, and escapes a record's
+Markdown.
 
 ## 2.20 stage (2.20.0)
 

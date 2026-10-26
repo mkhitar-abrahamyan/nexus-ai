@@ -1,0 +1,64 @@
+name: Community compatibility
+
+# The records community adapters' own CI publishes, gathered daily onto the compatibility page: each
+# adapter package found on npm by the keyword nexus-ai-pro-adapter names its record's URL in its
+# package.json, and compatibility/sources.json lists any others. A record is listed only when it reads
+# as `nexus adapters verify` sealed it and names its own package, and it turns its adapter red when it
+# says the adapter no longer passes. Nothing an adapter publishes is run here. The page and the records
+# live on the compatibility branch, written by this workflow alone, so main takes no commits from it.
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: community-compatibility
+  cancel-in-progress: false
+
+jobs:
+  gather:
+    name: Gather community records onto the page
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+          cache: npm
+
+      - name: Install dependencies and build
+        run: npm ci && npm run build
+
+      - name: Open the compatibility branch, with the records gathered last time
+        run: |
+          if git ls-remote --exit-code --heads origin compatibility > /dev/null; then
+            git fetch --depth 1 origin compatibility
+            git worktree add --detach site FETCH_HEAD
+          else
+            git worktree add --detach site
+            git -C site checkout --orphan compatibility
+            git -C site rm -rf --quiet .
+          fi
+
+      - name: Gather the records and write the page
+        run: node scripts/community-compatibility.mjs --out site
+
+      - name: Publish the page when it changed
+        working-directory: site
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing changed."
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit --quiet -m "Community compatibility records, $(date -u +%Y-%m-%d)"
+          git push origin HEAD:refs/heads/compatibility

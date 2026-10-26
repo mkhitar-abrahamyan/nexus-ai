@@ -51,6 +51,15 @@ export {
 } from './contracts.js';
 export { AdapterError, type AdapterErrorClass, type AdapterErrorCode, classifyAdapterError } from './errors.js';
 export {
+  ADAPTER_KEYWORD,
+  type GatheredSource,
+  type GatherOutcome,
+  type GatherRecordsOptions,
+  type GatherReport,
+  gatherRecords,
+  type RecordSource,
+} from './gather.js';
+export {
   type CheckChange,
   COMPATIBILITY_RECORD_FORMAT,
   type CompatibilityComparison,

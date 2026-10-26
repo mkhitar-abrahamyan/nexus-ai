@@ -127,12 +127,12 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 16% | none |
 | `nexus-ai-pro/providers/cohere` | 59 KB | 16% | none |
 | `nexus-ai-pro/providers/ollama` | 59 KB | 16% | none |
+| `nexus-ai-pro/adapter-kit` | 59 KB | 16% | none |
 | `nexus-ai-pro/security` | 58 KB | 16% | none |
 | `nexus-ai-pro/video` | 58 KB | 16% | none |
 | `nexus-ai-pro/operations` | 56 KB | 15% | none |
 | `nexus-ai-pro/evaluate/media` | 54 KB | 15% | none |
 | `nexus-ai-pro/evaluate` | 52 KB | 14% | none |
-| `nexus-ai-pro/adapter-kit` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 14% | none |
 | `nexus-ai-pro/models/data` | 51 KB | 14% | none |

@@ -9,7 +9,6 @@
  * fixed version passes, and the page says which records are stale.
  */
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -31,6 +30,7 @@ import {
 import { MemoryVectorStore } from '../src/hallucination/retrieval.js';
 import { MemoryStore } from '../src/store/memory.js';
 import { NEXUS_VERSION } from '../src/version.js';
+import { adapterSource, nexus } from './community-adapter.js';
 
 const embed = async (texts: string[]) =>
   texts.map((text) => {
@@ -302,71 +302,6 @@ test('one page lists every record, by kind and name, the same records making the
   assert.match(html, /<tr data-state="stale">/);
   assert.match(html, /<a href="https:\/\/example.com\/acme\|vectors">@acme\/memory-vectors<\/a>/);
 });
-
-/** tsx by its own location: the adapter's directory has no `node_modules` to find it in. */
-const TSX = pathToFileURL(path.resolve('node_modules/tsx/dist/loader.mjs')).href;
-
-/** The CLI from source, in a directory of its own, as an adapter's repository runs it. */
-function nexus(args: string[], cwd: string) {
-  const result = spawnSync(process.execPath, ['--import', TSX, path.resolve('src/cli.ts'), 'adapters', ...args], {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1' },
-    timeout: 120_000,
-  });
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
-}
-
-/** The community adapter's source: `forgets` marks a deleted id as gone and never clears the mark. */
-function adapterSource(kit: string, version: string, forgets: boolean) {
-  return `import { defineVectorStoreAdapter } from ${JSON.stringify(kit)};
-
-const embed = async (texts) =>
-  texts.map((text) => {
-    const vector = new Array(256).fill(0);
-    for (const word of text.toLowerCase().match(/[a-z]+/g) ?? []) {
-      let hash = 0x811c9dc5;
-      for (const char of word) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193) >>> 0;
-      vector[hash % 256] += 1;
-    }
-    const norm = Math.hypot(...vector) || 1;
-    return vector.map((value) => value / norm);
-  });
-
-class TombstoneStore {
-  rows = new Map();
-  deleted = new Set();
-  async add(documents) {
-    const vectors = await embed(documents.map((doc) => doc.content));
-    documents.forEach((doc, index) => {
-      ${forgets ? '' : 'this.deleted.delete(doc.id);'}
-      this.rows.set(doc.id, { ...doc, embedding: vectors[index] });
-    });
-  }
-  async search(query, options) { return this.searchVector((await embed([query]))[0], options); }
-  async searchVector(vector, options = {}) {
-    return [...this.rows.values()]
-      .filter((doc) => !this.deleted.has(doc.id))
-      .filter((doc) => Object.entries(options.filter ?? {}).every(([key, value]) => doc.metadata?.[key] === value))
-      .map(({ embedding, ...doc }) => ({ ...doc, score: embedding.reduce((sum, value, index) => sum + value * vector[index], 0) }))
-      .filter((doc) => doc.score >= (options.minScore ?? 0))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, options.topK ?? 5);
-  }
-  async delete(ids) { for (const id of ids) this.deleted.add(id); }
-}
-
-export const adapter = defineVectorStoreAdapter({
-  name: '@community/tombstone-vectors',
-  version: ${JSON.stringify(version)},
-  nexus: '^2.4.0',
-  capabilities: { filters: 'exact' },
-  create: () => new TombstoneStore(),
-});
-export const options = async () => ({ embed });
-export const record = { repository: 'https://example.com/community/tombstone-vectors' };
-`;
-}
 
 test('proof: a contract change an adapter does not meet turns its record red before the release that makes it', async () => {
   const kit = pathToFileURL(path.resolve('src/adapter-kit/index.ts')).href;

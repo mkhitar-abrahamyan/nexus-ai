@@ -26,6 +26,22 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   about one, and passed over as a fallback. The mock reads pictures and answers boxes.
 - `DecisionConformanceOptions.picture` runs the conformance checks of pictures and boxes, and
   `DecisionConformanceReport.skipped` lists the checks that could not run, rather than passing them.
+- **Compatibility records from community CI.** An adapter's own CI publishes its sealed record at the
+  URL its package names as `nexus.compatibility`, beside the keyword `nexus-ai-pro-adapter`.
+  `nexus adapters gather`, and `gatherRecords()` in `nexus-ai-pro/adapter-kit`, find those packages on
+  npm, fetch each record, and keep only those whose digest matches and that name their own package,
+  from HTTPS; a source that is down keeps its last record, and a package that no longer names one
+  leaves the page. Nothing an adapter publishes is run. A daily `Community compatibility` workflow
+  writes the page, with the adapters this repository ships, to the `compatibility` branch, where a
+  record that says its adapter fails turns it red. `compatibility/sources.json` lists adapters not
+  on npm.
+
+### Fixed
+
+- The compatibility page writes a record as text: an adapter links to its repository only at an
+  `http` or `https` address, so a record naming `javascript:` makes no link on the HTML page; a
+  record's line breaks, pipes, brackets, and stars no longer break or add to the Markdown; and the
+  HTML page colours each row by its state.
 
 ### Changed
 

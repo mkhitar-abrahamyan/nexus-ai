@@ -168,9 +168,63 @@ kind and name, with `CompatibilityPageOptions`: a `title`, an `intro`, the relea
 `markdown` or `html`. The same records make the same page.
 
 This repository's own page, [COMPATIBILITY.md](../COMPATIBILITY.md), lists records of the adapters it
-ships, made the same way from `compatibility/adapters`, and every build verifies each one again. To
-list an adapter of your own, open a pull request adding its record to `compatibility/records`, its
-`verify` naming a module published in its package.
+ships, made the same way from `compatibility/adapters`, and every build verifies each one again.
+
+## Records from an adapter's own CI
+
+An adapter of your own reaches the compatibility page from its own CI, without a pull request here.
+Its package carries the keyword `ADAPTER_KEYWORD`, `nexus-ai-pro-adapter`, and names where its CI
+publishes its record:
+
+```json
+{
+  "name": "@acme/nexus-milvus",
+  "keywords": ["nexus-ai-pro-adapter"],
+  "nexus": { "compatibility": "https://raw.githubusercontent.com/acme/nexus-milvus/compatibility/record.json" }
+}
+```
+
+Its CI verifies the adapter, on every change and on a schedule against the latest release, and
+publishes the record wherever that URL serves from, here a branch of its own:
+
+```yaml
+- run: npm install nexus-ai-pro@latest
+- run: npx nexus adapters verify ./verify.mjs --out record.json --package "@acme/nexus-milvus@$(node -p "require('./package.json').version")"
+  continue-on-error: true # a record that does not pass is published too, so the page shows it red
+- run: |
+    git switch --orphan compatibility && git add record.json && git commit -m "Compatibility record"
+    git push --force origin compatibility
+```
+
+Every day, this repository's `Community compatibility` workflow runs `nexus adapters gather`: it finds
+every package with the keyword on npm, reads the URL each names, fetches its record, and writes the
+page, with the adapters this repository ships, to its `compatibility` branch. A record is listed only
+when it reads as `nexus adapters verify` sealed it, its digest matching, and names the package that
+points to it, from HTTPS; a record that says the adapter fails turns its row red. A source that is down,
+or serves a record that is refused, keeps the last record read, saying why; a package that no longer
+names a record, or is no longer found, leaves the page. Nothing an adapter publishes is run here: a
+gathered record is listed as its own CI recorded it, and never verified again by this repository's
+builds, which run only the code it ships. `compatibility/sources.json` lists, by hand, any adapter that
+is not on npm.
+
+```bash
+npx nexus adapters gather --out community                            # find adapters on npm by the keyword
+npx nexus adapters gather --out community --no-keyword --sources sources.json
+npx nexus adapters page compatibility/records community --html --out index.html
+```
+
+`nexus adapters gather` writes one record a package into `--out`, keeps the last one for a package
+whose record cannot be read now, removes a record no longer published, and prints what became of each.
+It exits 1 when npm cannot be searched, rather than list every adapter as gone. In code,
+`gatherRecords()` takes `GatherRecordsOptions`: the `keyword`, the `sources` listed by hand, each a
+`RecordSource` of a package and its URL, the `registry`, the `previous` records to keep from, and the
+limits on a record's size and a request's time. Its `GatherReport` holds the `records` to list and,
+for each package, a `GatheredSource`: its URL, its `GatherOutcome` (`gathered`, `kept`, `refused`,
+`unreachable`, or `undeclared`), why, and its record.
+
+A record is written onto the page as text, never as markup: an adapter links to its repository only at
+an `http` or `https` address, a cell stays on one line, and the HTML page colours each row by its
+state, a failing adapter red.
 
 ## Proof
 
@@ -181,6 +235,13 @@ meet, its record turns red, naming the check, and the command exits 1; fixed, it
 new record replaces the old. The page shows the old record as stale, and refuses one edited after it
 was sealed. In the clean-install test, the installed command records a community adapter from the
 consumer project, verifies it again, and lists it.
+
+The same community adapter reaches the page from its own CI, against stand-ins for npm and for where
+it publishes: a passing record, published, is gathered and listed passing, with nothing in this
+repository changed; a release of it that breaks the contract is recorded by its CI as failing, and
+the next gather turns its row red. A record edited after it was sealed is refused and the last one
+kept, as it is while its source is down; while npm cannot be searched the gather fails and changes
+nothing, and a package npm no longer lists leaves the page.
 
 The clean-install test builds an adapter the way an outside package would. It is a vector store
 written in plain JavaScript inside the consumer project, importing nothing but
@@ -194,5 +255,7 @@ A deliberately broken store fails exactly the checks it breaks.
   local stand-in, not in a unit test without one.
 - Credentials belong in the configuration passed to `create()` and `verify()`, never in the
   definition, which an adapter package publishes.
-- A community adapter's record reaches the compatibility page by a pull request: it is not gathered
-  from the adapter's own CI.
+- A gathered record is trusted to be what its package's own CI recorded: it is checked for its seal and
+  its package, and served from the URL the package names, but its checks are not run again here.
+- The community page is published to the `compatibility` branch daily, so a record its CI published
+  reaches it within a day.

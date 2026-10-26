@@ -317,6 +317,8 @@ const imports = [
       'compatibilityPage',
       'ADAPTER_CONTRACTS',
       'CompatibilityRecordError',
+      'gatherRecords',
+      'ADAPTER_KEYWORD',
     ],
   },
   { specifier: 'nexus-ai-pro/next', exports: ['createNexusRouteHandler'] },

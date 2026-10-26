@@ -19,7 +19,7 @@
     "version": 2
   },
   "nexusVersion": "2.20.2",
-  "verifiedAt": "2026-10-24T18:01:26.957Z",
+  "verifiedAt": "2026-10-26T16:16:48.521Z",
   "runtime": "node 24.22.1 win32 x64",
   "compatible": true,
   "passed": true,
@@ -81,12 +81,12 @@
     "add": {
       "calls": 4,
       "p50Ms": 0.02,
-      "p95Ms": 0.3
+      "p95Ms": 0.32
     },
     "search": {
       "calls": 9,
-      "p50Ms": 0.03,
-      "p95Ms": 0.16
+      "p50Ms": 0.02,
+      "p95Ms": 0.17
     },
     "searchVector": {
       "calls": 1,
@@ -99,5 +99,5 @@
       "p95Ms": 0.01
     }
   },
-  "digest": "7e027cb003d5deab51e38bc23272498db0b3ca7bd17a2b90a97d51d060bf82b4"
+  "digest": "7ca367dcf708f4a12fa0bf537a91adc6a9e0ab12be618ee5ca747a8bbd9aa8fa"
 }

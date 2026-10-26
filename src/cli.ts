@@ -496,6 +496,7 @@ Usage:
   nexus adapters verify <module>[#export] [--out record.json] [--package name@version] [--repository url] [--verify spec] [--json]
   nexus adapters page <records|dir...> [--out page.md] [--html] [--title t] [--intro text] [--expect page.md] [--check] [--strict]
   nexus adapters recheck <records|dir...> [--out dir] [--update] [--json]
+  nexus adapters gather --out <dir> [--keyword nexus-ai-pro-adapter | --no-keyword] [--sources sources.json] [--registry url] [--json]
   nexus policy check <policy.json> [--base <policy.json>|git:<ref>] [--accept path,path] [--json]
   nexus optimize [request.json|prompt.txt] [--model gpt-5-mini] [--max-input-tokens 4000] [--densify] [--json]
 
@@ -511,6 +512,7 @@ Database modules for "db status" and "db migrate" export { client }, and optiona
 "graph lint" reads a compiled graph's shape and exits 1 on an error finding, or on a warning with --strict.
 "adapters verify" exits 1 when the adapter does not pass; its module exports { adapter, config, options, record, close }.
 "adapters recheck" verifies each listed adapter again and exits 1 when one that passed no longer does; "adapters page --check" exits 1 on a failing or incompatible record, --strict on a stale one too.
+"adapters gather" fetches the records adapters' own CI publishes, found on npm by keyword or listed in --sources, keeps only those sealed and naming their package, and never runs them.
 "policy check" exits 1 when the policy is not valid, or, against --base, when a change that widens what a tenant may reach is not acknowledged.`);
 }
 
