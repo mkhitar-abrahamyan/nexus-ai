@@ -136,6 +136,8 @@ interface OpenAIResponsesCreateParams {
   parallel_tool_calls?: boolean;
   reasoning?: { effort?: string; summary?: string };
   stream?: boolean;
+  top_logprobs?: number;
+  include?: string[];
 }
 
 interface OpenAIResponseUsage {
@@ -511,11 +513,13 @@ export class OpenAIProvider extends BaseProvider {
       await this.requestOptions(request, context),
     );
     const toolCalls = this.extractResponsesToolCalls(result);
+    const logprobs = request.logprobs ? responsesLogprobs(result) : undefined;
 
     return {
       content: this.extractResponsesText(result),
       role: 'assistant',
       toolCalls: toolCalls.length ? toolCalls : undefined,
+      ...(logprobs ? { logprobs } : {}),
       finishReason: toolCalls.length ? 'tool_calls' : this.mapResponsesFinishReason(result.status),
       meta: this.createMeta(result.model || request.model, Date.now() - startTime, responsesUsage(result.usage)),
     };
@@ -658,6 +662,13 @@ export class OpenAIProvider extends BaseProvider {
           strict: true,
         },
       };
+    }
+
+    // The Responses API reports log probabilities when asked to include them, with up to 20
+    // alternatives a token, as Chat Completions does.
+    if (request.logprobs && this.reportsLogprobs()) {
+      params.include = ['message.output_text.logprobs'];
+      if (request.logprobs.top) params.top_logprobs = Math.min(20, Math.max(0, Math.floor(request.logprobs.top)));
     }
 
     return params;
@@ -933,6 +944,14 @@ function mapResponsesToolChoice(choice: ToolChoice | undefined): unknown {
 }
 
 /** A chat completion's token log probabilities, in the package's shape. */
+/** The log probabilities of a response's text, in the order its text parts come, as Chat Completions reports them. */
+function responsesLogprobs(result: OpenAIResponse): TokenLogprob[] | undefined {
+  const parts = asArray(result.output)
+    .flatMap((item) => getArray(item, 'content'))
+    .filter((part) => isRecord(part) && asString(part.type) === 'output_text');
+  return chatLogprobs(parts.flatMap((part) => getArray(part, 'logprobs')) as Parameters<typeof chatLogprobs>[0]);
+}
+
 function chatLogprobs(
   content:
     | Array<{ token?: string; logprob?: number; top_logprobs?: Array<{ token?: string; logprob?: number }> }>

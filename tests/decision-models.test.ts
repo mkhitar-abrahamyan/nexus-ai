@@ -82,6 +82,85 @@ test('OpenAI and the OpenAI-compatible providers ask for log probabilities, and 
   }
 });
 
+test('OpenAI’s Responses API is asked for log probabilities too, read from each text part, so a decision there is one call, not samples', async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  const provider = new OpenAIProvider({ apiKey: 'k' });
+  (provider as unknown as { client: unknown }).client = {
+    responses: {
+      async create(params: Record<string, unknown>) {
+        sent.push(params);
+        const reported = params.include !== undefined;
+        return {
+          model: 'gpt-5.5-pro',
+          status: 'completed',
+          output: [
+            { type: 'reasoning', summary: [] },
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'Y',
+                  ...(reported
+                    ? {
+                        logprobs: [
+                          {
+                            token: 'Y',
+                            bytes: [89],
+                            logprob: Math.log(0.7),
+                            top_logprobs: [
+                              { token: 'Y', bytes: [89], logprob: Math.log(0.7) },
+                              { token: 'N', bytes: [78], logprob: Math.log(0.25) },
+                            ],
+                          },
+                        ],
+                      }
+                    : {}),
+                },
+                {
+                  type: 'output_text',
+                  text: '.',
+                  ...(reported
+                    ? { logprobs: [{ token: '.', bytes: [46], logprob: Math.log(0.99), top_logprobs: [] }] }
+                    : {}),
+                },
+              ],
+            },
+          ],
+        };
+      },
+    },
+  };
+  const response = await provider.complete({ ...ask, model: 'gpt-5.5-pro' });
+  assert.deepEqual(
+    [sent[0]?.include, sent[0]?.top_logprobs],
+    [['message.output_text.logprobs'], 20],
+    'asked to include them, at most twenty alternatives',
+  );
+  assert.deepEqual(response.logprobs, [
+    {
+      token: 'Y',
+      logprob: Math.log(0.7),
+      top: [
+        { token: 'Y', logprob: Math.log(0.7) },
+        { token: 'N', logprob: Math.log(0.25) },
+      ],
+    },
+    { token: '.', logprob: Math.log(0.99) },
+  ] satisfies TokenLogprob[]);
+  const unasked = await provider.complete({ ...ask, model: 'gpt-5.5-pro', logprobs: undefined });
+  assert.deepEqual([sent[1]?.include, sent[1]?.top_logprobs, unasked.logprobs], [undefined, undefined, undefined]);
+
+  const decisions = completionDecisions(provider, { model: 'gpt-5.5-pro' });
+  const decided = await new DecisionManager({ providers: { pro: decisions } }).decide({
+    state: 'The invoice was paid.',
+    questions: { paid: { type: 'yes-no' } },
+  });
+  close(decided.answers.paid.probability, 0.7 / 0.95, 'read from the code’s alternatives');
+  assert.equal(decided.usage?.calls, 1, 'one call');
+  assert.equal(decisions.sampledModels.has('gpt-5.5-pro'), false, 'and not sampled');
+});
+
 test('Gemini asks for log probabilities, and reads each chosen token with its alternatives', async () => {
   const original = globalThis.fetch;
   let body: Record<string, unknown> = {};

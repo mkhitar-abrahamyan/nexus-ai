@@ -45,6 +45,11 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   would change for a deployment. `TraceStore.durable` marks a store whose runs live only in the
   process, as `MemoryTraceStore`'s.
 
+- OpenAI's models on the Responses API, such as `gpt-5.5-pro`, report token log probabilities when a
+  request asks for them, as its chat models do: the request includes `message.output_text.logprobs`
+  with up to 20 alternatives a token, and each text part's are read back. A typed decision asked of
+  one is read from them in one call, rather than sampled; a model that refuses them is still sampled.
+
 ### Fixed
 
 - The compatibility page writes a record as text: an adapter links to its repository only at an
