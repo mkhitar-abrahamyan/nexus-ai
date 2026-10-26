@@ -338,15 +338,16 @@ Shipped so far:
   a person when it is not;
 - 2.20 tools read from a service's own OpenAPI document, which an agent calls or an emulator plays,
   an emulator that holds what a whole evaluation did so examples that build on each other are
-  evaluated with nothing sent, and one A2A handler serving many tenants, each seeing only its own.
+  evaluated with nothing sent, and one A2A handler serving many tenants, each seeing only its own;
+- 2.21 typed decisions about pictures, a yes or no, a choice, a score, or a box around something in
+  one, from TypeSafe AI's Jev or any vision model; community adapters' compatibility records gathered
+  from their own CI, a failing one turning red; and 3.0's defaults behind one switch today.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, 2.21 asks typed decisions about pictures, and gathers community adapters' compatibility
-records from their own CI.
-Pinecone, images, the Gemini
-embedding batch tier, media understanding, video, Gemini Live, SIP, and both phone providers
-graduate once the live workflow passes against each. The
+Next, in 2.22, Pinecone, images, the Gemini embedding batch tier, media understanding, video, typed
+decisions, Gemini Live, SIP, and both phone providers graduate once the live workflow passes against
+each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order
 applications ask for it.
 

@@ -4,6 +4,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-10-26
+
+Typed decisions about pictures, compatibility records gathered from community adapters' own CI, and
+3.0's defaults behind one switch today; with log probabilities from OpenAI's Responses API, and a card
+of its own for each tenant of an A2A agent.
+
 ### Added
 
 - **Decisions about pictures.** A decision's state may hold pictures, as image parts or image assets
@@ -3355,7 +3361,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.2...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.21.0...HEAD
+[2.21.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.2...v2.21.0
 [2.20.2]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.1...v2.20.2
 [2.20.1]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.0...v2.20.1
 [2.20.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.19.0...v2.20.0

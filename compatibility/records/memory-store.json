@@ -16,14 +16,14 @@
     "kind": "store",
     "version": 1
   },
-  "nexusVersion": "2.20.2",
-  "verifiedAt": "2026-10-26T16:16:48.376Z",
+  "nexusVersion": "2.21.0",
+  "verifiedAt": "2026-10-26T16:43:00.176Z",
   "runtime": "node 24.22.1 win32 x64",
   "compatible": true,
   "passed": true,
   "checks": [
     {
-      "name": "declares support for nexus-ai-pro 2.20.2",
+      "name": "declares support for nexus-ai-pro 2.21.0",
       "ok": true
     },
     {
@@ -63,22 +63,22 @@
     "put": {
       "calls": 5,
       "p50Ms": 0.01,
-      "p95Ms": 0.81
+      "p95Ms": 0.7
     },
     "get": {
       "calls": 5,
       "p50Ms": 0,
-      "p95Ms": 0.04
+      "p95Ms": 0.03
     },
     "delete": {
       "calls": 1,
-      "p50Ms": 0.02,
-      "p95Ms": 0.02
+      "p50Ms": 0.01,
+      "p95Ms": 0.01
     },
     "search": {
       "calls": 3,
-      "p50Ms": 0.06,
-      "p95Ms": 0.12
+      "p50Ms": 0.05,
+      "p95Ms": 0.11
     },
     "listNamespaces": {
       "calls": 1,
@@ -86,5 +86,5 @@
       "p95Ms": 0.04
     }
   },
-  "digest": "badd24bfb542f46f5e34457275d3ea720dedb4e70d70e7dbf102550b908940c8"
+  "digest": "d272352d1d4f59d391616758c0dff50c628af2c0141d6d3252fb69fc713a5625"
 }
