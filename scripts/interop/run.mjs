@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Each agent protocol against the reference client of its own project: `@ag-ui/client` drives the
- * AG-UI handler, `@a2a-js/sdk` the A2A agent over each of its three bindings, and
+ * AG-UI handler, `@a2a-js/sdk` the A2A agent over each of its three bindings, and for several tenants, and
  * `@agentclientprotocol/sdk` an ACP agent it starts as an editor would, offering it MCP servers built
  * with `@modelcontextprotocol/sdk` over stdio, HTTP, and SSE. Run nightly, against the clients' latest releases, so a change on their side
  * shows up before a user finds it.
@@ -289,6 +289,104 @@ const check = (label, condition, detail = '') => {
     );
   } catch (error) {
     failures.push(`A2A: ${error?.stack ?? error}`);
+  } finally {
+    await server.close();
+    await grpc.close();
+  }
+}
+
+// ── A2A, for several tenants ───────────────────────────────────────
+
+// One handler serving tenants: the reference client reads a tenant's own card, whose every interface
+// names the tenant, and calls as that tenant over each binding; a tenant it may not act for is refused.
+// The card is resolved relative to the URL the client is given, so a tenant's ends in a slash.
+{
+  const { ClientFactory, ClientFactoryOptions } = await load('@a2a-js/sdk/client');
+  const { GrpcTransportFactory } = await load('@a2a-js/sdk/client/grpc');
+  const { ListTasksRequest, Message, Task } = await load('@a2a-js/sdk');
+  let handler;
+  const routes = new Set();
+  const overGrpc = new Set();
+  const server = await serve((request) => {
+    routes.add(new URL(request.url).pathname);
+    return handler(request);
+  });
+  const grpc = await a2aGrpcService({
+    call: (method, params, context) => {
+      if (typeof params?.tenant === 'string') overGrpc.add(params.tenant);
+      return handler.call(method, params, context);
+    },
+    authenticate: (request) => handler.authenticate(request),
+  }).listen(0);
+  handler = a2aHandler(mailer(), {
+    card: {
+      name: 'Tenant mailer',
+      description: 'Sends mail for its tenants',
+      version: '1.0.0',
+      url: `${server.url}/a2a`,
+      skills: [],
+    },
+    interfaces: [{ url: grpc.url, protocolBinding: 'GRPC' }],
+    // Nobody is authenticated here: the stand-in lets anyone act for acme, and no other tenant.
+    tenants: { authorize: (tenant) => tenant === 'acme' },
+  });
+  const clientFor = (where, binding) =>
+    new ClientFactory(
+      ClientFactoryOptions.createFrom(ClientFactoryOptions.default, {
+        transports: [new GrpcTransportFactory()],
+        preferredTransports: [binding],
+      }),
+    ).createFromUrl(where);
+  const message = (text, taskId) =>
+    Message.fromJSON({
+      messageId: `m-${Math.random()}`,
+      role: 'ROLE_USER',
+      parts: [{ text }],
+      ...(taskId ? { taskId } : {}),
+    });
+  const asJson = (result) => Task.toJSON(result.task ?? result.payload?.value ?? result);
+  const refusal = async (send) => {
+    try {
+      await send();
+      return '';
+    } catch (error) {
+      return String(error?.message ?? error);
+    }
+  };
+  try {
+    const started = [];
+    for (const binding of ['JSONRPC', 'HTTP+JSON', 'GRPC']) {
+      const acme = await clientFor(`${server.url}/acme/`, binding);
+      const paused = asJson(await acme.sendMessage({ message: message('Email Ana') }));
+      const done = asJson(await acme.sendMessage({ message: message('yes', paused.id) }));
+      check(
+        `A2A tenants ${binding}: a task runs as the tenant its card names`,
+        done.id === paused.id && done.status?.state === 'TASK_STATE_COMPLETED',
+        JSON.stringify(done.status),
+      );
+      started.push(paused.id);
+      const globex = await clientFor(`${server.url}/globex/`, binding);
+      const refused = await refusal(() => globex.sendMessage({ message: message('Email Rui') }));
+      check(`A2A tenants ${binding}: a tenant it may not act for is refused`, refused !== '', 'it answered');
+      const untenanted = await clientFor(server.url, binding);
+      const unnamed = await refusal(() => untenanted.sendMessage({ message: message('Email Rui') }));
+      check(`A2A tenants ${binding}: a call naming no tenant is refused`, unnamed !== '', 'it answered');
+    }
+    const listed = await (await clientFor(`${server.url}/acme/`, 'HTTP+JSON')).listTasks(ListTasksRequest.fromJSON({}));
+    const ids = (listed.tasks ?? []).map((task) => task.id);
+    check(
+      'A2A tenants: the tenant lists the tasks it started over every binding, and only those',
+      started.every((id) => ids.includes(id)) && ids.length === started.length,
+      ids.join(','),
+    );
+    check(
+      'A2A tenants: HTTP+JSON named the tenant in the path',
+      routes.has('/a2a/acme/message:send'),
+      [...routes].join(','),
+    );
+    check('A2A tenants: gRPC named the tenant', overGrpc.has('acme'), [...overGrpc].join(','));
+  } catch (error) {
+    failures.push(`A2A tenants: ${error?.stack ?? error}`);
   } finally {
     await server.close();
     await grpc.close();

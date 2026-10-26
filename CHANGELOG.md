@@ -50,6 +50,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   with up to 20 alternatives a token, and each text part's are read back. A typed decision asked of
   one is read from them in one call, rather than sampled; a model that refuses them is still sampled.
 
+- With `tenants`, an A2A handler serves each tenant a card of its own at
+  `/{tenant}/.well-known/agent-card.json`, every interface naming the tenant, so a client that reads it,
+  such as the A2A project's reference client, calls as that tenant over each binding. The nightly
+  interoperability run drives a tenant through `@a2a-js/sdk` over JSON-RPC, HTTP+JSON, and gRPC, and
+  checks that a tenant it may not act for, and a call naming none, are refused.
+
 ### Fixed
 
 - The compatibility page writes a record as text: an adapter links to its repository only at an

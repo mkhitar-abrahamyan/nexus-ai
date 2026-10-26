@@ -92,7 +92,10 @@ was retried before or is now. A provider of your own that reads pictures declare
 without it, a decision about a picture is not sent to it. A union over `DecisionQuestionType` or
 `DecisionAnswer` that handled three kinds now meets a fourth, `box`. `compatibilityPage()` writes a
 repository that is not an `http` or `https` address as text, not a link, and escapes a record's
-Markdown. A doctor report has one more check, `upgrade`, skipped unless asked for.
+Markdown. A doctor report has one more check, `upgrade`, skipped unless asked for. With `tenants`, an
+A2A handler answers `/{tenant}/.well-known/agent-card.json` with that tenant's card, where it answered
+the card itself; without `tenants`, nothing changes. A model on OpenAI's Responses API is sent
+`include` and `top_logprobs` when a request asks for log probabilities, which it was not before.
 
 ## 2.20 stage (2.20.0)
 

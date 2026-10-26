@@ -1541,12 +1541,33 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
     return Response.json(outcome.result ?? {});
   };
 
+  /**
+   * The card, or with several tenants, a tenant's own, asked for under its path: at
+   * `/{tenant}/.well-known/agent-card.json`, from the root or under the card's URL, every interface names
+   * the tenant, so a client that reads it calls as that tenant over whichever binding it picks.
+   */
+  const cardFor = (prefix: string): A2aAgentCard => {
+    if (!tenancy) return card;
+    const rest = base && (prefix === base || prefix.startsWith(`${base}/`)) ? prefix.slice(base.length) : prefix;
+    const segment = /^\/([^/]+)$/.exec(rest)?.[1];
+    if (!segment) return card;
+    let tenant: string;
+    try {
+      tenant = decodeURIComponent(segment);
+    } catch {
+      return card;
+    }
+    return {
+      ...card,
+      supportedInterfaces: card.supportedInterfaces.map((item) => (item.tenant ? item : { ...item, tenant })),
+    };
+  };
+
   const handle = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     if (request.method === 'GET') {
-      if (url.pathname.endsWith('/.well-known/agent-card.json') || url.pathname.endsWith('/agent-card.json')) {
-        return Response.json(card);
-      }
+      const asked = /^(.*?)\/(?:\.well-known\/)?agent-card\.json$/.exec(url.pathname);
+      if (asked) return Response.json(cardFor(asked[1] as string));
     }
     // Under the card's URL, a route of the HTTP+JSON binding; the URL itself, or any other path a
     // POST reaches, JSON-RPC, as it always was.

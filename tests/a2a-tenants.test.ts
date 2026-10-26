@@ -358,6 +358,59 @@ test('a client names its interface’s tenant on every request: in the params, i
   });
 });
 
+test('a tenant’s own card names it on every interface, so a client that reads it calls as that tenant', async () => {
+  const cardAt = async (path: string) => (await (await fetch(`${http.origin}${path}`)).json()) as A2aAgentCard;
+  const tenants = (card: A2aAgentCard) => card.supportedInterfaces.map((item) => item.tenant);
+  assert.deepEqual(
+    tenants(await cardAt('/.well-known/agent-card.json')),
+    [undefined, undefined],
+    'the card itself names none',
+  );
+  assert.deepEqual(tenants(await cardAt('/a2a/agent-card.json')), [undefined, undefined]);
+  assert.deepEqual(tenants(await cardAt('/acme/.well-known/agent-card.json')), ['acme', 'acme'], 'at the root');
+  assert.deepEqual(tenants(await cardAt('/a2a/globex/agent-card.json')), ['globex', 'globex'], 'under the card’s URL');
+  assert.deepEqual(tenants(await cardAt('/acme%2Feu/.well-known/agent-card.json')), ['acme/eu', 'acme/eu'], 'decoded');
+  assert.deepEqual(
+    tenants(await cardAt('/a/b/.well-known/agent-card.json')),
+    [undefined, undefined],
+    'one segment only',
+  );
+  assert.deepEqual(
+    tenants(await cardAt('/%E0%A4%A/.well-known/agent-card.json')),
+    [undefined, undefined],
+    'not a tenant',
+  );
+
+  // A client given the tenant's card calls as the tenant, over each binding, naming no tenant itself.
+  for (const binding of ['JSONRPC', 'HTTP+JSON'] as const) {
+    const client = a2aClient({
+      url: `${http.origin}/acme/.well-known/agent-card.json`,
+      binding,
+      headers: bearer('acme-key'),
+    });
+    assert.equal(answerOf(await client.send('Hello')), 'for acme, turn 1', binding);
+  }
+  // Without tenants, a path that looks like a tenant's is the card, as before.
+  const single = a2aHandler(whoAmIAgent(), {
+    card: { name: 'One', description: 'One tenant', version: '1.0.0', url: 'https://one.example.com/a2a', skills: [] },
+    interfaces: [{ url: 'one.example.com:443', protocolBinding: 'GRPC' }],
+  });
+  const plain = (await (
+    await single(new Request('https://one.example.com/acme/.well-known/agent-card.json'))
+  ).json()) as A2aAgentCard;
+  assert.deepEqual(tenants(plain), [undefined, undefined, undefined]);
+  // An interface that names its own tenant keeps it on a tenant's card.
+  const own = a2aHandler(whoAmIAgent(), {
+    card: { name: 'Own', description: 'Own tenant', version: '1.0.0', url: 'https://own.example.com/a2a', skills: [] },
+    interfaces: [{ url: 'own.example.com:443', protocolBinding: 'GRPC', tenant: 'fixed' }],
+    tenants: true,
+  });
+  const ownCard = (await (
+    await own(new Request('https://own.example.com/acme/.well-known/agent-card.json'))
+  ).json()) as A2aAgentCard;
+  assert.deepEqual(tenants(ownCard), ['acme', 'acme', 'fixed']);
+});
+
 test('over gRPC, a card’s security schemes, requirements, and signatures read as its JSON has them', async () => {
   const security: Pick<A2aAgentCard, 'securitySchemes' | 'securityRequirements' | 'signatures'> = {
     securitySchemes: {

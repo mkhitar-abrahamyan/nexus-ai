@@ -383,6 +383,13 @@ A client names a tenant on every request, as the specification requires: `A2aCli
 else the tenant of the interface the card lists for its binding. `a2aGrpcClient()` takes the same
 option.
 
+Each tenant has a card of its own, at `/{tenant}/.well-known/agent-card.json`, from the root or under the
+card's URL: the same card, every interface naming the tenant, so a client that reads it calls as that
+tenant over whichever binding it picks, this package's and the A2A project's reference client alike.
+An interface that names its own tenant keeps it. Give a client the tenant's card, or, for one that
+resolves the card from a base URL, the tenant's base ending in a slash, such as
+`https://agents.example.com/acme/`. Without `tenants`, every such path is the card itself, as before.
+
 ### Calling other agents
 
 `a2aClient()` talks to any A2A agent, over JSON-RPC or, with `binding: 'HTTP+JSON'`, over HTTP+JSON.
