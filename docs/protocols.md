@@ -645,8 +645,8 @@ Each protocol is also tested across releases and against the reference client of
   crash, so a tool with side effects needs an idempotency key. A slow replica that loses its lease
   stops its run, but a tool already running finishes.
 - **A2A cards.** A card's signatures are carried as given, neither computed nor checked: a signature
-  must be over the card as it is served, its interfaces included. One handler serves one card; with
-  `tenants`, list an interface naming a tenant in `interfaces` when its callers need one.
+  must be over the card as it is served, its interfaces included. One handler serves one card, and with
+  `tenants`, one more a tenant, at the tenant's path.
 - **ACP turns.** A turn goes on when the editor reopens its session, not before; one the agent stops
   in again while carrying it on goes on at the next reopening. A step that was halfway through when
   the agent stopped runs again, so a tool with side effects needs an idempotency key.

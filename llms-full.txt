@@ -1643,8 +1643,8 @@ price raised tenfold in a supplied file makes the next call cost ten times as mu
   models, and a changed price is still checked against the provider's pricing page.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
-- Log probabilities come from `complete()` through Chat Completions, Gemini, or Ollama: not from a
-  stream, the Responses API, Anthropic, Cohere, Groq, or Mistral.
+- Log probabilities come from `complete()` through Chat Completions, OpenAI's Responses API, Gemini, or
+  Ollama: not from a stream, Anthropic, Cohere, Groq, or Mistral.
 
 ---
 
@@ -4727,8 +4727,8 @@ Each protocol is also tested across releases and against the reference client of
   crash, so a tool with side effects needs an idempotency key. A slow replica that loses its lease
   stops its run, but a tool already running finishes.
 - **A2A cards.** A card's signatures are carried as given, neither computed nor checked: a signature
-  must be over the card as it is served, its interfaces included. One handler serves one card; with
-  `tenants`, list an interface naming a tenant in `interfaces` when its callers need one.
+  must be over the card as it is served, its interfaces included. One handler serves one card, and with
+  `tenants`, one more a tenant, at the tenant's path.
 - **ACP turns.** A turn goes on when the editor reopens its session, not before; one the agent stops
   in again while carrying it on goes on at the next reopening. A step that was halfway through when
   the agent stopped runs again, so a tool with side effects needs an idempotency key.
@@ -5243,8 +5243,9 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
 - A run keeps at most `maxEventsPerRun` events; the rest are counted, not kept. A model run's events
   from its response, other than failed attempts, carry the time the response came back.
 - Without `writeAhead`, the runs waiting to be batched, at most `flushIntervalMs` of them, are lost
-  with a process that stops before it sends them; what the collector refused is not. Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a
-  `RollupStore` of your own.
+  with a process that stops before it sends them; what the collector refused is not.
+- Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a `RollupStore`
+  of your own.
 - An alert measures up to 1,000 runs in its window unless its filter sets a larger `limit`.
 - Cost alerts sum every run in the window, so give a `filter` such as `{ kind: 'model' }` when
   parent runs also record cost.
@@ -7916,7 +7917,6 @@ cost only when it can price the call in dollars.
   moment; `algorithm: 'gcra'` does not. GCRA through Redis needs `eval`.
 - Health comes from calls. Without `observationTtlMs`, a provider that receives no traffic keeps its last
   score; with it, an idle provider is `unknown` until a call or `checkProviders()` says more.
-- rate limiting
 
 ---
 
@@ -13857,7 +13857,8 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   `expectedVersion` and retry a conflict.
 - A replica that dies loses the runs it counted in its last `rollupMs`. The run records stay whole.
 - `fnv1a-v1` stays the default bucket strategy through 2.x, so a deployment keyed by sequential ids
-  needs `bucketStrategy: 'hash-v2'` to split them evenly.
+  needs `bucketStrategy: 'hash-v2'` to split them evenly, or the preview of 3.0's defaults,
+  `useDefaults('3.0')`, which records a new deployment with it.
 - A worker of 2.4 or earlier claims a run of any revision, and runs its live revision when it lacks
   the one routed. Finish a rollout from 2.4 before images start carrying different revisions.
 - A replica that both serves the API and claims runs routes a run it has room for only among its own

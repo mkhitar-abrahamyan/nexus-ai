@@ -501,8 +501,9 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
 - A run keeps at most `maxEventsPerRun` events; the rest are counted, not kept. A model run's events
   from its response, other than failed attempts, carry the time the response came back.
 - Without `writeAhead`, the runs waiting to be batched, at most `flushIntervalMs` of them, are lost
-  with a process that stops before it sends them; what the collector refused is not. Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a
-  `RollupStore` of your own.
+  with a process that stops before it sends them; what the collector refused is not.
+- Rollups come as `MemoryRollupStore` and `PostgresRollupStore`; another database's is a `RollupStore`
+  of your own.
 - An alert measures up to 1,000 runs in its window unless its filter sets a larger `limit`.
 - Cost alerts sum every run in the window, so give a `filter` such as `{ kind: 'model' }` when
   parent runs also record cost.

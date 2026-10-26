@@ -599,7 +599,8 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   `expectedVersion` and retry a conflict.
 - A replica that dies loses the runs it counted in its last `rollupMs`. The run records stay whole.
 - `fnv1a-v1` stays the default bucket strategy through 2.x, so a deployment keyed by sequential ids
-  needs `bucketStrategy: 'hash-v2'` to split them evenly.
+  needs `bucketStrategy: 'hash-v2'` to split them evenly, or the preview of 3.0's defaults,
+  `useDefaults('3.0')`, which records a new deployment with it.
 - A worker of 2.4 or earlier claims a run of any revision, and runs its live revision when it lacks
   the one routed. Finish a rollout from 2.4 before images start carrying different revisions.
 - A replica that both serves the API and claims runs routes a run it has room for only among its own

@@ -324,8 +324,8 @@ price raised tenfold in a supplied file makes the next call cost ten times as mu
   models, and a changed price is still checked against the provider's pricing page.
 - An option a model does not declare passes through untouched, so a registry that does not know a
   feature never blocks it; it also never warns about it.
-- Log probabilities come from `complete()` through Chat Completions, Gemini, or Ollama: not from a
-  stream, the Responses API, Anthropic, Cohere, Groq, or Mistral.
+- Log probabilities come from `complete()` through Chat Completions, OpenAI's Responses API, Gemini, or
+  Ollama: not from a stream, Anthropic, Cohere, Groq, or Mistral.
 
 <!-- reference:start -->
 ## Reference

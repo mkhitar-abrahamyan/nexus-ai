@@ -353,7 +353,6 @@ cost only when it can price the call in dollars.
   moment; `algorithm: 'gcra'` does not. GCRA through Redis needs `eval`.
 - Health comes from calls. Without `observationTtlMs`, a provider that receives no traffic keeps its last
   score; with it, an idle provider is `unknown` until a call or `checkProviders()` says more.
-- rate limiting
 
 <!-- reference:start -->
 ## Reference
