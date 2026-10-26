@@ -40,6 +40,8 @@ export async function runDoctorCommand({ flags }: ParsedArgs): Promise<void> {
   if (replicas !== undefined) options.deployment = { ...options.deployment, replicas };
   const maxQueueAgeMs = numberFlag(flags, 'max-queue-age-ms');
   if (maxQueueAgeMs !== undefined) options.maxQueueAgeMs = maxQueueAgeMs;
+  const upgrade = stringFlag(flags, 'upgrade');
+  if (upgrade !== undefined) options.upgrade = upgrade as DoctorOptions['upgrade'];
 
   let report: DoctorReport;
   try {

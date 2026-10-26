@@ -267,3 +267,5 @@ export function createNexusConfig(seed: Partial<NexusAIConfig> = {}): NexusConfi
 export function defineNexusConfig(config: NexusAIConfig): NexusAIConfig {
   return config;
 }
+
+export { DEFAULT_CHANGES, type DefaultChange, type NexusDefaults, nexusDefaults, useDefaults } from './defaults.js';

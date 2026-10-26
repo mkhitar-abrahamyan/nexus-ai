@@ -5,6 +5,7 @@ import type {
   OperationStoreFilter,
   OperationStoreStats,
 } from '../types/operations.js';
+import { nexusDefaults } from '../core/defaults.js';
 import { isTerminalOperationStatus, TERMINAL_OPERATION_STATUSES } from '../types/operations.js';
 import { OperationDuplicateError } from './errors.js';
 import { assertSerializableRecord } from './serialization.js';
@@ -136,6 +137,7 @@ export interface RedisOperationStoreOptions {
    *
    * Off by default, because a 2.1 worker writes records without index entries. Turn it on once every
    * worker sharing the prefix runs 2.2, then call `reindex()` once to index what is already there.
+   * Under 3.0's defaults, `useDefaults('3.0')`, on where the client has the commands it needs.
    * Needs `zadd`, `zrem`, and `zrangebyscore`; with `eval`, a record and its index entries change in
    * one step.
    */
@@ -162,7 +164,9 @@ export class RedisOperationStore<TResult = unknown> implements OperationStore<TR
   ) {
     this.prefix = options.prefix ?? 'nexus-ai-pro:operations:';
     this.useEval = options.useEval !== false && typeof client.eval === 'function';
-    this.indexed = options.index === true;
+    // 3.0's defaults index where the client can; asked for explicitly, a client that cannot is refused.
+    this.indexed =
+      options.index ?? (nexusDefaults() === '3.0' && Boolean(client.zadd && client.zrem && client.zrangebyscore));
     if (this.indexed && !(client.zadd && client.zrem && client.zrangebyscore)) {
       throw new TypeError('A Redis operation store with index: true needs zadd, zrem, and zrangebyscore');
     }

@@ -7,6 +7,7 @@
  * is loaded only when its check runs, so an application can call `diagnose()` at boot or from a
  * health endpoint.
  */
+import { nexusDefaults } from '../core/defaults.js';
 import type { NexusAIConfig } from '../types/config.js';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -97,6 +98,12 @@ export interface DoctorOptions {
   models?: NexusAIConfig['models'];
   /** How the application is deployed. */
   deployment?: DoctorDeployment;
+  /**
+   * A release to check readiness for: `3.0` lists, for the stores `deployment` describes, what 3.0's
+   * defaults would change and what to do first, or confirms the preview of them is on. Without it, the
+   * check is skipped.
+   */
+  upgrade?: '3.0';
   /** Replaces the clock, for tests. */
   now?: () => Date;
 }
@@ -170,6 +177,7 @@ export async function diagnose(options: DoctorOptions = {}): Promise<DoctorRepor
   await run('health', 'Provider health', () => healthCheck(options.ai));
   await run('topology', 'Settings that only work in one process', () => topologyCheck(options.deployment));
   await run('settings', 'Opt-in settings a deployment needs', () => settingsCheck(options.deployment));
+  await run('upgrade', 'What 3.0 changes', () => upgradeCheck(options.upgrade, options.deployment));
 
   const failures = checks.filter((check) => check.status === 'fail').length;
   const warnings = checks.filter((check) => check.status === 'warn').length;
@@ -406,6 +414,59 @@ function settingsCheck(deployment: DoctorDeployment | undefined): Omit<DoctorChe
   }
   if (findings.length === 0) return { status: 'ok', detail: 'No store lacks a setting a deployment needs.' };
   return { status: 'warn', detail: `${findings.join('; ')}.`, hint: [...hints].join(' ') };
+}
+
+/**
+ * What 3.0's defaults would change for the stores described: a tracer on a durable store that writes
+ * at the end, a Redis operation store without its index, and assistants whose deployments are not yet
+ * recorded, which 3.0 would first record with `hash-v2`. An option set explicitly is kept by 3.0, so
+ * each finding says how to keep 2.x's behaviour too.
+ */
+async function upgradeCheck(
+  upgrade: DoctorOptions['upgrade'],
+  deployment: DoctorDeployment | undefined,
+): Promise<Omit<DoctorCheck, 'id' | 'title'>> {
+  if (upgrade === undefined) return { status: 'skip', detail: 'No release asked about: pass upgrade 3.0.' };
+  if (upgrade !== '3.0') throw new Error(`Readiness is checked for 3.0, not ${JSON.stringify(upgrade)}`);
+  if (nexusDefaults() === '3.0') {
+    return { status: 'ok', detail: "3.0's defaults are on already: what runs here is what 3.0 runs." };
+  }
+  const stores = Object.entries(deployment?.stores ?? {});
+  if (stores.length === 0) return { status: 'skip', detail: 'No stores described.' };
+  const findings: string[] = [];
+  for (const [name, value] of stores) {
+    const kind = kindOf(value);
+    if (kind === 'Tracer') {
+      const tracer = value as { incremental?: unknown; store?: { durable?: unknown } };
+      if (tracer.incremental === false && tracer.store && tracer.store.durable !== false) {
+        findings.push(
+          `${name} writes each trace when its root finishes; 3.0 writes each run as it starts and ends, unless it is created with incremental: false`,
+        );
+      }
+    }
+    if (kind === 'RedisOperationStore' && (value as { indexed?: unknown }).indexed === false) {
+      findings.push(
+        `${name} reads every record to find queued work; 3.0 keeps an index, unless it is created with index: false: first run 2.2 or later on every worker sharing its prefix, and call reindex() once`,
+      );
+    }
+    if (kind === 'Deployments' && typeof (value as { list?: unknown }).list === 'function') {
+      const records = await (
+        value as { list(): Promise<Array<{ assistant: string; version: number; bucketStrategy?: string }>> }
+      ).list();
+      const unrecorded = records.filter((record) => record.version === 0 && record.bucketStrategy === undefined);
+      if (unrecorded.length > 0) {
+        findings.push(
+          `${name} has not yet recorded ${unrecorded.map((record) => record.assistant).join(', ')}; 3.0 would first record ${unrecorded.length === 1 ? 'it' : 'them'} with hash-v2, unless registered with bucketStrategy: 'fnv1a-v1'`,
+        );
+      }
+    }
+  }
+  if (findings.length === 0) return { status: 'ok', detail: "Nothing described here changes under 3.0's defaults." };
+  return {
+    status: 'warn',
+    detail: `${findings.join('; ')}.`,
+    hint: "Run with 3.0's defaults now: call useDefaults('3.0') before creating anything, or set NEXUS_DEFAULTS=3.0.",
+  };
 }
 
 function kindOf(value: unknown): string | undefined {

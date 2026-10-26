@@ -952,6 +952,33 @@ For a full HTTP surface — threads, background runs, resumable streams — see 
 - Guardrails reduce risk; keep server-side authorization and provider moderation around high-impact
   actions, as the [security guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/security.md) says.
 
+## Previewing 3.0's defaults
+
+3.0 turns on three settings that 2.x keeps opt-in, because turning them on changes what an upgrade
+does. One switch turns all three on now, so an application runs as 3.0 will before it upgrades:
+
+```ts
+import { useDefaults } from 'nexus-ai-pro/config';
+
+useDefaults('3.0'); // before creating a tracer, an operation store, or a deployment
+```
+
+or, without a change to the code, `NEXUS_DEFAULTS=3.0` in the environment. `DEFAULT_CHANGES` lists
+each `DefaultChange`: the setting, where it is set, what 2.x does, what 3.0 does, and what to do first.
+
+| Setting | 2.x | 3.0, and the preview |
+| --- | --- | --- |
+| `Tracer` `incremental` | A trace is written when its root run finishes | Each run is written as it starts and ends, on a durable trace store: one whose `durable` is not `false`, as `MemoryTraceStore`'s is |
+| `RedisOperationStore` `index` | Finding queued work reads every record | Queued and leased work is kept in sorted sets, where the client has `zadd`, `zrem`, and `zrangebyscore`; first run 2.2 or later on every worker sharing the prefix, and call `reindex()` once |
+| `Deployments` `bucketStrategy` | `fnv1a-v1` for a deployment first recorded | `hash-v2` for a deployment first recorded; one already recorded keeps its own |
+
+Each is read when the object is created, so switch before creating anything, and on every replica
+together. An option set explicitly wins under either: `incremental: false`, `index: false`, or
+`bucketStrategy: 'fnv1a-v1'` keeps 2.x's behaviour under 3.0 too. `nexusDefaults()` returns the
+`NexusDefaults` in effect, `2.x` or `3.0`, and a value of `NEXUS_DEFAULTS` that is neither is refused
+rather than ignored. `nexus doctor --upgrade 3.0` says what 3.0 would change for a deployment, as the
+[CLI guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md#checking-a-deployment) shows.
+
 ## The registry's types, in passing
 
 The root keeps the types a model entry is made of, which the [providers guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/providers.md)
@@ -14613,20 +14640,22 @@ which suits a deploy step. `migrate --dry-run` prints the statements it would ru
 | Provider health | a provider is stale or unhealthy (warns) |
 | One-process settings | with more than one replica, a store keeps its state in process memory: a memory checkpointer, operation store, server state, or tenant usage fails; a memory rate-limit, circuit, trace, prompt, cache, or rollup store warns |
 | Opt-in settings | a store lacks a setting that stays opt-in through 2.x but that a deployment needs: a `RedisOperationStore` without `index: true`, or a `Tracer` writing to a persistent store without `incremental` (warns, with the setting that fixes it) |
+| What 3.0 changes | with `--upgrade 3.0`, a store whose behaviour 3.0's defaults change: a tracer that writes at the end, a Redis operation store without its index, or an assistant whose deployment is not yet recorded (warns, saying what to do first and how to keep 2.x's behaviour); `ok` once the [preview of 3.0's defaults](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/core.md#previewing-30s-defaults) is on |
 
 Without `--module` it checks what a shell can see. A module reaches the rest, exporting any of
 `database` (or `client`, so a `nexus db` module works unchanged), `redis`, `operations`, `ai`,
 `deployment` (`{ replicas, stores }`), and `close`. `--replicas` sets the replica count. Put the
 application's tracer among the `stores` for the tracing check: `Tracer.store` and
-`Tracer.incremental` are what it reads, and `RedisOperationStore.indexed` for the queue's.
+`Tracer.incremental` are what it reads, and `RedisOperationStore.indexed` for the queue's; with
+`--upgrade 3.0`, a `Deployments` among them is read for the assistants it has not yet recorded.
 
 ```bash
 nexus doctor --module doctor.mjs --strict
 ```
 
 `diagnose()`, on `nexus-ai-pro/doctor`, runs the same checks from code — at boot, or behind a health
-endpoint. `DoctorOptions` takes each input, including a `DoctorDatabase` and a
-`DoctorDeployment`, and it resolves to a `DoctorReport`: every `DoctorCheck` with its `DoctorStatus`
+endpoint. `DoctorOptions` takes each input, including a `DoctorDatabase`, a `DoctorDeployment`, and
+the release to check readiness for as `upgrade`, and it resolves to a `DoctorReport`: every `DoctorCheck` with its `DoctorStatus`
 (`ok`, `warn`, `fail`, or `skip`), detail, and hint, and whether the deployment is `ok`. It never
 throws: a check that cannot run is a failure with the reason, and anything heavy is loaded only when
 its check runs.
@@ -14830,12 +14859,12 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 364 KB | 100% | none |
-| `nexus-ai-pro/config` | 356 KB | 98% | none |
-| `nexus-ai-pro/core` | 352 KB | 97% | none |
+| `nexus-ai-pro` | 365 KB | 100% | none |
+| `nexus-ai-pro/config` | 358 KB | 98% | none |
+| `nexus-ai-pro/core` | 352 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 216 KB | 59% | none |
-| `nexus-ai-pro/deep-agent` | 213 KB | 59% | none |
-| `nexus-ai-pro/server/deployments` | 151 KB | 41% | none |
+| `nexus-ai-pro/deep-agent` | 213 KB | 58% | none |
+| `nexus-ai-pro/server/deployments` | 153 KB | 42% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 142 KB | 39% | none |
 | `nexus-ai-pro/server` | 126 KB | 35% | none |
 | `nexus-ai-pro/batch` | 118 KB | 32% | none |
@@ -14855,7 +14884,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/openrouter` | 88 KB | 24% | none |
 | `nexus-ai-pro/policy` | 85 KB | 23% | none |
 | `nexus-ai-pro/router` | 83 KB | 23% | none |
-| `nexus-ai-pro/graph` | 82 KB | 23% | none |
+| `nexus-ai-pro/graph` | 82 KB | 22% | none |
 | `nexus-ai-pro/images` | 81 KB | 22% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 74 KB | 20% | none |
@@ -14866,8 +14895,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/ollama` | 59 KB | 16% | none |
 | `nexus-ai-pro/adapter-kit` | 59 KB | 16% | none |
 | `nexus-ai-pro/security` | 58 KB | 16% | none |
+| `nexus-ai-pro/operations` | 58 KB | 16% | none |
 | `nexus-ai-pro/video` | 58 KB | 16% | none |
-| `nexus-ai-pro/operations` | 56 KB | 15% | none |
 | `nexus-ai-pro/evaluate/media` | 54 KB | 15% | none |
 | `nexus-ai-pro/evaluate` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 14% | none |
@@ -14883,27 +14912,27 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/voice` | 42 KB | 12% | none |
 | `nexus-ai-pro/embeddings` | 41 KB | 11% | none |
 | `nexus-ai-pro/embeddings/batch` | 41 KB | 11% | none |
+| `nexus-ai-pro/tracing` | 40 KB | 11% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 11% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 11% | none |
 | `nexus-ai-pro/agent/workspace` | 38 KB | 10% | none |
-| `nexus-ai-pro/tracing` | 38 KB | 10% | none |
+| `nexus-ai-pro/tracing/otlp-grpc` | 38 KB | 10% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 10% | none |
 | `nexus-ai-pro/models` | 37 KB | 10% | none |
-| `nexus-ai-pro/tracing/otlp-grpc` | 36 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/lifecycle` | 35 KB | 10% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 9% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
-| `nexus-ai-pro/insights` | 31 KB | 9% | none |
+| `nexus-ai-pro/insights` | 31 KB | 8% | none |
+| `nexus-ai-pro/tracing/otlp` | 30 KB | 8% | none |
 | `nexus-ai-pro/telephony/twilio` | 30 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
 | `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |
 | `nexus-ai-pro/mcp` | 28 KB | 8% | none |
 | `nexus-ai-pro/mcp/registry` | 28 KB | 8% | none |
 | `nexus-ai-pro/protocols/acp/editor` | 28 KB | 8% | none |
-| `nexus-ai-pro/tracing/otlp` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 7% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 7% | none |
 | `nexus-ai-pro/server/tenancy` | 27 KB | 7% | none |
@@ -14916,16 +14945,17 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/loaders/web` | 24 KB | 7% | none |
 | `nexus-ai-pro/images/evals` | 23 KB | 6% | none |
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
+| `nexus-ai-pro/operations/adapters` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 5% | none |
 | `nexus-ai-pro/agent/openapi` | 20 KB | 5% | none |
 | `nexus-ai-pro/media/catalog` | 20 KB | 5% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |
-| `nexus-ai-pro/operations/adapters` | 19 KB | 5% | none |
 | `nexus-ai-pro/connectors` | 19 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 19 KB | 5% | none |
 | `nexus-ai-pro/evaluate/emulate` | 18 KB | 5% | none |
 | `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
+| `nexus-ai-pro/doctor` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |
 | `nexus-ai-pro/agent/interpreter` | 17 KB | 5% | none |
@@ -14944,7 +14974,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/protocols/ag-ui` | 14 KB | 4% | none |
 | `nexus-ai-pro/server/regions` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
-| `nexus-ai-pro/doctor` | 14 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/residency` | 13 KB | 4% | none |

@@ -78,8 +78,12 @@ and its `DecisionDistribution`, `DecisionProviderCapabilities.images`, `answered
 `DecisionConformanceReport.skipped`, and `CompletionDecisionsOptions.images`; in
 `nexus-ai-pro/decisions/typesafe`, `TypeSafeDecisionProviderOptions.media`; in `nexus-ai-pro/adapter-kit`,
 `gatherRecords()`, `GatherRecordsOptions`, `GatherReport`, `GatheredSource`, `GatherOutcome`,
-`RecordSource`, and `ADAPTER_KEYWORD`; the command `nexus adapters gather`; and a package's
-`nexus.compatibility` field, the URL of its record. A box from TypeSafe AI rests
+`RecordSource`, and `ADAPTER_KEYWORD`; the command `nexus adapters gather`; a package's
+`nexus.compatibility` field, the URL of its record; in `nexus-ai-pro/config`, `useDefaults()`,
+`nexusDefaults()`, `NexusDefaults`, `DEFAULT_CHANGES`, and `DefaultChange`, and the `NEXUS_DEFAULTS`
+variable; `DoctorOptions.upgrade` and `nexus doctor --upgrade`; and `TraceStore.durable`. The
+preview turns on exactly what 3.0 will; should 3.0 change its defaults again before it ships, the
+preview follows, and `DEFAULT_CHANGES` says so. A box from TypeSafe AI rests
 on what it marks as experimental, its pictures and boxes, whose request format may change between its
 releases.
 
@@ -88,7 +92,7 @@ was retried before or is now. A provider of your own that reads pictures declare
 without it, a decision about a picture is not sent to it. A union over `DecisionQuestionType` or
 `DecisionAnswer` that handled three kinds now meets a fourth, `box`. `compatibilityPage()` writes a
 repository that is not an `http` or `https` address as text, not a link, and escapes a record's
-Markdown.
+Markdown. A doctor report has one more check, `upgrade`, skipped unless asked for.
 
 ## 2.20 stage (2.20.0)
 

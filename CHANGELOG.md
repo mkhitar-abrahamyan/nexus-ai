@@ -36,6 +36,15 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   record that says its adapter fails turns it red. `compatibility/sources.json` lists adapters not
   on npm.
 
+- **A preview of 3.0's defaults.** `useDefaults('3.0')`, from `nexus-ai-pro/config`, or
+  `NEXUS_DEFAULTS=3.0`, turns on the three settings 2.x keeps opt-in, as 3.0 will: incremental tracing on
+  a durable trace store, the Redis operation store's dispatch index where the client can keep it, and
+  `hash-v2` for a deployment first recorded. An option set explicitly wins, and without the switch
+  nothing changes. `DEFAULT_CHANGES` lists each, with what to do first; `nexusDefaults()` says which
+  defaults are in effect; and `nexus doctor --upgrade 3.0`, `DoctorOptions.upgrade`, says what 3.0
+  would change for a deployment. `TraceStore.durable` marks a store whose runs live only in the
+  process, as `MemoryTraceStore`'s.
+
 ### Fixed
 
 - The compatibility page writes a record as text: an adapter links to its repository only at an
@@ -50,6 +59,7 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   retried.
 - A decision's trace and cache key hold a digest of each picture in its place, never its bytes, and the
   budget holds a picture at 1,600 tokens rather than reading its base64 as text.
+- A doctor report has one more check, `upgrade`, skipped unless `upgrade` asks about a release.
 
 ## [2.20.2] - 2026-10-24
 

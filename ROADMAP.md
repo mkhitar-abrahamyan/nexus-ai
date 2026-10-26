@@ -28,7 +28,7 @@ the theme after it that owns it.
 
 ---
 
-## 2.21.0: Decisions about pictures, and compatibility records from community CI
+## 2.21.0: Decisions about pictures, compatibility records from community CI, and 3.0's defaults today
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
 understanding, video, typed decisions, Gemini Live, SIP call control, and both phone providers
@@ -46,9 +46,16 @@ page by a pull request today. 2.21 has an adapter publish its own record from it
 `nexus adapters verify` seals it, and a scheduled workflow gathers the records onto the page, turning
 an adapter red when its record says it no longer passes.
 
+**3.0's defaults, today.** The three settings held for 3.0 stay opt-in through 2.x. 2.21 turns all
+three on behind one switch, `useDefaults('3.0')` or `NEXUS_DEFAULTS=3.0`, so an application runs as 3.0
+will before it upgrades, an explicit option still winning, and `nexus doctor --upgrade 3.0` says what
+3.0 would change for a deployment.
+
 **Proof.** One decision suite passes on pictures, on TypeSafe AI's API against a stand-in written from
-its documentation and on a vision model, a box landing where the picture has it; and a record an
-adapter's CI publishes reaches the page with nothing merged, and a failing one turns it red.
+its documentation and on a vision model, a box landing where the picture has it; a record an
+adapter's CI publishes reaches the page with nothing merged, and a failing one turns it red; and the
+switch turns on all three of 3.0's defaults, a run written to a durable store while it runs, while
+without it nothing changes.
 
 ---
 
@@ -57,7 +64,8 @@ adapter's CI publishes reaches the page with nothing merged, and a failing one t
 Nothing else is placed yet.
 
 **Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
-does. In 3.0 they become defaults, each with a migration note:
+does. In 3.0 they become defaults, each with a migration note; since 2.21, `useDefaults('3.0')` or
+`NEXUS_DEFAULTS=3.0` runs all three now, and `nexus doctor --upgrade 3.0` says what they change:
 - incremental tracing on a persistent trace store;
 - the Redis operation store's dispatch index;
 - `hash-v2` bucketing for deployments created on 3.0. A deployment keeps the strategy it records.

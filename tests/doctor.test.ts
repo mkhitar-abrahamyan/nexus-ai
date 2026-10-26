@@ -100,6 +100,7 @@ test('every seeded misconfiguration is reported, each by its own check', async (
     health: 'warn',
     topology: 'fail',
     settings: 'warn',
+    upgrade: 'skip',
   });
   const detail = (id: string) => report.checks.find((check) => check.id === id)?.detail ?? '';
   assert.match(detail('node'), /needs 22 or newer/);
@@ -160,7 +161,7 @@ test('the same deployment, fixed, passes every check', async () => {
   const empty = await diagnose({ nodeVersion: '22.0.0', env: {}, resolvePackage: () => true });
   assert.deepEqual(
     empty.checks.filter((check) => check.status === 'skip').map((check) => check.id),
-    ['database', 'migrations', 'redis', 'queue', 'health', 'topology', 'settings'],
+    ['database', 'migrations', 'redis', 'queue', 'health', 'topology', 'settings', 'upgrade'],
   );
 });
 

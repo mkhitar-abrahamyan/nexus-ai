@@ -197,6 +197,12 @@ export interface TraceStore {
   addFeedback?(runId: string, feedback: RunFeedback): Promise<void> | void;
   /** Removes runs older than a cutoff, returning how many went. */
   prune?(before: string): Promise<number> | number;
+  /**
+   * `false` for a store whose runs live only in this process, such as `MemoryTraceStore`, where a
+   * trace written as it runs outlives nothing. Any other store is durable, which 3.0's defaults write to
+   * incrementally.
+   */
+  readonly durable?: boolean;
 }
 
 /**

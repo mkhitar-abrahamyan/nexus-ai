@@ -122,20 +122,22 @@ which suits a deploy step. `migrate --dry-run` prints the statements it would ru
 | Provider health | a provider is stale or unhealthy (warns) |
 | One-process settings | with more than one replica, a store keeps its state in process memory: a memory checkpointer, operation store, server state, or tenant usage fails; a memory rate-limit, circuit, trace, prompt, cache, or rollup store warns |
 | Opt-in settings | a store lacks a setting that stays opt-in through 2.x but that a deployment needs: a `RedisOperationStore` without `index: true`, or a `Tracer` writing to a persistent store without `incremental` (warns, with the setting that fixes it) |
+| What 3.0 changes | with `--upgrade 3.0`, a store whose behaviour 3.0's defaults change: a tracer that writes at the end, a Redis operation store without its index, or an assistant whose deployment is not yet recorded (warns, saying what to do first and how to keep 2.x's behaviour); `ok` once the [preview of 3.0's defaults](./core.md#previewing-30s-defaults) is on |
 
 Without `--module` it checks what a shell can see. A module reaches the rest, exporting any of
 `database` (or `client`, so a `nexus db` module works unchanged), `redis`, `operations`, `ai`,
 `deployment` (`{ replicas, stores }`), and `close`. `--replicas` sets the replica count. Put the
 application's tracer among the `stores` for the tracing check: `Tracer.store` and
-`Tracer.incremental` are what it reads, and `RedisOperationStore.indexed` for the queue's.
+`Tracer.incremental` are what it reads, and `RedisOperationStore.indexed` for the queue's; with
+`--upgrade 3.0`, a `Deployments` among them is read for the assistants it has not yet recorded.
 
 ```bash
 nexus doctor --module doctor.mjs --strict
 ```
 
 `diagnose()`, on `nexus-ai-pro/doctor`, runs the same checks from code — at boot, or behind a health
-endpoint. `DoctorOptions` takes each input, including a `DoctorDatabase` and a
-`DoctorDeployment`, and it resolves to a `DoctorReport`: every `DoctorCheck` with its `DoctorStatus`
+endpoint. `DoctorOptions` takes each input, including a `DoctorDatabase`, a `DoctorDeployment`, and
+the release to check readiness for as `upgrade`, and it resolves to a `DoctorReport`: every `DoctorCheck` with its `DoctorStatus`
 (`ok`, `warn`, `fail`, or `skip`), detail, and hint, and whether the deployment is `ok`. It never
 throws: a check that cannot run is a failure with the reason, and anything heavy is loaded only when
 its check runs.

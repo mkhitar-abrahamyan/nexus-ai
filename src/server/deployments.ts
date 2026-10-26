@@ -3,6 +3,7 @@ import {
   type OnlineEvaluationWorkerOptions,
   onlineEvaluationWorker,
 } from '../evaluate/online.js';
+import { nexusDefaults } from '../core/defaults.js';
 import { compareRuns, type Regression, type RegressionMetric, type RunSample } from '../insights/regressions.js';
 import { MemoryOperationStore } from '../operations/store.js';
 import { applyQuery } from '../tracing/query.js';
@@ -82,8 +83,9 @@ export interface RevisionedAssistantOptions {
   /** What the assistant is, reported by the assistants endpoint. */
   description?: string;
   /**
-   * How the deployment places threads, when it is first recorded. Defaults to `fnv1a-v1`. A deployment
-   * already recorded keeps its own; `Deployments.bucketing()` changes it.
+   * How the deployment places threads, when it is first recorded. Defaults to `fnv1a-v1`, and under
+   * 3.0's defaults, `useDefaults('3.0')`, to `hash-v2`. A deployment already recorded keeps its own;
+   * `Deployments.bucketing()` changes it.
    */
   bucketStrategy?: BucketStrategy;
 }
@@ -331,7 +333,11 @@ export class Deployments implements ServerDeployments {
     this.registrations.set(id, {
       revisions,
       live,
-      ...(options.bucketStrategy ? { bucketStrategy: checkStrategy(options.bucketStrategy) } : {}),
+      ...(options.bucketStrategy
+        ? { bucketStrategy: checkStrategy(options.bucketStrategy) }
+        : nexusDefaults() === '3.0'
+          ? { bucketStrategy: 'hash-v2' as const }
+          : {}),
     });
 
     const pick = (context?: AssistantRunContext): ServerAssistant =>

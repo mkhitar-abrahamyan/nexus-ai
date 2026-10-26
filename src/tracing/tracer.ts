@@ -1,3 +1,4 @@
+import { nexusDefaults } from '../core/defaults.js';
 import { randomHex } from '../utils/ids.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
@@ -49,7 +50,8 @@ export interface TracerOptions {
    * run stays in the store with every run that finished, and a run in progress can be watched.
    * Sampling is then decided when the root starts. A trace not sampled is still held in memory and
    * written at the end when tail sampling keeps it, so `keepErrors` still shows every failure.
-   * Defaults to false, which writes at the end, as before.
+   * Defaults to false, which writes at the end, as before; under 3.0's defaults, `useDefaults('3.0')`,
+   * to true on a durable store, one whose `durable` is not `false`.
    */
   incremental?: boolean;
   /**
@@ -167,8 +169,12 @@ export class Tracer {
   private readonly closed = new WeakSet<Run>();
   private readonly now: () => Date;
 
+  /** Whether runs are written as they start and finish: as asked, or as the defaults in effect say. */
+  private readonly writesAsItRuns: boolean;
+
   constructor(private readonly options: TracerOptions) {
     this.now = options.now ?? (() => new Date());
+    this.writesAsItRuns = options.incremental ?? (nexusDefaults() === '3.0' && options.store?.durable !== false);
   }
 
   /** Where runs are written. */
@@ -176,9 +182,9 @@ export class Tracer {
     return this.options.store;
   }
 
-  /** Whether runs are written as they start and finish, as `incremental` asks. */
+  /** Whether runs are written as they start and finish, as `incremental` asks, or 3.0's defaults do. */
   get incremental(): boolean {
-    return this.options.incremental === true;
+    return this.writesAsItRuns;
   }
 
   /** The run currently in scope, if any. */
@@ -227,7 +233,7 @@ export class Tracer {
       ...(options.links?.length ? { links: linksOf(options.links) } : {}),
     };
 
-    if (this.options.incremental && sampled) {
+    if (this.writesAsItRuns && sampled) {
       // Written as it starts, so a crash leaves it behind instead of taking it along.
       this.enqueue(run.traceId, () => this.options.store.save(this.prepare(run)));
     } else {
@@ -346,7 +352,7 @@ export class Tracer {
         ...(options.provider ? { provider: options.provider } : {}),
         metadata: { ...run.metadata, ...options.metadata },
       };
-      if (this.options.incremental && sampled) {
+      if (this.writesAsItRuns && sampled) {
         await this.enqueue(run.traceId, async () => {
           const prepared = this.prepare(finished);
           await this.options.store.save(prepared);

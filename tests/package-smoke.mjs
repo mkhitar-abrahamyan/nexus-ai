@@ -20,7 +20,17 @@ const imports = [
       'negotiateCompletionRequest',
     ],
   },
-  { specifier: 'nexus-ai-pro/config', exports: ['NexusConfigBuilder', 'createNexusConfig', 'defineNexusConfig'] },
+  {
+    specifier: 'nexus-ai-pro/config',
+    exports: [
+      'NexusConfigBuilder',
+      'createNexusConfig',
+      'defineNexusConfig',
+      'useDefaults',
+      'nexusDefaults',
+      'DEFAULT_CHANGES',
+    ],
+  },
   { specifier: 'nexus-ai-pro/providers', exports: ['BaseProvider', 'NexusProviderError'] },
   { specifier: 'nexus-ai-pro/providers/base', exports: ['BaseProvider', 'NexusProviderError'] },
   { specifier: 'nexus-ai-pro/providers/openai', exports: ['OpenAIProvider'] },

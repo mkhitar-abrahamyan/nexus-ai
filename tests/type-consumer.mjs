@@ -168,7 +168,13 @@ import {
   type VoiceProvider,
   type VoiceSessionConfig,
 } from 'nexus-ai-pro';
-import { createNexusConfig as createSubpathNexusConfig } from 'nexus-ai-pro/config';
+import {
+  createNexusConfig as createSubpathNexusConfig,
+  DEFAULT_CHANGES,
+  type NexusDefaults,
+  nexusDefaults,
+  useDefaults,
+} from 'nexus-ai-pro/config';
 import { OpenAIProvider } from 'nexus-ai-pro/providers/openai';
 import { NexusProviderError as SubpathProviderError } from 'nexus-ai-pro/providers/errors';
 import { MemoryCache as SubpathMemoryCache } from 'nexus-ai-pro/cache/memory-cache';
@@ -662,6 +668,11 @@ const builderConfig = createNexusConfig()
   .security('off')
   .build();
 const builtAi = createSubpathNexusConfig(builderConfig).create();
+// A preview of 3.0's defaults, and what each changes.
+useDefaults('3.0');
+const defaultsInEffect: NexusDefaults = nexusDefaults();
+const changedSettings: string[] = DEFAULT_CHANGES.map((change) => change.setting + ': ' + change.next);
+void [defaultsInEffect, changedSettings];
 const literalConfig = defineNexusConfig({
   providers: { openai: { apiKey: 'test' } },
   routing: { mode: 'direct' },

@@ -487,7 +487,7 @@ Usage:
   nexus db status --client <db.mjs> [--adapters ...] [--dialect postgres|sqlite] [--table t] [--check] [--json]
   nexus db migrate --client <db.mjs> [--dry-run] [--adapters ...] [--dialect postgres|sqlite] [--table t] [--json]
   nexus migrate [paths...] [--write] [--check] [--json]
-  nexus doctor [--module doctor.mjs] [--replicas n] [--max-queue-age-ms n] [--strict] [--json]
+  nexus doctor [--module doctor.mjs] [--replicas n] [--max-queue-age-ms n] [--upgrade 3.0] [--strict] [--json]
   nexus graph lint <module>[#export] [--deployed] [--strict] [--ignore CODE,CODE] [--json]
   nexus deploy status [assistant] --url <server> [--token t] [--json]
   nexus deploy canary <assistant> <revision> <percent> --url <server> [--reason r] [--version n]

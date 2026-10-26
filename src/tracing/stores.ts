@@ -19,6 +19,8 @@ export interface MemoryTraceStoreOptions {
  * runs. Bounded, like every other in-memory store here.
  */
 export class MemoryTraceStore implements TraceStore {
+  /** Not durable: its runs live only in this process. */
+  readonly durable = false;
   private readonly runs = new Map<string, Run>();
   private readonly maxRuns: number;
 
