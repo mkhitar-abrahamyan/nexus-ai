@@ -369,7 +369,7 @@ import {
   recordStatus,
 } from 'nexus-ai-pro/adapter-kit';
 import { OtlpGrpcTraceExporter, type OtlpGrpcTraceExporterOptions } from 'nexus-ai-pro/tracing/otlp-grpc';
-import { A2A_ERRORS, a2aClient, a2aErrorStatus, a2aHandler, type A2aCallOutcome, type A2aSecurityScheme, type A2aTenancyOptions } from 'nexus-ai-pro/protocols/a2a';
+import { A2A_ERRORS, a2aClient, a2aErrorStatus, a2aHandler, type A2aCallOutcome, type A2aCardSigner, type A2aSecurityScheme, type A2aTenancyOptions, canonicalA2aCard, signA2aCard, verifyA2aCard } from 'nexus-ai-pro/protocols/a2a';
 import { a2aGrpcClient, a2aGrpcService, type A2aGrpcClient } from 'nexus-ai-pro/protocols/a2a/grpc';
 import { mediaChecks, mediaJudge, readMediaDuration, resolveMedia, type MediaDuration, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { emulatedTools, EmulatedWorld, MemoryEmulationStore, type EmulatedToolCall, type EmulatedWorldSnapshot } from 'nexus-ai-pro/evaluate/emulate';
@@ -1340,6 +1340,13 @@ const a2aRest = a2aClient({ url: 'https://agents.example.com/a2a', binding: 'HTT
 const notFoundOverHttp: number = a2aErrorStatus(-32001).httpStatus;
 // One handler for several tenants, and a card that says how to authenticate.
 const tenancy: A2aTenancyOptions = { authorize: (tenant, principal) => principal?.tenantId === tenant, required: true };
+// A card signed as protocol 1.0 signs one, and a client that calls only once a signature holds.
+const cardSigner: A2aCardSigner = { key: { kty: 'EC', crv: 'P-256' }, alg: 'ES256', kid: 'agents-2026' };
+const signedCard: Promise<string> = signA2aCard({ name: 'n', description: 'd', version: '1', supportedInterfaces: [], capabilities: { streaming: false, pushNotifications: false, extendedAgentCard: false }, defaultInputModes: [], defaultOutputModes: [], skills: [] }, cardSigner).then(
+  async (card) => (await verifyA2aCard(card, (kid) => (kid === 'agents-2026' ? { kty: 'EC' } : undefined))).kid + canonicalA2aCard(card),
+);
+const wary = a2aClient({ url: 'https://agents.example.com/.well-known/agent-card.json', verifyCard: () => undefined });
+void [signedCard, wary];
 const bearerScheme: A2aSecurityScheme = { httpAuthSecurityScheme: { scheme: 'Bearer', bearerFormat: 'JWT' } };
 const tenantAgent = a2aHandler(createAgent({ client: { complete: async () => ({}) as never } }), {
   card: {

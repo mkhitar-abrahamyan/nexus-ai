@@ -67,6 +67,19 @@ graduation:
 | Upgrade | A migration test from the previous minor |
 | Soak | A long-running test with flat memory and no leaked handles |
 
+## 2.22 stage (Unreleased)
+
+Everything 2.22 adds is stable from the start and additive, unless this section says otherwise.
+
+New and stable: `StreamChunk.logprobs`; in `nexus-ai-pro/protocols/a2a`, `signA2aCard()`,
+`verifyA2aCard()`, `canonicalA2aCard()`, `A2aCardSignatureError`, `A2aCardSigner`, `A2aCardKeyResolver`,
+`A2aSignatureAlgorithm`, `A2aJsonWebKey`, `A2aCryptoKey`, `A2aServerOptions.sign`, and
+`A2aClientOptions.verifyCard`, which `A2aGrpcClientOptions` takes too.
+
+Changed on purpose: an answer the output guard changes or blocks keeps no `logprobs`, streamed or
+not; a typed decision of a model that reports the chosen token alone is sampled; an Ollama stream
+honours `stop`.
+
 ## 2.21 stage (2.21.0)
 
 Everything 2.21 adds is stable from the start and additive, unless this section says otherwise.

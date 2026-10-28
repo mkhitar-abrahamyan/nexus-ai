@@ -20,6 +20,7 @@ import type { GraphEvent, GraphToolEvent } from '../types/graph.js';
 import type { Message, ToolDefinition } from '../types/messages.js';
 import type { Principal } from '../types/principal.js';
 import type { Store } from '../types/store.js';
+import { type A2aCardKeyResolver, type A2aCardSigner, signA2aCard, verifyA2aCard } from './a2a-signing.js';
 import {
   answerOf,
   approvalOf,
@@ -559,6 +560,12 @@ export interface A2aServerOptions {
    * anything else this caller may see. Without it, there is no extended card.
    */
   extendedCard?: (principal: Principal) => Partial<A2aAgentCard> | Promise<Partial<A2aAgentCard>>;
+  /**
+   * Signs every card this handler serves, its own, each tenant's, and the extended card, with each key
+   * given, as protocol 1.0 signs a card: a JWS over its canonical form. A card's own `signatures` are
+   * kept, and these follow them.
+   */
+  sign?: A2aCardSigner | readonly A2aCardSigner[];
   /** How often `SubscribeToTask` reads a task another replica runs, in milliseconds. Defaults to 1 second. */
   pollMs?: number;
   /**
@@ -1413,7 +1420,7 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
           if (!principal) {
             return fail(A2A_ERRORS.extendedCardNotConfigured, 'The extended card needs an authenticated caller');
           }
-          return { result: { ...card, ...(await options.extendedCard(principal)) } };
+          return { result: await signed({ ...card, ...(await options.extendedCard(principal)) }) };
         }
         default:
           return fail(-32601, `Method ${method} is not supported`);
@@ -1546,28 +1553,54 @@ export function a2aHandler(graph: ProtocolGraph, options: A2aServerOptions): A2a
    * `/{tenant}/.well-known/agent-card.json`, from the root or under the card's URL, every interface names
    * the tenant, so a client that reads it calls as that tenant over whichever binding it picks.
    */
-  const cardFor = (prefix: string): A2aAgentCard => {
-    if (!tenancy) return card;
+  const cardFor = (prefix: string): { tenant?: string; card: A2aAgentCard } => {
+    if (!tenancy) return { card };
     const rest = base && (prefix === base || prefix.startsWith(`${base}/`)) ? prefix.slice(base.length) : prefix;
     const segment = /^\/([^/]+)$/.exec(rest)?.[1];
-    if (!segment) return card;
+    if (!segment) return { card };
     let tenant: string;
     try {
       tenant = decodeURIComponent(segment);
     } catch {
-      return card;
+      return { card };
     }
     return {
-      ...card,
-      supportedInterfaces: card.supportedInterfaces.map((item) => (item.tenant ? item : { ...item, tenant })),
+      tenant,
+      card: {
+        ...card,
+        supportedInterfaces: card.supportedInterfaces.map((item) => (item.tenant ? item : { ...item, tenant })),
+      },
     };
+  };
+  /** The card as it is served: signed with each key given, each tenant's once. */
+  const signers = options.sign === undefined ? [] : Array.isArray(options.sign) ? options.sign : [options.sign];
+  const signed = async (unsigned: A2aAgentCard): Promise<A2aAgentCard> => {
+    let result = unsigned;
+    for (const signer of signers as A2aCardSigner[]) result = await signA2aCard(result, signer);
+    return result;
+  };
+  const servedCards = new Map<string, Promise<A2aAgentCard>>();
+  const served = (prefix: string): Promise<A2aAgentCard> => {
+    const { tenant, card: unsigned } = cardFor(prefix);
+    if (signers.length === 0) return Promise.resolve(unsigned);
+    const key = tenant ?? '';
+    let found = servedCards.get(key);
+    if (!found) {
+      found = signed(unsigned);
+      // A failed signing is tried again on the next request, not served from here.
+      found.catch(() => servedCards.delete(key));
+      // Each tenant's card is kept, up to a bound, so a crawler of tenant names holds no memory.
+      if (servedCards.size >= 1_000) servedCards.delete(servedCards.keys().next().value as string);
+      servedCards.set(key, found);
+    }
+    return found;
   };
 
   const handle = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     if (request.method === 'GET') {
       const asked = /^(.*?)\/(?:\.well-known\/)?agent-card\.json$/.exec(url.pathname);
-      if (asked) return Response.json(cardFor(asked[1] as string));
+      if (asked) return Response.json(await served(asked[1] as string));
     }
     // Under the card's URL, a route of the HTTP+JSON binding; the URL itself, or any other path a
     // POST reaches, JSON-RPC, as it always was.
@@ -1785,6 +1818,12 @@ export interface A2aClientOptions {
    * binding, as protocol 1.0 requires a client to send it.
    */
   tenant?: string;
+  /**
+   * Checks the agent's card before the first call: a signature on it must hold against the public key
+   * this gives for the signature's key id, or every call fails with `A2aCardSignatureError`. Given an
+   * endpoint rather than the card, the card is read from the endpoint's origin to check it.
+   */
+  verifyCard?: A2aCardKeyResolver;
 }
 
 /** What to send: text, and optionally data, a conversation, or the paused task it answers. */
@@ -1866,13 +1905,21 @@ export function a2aClient(options: A2aClientOptions): A2aClient {
     cached ??= fetcher(cardUrl, { headers: { accept: 'application/json', ...options.headers } }).then(
       async (response) => {
         if (!response.ok) throw new A2aError(response.status, `The agent card answered ${response.status}`);
-        return (await response.json()) as A2aAgentCard;
+        const read = (await response.json()) as A2aAgentCard;
+        if (options.verifyCard) await verifyA2aCard(read, options.verifyCard);
+        return read;
       },
     );
+    // A card that could not be read, or did not verify, is read again by the next call.
+    cached.catch(() => {
+      cached = undefined;
+    });
     return cached;
   };
   /** Where calls go, and the tenant they name: the card's interface for the binding, when given the card. */
   const target = async (): Promise<{ url: string; tenant?: string }> => {
+    // A card to be verified is read even for an endpoint: no call goes out before it holds.
+    if (options.verifyCard && !isCard) await card();
     if (!isCard) return { url: options.url, ...(options.tenant ? { tenant: options.tenant } : {}) };
     const chosen = (await card()).supportedInterfaces.find((item) => item.protocolBinding === binding);
     const tenant = options.tenant ?? chosen?.tenant;
@@ -2149,3 +2196,15 @@ export function a2aTool(options: A2aToolOptions): ToolDefinition {
     },
   };
 }
+
+export {
+  type A2aCardKeyResolver,
+  type A2aCryptoKey,
+  type A2aJsonWebKey,
+  A2aCardSignatureError,
+  type A2aCardSigner,
+  type A2aSignatureAlgorithm,
+  canonicalA2aCard,
+  signA2aCard,
+  verifyA2aCard,
+} from './a2a-signing.js';

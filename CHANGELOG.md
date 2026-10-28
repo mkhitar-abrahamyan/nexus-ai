@@ -11,6 +11,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   the chunks' together are what `complete()` reports.
 - Cohere reports log probabilities, `complete()` and streamed: a piece of text at a time, each piece's
   the sum of its tokens', with no alternatives.
+- **Signed A2A cards.** `signA2aCard()` and `verifyA2aCard()`, with `canonicalA2aCard()`, sign and check
+  a card as protocol 1.0 does, a flattened JWS over its canonical form, which is the A2A project's SDK's
+  form: a card either signs, the other verifies. A handler's `sign` signs every card it serves, each
+  tenant's and the extended card included, and a client's `verifyCard` makes no call until a signature
+  on the card holds. ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, and Ed25519, by the
+  Web Crypto API alone. The nightly interoperability run checks both directions against `@a2a-js/sdk`.
 
 ### Fixed
 

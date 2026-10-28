@@ -204,7 +204,7 @@ const imports = [
   },
   {
     specifier: 'nexus-ai-pro/protocols/a2a',
-    exports: ['a2aHandler', 'a2aClient', 'a2aTool', 'A2aError', 'A2A_PROTOCOL_VERSION'],
+    exports: ['a2aHandler', 'a2aClient', 'a2aTool', 'A2aError', 'A2A_PROTOCOL_VERSION', 'signA2aCard', 'verifyA2aCard'],
   },
   { specifier: 'nexus-ai-pro/protocols/acp', exports: ['serveAcp', 'ACP_PROTOCOL_VERSION'] },
   {

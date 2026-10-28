@@ -4438,7 +4438,37 @@ a header, a query, or a cookie; HTTP authentication, such as a bearer token; OAu
 `A2aOAuthFlows`, authorization code, client credentials, or device code; OpenID Connect; or mutual
 TLS. `securityRequirements`, on the card or on one skill, list each `A2aSecurityRequirement`: the
 schemes a call needs, by name, with their scopes. `signatures` carry each `A2aCardSignature`, a JSON
-Web Signature over the card, as given. Every binding carries them, the gRPC card included.
+Web Signature over the card. Every binding carries them, the gRPC card included.
+
+### Signed cards
+
+A card is signed as protocol 1.0 signs one: a flattened JWS over its canonical form, which
+`canonicalA2aCard()` writes, the card as its schema has it, without its `signatures` and empty values,
+its keys in order as RFC 8785 serializes JSON. That is the form the A2A project's SDK computes, so a
+card either signs, the other verifies. `sign`, an `A2aCardSigner` or several, signs every card the
+handler serves, each tenant's and the extended card included:
+
+```ts
+const handler = a2aHandler(agent, {
+  card,
+  sign: { key: privateJwk, alg: 'ES256', kid: 'agents-2026', jku: 'https://agents.example.com/jwks.json' },
+});
+
+const client = a2aClient({
+  url: 'https://agents.example.com/.well-known/agent-card.json',
+  verifyCard: (kid) => trustedKeys[kid], // the public key, or undefined for one not trusted
+});
+```
+
+`A2aClientOptions.verifyCard`, an `A2aCardKeyResolver` given each signature's key id, its key set's URL,
+and its algorithm, makes the client check the card before its first call: until a signature holds,
+every call fails with `A2aCardSignatureError`, which says why each signature did not, and nothing is
+sent. Given an endpoint rather than the card, the client reads the card from its origin to check it;
+`a2aGrpcClient()` checks what `card()` and `extendedCard()` read. `signA2aCard()` and `verifyA2aCard()`
+do the same for any card. A key is a Web Crypto key, an `A2aCryptoKey`, or a JWK, an `A2aJsonWebKey`, and an
+`A2aSignatureAlgorithm` is ES256,
+ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, or Ed25519, by that name or `EdDSA`; a JWK that
+names another algorithm is refused, and a header naming `none`, or an HMAC, never verifies.
 
 ### Several tenants behind one handler
 
@@ -4734,9 +4764,10 @@ Each protocol is also tested across releases and against the reference client of
   process stopped runs again on the replica that takes it over, as a graph's steps do after any
   crash, so a tool with side effects needs an idempotency key. A slow replica that loses its lease
   stops its run, but a tool already running finishes.
-- **A2A cards.** A card's signatures are carried as given, neither computed nor checked: a signature
-  must be over the card as it is served, its interfaces included. One handler serves one card, and with
-  `tenants`, one more a tenant, at the tenant's path.
+- **A2A cards.** A signature covers what the card's schema names: a field outside it is not covered,
+  as the A2A project's SDK says of its own. The client trusts the keys `verifyCard` gives; fetching a
+  key set from a card's `jku` is the resolver's to do, from hosts it trusts. One handler serves one
+  card, and with `tenants`, one more a tenant, at the tenant's path.
 - **ACP turns.** A turn goes on when the editor reopens its session, not before; one the agent stops
   in again while carrying it on goes on at the next reopening. A step that was halfway through when
   the agent stopped runs again, so a tool with side effects needs an idempotency key.
@@ -14878,19 +14909,20 @@ declarations, which carry every doc comment to your editor.
 
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
-| `nexus-ai-pro` | 365 KB | 100% | none |
+| `nexus-ai-pro` | 366 KB | 100% | none |
 | `nexus-ai-pro/config` | 358 KB | 98% | none |
 | `nexus-ai-pro/core` | 352 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 216 KB | 59% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 58% | none |
 | `nexus-ai-pro/server/deployments` | 153 KB | 42% | none |
 | `nexus-ai-pro/realtime/openai-sip` | 142 KB | 39% | none |
-| `nexus-ai-pro/server` | 126 KB | 35% | none |
+| `nexus-ai-pro/server` | 126 KB | 34% | none |
 | `nexus-ai-pro/batch` | 118 KB | 32% | none |
 | `nexus-ai-pro/agent` | 114 KB | 31% | none |
+| `nexus-ai-pro/protocols/a2a/grpc` | 111 KB | 30% | none |
 | `nexus-ai-pro/decisions` | 110 KB | 30% | none |
 | `nexus-ai-pro/realtime/session` | 109 KB | 30% | none |
-| `nexus-ai-pro/protocols/a2a/grpc` | 102 KB | 28% | none |
+| `nexus-ai-pro/protocols/a2a` | 96 KB | 26% | none |
 | `nexus-ai-pro/providers/groq` | 90 KB | 25% | none |
 | `nexus-ai-pro/providers/mistral` | 90 KB | 25% | none |
 | `nexus-ai-pro/postgres` | 90 KB | 25% | none |
@@ -14898,9 +14930,9 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/deepseek` | 89 KB | 24% | none |
 | `nexus-ai-pro/providers/llamacpp` | 89 KB | 24% | none |
 | `nexus-ai-pro/providers/lmstudio` | 89 KB | 24% | none |
+| `nexus-ai-pro/providers/openai` | 89 KB | 24% | none |
 | `nexus-ai-pro/providers/openrouter` | 89 KB | 24% | none |
 | `nexus-ai-pro/evaluate/online` | 89 KB | 24% | none |
-| `nexus-ai-pro/providers/openai` | 88 KB | 24% | none |
 | `nexus-ai-pro/policy` | 85 KB | 23% | none |
 | `nexus-ai-pro/router` | 83 KB | 23% | none |
 | `nexus-ai-pro/graph` | 82 KB | 22% | none |
@@ -14908,12 +14940,11 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 74 KB | 20% | none |
 | `nexus-ai-pro/decisions/typesafe` | 70 KB | 19% | none |
-| `nexus-ai-pro/protocols/a2a` | 63 KB | 17% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 16% | none |
 | `nexus-ai-pro/providers/cohere` | 59 KB | 16% | none |
 | `nexus-ai-pro/providers/ollama` | 59 KB | 16% | none |
+| `nexus-ai-pro/security` | 59 KB | 16% | none |
 | `nexus-ai-pro/adapter-kit` | 59 KB | 16% | none |
-| `nexus-ai-pro/security` | 58 KB | 16% | none |
 | `nexus-ai-pro/operations` | 58 KB | 16% | none |
 | `nexus-ai-pro/video` | 58 KB | 16% | none |
 | `nexus-ai-pro/evaluate/media` | 54 KB | 15% | none |
@@ -14928,7 +14959,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 12% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 12% | none |
-| `nexus-ai-pro/voice` | 42 KB | 12% | none |
+| `nexus-ai-pro/voice` | 42 KB | 11% | none |
 | `nexus-ai-pro/embeddings` | 41 KB | 11% | none |
 | `nexus-ai-pro/embeddings/batch` | 41 KB | 11% | none |
 | `nexus-ai-pro/tracing` | 40 KB | 11% | none |

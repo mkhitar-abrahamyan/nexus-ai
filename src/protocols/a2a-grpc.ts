@@ -41,6 +41,7 @@ import {
   encodeA2a,
   encodeA2aStatus,
 } from './a2a-proto.js';
+import { verifyA2aCard } from './a2a-signing.js';
 import { protocolId } from './shared.js';
 
 /** gRPC's status codes, by name. */
@@ -418,18 +419,24 @@ export function a2aGrpcClient(options: A2aGrpcClientOptions): A2aGrpcClient {
     const { taskId: _taskId, tenant: _tenant, ...config } = answer;
     return config as unknown as A2aPushNotificationConfig;
   };
+  /** A card as read, checked against `verifyCard` when it is given. */
+  const checked = async (read: A2aAgentCard): Promise<A2aAgentCard> => {
+    if (options.verifyCard) await verifyA2aCard(read, options.verifyCard);
+    return read;
+  };
+  const extendedCard = async () => checked(await unary<A2aAgentCard>('GetExtendedAgentCard', {}));
   const card = async (): Promise<A2aAgentCard> => {
-    if (!options.cardUrl) return unary<A2aAgentCard>('GetExtendedAgentCard', {});
+    if (!options.cardUrl) return extendedCard();
     const response = await (options.fetch ?? globalThis.fetch)(options.cardUrl, {
       headers: { accept: 'application/json', ...options.headers },
     });
     if (!response.ok) throw new A2aError(response.status, `The agent card answered ${response.status}`);
-    return (await response.json()) as A2aAgentCard;
+    return checked((await response.json()) as A2aAgentCard);
   };
 
   return {
     card,
-    extendedCard: () => unary<A2aAgentCard>('GetExtendedAgentCard', {}),
+    extendedCard,
     async send(text, send = {}) {
       const result = await unary<{ task?: A2aTask; message?: A2aMessage }>(
         'SendMessage',

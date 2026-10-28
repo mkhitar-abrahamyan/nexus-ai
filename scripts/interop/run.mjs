@@ -54,7 +54,7 @@ const versionOf = (name) =>
 
 const { createAgent, tool } = await import('../../dist/agent/index.js');
 const { agUiHandler } = await import('../../dist/protocols/ag-ui.js');
-const { a2aHandler } = await import('../../dist/protocols/a2a.js');
+const { a2aHandler, canonicalA2aCard, verifyA2aCard } = await import('../../dist/protocols/a2a.js');
 const { a2aGrpcService } = await import('../../dist/protocols/a2a-grpc.js');
 const { mcpSdk, mcpTools } = await import('./mcp-server.mjs');
 
@@ -292,6 +292,60 @@ const check = (label, condition, detail = '') => {
   } finally {
     await server.close();
     await grpc.close();
+  }
+}
+
+// ── A2A card signatures ────────────────────────────────────────────
+
+// The reference SDK and this package compute one canonical form of a card, and each verifies the
+// other's signature: a card this package's handler signs, a tenant's included, and one the SDK signs.
+{
+  const sdk = await load('@a2a-js/sdk');
+  const { subtle } = globalThis.crypto;
+  const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  // Without the label Web Crypto writes, which jose holds a key to as strictly as its algorithm.
+  const { alg: _private, ...privateJwk } = await subtle.exportKey('jwk', pair.privateKey);
+  const { alg: _public, ...publicJwk } = await subtle.exportKey('jwk', pair.publicKey);
+  let handler;
+  const server = await serve((request) => handler(request));
+  handler = a2aHandler(mailer(), {
+    card: { name: 'Signed mailer', description: 'Sends mail', version: '1.0.0', url: `${server.url}/a2a`, skills: [] },
+    sign: { key: privateJwk, alg: 'ES256', kid: 'interop' },
+    tenants: { required: false, authorize: () => true },
+  });
+  try {
+    for (const [label, path] of [
+      ['its card', '/.well-known/agent-card.json'],
+      ['a tenant’s card', '/acme/.well-known/agent-card.json'],
+    ]) {
+      const served = await (await fetch(`${server.url}${path}`)).json();
+      check(
+        `A2A signatures: the SDK and this package write ${label} in one canonical form`,
+        sdk.canonicalizeAgentCard(served) === canonicalA2aCard(served),
+      );
+      const verified = await sdk
+        .verifyAgentCardSignature(async () => publicJwk)(served)
+        .then(
+          () => '',
+          (error) => String(error?.message ?? error),
+        );
+      check(`A2A signatures: the SDK verifies ${label}, signed here`, verified === '', verified);
+    }
+    const { signatures: _signatures, ...unsigned } = await (
+      await fetch(`${server.url}/.well-known/agent-card.json`)
+    ).json();
+    const signedBySdk = await sdk.generateAgentCardSignature(privateJwk, { alg: 'ES256', kid: 'sdk', typ: 'JOSE' })(
+      unsigned,
+    );
+    const ours = await verifyA2aCard(signedBySdk, () => publicJwk).then(
+      (result) => result.kid,
+      (error) => String(error?.message ?? error),
+    );
+    check('A2A signatures: this package verifies a card the SDK signed', ours === 'sdk', ours);
+  } catch (error) {
+    failures.push(`A2A signatures: ${error?.stack ?? error}`);
+  } finally {
+    await server.close();
   }
 }
 

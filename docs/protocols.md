@@ -348,7 +348,37 @@ a header, a query, or a cookie; HTTP authentication, such as a bearer token; OAu
 `A2aOAuthFlows`, authorization code, client credentials, or device code; OpenID Connect; or mutual
 TLS. `securityRequirements`, on the card or on one skill, list each `A2aSecurityRequirement`: the
 schemes a call needs, by name, with their scopes. `signatures` carry each `A2aCardSignature`, a JSON
-Web Signature over the card, as given. Every binding carries them, the gRPC card included.
+Web Signature over the card. Every binding carries them, the gRPC card included.
+
+### Signed cards
+
+A card is signed as protocol 1.0 signs one: a flattened JWS over its canonical form, which
+`canonicalA2aCard()` writes, the card as its schema has it, without its `signatures` and empty values,
+its keys in order as RFC 8785 serializes JSON. That is the form the A2A project's SDK computes, so a
+card either signs, the other verifies. `sign`, an `A2aCardSigner` or several, signs every card the
+handler serves, each tenant's and the extended card included:
+
+```ts
+const handler = a2aHandler(agent, {
+  card,
+  sign: { key: privateJwk, alg: 'ES256', kid: 'agents-2026', jku: 'https://agents.example.com/jwks.json' },
+});
+
+const client = a2aClient({
+  url: 'https://agents.example.com/.well-known/agent-card.json',
+  verifyCard: (kid) => trustedKeys[kid], // the public key, or undefined for one not trusted
+});
+```
+
+`A2aClientOptions.verifyCard`, an `A2aCardKeyResolver` given each signature's key id, its key set's URL,
+and its algorithm, makes the client check the card before its first call: until a signature holds,
+every call fails with `A2aCardSignatureError`, which says why each signature did not, and nothing is
+sent. Given an endpoint rather than the card, the client reads the card from its origin to check it;
+`a2aGrpcClient()` checks what `card()` and `extendedCard()` read. `signA2aCard()` and `verifyA2aCard()`
+do the same for any card. A key is a Web Crypto key, an `A2aCryptoKey`, or a JWK, an `A2aJsonWebKey`, and an
+`A2aSignatureAlgorithm` is ES256,
+ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, or Ed25519, by that name or `EdDSA`; a JWK that
+names another algorithm is refused, and a header naming `none`, or an HMAC, never verifies.
 
 ### Several tenants behind one handler
 
@@ -644,9 +674,10 @@ Each protocol is also tested across releases and against the reference client of
   process stopped runs again on the replica that takes it over, as a graph's steps do after any
   crash, so a tool with side effects needs an idempotency key. A slow replica that loses its lease
   stops its run, but a tool already running finishes.
-- **A2A cards.** A card's signatures are carried as given, neither computed nor checked: a signature
-  must be over the card as it is served, its interfaces included. One handler serves one card, and with
-  `tenants`, one more a tenant, at the tenant's path.
+- **A2A cards.** A signature covers what the card's schema names: a field outside it is not covered,
+  as the A2A project's SDK says of its own. The client trusts the keys `verifyCard` gives; fetching a
+  key set from a card's `jku` is the resolver's to do, from hosts it trusts. One handler serves one
+  card, and with `tenants`, one more a tenant, at the tenant's path.
 - **ACP turns.** A turn goes on when the editor reopens its session, not before; one the agent stops
   in again while carrying it on goes on at the next reopening. A step that was halfway through when
   the agent stopped runs again, so a tool with side effects needs an idempotency key.
@@ -672,16 +703,21 @@ specific entry point that provides it.
 | `A2aBinding` | type | The binding a call arrived on. |
 | `A2aCallContext` | interface | Who a call is for, and what carries it. |
 | `A2aCallOutcome` | type | What one A2A call answers, whatever binding carries it: a result, an error, or a stream of events. |
+| `A2aCardKeyResolver` | type | Finds the public key a signature names: by its key id, the JWK Set URL its header gives, if any, and the algorithm it was made with. |
 | `A2aCardSignature` | interface | A JSON Web Signature over an agent card, as the card carries it. |
+| `A2aCardSignatureError` | class | Raised for a card that carries no signature its verifier can check, or none that holds. |
+| `A2aCardSigner` | interface | A key that signs cards: the private key, its algorithm, and the id a verifier finds its public key by. |
 | `a2aClient` | function | A client for an A2A agent, by its card or endpoint URL. |
 | `A2aClient` | interface | A client for one A2A agent. |
 | `A2aClientOptions` | interface | Options for `a2aClient()`. |
+| `A2aCryptoKey` | interface | A Web Crypto key, as `crypto.subtle` returns one. |
 | `A2aError` | class | Raised by a client when an agent answers with an error, on any binding, as A2A's code. |
 | `a2aErrorCode` | function | The error code of an `ErrorInfo` reason, the way back: `TASK_NOT_FOUND` is -32001. |
 | `a2aErrorStatus` | function | How an error code is carried on the HTTP+JSON and gRPC bindings, as protocol 1.0 maps them. |
 | `A2aErrorStatus` | interface | An A2A error, as each binding carries it: its HTTP status, its gRPC status, and its reason. |
 | `a2aHandler` | function | An HTTP handler that serves a graph as an A2A agent: `GET` the card, `POST` JSON-RPC, or call an HTTP+JSON route. |
 | `A2aHandler` | interface | An A2A agent's HTTP handler, with what keeps its tasks alive across replicas: `recover()` takes over the working tasks whose replica stopped renewing their lease, and `close()` stops the recovery timer. |
+| `A2aJsonWebKey` | interface | A JSON Web Key, as Web Crypto imports and exports one. |
 | `A2aListTasksOptions` | interface | Which tasks `A2aClient.listTasks()` asks for. |
 | `A2aMessage` | interface | A message between agents. |
 | `A2aOAuthFlows` | type | One of the OAuth 2.0 flows an `oauth2SecurityScheme` offers: exactly one is set. |
@@ -694,6 +730,7 @@ specific entry point that provides it.
 | `A2aSecurityScheme` | type | How a caller authenticates with an agent, as its card names it: exactly one scheme is set. |
 | `A2aSendOptions` | interface | What to send: text, and optionally data, a conversation, or the paused task it answers. |
 | `A2aServerOptions` | interface | Options for `a2aHandler()`. |
+| `A2aSignatureAlgorithm` | type | An algorithm a card is signed with, as JWS names it. |
 | `A2aSkill` | interface | A skill an agent card advertises. |
 | `A2aStreamEvent` | type | A streamed event: a task, a status change, or a piece of an artifact. |
 | `A2aTask` | interface | A unit of work an agent was asked to do. |
@@ -707,8 +744,11 @@ specific entry point that provides it.
 | `A2aTenancyOptions` | interface | How one handler serves several tenants, each request routed by the `tenant` it names. |
 | `a2aTool` | function | A remote A2A agent as a tool another agent can call. |
 | `A2aToolOptions` | interface | Options for `a2aTool()`. |
+| `canonicalA2aCard` | function | A card in the form its signatures cover: as its schema has it, fields the schema does not name and fields at their default left out, then the `signatures` field and every empty value, and serialized with each object's keys in order, as RFC 8785 serializes JSON. |
 | `MemoryA2aTaskStore` | class | Tasks and conversations in this process: the default, for one replica. |
+| `signA2aCard` | function | The card with one more signature, by `signer`, over its canonical form: a flattened JWS whose protected header names the algorithm, the key id, `typ: JOSE`, and the key set's URL when given. |
 | `storeA2aTasks` | function | Tasks and conversations in any long-term `Store`: the memory, Redis, Postgres, or SQLite store, so every replica sees one set. |
+| `verifyA2aCard` | function | Checks a card's signatures over its canonical form, each against the public key `resolveKey` gives for its key id, and returns the first that holds. |
 
 ### `nexus-ai-pro/protocols/a2a/grpc`
 
