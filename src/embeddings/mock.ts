@@ -57,7 +57,7 @@ export class MockEmbeddingProvider implements EmbeddingsProvider {
         dimensions: true,
         encodingFormats: ['float'],
         inputTypes: ['document', 'query', 'classification', 'clustering'],
-        inputModalities: ['text', 'image', 'audio', 'document'],
+        inputModalities: ['text', 'image', 'audio', 'video', 'document'],
         truncate: true,
         ...options.capabilities,
       },

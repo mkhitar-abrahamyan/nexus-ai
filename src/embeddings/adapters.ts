@@ -193,7 +193,7 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
         models: ['gemini-embedding-001', 'gemini-embedding-2', 'text-embedding-004'],
         maxBatchSize: 100,
         maxInputTokens: 8192,
-        inputModalities: ['text', 'image', 'audio', 'document'],
+        inputModalities: ['text', 'image', 'audio', 'video', 'document'],
         dimensions: true,
         inputTypes: ['document', 'query', 'classification', 'clustering'],
         encodingFormats: ['float'],
@@ -206,7 +206,7 @@ export class GoogleEmbeddingProvider extends HttpEmbeddingProvider {
     return key ? { 'x-goog-api-key': key } : {};
   }
 
-  /** Embeds a batch of inputs: texts, or parts with images, audio, and documents. */
+  /** Embeds a batch of inputs: texts, or parts with images, audio, video, and documents. */
   async embed(
     request: EmbeddingProviderRequest,
     context: EmbeddingProviderCallContext,

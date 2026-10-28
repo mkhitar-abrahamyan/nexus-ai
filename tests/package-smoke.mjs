@@ -490,10 +490,10 @@ const imports = [
   { specifier: 'nexus-ai-pro/loaders/text', exports: ['loadText', 'loadDirectory'] },
   { specifier: 'nexus-ai-pro/loaders/markdown', exports: ['loadMarkdown', 'parseMarkdown'] },
   { specifier: 'nexus-ai-pro/loaders/html', exports: ['loadHtml', 'htmlToText'] },
-  { specifier: 'nexus-ai-pro/loaders/csv', exports: ['loadCsv', 'parseCsv'] },
+  { specifier: 'nexus-ai-pro/loaders/csv', exports: ['loadCsv', 'parseCsv', 'CsvRowParser'] },
   { specifier: 'nexus-ai-pro/loaders/json', exports: ['loadJson'] },
   { specifier: 'nexus-ai-pro/loaders/pdf', exports: ['loadPdf', 'PdfLoaderError'] },
-  { specifier: 'nexus-ai-pro/loaders/web', exports: ['loadWebPages', 'loadSitemap', 'sitemapUrls'] },
+  { specifier: 'nexus-ai-pro/loaders/web', exports: ['loadWebPages', 'loadSitemap', 'sitemapUrls', 'browserRenderer'] },
   { specifier: 'nexus-ai-pro/loaders/git', exports: ['loadGitRepository', 'GitLoaderError'] },
   { specifier: 'nexus-ai-pro/postgres/vectors', exports: ['PostgresVectorStore', 'vectorStoreMigration'] },
   {

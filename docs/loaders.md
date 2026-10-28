@@ -159,9 +159,14 @@ The file loaders take one input or many. A `FileInput` is one of:
 
 - a path, or a `file:` URL;
 - content already in memory, with a name for it: `{ source: 'upload.md', content }`. That is how a
-  loader reads an upload, a database blob, or a file on a runtime without a filesystem.
+  loader reads an upload, a database blob, or a file on a runtime without a filesystem;
+- a stream of it, with a name: `{ source: 'export.csv', stream }`, any iterable or async iterable of
+  bytes or text, such as a response's body or an object store's download.
 
 `node:fs` is imported only when a path is read. `FileLoaderOptions` adds `metadata` to every document.
+The CSV and JSON loaders read a file as it arrives, a path in chunks of 64 KiB and a stream piece by
+piece, and yield each row or record as soon as it is read, so a file larger than memory streams through
+to the store. The other loaders read a file whole, a stream included.
 
 - **Text.** `loadText()` reads plain text files, one document each, dropping a byte-order mark.
 - **Directories.** `loadDirectory()` walks a directory in sorted order, so a load is reproducible. It
@@ -187,12 +192,27 @@ The file loaders take one input or many. A `FileInput` is one of:
   reading a chunk knows what each value is. `CsvLoaderOptions` chooses the `textColumns`, an
   `idColumn` for stable ids, and `metadataColumns` to filter on. `parseCsv()` is an RFC 4180 parser
   — quoted delimiters, line breaks, and doubled quotes — and `CsvParseOptions` sets the `delimiter`.
-- **JSON.** `loadJson()` makes one document per record, from a JSON file or JSON Lines.
-  `JsonLoaderOptions` sets:
-  - `records`, which picks the records out of the parsed value;
+  `CsvRowParser` is the same parser given text a piece at a time: `push()` returns the rows a piece
+  completed and `end()` the last, a quote or a CRLF split between two pieces read as one.
+- **JSON.** `loadJson()` makes one document per record, from a JSON file or JSON Lines. The items of
+  a top-level array, or of the array at `recordsAt`, and the lines of JSON Lines, are read one at a
+  time as the file arrives; a file that is not an array is one record. `JsonLoaderOptions` sets:
+  - `recordsAt`, object keys from the top, dotted, such as `data.items`, to the array of records. A
+    file with no array there is refused;
+  - `records`, which picks the records out of the parsed value instead, reading the file whole;
   - `text` and `id`, each a field by dotted path, or a function;
   - `metadataFields`, copied into the metadata;
-  - `lines`, which reads one value per line. On by default for `.jsonl` and `.ndjson`.
+  - `lines`, which reads one value per line. On by default for `.jsonl` and `.ndjson`; a line that
+    does not parse is named by its number.
+
+```ts
+import { loadJson } from 'nexus-ai-pro/loaders/json';
+
+const response = await fetch('https://exports.example.com/tickets.json');
+// { "meta": { ... }, "data": { "items": [ ...millions of tickets... ] } }, a ticket at a time.
+const tickets = loadJson({ source: 'tickets.json', stream: response.body ?? [] }, { recordsAt: 'data.items', id: 'id', text: 'body' });
+await loadIntoStore(tickets, store);
+```
 - **PDF.** `loadPdf()` hands each file's bytes to your parser, a `PdfTextExtractor` wrapping
   `pdfjs-dist`, `unpdf`, or an OCR service, which returns the text or one string per page.
   `PdfLoaderOptions` takes that `extract` function and `splitPages`: on by default, one document per
@@ -228,6 +248,25 @@ A page that fails — a status other than 2xx, a type that is not text, a timeou
 `WebLoaderError` with the URL and status. Set `onError: 'skip'` to pass over it and hear about it in
 `onSkip`.
 
+A page whose content a script builds holds little in the HTML a server sends. `render` is a
+`WebPageRenderer` that renders one with a browser of the application's own: given the
+`WebPageToRender`, the page's URL and the HTML fetched, it returns the HTML the browser ends with, and
+the document is read from that, marked `rendered`. It is called for an HTML page that runs a script
+and whose text is shorter than `renderBelow`, 200 characters by default; `Infinity` renders every
+page that runs one. `browserRenderer()` makes one from a `RenderingBrowser`, such as Playwright's or
+Puppeteer's: each page is opened, waited on until `waitUntil` (`networkidle`), read, and closed, within
+`timeoutMs` (30 seconds), as `BrowserRendererOptions` say. The package depends on no browser. The
+safe fetch checks a page's URL first; the browser then fetches what the page loads under its own
+network policy, not the loader's.
+
+```ts
+import { chromium } from 'playwright';
+import { browserRenderer, loadWebPages } from 'nexus-ai-pro/loaders/web';
+
+const browser = await chromium.launch();
+const pages = loadWebPages(urls, { render: browserRenderer(browser) });
+```
+
 `sitemapUrls()` reads a sitemap's page URLs, following a sitemap index into its sitemaps and
 decompressing gzipped ones; `loadSitemap()` loads those pages. `SitemapOptions` adds an `include`
 test and a `limit` (1,000 URLs).
@@ -251,10 +290,10 @@ committed line endings, so a commit loads the same on every platform. A failure 
 
 ## Limitations
 
-- The HTML conversion is a heuristic, not a browser: pages rendered by script have no content in
-  their HTML. Render those elsewhere and pass the result to `htmlToText()`.
-- CSV and JSON files are read whole before their rows stream out; split an export larger than memory
-  into several files, or use JSON Lines.
+- The HTML conversion is a heuristic, not a browser: a page built by script needs a `render` of the
+  application's own, and an HTML file read from disk is never rendered.
+- A JSON file's records stream from an array reached by object keys alone; one inside another array,
+  or picked by a `records` function, is read whole.
 - The Git loader needs the `git` executable on the path.
 
 <!-- reference:start -->
@@ -271,7 +310,7 @@ specific entry point that provides it.
 | `collectDocuments` | function | Reads every document from one or more loaders, in order, into an array. |
 | `DocumentLoader` | type | Documents produced one at a time. |
 | `DocumentSource` | interface | A document to split into chunks. |
-| `FileInput` | type | A file to load: a path, a `file:` URL, or content already in memory with a name for it. |
+| `FileInput` | type | A file to load: a path, a `file:` URL, content already in memory with a name for it, or a stream of it, such as a response's body or an object store's download. |
 | `loadIntoStore` | function | Streams documents from loaders into one or more stores: each batch is split into chunks and added to every store at once, so memory holds one batch at a time however large the corpus is. |
 | `LoadIntoStoreOptions` | interface | Options for `loadIntoStore()`: how documents are split, and how many are embedded at once. |
 | `LoadIntoStoreResult` | interface | What `loadIntoStore()` stored. |
@@ -282,6 +321,7 @@ specific entry point that provides it.
 | --- | --- | --- |
 | `CsvLoaderOptions` | interface | Options for `loadCsv()`. |
 | `CsvParseOptions` | interface | Options for `parseCsv()`. |
+| `CsvRowParser` | class | CSV parsed as it arrives: `push()` takes the next piece of text, of any length, and returns the rows it completed; `end()` returns the last. |
 | `loadCsv` | function | CSV files, one document per row. |
 | `parseCsv` | function | Parses CSV into rows of fields, following RFC 4180: quoted fields may hold the delimiter, line breaks, and doubled quotes; lines may end in CRLF or LF; and a trailing line break adds no row. |
 
@@ -343,13 +383,18 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `browserRenderer` | function | A renderer over a browser of the application's own, such as Playwright's `chromium.launch()`: each page is opened, waited on, read, and closed. |
+| `BrowserRendererOptions` | interface | Options for `browserRenderer()`. |
 | `loadSitemap` | function | Every page a sitemap lists, loaded as `loadWebPages()` loads them. |
 | `loadWebPages` | function | Web pages, one document each, fetched through the SSRF-safe fetch. |
+| `RenderingBrowser` | interface | What `browserRenderer()` drives: a Playwright or Puppeteer browser, or anything shaped like one. |
 | `SafeFetchPolicy` | interface | Which URLs a fetch may reach. |
 | `SitemapOptions` | interface | Options for `sitemapUrls()` and `loadSitemap()`. |
 | `sitemapUrls` | function | The page URLs a sitemap lists. |
 | `WebLoaderError` | class | Raised when a page cannot be loaded: a status that is not 2xx, or a type that is not text. |
 | `WebLoaderOptions` | interface | Options for the web loaders. |
+| `WebPageRenderer` | type | Renders a page with a browser: the HTML it ends with once the page's scripts have run, which is what a page built by script holds. |
+| `WebPageToRender` | interface | A page as fetched, which a renderer is given. |
 
 ### `nexus-ai-pro/rag/pipeline`
 

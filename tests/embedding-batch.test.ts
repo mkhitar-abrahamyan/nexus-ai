@@ -235,20 +235,7 @@ test('Google: asyncBatchEmbedContent inline, its states read, and results matche
     { customId: 'q2', error: { message: 'unsupported image', code: '3' } },
   ]);
 
-  const huge = 'x'.repeat(11 * 1024 * 1024);
-  await assert.rejects(
-    google.submit(
-      {
-        model: 'gemini-embedding-001',
-        items: [
-          { customId: 'a', input: huge },
-          { customId: 'b', input: huge },
-        ],
-      },
-      context(),
-    ),
-    /at most 20 MB/,
-  );
+  // A batch over 20 MB is uploaded as a file instead: embeddings-length.test.ts follows it.
 });
 
 test('proof: a 100,000-chunk ingestion through a batch tier, crashed between submit and collect, never submits a window twice', async () => {

@@ -19,7 +19,17 @@ import { RateLimiter } from '../ops/rate-limiter.js';
 import { OperationLifecycle } from '../core/lifecycle.js';
 import type { EmbeddingManagerRuntime } from './manager.js';
 import type { EmbeddingCacheContext } from './cache.js';
-import { acceptedModalities, type EmbeddingInputs, inputIdentities, normalizeInputs } from './inputs.js';
+import {
+  acceptedModalities,
+  assertLengths,
+  type EmbeddingInputs,
+  inputIdentities,
+  type MediaUnits,
+  mediaCost,
+  normalizeInputs,
+  pricesByLength,
+  totalUnits,
+} from './inputs.js';
 import type { ProviderCallContext } from '../types/lifecycle.js';
 import { NexusProviderError, createTimeoutProviderError, isAbortError } from '../providers/errors.js';
 import { assertWithinCostBudget, formatCost } from '../optimizer/cost-budget.js';
@@ -118,6 +128,7 @@ export class EmbeddingEngine {
             route.provider,
             inputs,
           );
+          assertLengths(inputs, route.resolved.model, route.resolved.capabilities);
           estimate = this.enforceCostBudget(inputs, route.resolved.model);
           return { provider: route.providerName, model: route.resolved.model };
         },
@@ -195,7 +206,7 @@ export class EmbeddingEngine {
     let truncated = false;
     let providerUsed = route.providerName;
     let modelUsed = model;
-    let images = 0;
+    const embedded: MediaUnits[] = [];
 
     if (unique.length > 0) {
       const batchSize = resolveMaxBatchSize(route.resolved.capabilities, route.provider);
@@ -230,7 +241,7 @@ export class EmbeddingEngine {
           this.tokenizer,
         );
       }
-      for (const index of unique) images += inputs.images[index] ?? 0;
+      for (const index of unique) embedded.push(inputs.units[index] as MediaUnits);
 
       const finished = flatVectors.map((values) => this.postProcess(values, route, request));
       for (let position = 0; position < pending.length; position += 1) {
@@ -268,6 +279,7 @@ export class EmbeddingEngine {
       };
     });
 
+    const media = totalUnits(embedded);
     const meta: EmbeddingMeta = {
       requestId,
       providerUsed,
@@ -277,7 +289,8 @@ export class EmbeddingEngine {
       latencyMs: Date.now() - startedAt,
       batches,
       usage,
-      cost: withImageCost(priceEmbeddingUsage(model, usage, this.config.models), images, route.resolved.capabilities),
+      cost: withMediaCost(priceEmbeddingUsage(model, usage, this.config.models), media, route.resolved.capabilities),
+      ...(media.unmeasured && pricesByLength(route.resolved.capabilities) ? { unpricedMedia: media.unmeasured } : {}),
       cacheHit: cachedInputs === count && count > 0,
       cachedInputs: cachedInputs || undefined,
       deduplicatedInputs: deduplicatedInputs || undefined,
@@ -604,10 +617,9 @@ export class EmbeddingEngine {
     let inputTokens = 0;
     for (const text of inputs.texts) inputTokens += this.tokenizer.estimateTextTokens(text);
     const estimate = estimateEmbeddingCost({ model, inputTokens, config: this.config.models });
-    const images = inputs.images.reduce((total, count) => total + count, 0);
-    const perImage = images ? resolveEmbeddingModel(model, this.config.models).capabilities?.costPerImage : undefined;
-    if (!perImage) return estimate;
-    const totalCost = estimate.totalCost + images * perImage;
+    const extra = mediaCost(totalUnits(inputs.units), resolveEmbeddingModel(model, this.config.models).capabilities);
+    if (!extra) return estimate;
+    const totalCost = estimate.totalCost + extra;
     return { ...estimate, totalCost, formatted: formatCost(totalCost) };
   }
 
@@ -793,16 +805,15 @@ function assertModalities(
   );
 }
 
-/** A cost with its images priced, at the model's price per image. */
-function withImageCost(
+/** A cost with its media priced: images, seconds of audio, and video frames, at the model's prices. */
+function withMediaCost(
   cost: ResponseCost,
-  images: number,
+  media: MediaUnits,
   model: EmbeddingModelCapabilities | undefined,
 ): ResponseCost {
-  const perImage = model?.costPerImage;
-  if (!images || !perImage) return cost;
-  const imageCost = images * perImage;
-  return { ...cost, amount: cost.amount + imageCost, input: (cost.input ?? 0) + imageCost };
+  const extra = mediaCost(media, model);
+  if (!extra) return cost;
+  return { ...cost, amount: cost.amount + extra, input: (cost.input ?? 0) + extra };
 }
 
 function addUsage(usage: TokenUsage, inputTokens?: number, totalTokens?: number): TokenUsage {

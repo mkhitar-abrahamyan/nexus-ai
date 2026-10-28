@@ -58,11 +58,30 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - TypeSafe AI is sent a decision's pictures as parts of a multipart request, as bytes, so three
   pictures of 10 MiB fit in the 32 MiB a request holds; `TypeSafeDecisionProviderOptions.pictures`
   set to `base64` sends them within the JSON, as before.
+- **Embeddings of video, and audio and video priced by length.** An `EmbeddingVideoPart` holds a video
+  by its bytes, base64, or a URL, such as a Files API URI, and gemini-embedding-2 embeds it. Audio is
+  priced by the second and video by the frame the model takes, one a second and at most 32 on
+  gemini-embedding-2, at $0.00016 a second and $0.00079 a frame, each length read from the media's own
+  headers; a budget counts them before the call. Media longer than a model's `maxAudioSeconds` or
+  `maxVideoSeconds` is refused before it is sent, and media whose length cannot be read is counted in
+  `unpricedMedia`. A registry data file sets these prices and limits too, each checked when it loads.
+- A Google embedding batch over 20 MB, up to 2 GB, is uploaded as a JSONL file through the Files API, and
+  its results are read from the file the batch writes, matched to their inputs by key.
+- **CSV and JSON stream through.** `loadCsv()` and `loadJson()` read a file as it arrives and yield each
+  row or record as soon as it is read: a path in chunks, or a `FileInput` that is now also a stream,
+  such as a response's body. `CsvRowParser` parses CSV a piece at a time, and `recordsAt` names the
+  array of records inside a JSON document, such as `data.items`, read item by item. A file larger than
+  memory goes to the store a batch at a time.
+- **Pages built by script.** `loadWebPages()` takes a `render` of the application's own for a page
+  whose text a script builds, and `browserRenderer()` makes one from a Playwright or Puppeteer browser,
+  with no browser a dependency of the package.
 
 ### Changed
 
 - A TypeSafe AI request with pictures is multipart by default, and its 32 MiB is counted in bytes, not
   characters, so a state of text outside ASCII is refused before it is sent rather than by the API.
+- `loadCsv()` and `loadJson()` yield their first document before the rest of the file is read; a JSON
+  file whose array of records is cut short is refused as such, after the records before the cut.
 - An OpenAPI operation with a multipart or other non-JSON body becomes a tool, where it was skipped; a
   Swagger 2.0 document is read, where it was refused; and `loadOpenApiTools()` refuses a document over
   `maxBytes`, 5 MB by default, reading no further.
@@ -76,6 +95,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - **An answer the output guard redacts keeps no log probabilities.** They name the tokens the model
   wrote, so a redacted address or connection string was still spelled out in `response.logprobs`; now
   they are dropped wherever the guard changes or blocks the text, streamed or not.
+- The Google embedding batch adapter reads inline results under the name Google's API reference gives
+  them, `inlinedResponses`, as well as its clients' name.
 - A typed decision asked of a model that reports only the chosen token's log probability, with no
   alternatives, is sampled, where it was read as certain.
 - An Ollama stream stops at the request's `stop` sequences, as a call does.

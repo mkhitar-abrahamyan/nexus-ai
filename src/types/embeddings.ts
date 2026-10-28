@@ -2,7 +2,7 @@ import type { ProviderCallContext } from './lifecycle.js';
 import type { CacheConfig, RateLimitConfig, RetryConfig } from './config.js';
 import type { ModelStatus } from './providers.js';
 import type { ResponseCost, TokenUsage } from './response.js';
-import type { AudioContent, DocumentContent, ImageContent, TextContent } from './messages.js';
+import type { AudioContent, BinaryBuffer, DocumentContent, ImageContent, TextContent } from './messages.js';
 
 /**
  * What the vector will be used for.
@@ -20,13 +20,29 @@ export type EmbeddingEncodingFormat = 'float' | 'base64';
 export type EmbeddingTruncateMode = 'none' | 'start' | 'end';
 
 /** What an embedding input can hold besides text. */
-export type EmbeddingModality = 'text' | 'image' | 'audio' | 'document';
+export type EmbeddingModality = 'text' | 'image' | 'audio' | 'video' | 'document';
 
 /**
- * A part of an embedding input: the same text, image, audio, and document parts a message takes.
- * Media must hold its content, as bytes, base64, or a URL; a path or a transcript is refused.
+ * A video to embed, by its content. A message's video part names a file on disk, which a provider
+ * cannot be sent, so an embedding takes the video itself: its bytes or base64, with its container,
+ * such as `mp4` or `mov`, or a URL a provider reads, such as a Files API URI Google embeds from.
  */
-export type EmbeddingPart = TextContent | ImageContent | AudioContent | DocumentContent;
+export interface EmbeddingVideoPart {
+  /** Discriminates this part. */
+  type: 'video';
+  /** The video. */
+  source:
+    | { buffer: BinaryBuffer; format?: string }
+    | { base64: string; format?: string }
+    | { url: string; format?: string };
+}
+
+/**
+ * A part of an embedding input: the same text, image, audio, and document parts a message takes, and
+ * a video by its content. Media must hold its content, as bytes, base64, or a URL; a path or a
+ * transcript is refused.
+ */
+export type EmbeddingPart = TextContent | ImageContent | AudioContent | DocumentContent | EmbeddingVideoPart;
 
 /**
  * One input made of parts, such as an image with its caption, embedded as one vector in the same
@@ -142,6 +158,11 @@ export interface EmbeddingMeta {
   usage: TokenUsage;
   /** What it cost, from the model's price. */
   cost: ResponseCost;
+  /**
+   * Audio and video parts whose length could not be read from their bytes, such as one given by URL,
+   * and so are not in `cost` for a model that prices them by length.
+   */
+  unpricedMedia?: number;
   /** True when every input was served from cache and no provider call was made. */
   cacheHit: boolean;
   /** Inputs served from cache when only part of the batch was. */
@@ -334,6 +355,19 @@ export interface EmbeddingModelCapabilities {
   costPer1kInput: number;
   /** Price per image embedded, in US dollars, for a model that takes images. */
   costPerImage?: number;
+  /** Price per second of audio embedded, in US dollars, its length read from the audio's own headers. */
+  costPerAudioSecond?: number;
+  /** Price per frame the model takes from a video, in US dollars. */
+  costPerVideoFrame?: number;
+  /**
+   * How many frames the model takes from a video, which `costPerVideoFrame` prices: `perSecond`, and
+   * at most `max`. Defaults to one a second, with no most.
+   */
+  videoFrames?: { perSecond: number; max?: number };
+  /** The longest audio part it takes, in seconds. A longer one is refused before it is sent. */
+  maxAudioSeconds?: number;
+  /** The longest video part it takes, in seconds. A longer one is refused before it is sent. */
+  maxVideoSeconds?: number;
   /** What its inputs can hold. Text only when absent. */
   inputModalities?: readonly EmbeddingModality[];
   /** True when the model already returns unit-length vectors. */

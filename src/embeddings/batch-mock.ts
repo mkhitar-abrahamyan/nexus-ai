@@ -52,7 +52,7 @@ export class MockEmbeddingBatchProvider implements EmbeddingBatchProvider {
         maxItems: 50_000,
         supportsCancel: true,
         discount: 0.5,
-        inputModalities: ['text', 'image', 'audio', 'document'],
+        inputModalities: ['text', 'image', 'audio', 'video', 'document'],
         ...options.capabilities,
       },
     };

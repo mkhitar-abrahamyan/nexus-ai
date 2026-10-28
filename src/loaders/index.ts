@@ -10,10 +10,16 @@ export type { DocumentSource } from '../rag/ingestion.js';
 export type DocumentLoader = AsyncIterable<DocumentSource> | Iterable<DocumentSource>;
 
 /**
- * A file to load: a path, a `file:` URL, or content already in memory with a name for it. In-memory
- * content is how a loader reads an upload, a database blob, or a file on a runtime without a disk.
+ * A file to load: a path, a `file:` URL, content already in memory with a name for it, or a stream of
+ * it, such as a response's body or an object store's download. In-memory content is how a loader reads
+ * an upload, a database blob, or a file on a runtime without a disk; a stream, how the CSV and JSON
+ * loaders read a file larger than memory, as it arrives.
  */
-export type FileInput = string | URL | { source: string; content: string | Uint8Array };
+export type FileInput =
+  | string
+  | URL
+  | { source: string; content: string | Uint8Array }
+  | { source: string; stream: AsyncIterable<Uint8Array | string> | Iterable<Uint8Array | string> };
 
 /** Reads every document from one or more loaders, in order, into an array. */
 export async function collectDocuments(...loaders: DocumentLoader[]): Promise<DocumentSource[]> {

@@ -252,10 +252,12 @@ import {
   type Retriever,
   vectorRetriever,
 } from 'nexus-ai-pro/rag/retrievers';
-import { type DocumentLoader, loadIntoStore } from 'nexus-ai-pro/loaders';
+import { type DocumentLoader, type FileInput, loadIntoStore } from 'nexus-ai-pro/loaders';
 import { loadMarkdown } from 'nexus-ai-pro/loaders/markdown';
 import { loadDirectory } from 'nexus-ai-pro/loaders/text';
-import { loadWebPages } from 'nexus-ai-pro/loaders/web';
+import { browserRenderer, loadWebPages, type RenderingBrowser, type WebPageRenderer } from 'nexus-ai-pro/loaders/web';
+import { CsvRowParser, loadCsv } from 'nexus-ai-pro/loaders/csv';
+import { loadJson } from 'nexus-ai-pro/loaders/json';
 import { McpRegistry, type McpServerHealth } from 'nexus-ai-pro/mcp/registry';
 import { recallAtK, reciprocalRank } from 'nexus-ai-pro/evaluate';
 import { FileEvaluationCache, fingerprintOf, type EvaluationCache } from 'nexus-ai-pro/evaluate';
@@ -316,7 +318,12 @@ import { RedisRateLimitStore } from 'nexus-ai-pro/ops/rate-limit-adapters';
 import { OperationRunner as SubpathOperationRunner } from 'nexus-ai-pro/operations';
 import { RedisOperationStore } from 'nexus-ai-pro/operations/adapters';
 import { verifyOperationWebhook } from 'nexus-ai-pro/operations/webhooks';
-import { EmbeddingManager as SubpathEmbeddingManager } from 'nexus-ai-pro/embeddings';
+import {
+  EmbeddingManager as SubpathEmbeddingManager,
+  type EmbeddingModelCapabilities as SubpathEmbeddingModel,
+  type EmbeddingParts as SubpathEmbeddingParts,
+  type EmbeddingVideoPart,
+} from 'nexus-ai-pro/embeddings';
 import { MockEmbeddingProvider } from 'nexus-ai-pro/embeddings/mock';
 import { OpenAIEmbeddingProvider } from 'nexus-ai-pro/embeddings/adapters';
 import { resolveEmbeddingModel } from 'nexus-ai-pro/embeddings/models';
@@ -881,6 +888,20 @@ retrievalStores.push(
 );
 const keywords = new KeywordIndex();
 const loaders: DocumentLoader[] = [loadMarkdown('README.md'), loadDirectory('docs'), loadWebPages(['https://example.com'])];
+// Files that stream as they arrive, and pages a browser of the application's own renders.
+const streamedExport: FileInput = { source: 'export.csv', stream: (async function* () { yield new Uint8Array([97, 10]); })() };
+const chunkedExport: FileInput = { source: 'export.jsonl', stream: ['{"a":1}\\n', new Uint8Array([123, 125])] };
+const csvParser = new CsvRowParser({ delimiter: ';' });
+const parsedRows: string[][] = [...csvParser.push('a;b\\n'), ...csvParser.end()];
+const someBrowser: RenderingBrowser = { newPage: async () => ({ goto: async () => undefined, content: async () => '<main/>', close: async () => undefined }) };
+const renderer: WebPageRenderer = browserRenderer(someBrowser, { waitUntil: 'load', timeoutMs: 10_000 });
+const streamedLoaders: DocumentLoader[] = [
+  loadCsv(streamedExport, { idColumn: 'a' }),
+  loadJson(chunkedExport),
+  loadJson('tickets.json', { recordsAt: 'data.items', id: 'id' }),
+  loadWebPages(['https://example.com/app'], { render: renderer, renderBelow: 500 }),
+];
+void [parsedRows, streamedLoaders];
 void loadIntoStore([retrievalStores[0] as VectorStore, keywords], loaders, { batchSize: 16 });
 const retriever: Retriever = rerankRetriever(
   hybridRetriever([vectorRetriever(retrievalStores[0] as VectorStore), keywords]),
@@ -964,6 +985,23 @@ const operationRecord: Promise<OperationRecord<string> | undefined> = operationR
 const webhookOk: boolean = verifyOperationWebhook('{}', 't=1,v1=aa', 'secret');
 const embeddingManager = new EmbeddingManager(embeddingConfig);
 const subpathEmbeddingManager = new SubpathEmbeddingManager(embeddingConfig);
+// Video by its content, and a model priced by the second of audio and the video frame.
+const embeddedClip: EmbeddingVideoPart = { type: 'video', source: { base64: 'AAAA', format: 'mov' } };
+const clipInput: SubpathEmbeddingParts = { parts: [embeddedClip, { type: 'video', source: { url: 'https://generativelanguage.googleapis.com/v1beta/files/clip' } }] };
+const pricedByLength: SubpathEmbeddingModel = {
+  provider: 'google',
+  dimensions: 3072,
+  maxInputTokens: 8192,
+  costPer1kInput: 0.0002,
+  costPerAudioSecond: 0.00016,
+  costPerVideoFrame: 0.00079,
+  videoFrames: { perSecond: 1, max: 32 },
+  maxAudioSeconds: 180,
+  maxVideoSeconds: 120,
+  inputModalities: ['text', 'video'],
+};
+const unpriced: Promise<number | undefined> = subpathEmbeddingManager.embed({ input: clipInput }).then((response) => response.meta.unpricedMedia);
+void [pricedByLength, unpriced];
 const openAiEmbeddings = new OpenAIEmbeddingProvider({ apiKey: 'test' });
 const embeddingRequest: EmbeddingRequest = { input: ['one', 'two'], inputType: 'document', normalize: true };
 const embeddingResponse: Promise<EmbeddingResponse> = ai.embed(embeddingRequest);

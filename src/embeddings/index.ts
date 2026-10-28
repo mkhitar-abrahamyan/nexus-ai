@@ -72,5 +72,6 @@ export type {
   EmbeddingRequest,
   EmbeddingResponse,
   EmbeddingTruncateMode,
+  EmbeddingVideoPart,
   EmbeddingsProvider,
 } from '../types/embeddings.js';

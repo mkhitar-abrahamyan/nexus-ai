@@ -60,7 +60,7 @@ export class RegistryDataError extends Error {
 const MODEL_STATUSES = new Set(['stable', 'preview', 'latest', 'deprecated']);
 const INPUT_MODALITIES = new Set(['text', 'image', 'audio', 'video', 'pdf']);
 const OUTPUT_MODALITIES = new Set(['text', 'image', 'audio']);
-const EMBEDDING_MODALITIES = new Set(['text', 'image', 'audio', 'document']);
+const EMBEDDING_MODALITIES = new Set(['text', 'image', 'audio', 'video', 'document']);
 const DATE = /^\d{4}-\d{2}-\d{2}/;
 
 /**
@@ -264,6 +264,23 @@ function checkEmbeddingModel(path: string, entry: unknown, problems: string[]): 
   positiveInteger(`${path}.maxBatchSize`, entry.maxBatchSize, false, problems);
   price(`${path}.costPer1kInput`, entry.costPer1kInput, true, problems);
   price(`${path}.costPerImage`, entry.costPerImage, false, problems);
+  price(`${path}.costPerAudioSecond`, entry.costPerAudioSecond, false, problems);
+  price(`${path}.costPerVideoFrame`, entry.costPerVideoFrame, false, problems);
+  positiveNumber(`${path}.maxAudioSeconds`, entry.maxAudioSeconds, problems);
+  positiveNumber(`${path}.maxVideoSeconds`, entry.maxVideoSeconds, problems);
+  const frames = entry.videoFrames;
+  if (
+    frames !== undefined &&
+    !(
+      isRecord(frames) &&
+      typeof frames.perSecond === 'number' &&
+      Number.isFinite(frames.perSecond) &&
+      frames.perSecond > 0 &&
+      (frames.max === undefined || (Number.isSafeInteger(frames.max) && (frames.max as number) > 0))
+    )
+  ) {
+    problems.push(`${path}.videoFrames: { perSecond } above zero, with a max a positive integer`);
+  }
   modalities(`${path}.inputModalities`, entry.inputModalities, EMBEDDING_MODALITIES, false, problems);
   const sizes = entry.supportedDimensions;
   if (
@@ -308,6 +325,12 @@ function positiveInteger(path: string, value: unknown, required: boolean, proble
   if (value === undefined && !required) return;
   if (!(typeof value === 'number' && Number.isSafeInteger(value) && value > 0))
     problems.push(`${path}: a positive integer`);
+}
+
+function positiveNumber(path: string, value: unknown, problems: string[]): void {
+  if (value === undefined) return;
+  if (!(typeof value === 'number' && Number.isFinite(value) && value > 0))
+    problems.push(`${path}: a number above zero`);
 }
 
 function price(path: string, value: unknown, required: boolean, problems: string[]): void {

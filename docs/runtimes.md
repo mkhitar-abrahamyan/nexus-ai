@@ -205,12 +205,12 @@ These run anywhere, and load a Node module only when a feature that needs it is 
 | `nexus-ai-pro/agent/workspace` | `node:fs/promises`, `node:path` |
 | `nexus-ai-pro/agent/interpreter` | `node:worker_threads` |
 | `nexus-ai-pro/video` | `node:crypto`; the `Buffer` global |
-| `nexus-ai-pro/loaders/text` | `node:fs/promises`, `node:path` |
-| `nexus-ai-pro/loaders/markdown` | `node:fs/promises` |
-| `nexus-ai-pro/loaders/html` | `node:fs/promises` |
-| `nexus-ai-pro/loaders/csv` | `node:fs/promises` |
-| `nexus-ai-pro/loaders/json` | `node:fs/promises` |
-| `nexus-ai-pro/loaders/pdf` | `node:fs/promises` |
+| `nexus-ai-pro/loaders/text` | `node:fs/promises`, `node:fs`, `node:path` |
+| `nexus-ai-pro/loaders/markdown` | `node:fs/promises`, `node:fs` |
+| `nexus-ai-pro/loaders/html` | `node:fs/promises`, `node:fs` |
+| `nexus-ai-pro/loaders/csv` | `node:fs/promises`, `node:fs` |
+| `nexus-ai-pro/loaders/json` | `node:fs/promises`, `node:fs` |
+| `nexus-ai-pro/loaders/pdf` | `node:fs/promises`, `node:fs` |
 
 <!-- runtimes:end -->
 

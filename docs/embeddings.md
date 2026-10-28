@@ -104,11 +104,12 @@ ai.registerEmbeddingProvider('mock', new MockEmbeddingProvider());
 Bundled embedding dimensions and prices are defaults, not financial truth. Override them through
 `embeddings.models.registry` when exact numbers matter.
 
-## Images, audio, and documents
+## Images, audio, video, and documents
 
-An input can be media as well as text: an image, audio, a PDF, or text with them. A multimodal model
-embeds each in the same space as text, so a text query finds the image it describes. Give the input
-as `EmbeddingParts`: the same text, image, audio, and document parts a message takes.
+An input can be media as well as text: an image, audio, a video, a PDF, or text with them. A multimodal
+model embeds each in the same space as text, so a text query finds the image it describes. Give the
+input as `EmbeddingParts`: the same text, image, audio, and document parts a message takes, and a video
+by its content.
 
 ```ts
 const photos = await ai.embed({
@@ -122,28 +123,46 @@ const [query] = (await ai.embed({ model: 'gemini-embedding-2', inputType: 'query
 const found = await store.searchVector(query, { topK: 5 });
 ```
 
-An `EmbeddingPart` is a `TextContent`, `ImageContent`, `AudioContent`, or `DocumentContent`. Every part
-of one input becomes one vector, such as a product photo with its caption. A part must hold its
-content, as bytes, base64, or a URL. A path or a transcript is refused, since an embedding never reads
-a file.
+An `EmbeddingPart` is a `TextContent`, `ImageContent`, `AudioContent`, `DocumentContent`, or
+`EmbeddingVideoPart`. Every part of one input becomes one vector, such as a product photo with its
+caption. A part must hold its content, as bytes, base64, or a URL. A path or a transcript is refused,
+since an embedding never reads a file. That is why a video has a part of its own: a message's video
+part names a file, and an `EmbeddingVideoPart` holds the video's bytes or base64, with its container,
+`mp4` or `mov`, or a URL such as a Files API URI.
 
-Media is sent only to a model that takes it. An `EmbeddingModality` is `text`, `image`, `audio`, or
-`document`, and `inputModalities` on a model's registry entry says which it takes. A model without an
+```ts
+const clip = await ai.embed({
+  model: 'gemini-embedding-2',
+  input: { parts: [{ type: 'video', source: { buffer: await readFile('demo.mp4'), format: 'mp4' } }] },
+});
+```
+
+Media is sent only to a model that takes it. An `EmbeddingModality` is `text`, `image`, `audio`,
+`video`, or `document`, and `inputModalities` on a model's registry entry says which it takes. A model without an
 entry is judged by its adapter's capabilities. Anything else is refused with an
 `EmbeddingCapabilityError` before any call, and a fallback that cannot take the media is skipped.
 
 | Model | Takes | Notes |
 | --- | --- | --- |
-| `gemini-embedding-2` | text, image, audio, document | Up to 6 images, 180 seconds of audio, or a 6-page PDF an input. The task is a prefix on the text, which the adapter writes from `inputType`. |
+| `gemini-embedding-2` | text, image, audio, video, document | Up to 6 images, 180 seconds of audio, 120 seconds of video, its sound not heard, or a 6-page PDF an input. The task is a prefix on the text, which the adapter writes from `inputType`. |
 | `embed-v4.0` | text, image | Images as JPEG, PNG, WebP, or GIF, 20 MB a request. |
 | Every other bundled model | text | |
 
 Google takes media inline, or by a Files API URI; Cohere takes images inline. Any other URL is refused
 with the reason, since neither provider fetches it.
 
-An image is priced at its model's `costPerImage`, beside the text's tokens. Audio and video are
-billed by the second and the frame, which is not priced. A repeated medium is embedded once, and is
-cached under a hash of its content.
+Media is priced beside the text's tokens, at its model's registry prices:
+- an image at `costPerImage`;
+- audio at `costPerAudioSecond`, each part's length counted up to the next second;
+- video at `costPerVideoFrame`, for each frame the model takes, as its `videoFrames` says:
+  gemini-embedding-2 takes one a second, at most 32, so a minute's video is 32 frames.
+
+A length is read from the media's own headers, without decoding it: WAV, MP3, MP4, MOV, and the other
+containers the media family reads. Audio or video longer than a model's `maxAudioSeconds` or
+`maxVideoSeconds` is refused before any call, naming the input. A part whose length cannot be read,
+one given by URL or in a container no reader knows, is sent, and counted in the response's
+`unpricedMedia` rather than priced at nothing. A budget counts the media before the call, and a
+repeated medium is embedded once, and cached under a hash of its content.
 
 ## Sharing the cache
 
@@ -259,7 +278,7 @@ reported where the provider reports them, and estimated where it does not, never
 | Adapter | Entry point | Notes |
 | --- | --- | --- |
 | `OpenAIEmbeddingBatchProvider` | `nexus-ai-pro/embeddings/batch/openai` | `/v1/embeddings` lines, 50,000 a batch; failed lines are read from the error file. `OpenAIEmbeddingBatchProviderOptions`: the key, base URL, organization, headers, and `fetch`. |
-| `GoogleEmbeddingBatchProvider` | `nexus-ai-pro/embeddings/batch/google` | `asyncBatchEmbedContent` with inline requests under 20 MB; takes media on a model that does. `GoogleEmbeddingBatchProviderOptions`: the key, base URL, headers, and `fetch`. Experimental until a live run is recorded. |
+| `GoogleEmbeddingBatchProvider` | `nexus-ai-pro/embeddings/batch/google` | `asyncBatchEmbedContent`: inline under 20 MB, and a larger batch, up to 2 GB, uploaded as a JSONL file through the Files API, its results read from the file the batch writes, matched by key; takes media on a model that does. `GoogleEmbeddingBatchProviderOptions`: the key, base URL, headers, and `fetch`. Experimental until a live run is recorded. |
 | `MockEmbeddingBatchProvider` | `nexus-ai-pro/embeddings/batch/mock` | In memory, for tests: scripted statuses and failures, and the vectors `MockEmbeddingProvider` gives. `MockEmbeddingBatchProviderOptions` sets them. |
 
 An adapter of your own implements `EmbeddingBatchProvider`: `submit`, `poll`, `results`, and an optional
@@ -364,10 +383,10 @@ A vector store that needs no routing or retries can use a bare function instead:
 ## The embedding registry
 
 `KNOWN_EMBEDDING_MODELS` maps each model to its `EmbeddingModelCapabilities`: provider and family,
-native dimensions and the sizes it can shorten to, input and batch limits, the price per 1,000 input
-tokens and per image, whether it normalizes, the input types and `inputModalities` it takes, and its
-status. Each entry also
-records when and where it was verified.
+native dimensions and the sizes it can shorten to, input and batch limits, the longest audio and video
+it takes, the price per 1,000 input tokens, per image, per second of audio, and per video frame, with
+how many frames it takes a second, whether it normalizes, the input types and `inputModalities` it
+takes, and its status. Each entry also records when and where it was verified.
 
 `EMBEDDING_MODEL_ALIASES` holds stable names such as `embed-quality`. `EMBEDDING_REGISTRY_PROVENANCE`
 says when the bundled data was checked.
@@ -403,10 +422,8 @@ Every embedding error extends `EmbeddingError` and has a stable code.
 - Bundled dimensions and prices are defaults, verified on the date the registry records.
 - Cost is estimated from tokens when a provider reports none.
 - Two processes that miss the same text at once both embed it; the shared cache keeps one vector.
-- The Google batch adapter reads inline results, and refuses a batch over 20 MB; split a larger
-  job into several.
-- Video is not an embedding input yet, since a video part names a file; and audio and video are not
-  priced, since their price depends on a duration this runtime does not measure.
+- A Google batch file leaves its input file in the Files API, which deletes it after 48 hours.
+- Audio or video given by URL is not priced, since its length is not read; `unpricedMedia` counts it.
 
 <!-- reference:start -->
 ## Reference
@@ -438,7 +455,7 @@ specific entry point that provides it.
 | `EmbeddingModelCapabilities` | interface | What the registry knows about an embedding model. |
 | `EmbeddingModelNotFoundError` | class | Raised when a model is not in the embeddings registry and no provider was named. |
 | `EmbeddingModelRegistryConfig` | interface | Embedding models and aliases that extend or replace the bundled registry. |
-| `EmbeddingPart` | type | A part of an embedding input: the same text, image, audio, and document parts a message takes. |
+| `EmbeddingPart` | type | A part of an embedding input: the same text, image, audio, and document parts a message takes, and a video by its content. |
 | `EmbeddingParts` | interface | One input made of parts, such as an image with its caption, embedded as one vector in the same space as text. |
 | `EmbeddingProviderCallContext` | interface | What an adapter receives with every batch besides the request: the context every family's provider receives, and where this batch sits in the request. |
 | `EmbeddingProviderCapabilities` | interface | What an adapter can do. |
@@ -458,6 +475,7 @@ specific entry point that provides it.
 | `EmbeddingsProvider` | interface | An embeddings adapter. |
 | `EmbeddingTruncateMode` | type | How an input longer than the model's limit is handled. |
 | `EmbeddingValidationError` | class | Raised when a request is invalid before anything is sent. |
+| `EmbeddingVideoPart` | interface | A video to embed, by its content. |
 | `GeminiEmbeddingOptions` | interface | Options for `createGeminiEmbeddingProvider()`. |
 | `OpenAIEmbeddingOptions` | interface | Options for `createOpenAIEmbeddingProvider()`. |
 | `toEmbeddingFunction` | function | Adapts the embeddings operation family to the plain function that `MemoryVectorStore`, the semantic cache, and RAG ingestion accept. |
@@ -498,7 +516,7 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
-| `GoogleEmbeddingBatchProvider` | class | Gemini's Batch API for embeddings (`asyncBatchEmbedContent`): half price, inline requests under 20 MB, and results inline, in the order submitted. |
+| `GoogleEmbeddingBatchProvider` | class | Gemini's Batch API for embeddings (`asyncBatchEmbedContent`): half price. |
 | `GoogleEmbeddingBatchProviderOptions` | interface | Options for Gemini's embedding batch tier. |
 
 ### `nexus-ai-pro/embeddings/batch/mock`

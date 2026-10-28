@@ -25,7 +25,14 @@ import type { DurableOperationHandle, OperationRunnerConfig } from '../types/ope
 import type { ResponseCost, TokenUsage } from '../types/response.js';
 import { generateRequestId } from '../utils/ids.js';
 import { Tokenizer } from '../utils/tokenizer.js';
-import { acceptedModalities, normalizeInputs } from './inputs.js';
+import {
+  acceptedModalities,
+  assertLengths,
+  type MediaUnits,
+  mediaCost,
+  normalizeInputs,
+  totalUnits,
+} from './inputs.js';
 import { priceEmbeddingUsage, resolveEmbeddingModel } from './models.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
@@ -197,7 +204,10 @@ export interface EmbeddingBatchManagerRuntime {
 interface RefNotes {
   model?: string;
   estimatedInputTokens?: number;
+  /** Images, from a batch submitted before media was measured; `media` holds them since. */
   images?: number;
+  /** The batch's media, measured when it was submitted, for pricing. */
+  media?: MediaUnits;
   normalize?: boolean;
   items?: number;
   /** The tenant the batch runs for, whose key every later call on it uses. */
@@ -434,6 +444,11 @@ export class EmbeddingBatchManager {
         `Embedding model "${request.model}" in the "${providerName}" batch tier takes ${accepted.join(', ')} input, not ${refused.join(' or ')}`,
       );
     }
+    try {
+      assertLengths(inputs, request.model, model);
+    } catch (error) {
+      throw new BatchCapabilityError(providerName, 'input', (error as Error).message);
+    }
     const parts = inputs.parts;
     let estimatedInputTokens = 0;
     for (const text of inputs.texts) estimatedInputTokens += this.tokenizer.estimateTextTokens(text);
@@ -453,7 +468,7 @@ export class EmbeddingBatchManager {
       notes: {
         model: request.model,
         estimatedInputTokens,
-        images: inputs.images.reduce((total, count) => total + count, 0),
+        media: totalUnits(inputs.units),
         items: request.items.length,
         ...(request.normalize ? { normalize: true } : {}),
         ...(request.tenantId !== undefined ? { tenant: request.tenantId } : {}),
@@ -515,8 +530,9 @@ export class EmbeddingBatchManager {
     const discount = provider.info.capabilities.discount ?? 1;
     if (!notes.model) return { amount: 0, currency: 'USD', basis: 'estimated' };
     const cost = priceEmbeddingUsage(notes.model, usage, this.config.models);
-    const perImage = resolveEmbeddingModel(notes.model, this.config.models).capabilities?.costPerImage ?? 0;
-    const amount = (cost.amount + (notes.images ?? 0) * perImage) * discount;
+    const media = notes.media ?? { images: notes.images ?? 0, audio: [], video: [], unmeasured: 0 };
+    const amount =
+      (cost.amount + mediaCost(media, resolveEmbeddingModel(notes.model, this.config.models).capabilities)) * discount;
     return { ...cost, amount, input: amount, output: 0 };
   }
 

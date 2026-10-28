@@ -31,6 +31,75 @@ export interface WebLoaderOptions extends SafeFetchPolicy {
   onError?: 'throw' | 'skip';
   /** Called for each page skipped, with the reason. */
   onSkip?: (url: string, reason: Error) => void;
+  /**
+   * Renders a page whose content a script builds, with a browser of the application's own, such as
+   * `browserRenderer()` over Playwright's: given the page fetched, it returns the HTML the browser ends
+   * with. Called for an HTML page that runs a script and whose text, as fetched, is shorter than
+   * `renderBelow`. The fetch has checked the page's URL first; the browser fetches what the page
+   * loads under its own policy.
+   */
+  render?: WebPageRenderer;
+  /** Renders a page whose fetched text is shorter than this many characters. Defaults to 200; `Infinity` renders every page that runs a script. */
+  renderBelow?: number;
+}
+
+/** A page as fetched, which a renderer is given. */
+export interface WebPageToRender {
+  /** Its URL, after redirects. */
+  url: string;
+  /** The HTML the server sent. */
+  html: string;
+}
+
+/**
+ * Renders a page with a browser: the HTML it ends with once the page's scripts have run, which is
+ * what a page built by script holds.
+ */
+export type WebPageRenderer = (page: WebPageToRender, signal: AbortSignal) => Promise<string> | string;
+
+/** What `browserRenderer()` drives: a Playwright or Puppeteer browser, or anything shaped like one. */
+export interface RenderingBrowser {
+  /** Opens a page. */
+  newPage(): Promise<{
+    /** Goes to a URL and waits as told. */
+    goto(url: string, options?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
+    /** The HTML the page holds now. */
+    content(): Promise<string>;
+    /** Closes it. */
+    close(): Promise<unknown>;
+  }>;
+}
+
+/** Options for `browserRenderer()`. */
+export interface BrowserRendererOptions {
+  /** When the page counts as rendered. Defaults to `networkidle`, as Playwright names it. */
+  waitUntil?: string;
+  /** Time allowed per page, in milliseconds. Defaults to 30 seconds. */
+  timeoutMs?: number;
+}
+
+/**
+ * A renderer over a browser of the application's own, such as Playwright's `chromium.launch()`: each
+ * page is opened, waited on, read, and closed. The package depends on no browser; the browser fetches
+ * the page and what it loads under its own network policy, not the loader's.
+ *
+ * ```ts
+ * const browser = await chromium.launch();
+ * for await (const page of loadWebPages(urls, { render: browserRenderer(browser) })) store(page);
+ * ```
+ */
+export function browserRenderer(browser: RenderingBrowser, options: BrowserRendererOptions = {}): WebPageRenderer {
+  return async (page, signal) => {
+    signal.throwIfAborted();
+    const tab = await browser.newPage();
+    try {
+      await tab.goto(page.url, { waitUntil: options.waitUntil ?? 'networkidle', timeout: options.timeoutMs ?? 30_000 });
+      signal.throwIfAborted();
+      return await tab.content();
+    } finally {
+      await tab.close().catch(() => undefined);
+    }
+  };
 }
 
 /** The most a sitemap may hold uncompressed, by the sitemap protocol. */
@@ -148,7 +217,15 @@ async function loadPage(url: string, options: WebLoaderOptions): Promise<Documen
   const body = new TextDecoder().decode(response.bytes);
   const metadata: Record<string, unknown> = { ...options.metadata, url: response.url };
   if (type === 'text/html' || type === 'application/xhtml+xml' || (!type && /^\s*</.test(body))) {
-    const page = htmlToText(body, { baseUrl: response.url, mainContent: options.mainContent });
+    let page = htmlToText(body, { baseUrl: response.url, mainContent: options.mainContent });
+    if (options.render && page.text.length < (options.renderBelow ?? 200) && /<script\b/i.test(body)) {
+      const html = await options.render(
+        { url: response.url, html: body },
+        options.signal ?? new AbortController().signal,
+      );
+      page = htmlToText(html, { baseUrl: response.url, mainContent: options.mainContent });
+      metadata.rendered = true;
+    }
     if (page.title) metadata.title = page.title;
     if (page.description) metadata.description = page.description;
     return { id: response.url, text: page.text, source: response.url, metadata };

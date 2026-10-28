@@ -72,19 +72,48 @@ test('every problem in a file is reported, each with where it is', () => {
   (broken.models['gpt-5.4-mini'] as Record<string, unknown>).inputModalities = ['text', 'smell'];
   delete (broken.models['gpt-5.4-mini'] as Record<string, unknown>).maxContextTokens;
   (broken.aliases as unknown as Record<string, string>).fast = 'no-such-model';
-  (broken.embeddingModels['gemini-embedding-2'] as Record<string, unknown>).dimensions = 0;
+  const embedding = broken.embeddingModels['gemini-embedding-2'] as Record<string, unknown>;
+  embedding.dimensions = 0;
+  embedding.costPerAudioSecond = -1;
+  embedding.costPerVideoFrame = 'cheap';
+  embedding.maxVideoSeconds = 0;
+  embedding.maxAudioSeconds = Number.POSITIVE_INFINITY;
+  embedding.videoFrames = { perSecond: 1, max: 2.5 };
   const problems = checkRegistryData(broken);
   assert.deepEqual(problems.sort(), [
     'aliases.fast: names no model in the file or the bundled data',
+    'embeddingModels.gemini-embedding-2.costPerAudioSecond: a price of zero or more',
+    'embeddingModels.gemini-embedding-2.costPerVideoFrame: a price of zero or more',
     'embeddingModels.gemini-embedding-2.dimensions: a positive integer',
+    'embeddingModels.gemini-embedding-2.maxAudioSeconds: a number above zero',
+    'embeddingModels.gemini-embedding-2.maxVideoSeconds: a number above zero',
+    'embeddingModels.gemini-embedding-2.videoFrames: { perSecond } above zero, with a max a positive integer',
     'models.gpt-5.4-mini.costPer1kInput: a price of zero or more',
     'models.gpt-5.4-mini.inputModalities: a list of text, image, audio, video, pdf',
     'models.gpt-5.4-mini.maxContextTokens: a positive integer',
   ]);
   assert.throws(
     () => parseRegistryData(broken),
-    (error: unknown) => error instanceof RegistryDataError && error.problems.length === 5,
+    (error: unknown) => error instanceof RegistryDataError && error.problems.length === 10,
   );
+  for (const frames of [
+    { perSecond: 0 },
+    { perSecond: Number.POSITIVE_INFINITY },
+    'one a second',
+    null,
+    { perSecond: 2, max: 0 },
+  ]) {
+    const sampled = structuredClone(data) as unknown as Record<string, Record<string, Record<string, unknown>>>;
+    (sampled.embeddingModels['gemini-embedding-2'] as Record<string, unknown>).videoFrames = frames;
+    assert.deepEqual(
+      checkRegistryData(sampled),
+      ['embeddingModels.gemini-embedding-2.videoFrames: { perSecond } above zero, with a max a positive integer'],
+      JSON.stringify(frames),
+    );
+  }
+  const unbounded = structuredClone(data) as unknown as Record<string, Record<string, Record<string, unknown>>>;
+  (unbounded.embeddingModels['gemini-embedding-2'] as Record<string, unknown>).videoFrames = { perSecond: 0.5 };
+  assert.deepEqual(checkRegistryData(unbounded), [], 'a rate with no most');
   assert.match(checkRegistryData('{ not json')[0] ?? '', /not JSON/);
   assert.deepEqual(checkRegistryData({ ...data, format: 'other/2' }), ['format: expected "nexus-registry/1"']);
 });
