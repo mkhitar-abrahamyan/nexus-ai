@@ -142,6 +142,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/ops` | 48 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
+| `nexus-ai-pro/agent/openapi` | 44 KB | 12% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 12% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 12% | none |
 | `nexus-ai-pro/voice` | 42 KB | 11% | none |
@@ -181,7 +182,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 5% | none |
-| `nexus-ai-pro/agent/openapi` | 20 KB | 5% | none |
 | `nexus-ai-pro/media/catalog` | 20 KB | 5% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |

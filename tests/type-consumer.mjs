@@ -373,7 +373,7 @@ import { A2A_ERRORS, a2aClient, a2aErrorStatus, a2aHandler, type A2aCallOutcome,
 import { a2aGrpcClient, a2aGrpcService, type A2aGrpcClient } from 'nexus-ai-pro/protocols/a2a/grpc';
 import { mediaChecks, mediaJudge, readMediaDuration, resolveMedia, type MediaDuration, type ResolvedMedia } from 'nexus-ai-pro/evaluate/media';
 import { emulatedTools, EmulatedWorld, MemoryEmulationStore, type EmulatedToolCall, type EmulatedWorldSnapshot } from 'nexus-ai-pro/evaluate/emulate';
-import { loadOpenApiTools, openApiTools, OpenApiError, type OpenApiDocument, type OpenApiTools } from 'nexus-ai-pro/agent/openapi';
+import { bundleOpenApiDocument, loadOpenApiTools, openApiTools, OpenApiError, swaggerToOpenApi, type OpenApiBundleOptions, type OpenApiCredential, type OpenApiDocument, type OpenApiTools, type OpenApiWebhook } from 'nexus-ai-pro/agent/openapi';
 import { catalogedAssetStore, mediaCatalog, type MediaCatalogPage } from 'nexus-ai-pro/media/catalog';
 import {
   automationRules,
@@ -1398,6 +1398,30 @@ const savedWorld: EmulatedWorldSnapshot = shopWorld.snapshot();
 const loadedApi: Promise<OpenApiTools> = loadOpenApiTools('https://shop.example.com/openapi.json');
 const apiRefused: number | undefined = new OpenApiError('no', 'OPENAPI_REQUEST', 404).status;
 void [worldTools, savedWorld, loadedApi, apiRefused, shopWorld.digest()];
+// Credentials by scheme name, a Swagger 2.0 document converted, and references to other documents read in.
+const heldToken: OpenApiCredential = { token: 'held' };
+const securedApi: OpenApiTools = openApiTools(shopDocument, {
+  credentials: {
+    shopKey: 'key',
+    shopHeld: heldToken,
+    shopBasic: { username: 'ana', password: 'secret' },
+    shopOAuth: { clientId: 'agent', clientSecret: 'secret' },
+    perTenant: async ({ context }) => context?.tenantId ?? 'none',
+  },
+});
+const securityAsked: Array<Record<string, string[]>> | undefined = securedApi.operations[0]?.security;
+const firstHook: OpenApiWebhook | undefined = securedApi.webhooks[0];
+const hookSource: 'webhook' | 'callback' | undefined = firstHook?.source;
+const fromSwagger: OpenApiDocument = swaggerToOpenApi({ swagger: '2.0', paths: {} });
+const bundleOptions: OpenApiBundleOptions = {
+  documentUrl: 'https://shop.example.com/openapi.json',
+  references: (url) => url.startsWith('https://shop.example.com/'),
+  maxDocuments: 10,
+  maxBytes: 1_000_000,
+};
+const bundledDocument: Promise<OpenApiDocument> = bundleOpenApiDocument(shopDocument, bundleOptions);
+const loadedAnywhere: Promise<OpenApiTools> = loadOpenApiTools('https://shop.example.com/openapi.json', { references: 'any', maxBytes: 2_000_000 });
+void [securityAsked, hookSource, fromSwagger, bundledDocument, loadedAnywhere];
 void grpcExporter.close();
 const encoded: Uint8Array = encodeOtlpTraceRequest({ resourceSpans: [] });
 void encoded;

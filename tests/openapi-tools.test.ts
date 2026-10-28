@@ -76,7 +76,7 @@ test('an OpenAPI document becomes one tool per operation, named, described, and 
   );
 });
 
-test('names: by id, or by method and path; repeated, prefixed, and filtered; a DELETE is destructive, and a body not sent is skipped', () => {
+test('names: by id, or by method and path; repeated, prefixed, and filtered; a DELETE is destructive', () => {
   const document: OpenApiDocument = {
     openapi: '3.0.3',
     info: { title: 'Notes' },
@@ -98,22 +98,16 @@ test('names: by id, or by method and path; repeated, prefixed, and filtered; a D
   const api = openApiTools(document);
   assert.deepEqual(
     api.tools.map((item) => item.name),
-    ['get_notes_noteId', 'remove', 'remove_2'],
+    ['get_notes_noteId', 'remove', 'upload', 'remove_2'],
   );
-  assert.deepEqual(api.skipped, [
-    {
-      method: 'PUT',
-      path: '/notes',
-      reason: 'its request body is multipart/form-data; only JSON and form bodies are sent',
-    },
-  ]);
+  assert.deepEqual(api.skipped, [], 'a multipart body is sent, so nothing is skipped');
   assert.deepEqual(byName(api, 'remove').capabilities, ['api.destructive:notes/remove']);
   assert.deepEqual(api.results.remove, { type: 'null' }, 'nothing comes back');
   // A filtered-out operation frees its name, so the rest keep theirs whatever the filter.
   const admin = openApiTools(document, { include: (operation) => !operation.tags.includes('admin'), prefix: 'notes' });
   assert.deepEqual(
     admin.tools.map((item) => item.name),
-    ['notes_get_notes_noteId', 'notes_remove'],
+    ['notes_get_notes_noteId', 'notes_upload', 'notes_remove'],
   );
   assert.deepEqual(byName(admin, 'notes_remove').capabilities, ['api.write:notes/notes_remove']);
 });
@@ -174,8 +168,13 @@ test('schemas: references followed, a recursive one described, 3.0 keywords conv
   });
 
   assert.throws(
-    () => openApiTools({ swagger: '2.0' } as unknown as OpenApiDocument),
-    refused('OPENAPI_UNSUPPORTED', /Swagger 2\.0 .* OpenAPI 3/),
+    () => openApiTools({ swagger: '1.2' } as unknown as OpenApiDocument),
+    refused('OPENAPI_UNSUPPORTED', /Swagger 1\.2 .* OpenAPI 3/),
+  );
+  assert.deepEqual(
+    openApiTools({ swagger: '2.0', paths: {} } as unknown as OpenApiDocument).tools,
+    [],
+    'Swagger 2.0 is read',
   );
   assert.throws(
     () => openApiTools('openapi: 3.1.0'),
@@ -197,7 +196,10 @@ test('schemas: references followed, a recursive one described, 3.0 keywords conv
   });
   assert.throws(
     () => openApiTools(outside('./common.yaml#/Order')),
-    refused('OPENAPI_UNSUPPORTED', /outside the document/),
+    refused(
+      'OPENAPI_UNSUPPORTED',
+      /outside the document: read it with loadOpenApiTools\(\), or bundleOpenApiDocument\(\) first/,
+    ),
   );
   assert.throws(
     () => openApiTools(outside('#/components/schemas/Missing')),

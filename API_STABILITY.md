@@ -83,14 +83,23 @@ options, `onPromptsChanged()`, `onResourcesChanged()`, `onResourceUpdated()`, `s
 `unsubscribeResource()`, and `rootsChanged()`, `HttpClientOptions.listen`, the protocol types
 `McpSamplingRequest`, `McpSamplingResult`, `McpSamplingMessage`, `McpSamplingContent`,
 `McpModelPreferences`, `McpElicitationRequest`, `McpElicitationResult`, `McpRoot`, and
-`McpCallerRequests`, and `ToolContext.mcp`.
+`McpCallerRequests`, and `ToolContext.mcp`; in `nexus-ai-pro/agent/openapi`, `swaggerToOpenApi()`,
+`bundleOpenApiDocument()`, `OpenApiBundleOptions`, `OpenApiCredential`, `OpenApiWebhook`,
+`OpenApiToolsOptions.credentials`, `OpenApiOperation.security`, `OpenApiTools.webhooks`, and
+`loadOpenApiTools()`'s `references`, `maxDocuments`, and `maxBytes`.
 
 Changed on purpose: an answer the output guard changes or blocks keeps no `logprobs`, streamed or
 not; a typed decision of a model that reports the chosen token alone is sampled; an Ollama stream
 honours `stop`. An MCP server declares prompts and resource subscriptions at `initialize` whatever it
 was given, and serves every transport connected to it rather than the last; a tool it runs gets a
 `signal` and `mcp` in its context. The HTTP client transport returns from `send()` before a streamed
-answer ends, sends `mcp-protocol-version`, and sends a `DELETE` when closed with a session.
+answer ends, sends `mcp-protocol-version`, and sends a `DELETE` when closed with a session. OpenAPI
+tools are made of operations with any request body, where those with a body other than JSON or a form
+were skipped, and of Swagger 2.0 documents, which were refused; `loadOpenApiTools()` reads no more of
+a document than `maxBytes`. With `credentials` given, an operation whose security cannot be met fails
+before it is sent.
+
+Deprecated: `OpenApiTools.skipped`, always empty, is removed in 3.0.
 
 ## 2.21 stage (2.21.0)
 

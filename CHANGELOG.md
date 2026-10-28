@@ -31,6 +31,29 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   tenant's and the extended card included, and a client's `verifyCard` makes no call until a signature
   on the card holds. ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, and Ed25519, by the
   Web Crypto API alone. The nightly interoperability run checks both directions against `@a2a-js/sdk`.
+- **OpenAPI credentials.** Tools read from an OpenAPI document send the credentials each operation's
+  security asks for, from `credentials` given by scheme name, or chosen per call: an API key in a
+  header, query parameter, or cookie; HTTP Basic, bearer, or another HTTP scheme; and an OAuth 2.0 or
+  OpenID Connect token, held, or fetched by the client-credentials flow for the operation's scopes and
+  kept until a minute before it expires. An operation whose alternatives none can be met fails before
+  anything is sent, naming them. Each `OpenApiOperation` carries its `security`.
+- **Swagger 2.0, and references to other documents.** A Swagger 2.0 document is read as the OpenAPI 3.0
+  one it describes, which `swaggerToOpenApi()` returns. `bundleOpenApiDocument()` reads in the other
+  documents a document's references name, on its own origin by default, or as `references` allows,
+  within `maxDocuments` and `maxBytes`; `loadOpenApiTools()` does so itself.
+- OpenAPI tools send a multipart form, its file fields given as base64, a text or XML body, and a body
+  of bytes, such as an image, so every operation becomes a tool. `webhooks` lists what the API sends
+  the application, its webhooks and its operations' callbacks, each with its JSON body's schema.
+
+### Changed
+
+- An OpenAPI operation with a multipart or other non-JSON body becomes a tool, where it was skipped; a
+  Swagger 2.0 document is read, where it was refused; and `loadOpenApiTools()` refuses a document over
+  `maxBytes`, 5 MB by default, reading no further.
+
+### Deprecated
+
+- `OpenApiTools.skipped`, always empty now that every operation becomes a tool. It is removed in 3.0.
 
 ### Fixed
 

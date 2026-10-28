@@ -3404,14 +3404,19 @@ thrown error, so one bad call does not end a run. An unknown tool name is report
 ## Tools from an OpenAPI document
 
 `openApiTools()`, from `nexus-ai-pro/agent/openapi`, reads a service's own API description into tools: an
-`OpenApiDocument`, OpenAPI 3.0 or 3.1, as parsed JSON (parse a YAML one first). `loadOpenApiTools()`
-fetches one as JSON and reads it, resolving a relative server against where it came from.
+`OpenApiDocument`, OpenAPI 3.0 or 3.1, or Swagger 2.0, as parsed JSON (parse a YAML one first).
+`loadOpenApiTools()` fetches one as JSON and reads it, resolving a relative server against where it came
+from and reading in the other documents its references name.
 
 ```ts
 import { loadOpenApiTools } from 'nexus-ai-pro/agent/openapi';
 
 const shop = await loadOpenApiTools('https://shop.example.com/openapi.json', {
-  headers: ({ context }) => ({ authorization: `Bearer ${tokens.for(context?.tenantId)}` }),
+  // The document's security schemes, by name: a key per tenant, and an OAuth 2.0 client.
+  credentials: {
+    shopKey: ({ context }) => keys.for(context?.tenantId),
+    shopOAuth: { clientId: 'agent', clientSecret: secrets.shop },
+  },
 });
 const agent = createAgent({
   client: ai,
@@ -3424,10 +3429,13 @@ Each operation becomes one tool, described as an `OpenApiOperation`:
 - its name is its `operationId`, or its method and path, such as `get_orders_orderId`; two the same
   get a number, and `prefix` keeps two APIs' apart;
 - its description is the operation's summary and description;
-- its parameters are its path, query, and header parameters, and the fields of a JSON or form body,
-  flattened, unless one is named as a parameter, when the body is one `body` parameter. A property
-  the API marks `readOnly` is left out. Cookies, and the `Accept`, `Content-Type`, and
-  `Authorization` headers, are the client's, as OpenAPI says;
+- its parameters are its path, query, and header parameters, and the fields of a JSON, form, or
+  multipart body, flattened, unless one is named as a parameter, when the body is one `body`
+  parameter. A property the API marks `readOnly` is left out. Cookies, and the `Accept`,
+  `Content-Type`, and `Authorization` headers, are the client's, as OpenAPI says;
+- a body of text or XML is a string; a file field of a multipart form, and a body of bytes such as an
+  image, is its base64, alone or as `{ base64, filename, mimeType }`, and is sent as the bytes. A
+  multipart field the API takes as base64 text is text;
 - it declares `api.read`, `api.write`, or `api.destructive` with the API's name and its own, as its
   method says, and `network` for the API's host when it runs, so a permission policy decides it as it
   decides any tool.
@@ -3435,8 +3443,7 @@ Each operation becomes one tool, described as an `OpenApiOperation`:
 References within the document are followed, a schema that refers back to itself is described rather
 than repeated, and OpenAPI 3.0's `nullable` and `example` become JSON Schema's. An `OpenApiTools` holds
 the tools, their operations, `results`, the schema of what each returns, from its first success
-response, which `emulatedTools()` shows the emulator, and `skipped`: operations whose body is of a type
-the tools do not send, such as `multipart/form-data`, and why.
+response, which `emulatedTools()` shows the emulator, and `webhooks`.
 
 `OpenApiToolsOptions` sets `baseUrl`, where the API lives, which defaults to the document's first
 server; without one, the tools describe the API and run nowhere, as an emulated tool wants them.
@@ -3444,13 +3451,61 @@ server; without one, the tools describe the API and run nowhere, as an emulated 
 and the call's context with its tenant, and win over a header the model sets. `include` chooses
 operations, and `timeoutMs` (30 seconds), `maxResponseBytes` (1 MB), and `fetch` bound each call.
 
+### Credentials
+
+Each operation's security, or the document's, is its `security`: alternatives, each the schemes it
+needs at once. `credentials` gives one for each scheme, by its name in the document, as an
+`OpenApiCredential`, or a function choosing one per call from the same `OpenApiHeadersRequest`. A call
+sends the first alternative it has every credential for:
+- an `apiKey` in the header, query parameter, or cookie the scheme names, from a token, as text or
+  `{ token }`;
+- `http` `basic` from `{ username, password }`, and `bearer`, or another HTTP scheme by its own name,
+  from a token;
+- `oauth2` and `openIdConnect` from a token the application holds, or, for the client-credentials
+  flow, `{ clientId, clientSecret }`: a token is fetched from the scheme's `tokenUrl` for the scopes
+  the operation asks, the client authenticating with HTTP Basic, and kept until a minute before it
+  expires.
+
+An operation none of whose alternatives can be met throws `OPENAPI_INVALID`, naming them, before
+anything is sent; one that asks for `mutualTLS` throws `OPENAPI_UNSUPPORTED`. An operation that asks for
+no security is sent with none. Without `credentials`, nothing is added, and `headers` carry what the
+application sends. A credential goes where the document says, its token URL included, so give
+credentials only to tools from a document you trust.
+
+### Swagger 2.0 and other documents
+
+A Swagger 2.0 document is read as the OpenAPI 3.0 document it describes, which `swaggerToOpenApi()`
+returns: its host, base path, and first scheme as the server; its definitions, shared parameters and
+responses, and security definitions as components; a body parameter, or form data, as a request body of
+the type it consumes, a `file` field making it multipart; and each response's schema as content of the
+type it produces. Swagger 1.2 is refused.
+
+A reference to another document is read in by `bundleOpenApiDocument()`, which `loadOpenApiTools()`
+calls when the document has one: each document is fetched once, as JSON, relative to the one naming it;
+its own references are followed; a reference back into the first document stays one; and a cycle
+across documents is described rather than repeated. Its `OpenApiBundleOptions` take the
+`documentUrl` references are read against; `references`, which documents may be fetched, `same-origin`
+by default, `any` web URL, or a function; and `maxDocuments` (50) and `maxBytes` (5 MB), which
+`loadOpenApiTools()` takes too, the first document's size included. `openApiTools()` fetches nothing
+itself: a document with a
+reference outside it throws `OPENAPI_UNSUPPORTED`, naming the two ways to read it.
+
+### Webhooks and callbacks
+
+`webhooks` lists what the API sends the application, each an `OpenApiWebhook`: the document's webhooks,
+and each operation's callbacks, named for the operation and the callback with the runtime expression of
+where it is sent, each with its method and the schema of its JSON body. They are not tools: they
+describe what the application's own endpoint receives.
+
+### Calls
+
 A call encodes each path parameter, so none can reach another path, and refuses one that is only dots.
 It is never sent when its call was stopped first, never follows a redirect, reads no more of an answer
 than the limit, and returns the JSON, the text, or `null` for nothing. A refusal, or a call that
 cannot be made, throws an `OpenApiError` in the API's own words, such as `createRefund answered 409:
 already refunded`, with its `status`, which the agent sees as the tool's failure. A document that
-cannot be read throws one too: `OPENAPI_UNSUPPORTED` for Swagger 2.0 or a reference outside the
-document, and `OPENAPI_INVALID` for a malformed one.
+cannot be read throws one too: `OPENAPI_UNSUPPORTED` for Swagger 1.2, and `OPENAPI_INVALID` for a
+malformed one.
 
 ## The pieces, by name
 
@@ -3476,9 +3531,11 @@ The simpler loop is `AgentLoop`. It is configured with `AgentConfig` and driven 
   not on every pass.
 - Tool search uses the agent's own ranking, not a provider's server-side search, so it works the same
   on every provider; Anthropic loads what it finds through tool references.
-- An OpenAPI document's security schemes are not read: the application sends its credentials as
-  `headers`. Neither are references to other files, Swagger 2.0, request bodies other than JSON and
-  form, or callbacks and webhooks.
+- OpenAPI credentials are sent for flows that need no person: an OAuth 2.0 authorization-code or
+  device flow is the application's, which passes the token it gives. `mutualTLS` is for a `fetch` that
+  holds the certificate.
+- Other documents a reference names are read as JSON; a `fetch` that answers a YAML one as JSON reads it.
+- Webhooks and callbacks are listed, not received: the application's own endpoint receives them.
 - A query parameter is sent as OpenAPI's default form, an array as the parameter repeated; an object in
   a query or a header is sent as JSON.
 
@@ -15046,6 +15103,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/ops` | 48 KB | 13% | none |
 | `nexus-ai-pro/batch/mock` | 46 KB | 13% | none |
 | `nexus-ai-pro/realtime/openai-webrtc` | 46 KB | 13% | none |
+| `nexus-ai-pro/agent/openapi` | 44 KB | 12% | none |
 | `nexus-ai-pro/realtime/gemini-live` | 44 KB | 12% | none |
 | `nexus-ai-pro/sqlite` | 43 KB | 12% | none |
 | `nexus-ai-pro/voice` | 42 KB | 11% | none |
@@ -15085,7 +15143,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/media/mistral` | 22 KB | 6% | none |
 | `nexus-ai-pro/operations/adapters` | 21 KB | 6% | none |
 | `nexus-ai-pro/images/transform` | 20 KB | 5% | none |
-| `nexus-ai-pro/agent/openapi` | 20 KB | 5% | none |
 | `nexus-ai-pro/media/catalog` | 20 KB | 5% | none |
 | `nexus-ai-pro/images/openai` | 19 KB | 5% | none |
 | `nexus-ai-pro/embeddings/adapters` | 19 KB | 5% | none |

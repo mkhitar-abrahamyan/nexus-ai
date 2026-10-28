@@ -7,7 +7,7 @@
     "./agent": 126,
     "./agent/interpreter": 20,
     "./agent/middleware": 38,
-    "./agent/openapi": 22,
+    "./agent/openapi": 50,
     "./agent/permissions": 10,
     "./agent/sandbox": 54,
     "./agent/sandbox/container": 66,
