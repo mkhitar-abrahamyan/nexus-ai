@@ -161,6 +161,18 @@ export function reduceRealtimeConversation(
       item.text += redact(event.delta, event.role === 'assistant' ? 'assistant' : 'user', options);
       break;
     }
+    case 'message.image': {
+      next.items.push({
+        id: idFactory('item'),
+        type: 'image',
+        role: 'user',
+        mimeType: event.mimeType,
+        digest: event.digest,
+        ...(event.url ? { url: event.url } : {}),
+        createdAt: timestamp,
+      });
+      break;
+    }
     case 'message.text.completed': {
       const item = ensureTextMessage(next, event.role, event.responseId, event.itemId, timestamp, idFactory);
       item.text =
@@ -328,7 +340,9 @@ export function replayRealtimeConversation(conversation: RealtimeConversation, l
     if (item.type === 'user_speech' && item.transcript) created = message('user', item.transcript);
     else if (item.type === 'assistant_speech' && item.transcript) created = message('assistant', item.transcript);
     else if (item.type === 'text_message' && item.text) created = message(item.role, item.text);
-    else if (item.type === 'tool_call') {
+    else if (item.type === 'image' && item.url) {
+      created = { type: 'message', role: 'user', content: [{ type: 'input_image', image_url: item.url }] };
+    } else if (item.type === 'tool_call') {
       created = {
         type: 'function_call',
         call_id: item.callId,
@@ -404,6 +418,7 @@ function exportText(conversation: RealtimeConversation): string {
     if (item.type === 'user_speech' && item.transcript) lines.push(`User: ${item.transcript}`);
     if (item.type === 'assistant_speech' && item.transcript) lines.push(`Assistant: ${item.transcript}`);
     if (item.type === 'text_message' && item.text) lines.push(`${capitalize(item.role)}: ${item.text}`);
+    if (item.type === 'image') lines.push(`[User showed an image, ${item.mimeType}]`);
     if (item.type === 'tool_call') lines.push(`Tool call (${item.name}): ${JSON.stringify(item.arguments)}`);
     if (item.type === 'tool_result') {
       lines.push(`Tool result (${item.name}): ${item.error || safeStringify(item.result)}`);
@@ -419,6 +434,7 @@ function exportAnalytics(conversation: RealtimeConversation): RealtimeAnalyticsE
     user_speech: 0,
     assistant_speech: 0,
     text_message: 0,
+    image: 0,
     tool_call: 0,
     tool_result: 0,
     interruption: 0,

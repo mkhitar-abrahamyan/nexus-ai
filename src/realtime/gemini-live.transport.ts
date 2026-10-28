@@ -104,6 +104,17 @@ export class GeminiLiveTransport implements RealtimeTransport {
   private inputRate = 16_000;
   /** The latest handle Gemini gave for resuming this session. */
   private resumptionHandle?: string;
+  /** Whether the latest handle can resume the session now, between turns. */
+  private resumable = false;
+  /** The configuration the socket was set up with, which an update changes. */
+  private config?: RealtimeSessionConfig;
+  /** A configuration an update asked for, waiting for a point Gemini can resume from. */
+  private pendingConfig?: RealtimeSessionConfig;
+  /** The configuration the latest move set up, which an update made while it moves builds on. */
+  private target?: RealtimeSessionConfig;
+  /** Set while the socket is replaced for an update: what is sent meanwhile waits, in order. */
+  private moving = false;
+  private readonly outbox: string[] = [];
   /** Tool calls Gemini is waiting on, by id, with their names, which a response must carry back. */
   private readonly pendingCalls = new Map<string, string>();
   /** Tool calls Gemini cancelled, whose results it no longer wants. */
@@ -146,6 +157,10 @@ export class GeminiLiveTransport implements RealtimeTransport {
     this.disconnectEmitted = false;
     this.resetTurn();
     this.inputRate = config.audio?.input?.format?.rate ?? 16_000;
+    this.config = config;
+    this.pendingConfig = undefined;
+    this.target = undefined;
+    this.resumable = false;
     const generation = ++this.generation;
     const externalSignal = config.connection?.signal || config.signal;
     const controller = new PortableAbortController();
@@ -158,40 +173,7 @@ export class GeminiLiveTransport implements RealtimeTransport {
       }),
     );
     try {
-      if (signal?.aborted) throw this.abortError(signal.reason);
-      const token = await waitForTransportOperation(this.resolveToken(config, signal), {
-        signal,
-        timers: this.timers(),
-        timeoutMs: this.options.connectTimeoutMs ?? 10_000,
-        abortError: (reason) => this.abortError(reason),
-        timeoutError: () =>
-          new RealtimeError({
-            message: 'Gemini Live credential resolution timed out',
-            code: 'connection_timeout',
-            category: 'timeout',
-            provider: 'google',
-            retryable: true,
-          }),
-      });
-      if (generation !== this.generation || this.state !== 'connecting') throw this.abortError();
-      const ephemeral = token.kind === 'token';
-      const browser = typeof (globalThis as { document?: unknown }).document !== 'undefined';
-      if (!ephemeral && browser && !this.options.webSocketFactory) {
-        throw new RealtimeError({
-          message: 'A Gemini API key cannot be sent from a browser; use an ephemeral token',
-          code: 'unsafe_browser_auth',
-          category: 'authentication',
-          provider: 'google',
-        });
-      }
-      const base = this.options.url || (ephemeral ? TOKEN_URL : API_KEY_URL);
-      const url = `${base}${base.includes('?') ? '&' : '?'}${ephemeral ? 'access_token' : 'key'}=${encodeURIComponent(token.value)}`;
-      const socket = this.options.webSocketFactory
-        ? this.options.webSocketFactory(url, { headers: {} })
-        : this.globalSocket(url);
-      this.socket = socket;
-      socket.binaryType = 'arraybuffer';
-      await this.awaitSetup(socket, config, signal, generation);
+      await this.open(config, signal, generation);
     } catch (error) {
       const current = generation === this.generation;
       if (current) {
@@ -210,6 +192,46 @@ export class GeminiLiveTransport implements RealtimeTransport {
       });
       if (current) this.emitter.emit('error', normalized);
       throw normalized;
+    }
+  }
+
+  /** Resolves the credential, opens a socket, and sets it up with the configuration given. */
+  private async open(config: RealtimeSessionConfig, signal: AbortSignalLike, generation: number): Promise<void> {
+    {
+      if (signal?.aborted) throw this.abortError(signal.reason);
+      const token = await waitForTransportOperation(this.resolveToken(config, signal), {
+        signal,
+        timers: this.timers(),
+        timeoutMs: this.options.connectTimeoutMs ?? 10_000,
+        abortError: (reason) => this.abortError(reason),
+        timeoutError: () =>
+          new RealtimeError({
+            message: 'Gemini Live credential resolution timed out',
+            code: 'connection_timeout',
+            category: 'timeout',
+            provider: 'google',
+            retryable: true,
+          }),
+      });
+      if (generation !== this.generation || (this.state !== 'connecting' && !this.moving)) throw this.abortError();
+      const ephemeral = token.kind === 'token';
+      const browser = typeof (globalThis as { document?: unknown }).document !== 'undefined';
+      if (!ephemeral && browser && !this.options.webSocketFactory) {
+        throw new RealtimeError({
+          message: 'A Gemini API key cannot be sent from a browser; use an ephemeral token',
+          code: 'unsafe_browser_auth',
+          category: 'authentication',
+          provider: 'google',
+        });
+      }
+      const base = this.options.url || (ephemeral ? TOKEN_URL : API_KEY_URL);
+      const url = `${base}${base.includes('?') ? '&' : '?'}${ephemeral ? 'access_token' : 'key'}=${encodeURIComponent(token.value)}`;
+      const socket = this.options.webSocketFactory
+        ? this.options.webSocketFactory(url, { headers: {} })
+        : this.globalSocket(url);
+      this.socket = socket;
+      socket.binaryType = 'arraybuffer';
+      await this.awaitSetup(socket, config, signal, generation);
     }
   }
 
@@ -238,9 +260,9 @@ export class GeminiLiveTransport implements RealtimeTransport {
 
   /**
    * Translates one of the session's events into Gemini's: conversation items into turns, a tool's
-   * result into a `toolResponse`, and a request for a response into the end of the user's turn.
-   * Events Gemini has no counterpart for, such as a session update after setup or a truncation, are
-   * dropped.
+   * result into a `toolResponse`, a request for a response into the end of the user's turn, and a
+   * session update into a new setup, resumed. Events Gemini has no counterpart for, such as a
+   * truncation, are dropped.
    */
   sendEvent(event: RealtimeClientEvent): void {
     switch (event.type) {
@@ -255,6 +277,9 @@ export class GeminiLiveTransport implements RealtimeTransport {
       case 'conversation.item.create':
         this.sendItem(isRecord(event.item) ? event.item : {});
         return;
+      case 'session.update':
+        this.update(isRecord(event.session) ? event.session : {});
+        return;
       case 'response.create':
         if (this.toolResponded) {
           this.toolResponded = false;
@@ -263,9 +288,72 @@ export class GeminiLiveTransport implements RealtimeTransport {
         this.send({ clientContent: { turnComplete: true } });
         return;
       default:
-        // session.update (Gemini is configured once, at setup), response.cancel (Gemini stops itself
-        // when the person speaks), and truncation have no counterpart.
+        // response.cancel (Gemini stops itself when the person speaks) and truncation have no
+        // counterpart.
         return;
+    }
+  }
+
+  /**
+   * Gemini is configured once, at setup, so an update that changes the setup is made by setting up
+   * again: on a new socket, with the new setup and the latest resumption handle, once Gemini says the
+   * session can be resumed, between turns. The conversation carries on, and what is sent meanwhile
+   * waits. An update that changes nothing, as the session's own after it connects, is passed over.
+   */
+  private update(session: Record<string, unknown>): void {
+    const settled = this.target ?? this.config;
+    const base = this.pendingConfig ?? settled;
+    if (!base || !settled || this.options.sessionResumption === false) return;
+    const next = configWith(base, session);
+    this.pendingConfig = this.setupKey(next) === this.setupKey(settled) ? undefined : next;
+    this.maybeMove();
+  }
+
+  /** The setup a configuration describes, to tell two apart. */
+  private setupKey(config: RealtimeSessionConfig): string {
+    return JSON.stringify(this.setupFor(config));
+  }
+
+  private maybeMove(): void {
+    if (!this.pendingConfig || this.moving || this.state !== 'connected' || !this.resumable) return;
+    void this.move();
+  }
+
+  /** Sets the session up again with the pending configuration, resuming where Gemini left it. */
+  private async move(): Promise<void> {
+    const next = this.pendingConfig as RealtimeSessionConfig;
+    this.pendingConfig = undefined;
+    this.target = next;
+    this.moving = true;
+    this.resumable = false;
+    // The old socket's events are no longer this session's.
+    const generation = ++this.generation;
+    this.closeSocket(1000, 'session update');
+    const signal = (this.connectAbort ?? new PortableAbortController()).signal;
+    try {
+      await this.open(next, signal, generation);
+      if (generation !== this.generation) return;
+      this.config = next;
+      this.moving = false;
+      this.inputRate = next.audio?.input?.format?.rate ?? this.inputRate;
+      for (const message of this.outbox.splice(0)) this.socket?.send(message);
+      this.emit({ type: 'session.updated', session: { id: next.id, model: next.model } }, { setupComplete: true });
+      this.maybeMove();
+    } catch (error) {
+      if (generation !== this.generation) return;
+      this.moving = false;
+      this.outbox.length = 0;
+      const normalized = new RealtimeError({
+        message: `Gemini Live could not be set up again for a session update: ${error instanceof Error ? error.message : String(error)}`,
+        code: 'session_update_failed',
+        category: 'network',
+        provider: 'google',
+        retryable: true,
+        cause: error,
+      });
+      this.emitter.emit('error', normalized);
+      // The old socket is closed: the session sees a drop, and its reconnect policy decides.
+      this.finishDisconnect(undefined, false, undefined, normalized.message);
     }
   }
 
@@ -439,7 +527,9 @@ export class GeminiLiveTransport implements RealtimeTransport {
     const resumption = isRecord(message.sessionResumptionUpdate) ? message.sessionResumptionUpdate : undefined;
     if (resumption?.resumable !== false && typeof resumption?.newHandle === 'string') {
       this.resumptionHandle = resumption.newHandle;
-    }
+      this.resumable = true;
+      this.maybeMove();
+    } else if (resumption) this.resumable = false;
     if (isRecord(message.goAway)) this.emit({ type: 'session.go_away', time_left: message.goAway.timeLeft }, message);
     if (isRecord(message.toolCall)) this.receiveToolCall(message.toolCall, message);
     if (isRecord(message.toolCallCancellation)) {
@@ -664,6 +754,10 @@ export class GeminiLiveTransport implements RealtimeTransport {
   }
 
   private send(message: Record<string, unknown>): void {
+    if (this.moving) {
+      this.outbox.push(JSON.stringify(message));
+      return;
+    }
     const socket = this.requireOpenSocket();
     try {
       socket.send(JSON.stringify(message));
@@ -691,8 +785,10 @@ export class GeminiLiveTransport implements RealtimeTransport {
     const timers = this.timers();
     return new Promise((resolve, reject) => {
       let settled = false;
+      let setUp = false;
       let timeout: unknown;
       const current = () => generation === this.generation;
+      const settingUp = () => !setUp && (this.state === 'connecting' || this.moving);
       const settle = (error?: RealtimeError) => {
         if (settled) return;
         settled = true;
@@ -712,15 +808,18 @@ export class GeminiLiveTransport implements RealtimeTransport {
         if (!current()) return;
         const message = this.parse(raw);
         if (!message) return;
-        if (this.state === 'connecting' && 'setupComplete' in message) {
-          this.state = 'connected';
-          this.emitter.emit('connected', {
-            sessionId: config.id,
-            transport: this.kind,
-            timestamp: this.now(),
-            raw: message,
-          });
-          this.emit({ type: 'session.created', session: { id: config.id, model: config.model } }, message);
+        if (settingUp() && 'setupComplete' in message) {
+          setUp = true;
+          if (this.state === 'connecting') {
+            this.state = 'connected';
+            this.emitter.emit('connected', {
+              sessionId: config.id,
+              transport: this.kind,
+              timestamp: this.now(),
+              raw: message,
+            });
+            this.emit({ type: 'session.created', session: { id: config.id, model: config.model } }, message);
+          }
           settle();
           return;
         }
@@ -736,7 +835,7 @@ export class GeminiLiveTransport implements RealtimeTransport {
           retryable: true,
           raw: isRecord(raw) ? { message: raw.message } : undefined,
         });
-        if (this.state === 'connecting') settle(error);
+        if (settingUp()) settle(error);
         else this.emitter.emit('error', error);
       };
       const onClose = (raw: unknown) => {
@@ -744,7 +843,7 @@ export class GeminiLiveTransport implements RealtimeTransport {
         const close = isRecord(raw) ? raw : {};
         const code = typeof close.code === 'number' ? close.code : undefined;
         const reason = typeof close.reason === 'string' ? close.reason : undefined;
-        if (this.state === 'connecting') {
+        if (settingUp()) {
           settle(
             new RealtimeError({
               message: `Gemini Live closed before it was set up${reason ? `: ${reason}` : ''}`,
@@ -939,4 +1038,52 @@ function parseOutput(output: unknown): Record<string, unknown> {
 function dataUrl(url: string): { mimeType: string; data: string } | undefined {
   const match = /^data:([^;,]+);base64,(.*)$/s.exec(url);
   return match ? { mimeType: match[1] as string, data: match[2] as string } : undefined;
+}
+
+/**
+ * A configuration with a session update's fields folded in. Instructions, voice, language, output
+ * modalities, tools, turn detection, and the model change the setup they describe; any other field is
+ * a setup field of Gemini's own, kept with the configuration's `providerSession`.
+ */
+function configWith(base: RealtimeSessionConfig, session: Record<string, unknown>): RealtimeSessionConfig {
+  const next: RealtimeSessionConfig = { ...base };
+  const providerSession: Record<string, unknown> = { ...base.providerSession };
+  let input = { ...base.audio?.input };
+  let output = { ...base.audio?.output };
+  for (const [key, value] of Object.entries(session)) {
+    if (key === 'instructions') {
+      if (typeof value === 'string') next.instructions = value;
+      else delete next.instructions;
+    } else if (key === 'model' && typeof value === 'string') next.model = value;
+    else if (key === 'output_modalities' && Array.isArray(value)) {
+      next.modalities = value.filter((item): item is 'audio' | 'text' => item === 'audio' || item === 'text');
+    } else if (key === 'voice' && typeof value === 'string') output = { ...output, voice: value };
+    else if (key === 'tools') {
+      next.tools = (Array.isArray(value) ? value : []).filter(isRecord).map((tool) => ({
+        name: String(tool.name ?? ''),
+        description: String(tool.description ?? ''),
+        ...(isRecord(tool.parameters) ? { parameters: tool.parameters } : {}),
+      })) as unknown as RealtimeSessionConfig['tools'];
+    } else if (key === 'audio' && isRecord(value)) {
+      const audioOutput = isRecord(value.output) ? value.output : {};
+      const audioInput = isRecord(value.input) ? value.input : {};
+      const transcription = isRecord(audioInput.transcription) ? audioInput.transcription : {};
+      if (typeof audioOutput.voice === 'string') output = { ...output, voice: audioOutput.voice };
+      if (typeof transcription.language === 'string') input = { ...input, language: transcription.language };
+      if ('turn_detection' in audioInput) {
+        input = {
+          ...input,
+          turnDetection:
+            audioInput.turn_detection === null
+              ? null
+              : (base.audio?.input?.turnDetection ?? ({ type: 'server_vad' } as const)),
+        };
+      }
+    } else if (key !== 'type' && key !== 'tool_choice') providerSession[key] = value;
+  }
+  return {
+    ...next,
+    audio: { ...base.audio, input, output },
+    ...(Object.keys(providerSession).length ? { providerSession } : {}),
+  };
 }

@@ -79,6 +79,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   WAV or raw PCM, whichever its model answers with, directed by a system instruction that is never
   spoken; and transcribes with a text model that hears the audio, inline or by a Files API URI, guided
   by its language and the names it may hold. Experimental until a live run is recorded.
+- **Gemini Live changes its setup mid-call.** `updateSession()` on Gemini Live sets the session up again
+  between turns, on a new socket resumed from the latest handle: instructions, voice, language,
+  modalities, tools, turn detection, the model, and Gemini's own setup fields. What is sent meanwhile
+  waits, and the conversation carries on.
+- **Images in the realtime record.** An image sent in a realtime conversation is kept as an `ImageItem`,
+  with its digest and, unless `recordImages` is `digest`, the image, and a resumed session gives it
+  back to the model. Video frames are not kept.
 
 ### Changed
 

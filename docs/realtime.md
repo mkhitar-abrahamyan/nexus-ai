@@ -235,7 +235,7 @@ The option groups:
 | `RealtimeInterruptionOptions` | What barge-in does: `enabled`, `cancelResponse`, `truncateUnheardAudio`, a `stopPlayback` hook, and `getPlaybackPositionMs` for where to cut. |
 | `RealtimeReconnectOptions` | `maxAttempts`, and a backoff from `initialDelayMs` growing by `multiplier` up to `maxDelayMs`. |
 | `RealtimeSecurityOptions` | Hard limits: `maxSessionDurationMs` and `maxAudioDurationMs` end the session. Also a `toolAllowlist`, `retainTranscripts`, and a `piiHook` that rewrites every transcript first. |
-| `RealtimeConversationOptions` | What the record keeps: transcripts, tool calls, raw events (10,000 by default), and a `redactTranscript` hook. Raw audio events keep the size of their audio, `delta_bytes`, not the audio, unless `retainRawAudio`. `replayItems` caps what a resumed session gives the provider back. |
+| `RealtimeConversationOptions` | What the record keeps: transcripts, tool calls, raw events (10,000 by default), a `redactTranscript` hook, and `recordImages`, `content` or `digest`. Raw audio events keep the size of their audio, `delta_bytes`, not the audio, unless `retainRawAudio`. `replayItems` caps what a resumed session gives the provider back. |
 | `RealtimeTelemetryOptions` | Tracing and metrics without a dependency, so OpenTelemetry plugs in. See the next table. |
 | `RealtimeConnectOptions` | What `connect()` takes in a browser: a signal, the microphone, and where audio plays. |
 
@@ -260,7 +260,7 @@ A session moves through `RealtimeSessionState`: `idle`, `connecting`, `connected
 | `sendImage()`, `sendVideoFrame()` | Adds an image to the conversation, or streams a frame of video. See [Video and images](#video-and-images). |
 | `sendAudio()`, `commitAudio()`, `clearAudio()` | Streams audio by hand, then ends or discards the turn. |
 | `createResponse()` | Asks the model to respond now. |
-| `updateSession()` | Changes instructions, tools, or audio mid-session. |
+| `updateSession()` | Changes instructions, tools, or audio mid-session; on Gemini Live, by setting up again between turns. |
 | `sendEvent()` | Sends a raw `RealtimeClientEvent`. |
 | `interrupt()` | Stops the current response. |
 | `markAudioPlayed()` | Reports that audio reached the speaker, for accurate latency. |
@@ -394,7 +394,8 @@ What the session sends becomes Gemini's, and what Gemini sends becomes the sessi
 
 | The session | Gemini Live |
 | --- | --- |
-| Its configuration: model, instructions, tools, voice, language, modalities, turn detection | The `setup` message, once, at connect. Tool schemas lose `additionalProperties` and `$schema`, which Gemini does not take. |
+| Its configuration: model, instructions, tools, voice, language, modalities, turn detection | The `setup` message, at connect. Tool schemas lose `additionalProperties` and `$schema`, which Gemini does not take. |
+| A session update, from `updateSession()` | A new `setup`, on a new socket, resumed from the latest handle between turns. |
 | Microphone audio, and committing it | `realtimeInput` audio, at the input format's rate (16 kHz by default), and the end of the audio stream. |
 | A message, an image, a tool call or result given back on resume | A `clientContent` turn. |
 | A request for a response | The end of the person's turn. |
@@ -412,6 +413,20 @@ keeps typed messages as it does on OpenAI. A tool call Gemini cancels, because t
 `sessionResumption`, on by default, asks Gemini for resumption handles: a socket that drops
 reconnects with the latest resumable one, and Gemini carries the conversation on where it left it.
 Gemini's warning that it will close the socket arrives as a raw `session.go_away` event.
+
+Gemini takes its setup once, at the start of a socket, so `updateSession()` changes it by setting up
+again. The update's fields that differ from the setup are folded in: instructions, voice, language,
+output modalities, tools, turn detection, and the model, and any other field as a setup field of
+Gemini's own. Gemini marks the points it can be resumed from, between turns; at the next one, the
+transport closes the socket and opens another with the new setup and that point's handle, and Gemini
+carries the conversation on. What the session sends meanwhile waits and goes out in order once the
+new socket is set up, and the session sees `session.updated`. An update that changes nothing, as the
+session's own after it connects, opens no socket; one made before Gemini has given a handle waits for
+it. A new setup that fails is a drop, which the session's reconnect policy decides on.
+
+```ts
+session.updateSession({ instructions: 'From now on, answer in French.', audio: { output: { voice: 'Kore' } } });
+```
 
 ### Server helpers
 
@@ -509,12 +524,17 @@ not answer it twice.
 `sendImage()` adds an image to the conversation as the person's: a photo, a screenshot, a page. It
 takes a `RealtimeImageInput` (bytes, a `data:` URL, or base64) with `RealtimeImageOptions`: the `mimeType` (`image/jpeg` by
 default), `text` sent in the same message, and `createResponse`, true by default when there is text.
+The record keeps it as an `ImageItem`, when it is sent, with a `message.image` event: its type, the
+SHA-256 of its bytes, and, unless the conversation's `recordImages` is `digest`, the image itself,
+which a resumed session gives back. The words sent with it are a text message after it, once the
+provider has them.
 
 `sendVideoFrame()` streams one frame of video, from a camera or a shared screen. On a provider that
 takes video as realtime input, such as Gemini Live, the frame goes there; otherwise it goes into the
 conversation as an image. `RealtimeVideoOptions` spaces frames out: one sooner than `minIntervalMs`
 after the last one sent is dropped (1,000 by default, about what the models take), and the method
-returns whether the frame was sent.
+returns whether the frame was sent. A frame is live input, not kept in the record, even where it goes
+into the conversation as an image.
 
 ```ts
 const session = createRealtimeAgent({
@@ -586,6 +606,7 @@ item id, the raw event, and metadata — and each is one of these:
 | `UserSpeechItem` | The user spoke. |
 | `AssistantSpeechItem` | The assistant spoke. |
 | `TextMessageItem` | A text message, either way. |
+| `ImageItem` | The user showed an image: its type, its digest, and, unless the record keeps images by digest, the image. |
 | `ToolCallItem`, `ToolResultItem` | A tool was called, and returned. |
 | `InterruptionItem` | The user interrupted. |
 | `RealtimeConversationErrorItem` | Something failed. |
@@ -635,7 +656,8 @@ Another process carries the conversation on with `resume`: its record, or its id
 new session takes the conversation's id, items, metrics, and metadata, active again. On connecting,
 it gives the provider what was said and what the tools returned, before anything new, so the model
 answers with it. `replayRealtimeConversation()` builds those items: speech as text from its
-transcript, typed messages, tool calls, and their results, the latest `replayItems` of them. Each
+transcript, typed messages, the images the record keeps, tool calls, and their results, the latest
+`replayItems` of them. Each
 carries an id that begins with `REALTIME_REPLAY_PREFIX`, so the provider's echoes are not recorded
 twice. A new transport carries the conversation; the socket and the audio that was in flight are not
 recovered.
@@ -705,13 +727,12 @@ its category.
 - Gemini Live and SIP calls are verified in the test suite against scripted versions of their
   protocols. The weekly live workflow also runs a Gemini Live session that calls a tool, and OpenAI's
   SIP call control, where the repository's secrets are set; a live call over a SIP trunk is not run.
-- Gemini Live is configured once, at connect: `updateSession()` changes nothing there, and neither
-  `clearAudio()` nor truncating unheard audio has a counterpart. Gemini stops its own response when
-  the person speaks.
+- Gemini Live changes its setup between turns alone, and only with `sessionResumption`: an update
+  waits for the turn to end. Neither `clearAudio()` nor truncating unheard audio has a counterpart;
+  Gemini stops its own response when the person speaks.
 - On a provider without video input, each frame becomes an image in the conversation, and so part of
   the model's context: space frames out further there.
-- Images and frames are not kept in the conversation record, and a resumed conversation does not give
-  them back.
+- Video frames are not kept in the record; an image kept by content makes the record as large as it.
 - A resumed conversation gives the provider its transcripts as text, not its audio, so the model
   hears what was said as written, not how it was said.
 - A turn is charged from `estimateCost`: a session without one is admitted and rate-limited turn by
@@ -729,7 +750,7 @@ specific entry point that provides it.
 | --- | --- | --- |
 | `AnyRealtimeTool` | type | Type-erased tool shape used by heterogeneous tool collections. |
 | `AssistantSpeechItem` | interface | Something the model said aloud. |
-| `ConversationItem` | type | One entry in a conversation record: speech, text, a tool call or result, an interruption, or an error. |
+| `ConversationItem` | type | One entry in a conversation record: speech, text, an image, a tool call or result, an interruption, or an error. |
 | `ConversationItemBase` | interface | Fields every item in a conversation record shares. |
 | `ConversationMetrics` | interface | Running totals for a whole conversation, alongside the latest turn's latency. |
 | `createOpenAISessionUpdate` | function | Builds OpenAI's `session.update` event from a session configuration. |
@@ -739,6 +760,7 @@ specific entry point that provides it.
 | `createRealtimeId` | function | Creates `<prefix>_<uuid>` ids, falling back to time and random parts where `crypto.randomUUID` is unavailable. |
 | `GeminiLiveProvider` | class | Gemini Live as a realtime provider, behind the same session, tools, and conversation record as OpenAI's. |
 | `GeminiLiveProviderOptions` | interface | Options for `GeminiLiveProvider`: those of every transport it creates. |
+| `ImageItem` | interface | An image the user showed: a photo, a screenshot, a page. |
 | `InferRealtimeSchema` | type | The argument type a schema produces, or a plain record when it cannot be inferred. |
 | `InterruptionItem` | interface | The model being cut off mid-response. |
 | `normalizeOpenAIRealtimeEvent` | function | Converts one OpenAI realtime event into neutral session events. |

@@ -98,7 +98,8 @@ modality `video`, `EmbeddingMeta.unpricedMedia`, and `EmbeddingModelCapabilities
 `costPerAudioSecond`, `costPerVideoFrame`, `videoFrames`, `maxAudioSeconds`, and `maxVideoSeconds`; in
 the loaders, `FileInput`'s stream form, `CsvRowParser`, `JsonLoaderOptions.recordsAt`,
 `WebLoaderOptions.render` and `renderBelow`, `browserRenderer()`, `WebPageRenderer`, `WebPageToRender`,
-`RenderingBrowser`, and `BrowserRendererOptions`. Experimental: `nexus-ai-pro/voice/google`,
+`RenderingBrowser`, and `BrowserRendererOptions`; in the realtime family, `ImageItem`, the `message.image`
+event, and `RealtimeConversationOptions.recordImages`. Experimental: `nexus-ai-pro/voice/google`,
 `GoogleVoiceProvider` and `GoogleVoiceProviderConfig`, until a live run is recorded.
 The state store keys and sessions are kept in, under `nexus/server`, is read by every later 2.x.
 
@@ -116,7 +117,9 @@ before it is sent.
 A TypeSafe AI request with pictures is multipart unless `pictures: 'base64'`, and its size is counted
 in bytes. gemini-embedding-2's audio and video are priced, where they cost nothing before, and audio
 past 180 seconds or video past 120 is refused before the call. A Google embedding batch over 20 MB is
-sent as a file, where it was refused.
+sent as a file, where it was refused. Gemini Live acts on `updateSession()`, which it ignored. A
+realtime record holds the images sent, as `image` items, which a consumer that switches on every item
+type meets for the first time.
 
 Deprecated: `OpenApiTools.skipped`, always empty, is removed in 3.0.
 

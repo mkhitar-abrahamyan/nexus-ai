@@ -415,6 +415,7 @@ import {
   createRealtimeAgent,
   createRealtimeSession,
   defineTool as defineRealtimeTool,
+  type ImageItem as RealtimeImageItem,
   type RealtimeConversation,
   type RealtimeEvent,
   type RealtimeToolCall,
@@ -524,6 +525,10 @@ const realtimeConversation: RealtimeConversation = createRealtimeConversation({
   provider: 'openai',
   model: 'gpt-realtime',
 });
+const imagesByDigest = createRealtimeSession({ model: 'gpt-realtime', transport: realtimeTransport, conversation: { recordImages: 'digest' } });
+const shownImages: RealtimeImageItem[] = realtimeConversation.items.filter((item): item is RealtimeImageItem => item.type === 'image');
+imagesByDigest.on('message.image', (event) => void [event.digest, event.mimeType, event.url]);
+void [shownImages.map((item) => item.digest)];
 const realtimeToolCall: RealtimeToolCall = {
   callId: 'call_1',
   name: 'check_availability',

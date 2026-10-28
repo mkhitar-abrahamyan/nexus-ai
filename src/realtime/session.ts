@@ -15,6 +15,8 @@ import {
   createOpenAIToolResultEvents,
   normalizeOpenAIRealtimeEvent,
 } from './openai-events.js';
+import { decodeBase64 } from '../utils/base64.js';
+import { sha256Hex } from '../utils/sha256.js';
 import { RealtimeToolExecutor } from './tools.js';
 import { encodeBase64 } from './transport-utils.js';
 import type {
@@ -380,12 +382,26 @@ export class RealtimeSession {
    * two go in one message, and the model answers unless `createResponse` is false.
    */
   sendImage(image: RealtimeImageInput, options: RealtimeImageOptions = {}): void {
-    const content: Array<Record<string, unknown>> = [
-      { type: 'input_image', image_url: imageUrl(image, options.mimeType || 'image/jpeg') },
-    ];
+    this.sendPicture(image, options, false);
+  }
+
+  /** Sends an image, and records it unless it is a frame of video. */
+  private sendPicture(image: RealtimeImageInput, options: RealtimeImageOptions, frame: boolean): void {
+    const url = imageUrl(image, options.mimeType || 'image/jpeg');
+    const content: Array<Record<string, unknown>> = [{ type: 'input_image', image_url: url }];
     const text = options.text?.trim() ? options.text : undefined;
     if (text) content.push({ type: 'input_text', text });
     this.sendProviderEvent({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content } });
+    if (!frame) {
+      const comma = url.indexOf(',');
+      this.applyEvent({
+        type: 'message.image',
+        mimeType: url.slice(5, url.indexOf(';')),
+        digest: sha256Hex(decodeBase64(url.slice(comma + 1))),
+        ...(this.config.conversation?.recordImages === 'digest' ? {} : { url }),
+        timestamp: this.clock.now(),
+      });
+    }
     if (options.createResponse ?? Boolean(text)) this.createResponse();
   }
 
@@ -404,7 +420,7 @@ export class RealtimeSession {
     this.lastFrameAt = now;
     const transport = this.config.transport;
     if (transport.sendVideo) transport.sendVideo(frame instanceof Uint8Array ? frame.slice().buffer : frame, mimeType);
-    else this.sendImage(frame, { mimeType, createResponse: false });
+    else this.sendPicture(frame, { mimeType, createResponse: false }, true);
     return true;
   }
 
@@ -1417,6 +1433,7 @@ function audioDurationMs(audio: ArrayBuffer, format?: RealtimeAudioFormat): numb
 
 /** Events after which a turn is committed to the record: what a resume can rely on. */
 const COMMITTED = new Set<string>([
+  'message.image',
   'assistant.response.completed',
   'assistant.response.cancelled',
   'user.transcript.completed',

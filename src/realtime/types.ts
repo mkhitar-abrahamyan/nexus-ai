@@ -312,6 +312,23 @@ export interface InterruptionItem extends ConversationItemBase {
   reason: 'barge_in' | 'manual';
 }
 
+/** An image the user showed: a photo, a screenshot, a page. A frame of video is not kept. */
+export interface ImageItem extends ConversationItemBase {
+  /** Discriminates this item in `ConversationItem`. */
+  type: 'image';
+  /** Who showed it. */
+  role: 'user';
+  /** Its MIME type, such as `image/jpeg`. */
+  mimeType: string;
+  /** The SHA-256 of its bytes, as hex, which tells two images apart without keeping either. */
+  digest: string;
+  /**
+   * The image as it was sent, a data URL, which a resumed conversation gives back. Absent when the
+   * record keeps images by digest alone.
+   */
+  url?: string;
+}
+
 /** An error recorded in the conversation, so an export shows where a session went wrong. */
 export interface RealtimeConversationErrorItem extends ConversationItemBase {
   /** Discriminates this item in `ConversationItem`. */
@@ -325,13 +342,14 @@ export interface RealtimeConversationErrorItem extends ConversationItemBase {
 }
 
 /**
- * One entry in a conversation record: speech, text, a tool call or result, an interruption, or an
- * error.
+ * One entry in a conversation record: speech, text, an image, a tool call or result, an interruption,
+ * or an error.
  */
 export type ConversationItem =
   | UserSpeechItem
   | AssistantSpeechItem
   | TextMessageItem
+  | ImageItem
   | ToolCallItem
   | ToolResultItem
   | InterruptionItem
@@ -463,6 +481,7 @@ export type RealtimeEvent =
       itemId?: string;
       timestamp: number;
     }
+  | { type: 'message.image'; mimeType: string; digest: string; url?: string; timestamp: number }
   | { type: 'assistant.response.created'; responseId: string; timestamp: number }
   | { type: 'assistant.response.completed'; responseId: string; itemId?: string; timestamp: number }
   | { type: 'assistant.response.cancelled'; responseId: string; itemId?: string; timestamp: number }
@@ -507,6 +526,8 @@ export interface RealtimeSessionEvents {
   'message.text.delta': Extract<RealtimeEvent, { type: 'message.text.delta' }>;
   /** A text message is complete. */
   'message.text.completed': Extract<RealtimeEvent, { type: 'message.text.completed' }>;
+  /** The user showed an image, which the record keeps. */
+  'message.image': Extract<RealtimeEvent, { type: 'message.image' }>;
   /** The model started a response. */
   'assistant.response.created': Extract<RealtimeEvent, { type: 'assistant.response.created' }>;
   /** The model finished a response. */
@@ -858,6 +879,12 @@ export interface RealtimeConversationOptions {
   retainRawAudio?: boolean;
   /** Rewrites transcript text before it is recorded. */
   redactTranscript?: (text: string, role: 'user' | 'assistant') => string;
+  /**
+   * What the record keeps of an image the user sends: `content`, the default, the image itself, so a
+   * resumed conversation gives it back; or `digest`, its SHA-256 and type alone, for a record that
+   * must hold no pictures.
+   */
+  recordImages?: 'content' | 'digest';
   /**
    * The most recent items a resumed session gives the provider back, so a long conversation does
    * not overflow the model's context. Defaults to all of them.
