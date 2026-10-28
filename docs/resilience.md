@@ -347,8 +347,10 @@ cost only when it can price the call in dollars.
 
 ## Limitations
 
-- The breaker's failure counts are per worker even with a shared store; only open, closed, and who
-  may probe are shared.
+- Failure counts are shared only with `shareObservations`; otherwise a shared store shares open,
+  closed, and who may probe, and each worker counts its own failures. Shared, a worker learns the
+  others' failures at its next sync, so it may let a call or two through, up to `syncIntervalMs`
+  after the circuit opened elsewhere.
 - The default fixed windows let a burst straddling a window boundary reach twice the limit for a
   moment; `algorithm: 'gcra'` does not. GCRA through Redis needs `eval`.
 - Health comes from calls. Without `observationTtlMs`, a provider that receives no traffic keeps its last
