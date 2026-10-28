@@ -994,7 +994,7 @@ const mediaHits: Promise<MediaHit[]> = mediaIndex.search('the total due', { topK
 const decisions = new DecisionManager(
   {
     providers: {
-      jev: new TypeSafeDecisionProvider({ apiKey: 'key' }),
+      jev: new TypeSafeDecisionProvider({ apiKey: 'key', pictures: 'base64' }),
       gpt: completionDecisions(ai, { model: 'gpt-4.1-mini' }),
       mock: new MockDecisionProvider(),
     },

@@ -165,10 +165,12 @@ works), the `model`, `longContext`, which sends the header TypeSafe AI requires 
 decision, not a failure to try again; `listModels()` reads `GET /v1/models`.
 
 The pictures a state holds go to Jev as the API's assets, each under a new reference in its place in
-the state, with the `TypeSafe-Danger-Zone-Images` header that pictures and boxes require. TypeSafe AI
-takes a still PNG or JPEG of at most 16 MiB, from 280 to 1,568 pixels a side, in a request of at most
-32 MiB, and refuses one outside them rather than resize it, so the adapter refuses it first, naming its
-path, before anything is sent. A box needs Jev 1.14 or later, which `jev-latest` serves; a decision
+the state, with the `TypeSafe-Danger-Zone-Images` header that pictures and boxes require. Each goes
+as a part of its own in a multipart request, as bytes, after the request itself; `pictures: 'base64'`
+sends them within the JSON instead, a third larger. TypeSafe AI takes a still PNG or JPEG of at most
+16 MiB, from 280 to 1,568 pixels a side, in a request of at most 32 MiB, counted in bytes as sent, and
+refuses one outside them rather than resize it, so the adapter refuses it first, naming its path,
+before anything is sent. Three pictures of 10 MiB fit as parts; as base64 they do not. A box needs Jev 1.14 or later, which `jev-latest` serves; a decision
 asking one of an earlier version is refused as unsupported.
 
 `completionDecisions()` makes any completion model a provider, through a client's own `complete()`, so
@@ -251,8 +253,8 @@ picture has it; a model that reads only the text fails it.
   format and limits may change between its releases.
 - A completion model's box costs `samples` calls, and its confidence is how far they agree, not a
   probability the model gave it.
-- The adapter does not resize a picture TypeSafe AI would refuse, nor send pictures as multipart parts;
-  a decision's pictures travel as base64 within the 32 MiB a request may hold.
+- The adapter does not resize a picture TypeSafe AI would refuse; a decision's pictures, parts or
+  base64, travel within the 32 MiB a request may hold.
 - Jev is in early access; its adapter has passed against a stand-in written from TypeSafe AI's
   documentation, not yet against the live service.
 

@@ -55,9 +55,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - **A Pinecone store makes its own index.** `PineconeVectorStore.create()` creates a serverless index
   with the cosine metric and the store's width, or uses one of that name that fits, waits until it is
   ready, and returns a store over its host; `ensurePineconeIndex()` does the first part alone.
+- TypeSafe AI is sent a decision's pictures as parts of a multipart request, as bytes, so three
+  pictures of 10 MiB fit in the 32 MiB a request holds; `TypeSafeDecisionProviderOptions.pictures`
+  set to `base64` sends them within the JSON, as before.
 
 ### Changed
 
+- A TypeSafe AI request with pictures is multipart by default, and its 32 MiB is counted in bytes, not
+  characters, so a state of text outside ASCII is refused before it is sent rather than by the API.
 - An OpenAPI operation with a multipart or other non-JSON body becomes a tool, where it was skipped; a
   Swagger 2.0 document is read, where it was refused; and `loadOpenApiTools()` refuses a document over
   `maxBytes`, 5 MB by default, reading no further.

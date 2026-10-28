@@ -29,7 +29,7 @@
     "./credentials": 10,
     "./decisions": 122,
     "./decisions/mock": 4,
-    "./decisions/typesafe": 78,
+    "./decisions/typesafe": 80,
     "./deep-agent": 236,
     "./doctor": 20,
     "./embeddings": 46,

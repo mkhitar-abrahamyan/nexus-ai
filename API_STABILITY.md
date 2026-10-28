@@ -92,7 +92,8 @@ options, `onPromptsChanged()`, `onResourcesChanged()`, `onResourceUpdated()`, `s
 `IssuedApiKey`, `ApiKeyIssueOptions`, `createSessions()`, `Sessions`, `SessionOptions`,
 `SessionCookieOptions`, `SessionRecord`, and `StartedSession`, and the principal method `session`; in
 `nexus-ai-pro/rag/pinecone`, `PineconeVectorStore.create()`, `ensurePineconeIndex()`,
-`PineconeIndexOptions`, `PineconeIndex`, and `PineconeCreateOptions`, experimental with the store.
+`PineconeIndexOptions`, `PineconeIndex`, and `PineconeCreateOptions`, experimental with the store;
+and `TypeSafeDecisionProviderOptions.pictures`.
 The state store keys and sessions are kept in, under `nexus/server`, is read by every later 2.x.
 
 Changed on purpose: an answer the output guard changes or blocks keeps no `logprobs`, streamed or
@@ -105,6 +106,9 @@ tools are made of operations with any request body, where those with a body othe
 were skipped, and of Swagger 2.0 documents, which were refused; `loadOpenApiTools()` reads no more of
 a document than `maxBytes`. With `credentials` given, an operation whose security cannot be met fails
 before it is sent.
+
+A TypeSafe AI request with pictures is multipart unless `pictures: 'base64'`, and its size is counted
+in bytes.
 
 Deprecated: `OpenApiTools.skipped`, always empty, is removed in 3.0.
 

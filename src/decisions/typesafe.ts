@@ -41,6 +41,12 @@ export interface TypeSafeDecisionProviderOptions {
    * none of them. Without them, a picture by reference fails the decision, naming it.
    */
   media?: MediaResolveOptions;
+  /**
+   * How a decision's pictures travel: `multipart`, the default, each as a part of its own beside the
+   * request, as bytes; or `base64`, within the JSON request, a third larger. Either way a request
+   * holds at most 32 MiB, so multipart carries more.
+   */
+  pictures?: 'multipart' | 'base64';
   /** How long a call may take before it fails, in milliseconds. Defaults to 30 seconds. */
   timeoutMs?: number;
   /** Headers added to every request. */
@@ -56,11 +62,22 @@ type WireQuestion =
   | { type: 'score'; instructions?: string; criteria: string[] }
   | { type: 'box'; instructions: string };
 
-/** A picture as the System One API takes it, by the reference the state holds in its place. */
+/**
+ * A picture as the System One API takes it, by the reference the state holds in its place: its bytes
+ * as base64, or, in a multipart request, the name of the part that holds them.
+ */
 interface WireAsset {
   type: 'image';
   format: 'png' | 'jpeg';
-  data_base64: string;
+  data_base64?: string;
+  part?: string;
+}
+
+/** A picture sent as a part of a multipart request: its name, which its asset gives, and its bytes. */
+interface WirePart {
+  name: string;
+  format: 'png' | 'jpeg';
+  bytes: Uint8Array;
 }
 
 /** An answer as the System One API gives it. */
@@ -84,19 +101,22 @@ interface WireResponse {
 /**
  * What TypeSafe AI takes of a picture, as of 2026-10-26: a still PNG or JPEG of at most 16 MiB, from
  * 280 to 1,568 pixels a side, in a request of at most 32 MiB. It refuses a picture outside them, never
- * resizing it, so one is refused here first, by its path.
+ * resizing it, so one is refused here first, by its path. A multipart request is counted with room for
+ * each part's boundary and headers.
  */
 const PICTURE_BYTES = 16 * 1024 * 1024;
 const PICTURE_SIDE = { min: 280, max: 1568 };
 const REQUEST_BYTES = 32 * 1024 * 1024;
+const PART_OVERHEAD = 256;
 
 /**
  * TypeSafe AI's System One API (`POST /v1/systemone`): Jev, a model that answers only typed
  * questions, a yes or no ("noul"), a choice among up to 255 options, a score on up to ten levels, or a
  * box around something in a picture, and bills for input tokens alone. Every question of a decision
  * goes in one call and is answered in isolation, against the same state. The pictures a state holds
- * are sent as the API's assets, with the `TypeSafe-Danger-Zone-Images` header it requires for them
- * and for a box, both of which it marks as experimental; a box needs Jev 1.14 or later.
+ * are sent as the API's assets, each as a part of a multipart request unless `pictures` says
+ * `base64`, with the `TypeSafe-Danger-Zone-Images` header it requires for them and for a box, both of
+ * which it marks as experimental; a box needs Jev 1.14 or later.
  *
  * ```ts
  * const decisions = new DecisionManager({ providers: { jev: new TypeSafeDecisionProvider({ apiKey: process.env.TYPESAFE_API_KEY! }) } });
@@ -130,16 +150,35 @@ export class TypeSafeDecisionProvider implements DecisionProvider {
         'DECISION_UNSUPPORTED',
       );
     }
-    const { state, assets } = await this.withAssets(request.state, context);
+    const multipart = (this.options.pictures ?? 'multipart') === 'multipart';
+    const { state, assets, parts } = await this.withAssets(request.state, context, multipart);
     const questions = Object.fromEntries(
       Object.entries(request.questions).map(([name, question]) => [name, wireQuestion(question)]),
     );
-    const body = JSON.stringify({ model: request.model, state, questions, ...(assets ? { assets } : {}) });
-    if (assets && body.length > REQUEST_BYTES) {
+    const json = JSON.stringify({ model: request.model, state, questions, ...(assets ? { assets } : {}) });
+    // The request's size in bytes, as sent: the JSON, and each part with its boundary and headers.
+    const size =
+      new TextEncoder().encode(json).byteLength +
+      (parts.length ? parts.reduce((total, part) => total + part.bytes.byteLength + PART_OVERHEAD, PART_OVERHEAD) : 0);
+    if (assets && size > REQUEST_BYTES) {
       throw new DecisionError(
-        `The decision is ${body.length} bytes with its pictures, and TypeSafe AI takes at most ${REQUEST_BYTES}`,
+        `The decision is ${size} bytes with its pictures, and TypeSafe AI takes at most ${REQUEST_BYTES}`,
         'DECISION_INVALID',
       );
+    }
+    let body: string | FormData = json;
+    if (parts.length) {
+      // The request first, named `request`, then each picture under the name its asset gives.
+      const form = new FormData();
+      form.append('request', json);
+      for (const part of parts) {
+        form.append(
+          part.name,
+          new Blob([part.bytes], { type: `image/${part.format}` }),
+          `${part.name}.${part.format === 'png' ? 'png' : 'jpg'}`,
+        );
+      }
+      body = form;
     }
     const payload = await this.call<WireResponse>(
       '/v1/systemone',
@@ -187,25 +226,31 @@ export class TypeSafeDecisionProvider implements DecisionProvider {
   /**
    * The state with each picture replaced by a reference of its own, and the pictures as assets by those
    * references; a state without pictures as it was. A new reference per picture per request, as the
-   * API advises, since it matches a reference wherever its text appears.
+   * API advises, since it matches a reference wherever its text appears. Sent multipart, each picture's
+   * part is named by its reference too.
    */
   private async withAssets(
     state: DecisionState,
     context: DecisionCallContext,
-  ): Promise<{ state: unknown; assets?: Record<string, WireAsset> }> {
+    multipart: boolean,
+  ): Promise<{ state: unknown; assets?: Record<string, WireAsset>; parts: WirePart[] }> {
     const pictures = typeof state === 'string' ? [] : statePictures(state);
-    if (pictures.length === 0) return { state };
+    if (pictures.length === 0) return { state, parts: [] };
     const read = await Promise.all(pictures.map((picture) => readPicture(picture, this.options.media)));
     context.signal.throwIfAborted();
     const references = new Map<string, string>();
     const assets: Record<string, WireAsset> = {};
+    const parts: WirePart[] = [];
     for (const picture of read) {
       const format = fitting(picture);
       const reference = globalThis.crypto.randomUUID();
       references.set(picture.path, reference);
-      assets[reference] = { type: 'image', format, data_base64: encodeBase64(picture.bytes) };
+      if (multipart) {
+        assets[reference] = { type: 'image', format, part: reference };
+        parts.push({ name: reference, format, bytes: picture.bytes });
+      } else assets[reference] = { type: 'image', format, data_base64: encodeBase64(picture.bytes) };
     }
-    return { state: replacePictures(state, (picture) => references.get(picture.path)), assets };
+    return { state: replacePictures(state, (picture) => references.get(picture.path)), assets, parts };
   }
 
   private async call<T>(
@@ -226,7 +271,8 @@ export class TypeSafeDecisionProvider implements DecisionProvider {
         {
           ...init,
           headers: {
-            ...(init.body ? { 'content-type': 'application/json' } : {}),
+            // A multipart body's content type, with its boundary, is the platform's to write.
+            ...(typeof init.body === 'string' ? { 'content-type': 'application/json' } : {}),
             authorization: `Bearer ${credential?.apiKey ?? this.options.apiKey}`,
             ...(this.options.longContext ? { 'TypeSafe-Danger-Zone-Long-Context': 'true' } : {}),
             ...extra,

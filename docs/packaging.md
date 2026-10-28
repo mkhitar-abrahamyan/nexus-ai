@@ -123,7 +123,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/images` | 81 KB | 22% | none |
 | `nexus-ai-pro/providers/anthropic` | 79 KB | 22% | none |
 | `nexus-ai-pro/providers/google` | 74 KB | 20% | none |
-| `nexus-ai-pro/decisions/typesafe` | 70 KB | 19% | none |
+| `nexus-ai-pro/decisions/typesafe` | 71 KB | 19% | none |
 | `nexus-ai-pro/agent/sandbox/container` | 60 KB | 16% | none |
 | `nexus-ai-pro/providers/cohere` | 59 KB | 16% | none |
 | `nexus-ai-pro/providers/ollama` | 59 KB | 16% | none |

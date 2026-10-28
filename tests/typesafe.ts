@@ -2,7 +2,9 @@
  * A stand-in for TypeSafe AI's System One API, written from its documentation (docs.typesafe.ai/api,
  * /images, and /primitives/box) and nothing of this package: `POST /v1/systemone` and `GET /v1/models`,
  * bearer keys, the request's validation as a 422 naming each field at fault, pictures as `assets`
- * behind the `TypeSafe-Danger-Zone-Images` header with their documented limits and refusals, and
+ * behind the `TypeSafe-Danger-Zone-Images` header with their documented limits and refusals, as base64
+ * in a JSON request or as parts of a multipart one (the request first, named `request`, then each
+ * picture in a part of its own that exactly one asset names), and
  * answers in the documented shapes, with score probabilities keyed by each level's number as a string
  * and a box's four edges with its confidence. What the model answers is the test's `judge`, which is
  * given the pictures the state references; the stand-in also computes the documented confidence, so a
@@ -43,8 +45,10 @@ export interface Seen {
     model?: unknown;
     state?: unknown;
     questions?: Record<string, WireQuestion>;
-    assets?: Record<string, { type?: unknown; format?: unknown; data_base64?: unknown }>;
+    assets?: Record<string, { type?: unknown; format?: unknown; data_base64?: unknown; part?: unknown }>;
   };
+  /** A multipart request's content type, as sent, and its parts' names and types, in order: `text` for a field. */
+  multipart?: { contentType: string; names: string[]; types: string[] };
 }
 
 /** The models the stand-in serves, and what each alias resolves to, as the box page's example shows. */
@@ -79,7 +83,34 @@ export function typesafeStandIn(options: {
       authorization: headers.get('authorization'),
       headers,
     };
+    let size = typeof init.body === 'string' ? Buffer.byteLength(init.body) : 0;
+    let parts: Map<string, Uint8Array> | undefined;
+    let malformed: string | undefined;
     if (typeof init.body === 'string') record.body = JSON.parse(init.body);
+    else if (init.body instanceof FormData) {
+      // The body as fetch sends it, boundary and all, then read back as the API reads it.
+      const sent = new Request(url, { method: 'POST', body: init.body });
+      const contentType = sent.headers.get('content-type') ?? '';
+      const raw = await sent.arrayBuffer();
+      size = raw.byteLength;
+      const form = await new Response(raw, { headers: { 'content-type': contentType } }).formData();
+      const names = [...form.keys()];
+      const types = [...form.values()].map((value) => (typeof value === 'string' ? 'text' : value.type));
+      record.multipart = { contentType, names, types };
+      const request = form.get('request');
+      if (names[0] !== 'request' || typeof request !== 'string')
+        malformed = 'The first part is the request, named request';
+      else record.body = JSON.parse(request);
+      parts = new Map();
+      for (const [name, value] of form.entries()) {
+        if (name === 'request') continue;
+        if (typeof value === 'string' || !name.trim() || parts.has(name)) {
+          malformed ??= `Part ${name || '(unnamed)'}: each image is a part of its own, with a unique, non-empty name`;
+          continue;
+        }
+        parts.set(name, new Uint8Array(await value.arrayBuffer()));
+      }
+    }
     seen.push(record);
     init.signal?.throwIfAborted();
     const forced = options.failWith?.();
@@ -89,8 +120,8 @@ export function typesafeStandIn(options: {
     if (url.pathname === '/v1/models' && record.method === 'GET')
       return json(200, { data: MODELS.map((id) => ({ id })) });
     if (url.pathname !== '/v1/systemone' || record.method !== 'POST') return json(404, { detail: 'Not Found' });
-    if (typeof init.body === 'string' && init.body.length > LIMITS.request)
-      return json(413, { detail: 'The request is over 32 MiB' });
+    if (size > LIMITS.request) return json(413, { detail: 'The request is over 32 MiB' });
+    if (malformed) return json(400, { detail: malformed });
     const body = record.body ?? {};
     const detail = validate(body);
     if (detail.length) return json(422, { detail });
@@ -101,7 +132,7 @@ export function typesafeStandIn(options: {
     const images = body.assets !== undefined || boxes;
     if (images && headers.get('TypeSafe-Danger-Zone-Images') !== 'true')
       return json(400, { detail: 'Images are not enabled: send TypeSafe-Danger-Zone-Images: true' });
-    const decoded = decodeAssets(body);
+    const decoded = decodeAssets(body, parts);
     if ('refusal' in decoded) return json(decoded.refusal.status, { detail: decoded.refusal.detail });
     const pictures = decoded.pictures;
     const answers: Record<string, unknown> = {};
@@ -176,11 +207,15 @@ function validate(body: Seen['body'] & object): Array<{ loc: Array<string | numb
 
 /**
  * The request's pictures, decoded and checked as the images page documents, by reference; or the
- * refusal: a 400 for a picture it rejects or a reference nothing uses, and a 413 for one too large.
+ * refusal: a 400 for a picture it rejects, a reference nothing uses, or a part no asset or several name,
+ * and a 413 for one too large. An asset that names a part takes its bytes from it, and its format from
+ * them; one without takes its base64, of the format it names.
  */
 function decodeAssets(
   body: Seen['body'] & object,
+  parts?: ReadonlyMap<string, Uint8Array>,
 ): { pictures: Record<string, StandInPicture> } | { refusal: { status: number; detail: string } } {
+  const named = new Set<string>();
   const pictures: Record<string, StandInPicture> = {};
   const assets = body.assets ?? {};
   // A reference counts wherever its text appears in the state, the instructions, or the criteria.
@@ -200,21 +235,35 @@ function decodeAssets(
     if (!reference.trim()) return refuse('a reference cannot be empty');
     if (!strings.some((text) => text.includes(reference))) return refuse('nothing references it');
     if (asset.type !== undefined && asset.type !== 'image') return refuse('the type must be "image"');
-    if (asset.format !== 'png' && asset.format !== 'jpg' && asset.format !== 'jpeg')
-      return refuse('the format must be png, jpg, or jpeg');
-    const data = asset.data_base64;
-    if (typeof data !== 'string' || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data))
-      return refuse('data_base64 is not standard base64');
-    const bytes = new Uint8Array(Buffer.from(data, 'base64'));
+    let bytes: Uint8Array;
+    if (asset.part !== undefined) {
+      if (!parts) return refuse('a part is named only in a multipart request');
+      const part = parts.get(String(asset.part));
+      if (!part) return refuse(`there is no part ${String(asset.part)}`);
+      if (named.has(String(asset.part))) return refuse(`the part ${String(asset.part)} is used by another asset`);
+      named.add(String(asset.part));
+      bytes = part;
+    } else {
+      if (asset.format !== 'png' && asset.format !== 'jpg' && asset.format !== 'jpeg')
+        return refuse('the format must be png, jpg, or jpeg');
+      const data = asset.data_base64;
+      if (typeof data !== 'string' || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data))
+        return refuse('data_base64 is not standard base64');
+      bytes = new Uint8Array(Buffer.from(data, 'base64'));
+    }
     if (bytes.length > LIMITS.bytes) return refuse('the image is over 16 MiB', 413);
     const read = header(bytes);
-    if (!read || read.format !== (asset.format === 'png' ? 'png' : 'jpeg'))
+    if (!read) return refuse('the image is neither a PNG nor a JPEG');
+    if (asset.part === undefined && read.format !== (asset.format === 'png' ? 'png' : 'jpeg'))
       return refuse(`the image is not the ${asset.format} it says it is`);
     if (read.animated) return refuse('an animated PNG is not a still image');
     const [min, max] = LIMITS.side;
     if ([read.width, read.height].some((side) => side < min || side > max))
       return refuse(`the image is ${read.width}x${read.height}, outside ${min} to ${max} pixels a side`);
     pictures[reference] = { format: read.format, bytes, width: read.width, height: read.height };
+  }
+  for (const name of parts?.keys() ?? []) {
+    if (!named.has(name)) return { refusal: { status: 400, detail: `Part ${name}: no asset uses it` } };
   }
   return { pictures };
 }

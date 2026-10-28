@@ -391,7 +391,7 @@ test('a picture is keyed and traced by a digest, never its bytes, and held again
   assert.equal(held.answers.marked.type, 'yes-no', 'and a budget well above it holds the picture, bytes and all');
 });
 
-test('TypeSafe AI: the pictures go as assets by new references, behind the images header, and a box comes back', async () => {
+test('TypeSafe AI: the pictures go as assets by new references, as parts of their own, behind the images header, and a box comes back', async () => {
   const api = typesafeStandIn({ judge: typesafeJudge });
   const manager = new DecisionManager({
     providers: { typesafe: new TypeSafeDecisionProvider({ apiKey: 'ts-key', fetch: api.fetch }) },
@@ -427,11 +427,15 @@ test('TypeSafe AI: the pictures go as assets by new references, behind the image
     'a UUID, as the API advises',
   );
   assert.equal(wire.claim, 'Claim 7: a mark on the door', 'the rest of the state as it was');
-  assert.deepEqual(sent?.body?.assets?.[wire.photo], {
-    type: 'image',
-    format: 'png',
-    data_base64: (red.source as { base64: string }).base64,
-  });
+  assert.deepEqual(sent?.body?.assets?.[wire.photo], { type: 'image', format: 'png', part: wire.photo });
+  assert.equal(sent?.headers.get('content-type'), null, 'the platform writes the multipart type, with its boundary');
+  assert.match(String(sent?.multipart?.contentType), /^multipart\/form-data; boundary=/);
+  assert.deepEqual(
+    sent?.multipart?.names,
+    ['request', ...Object.keys(sent?.body?.assets ?? {})],
+    'the request first, then a part per picture, named as its asset names it',
+  );
+  assert.deepEqual(sent?.multipart?.types, ['text', 'image/png', 'image/png'], 'each picture of its type');
   assert.deepEqual(sent?.body?.questions?.where, { type: 'box', instructions: 'the mark in `photo`' });
   assert.equal(result.answers.marked.yes, true);
   assert.equal(result.answers.earlier.choice, 'blue', 'a picture deeper in the state, read by its path');
@@ -444,6 +448,26 @@ test('TypeSafe AI: the pictures go as assets by new references, behind the image
   await manager.decide({ state: 'The door is fine.', questions: { marked } });
   assert.equal(api.seen[2]?.headers.get('TypeSafe-Danger-Zone-Images'), null, 'text alone sends no images header');
   assert.equal(api.seen[2]?.body?.assets, undefined, 'and no assets');
+  assert.equal(api.seen[2]?.multipart, undefined, 'in a JSON request');
+  assert.equal(api.seen[2]?.headers.get('content-type'), 'application/json');
+
+  // As base64, the pictures travel within the JSON request instead.
+  const inline = new DecisionManager({
+    providers: {
+      typesafe: new TypeSafeDecisionProvider({ apiKey: 'ts-key', fetch: api.fetch, pictures: 'base64' }),
+    },
+  });
+  const answered = await inline.decide({ state, questions: { marked } });
+  const json = api.seen[3];
+  const photo = ((json?.body?.state ?? {}) as { photo?: string }).photo ?? '';
+  assert.equal(json?.multipart, undefined);
+  assert.equal(json?.headers.get('content-type'), 'application/json');
+  assert.deepEqual(json?.body?.assets?.[photo], {
+    type: 'image',
+    format: 'png',
+    data_base64: (red.source as { base64: string }).base64,
+  });
+  assert.equal(answered.answers.marked.yes, true, 'and are answered the same');
 });
 
 test('TypeSafe AI: a picture it would refuse is refused first, by its path, and a box is not asked of Jev 1.13', async () => {
@@ -465,14 +489,29 @@ test('TypeSafe AI: a picture it would refuse is refused first, by its path, and 
     [{ type: 'image', source: { buffer: large } }, /`photo` is 16777217 bytes, over TypeSafe AI's 16777216/],
   ];
   for (const [photo, why] of pictures) await refused(ask({ photo }), 'DECISION_INVALID', why);
-  // Three pictures of ten megabytes each are 40 MB as base64: over the request's 32 MiB.
+  // Three pictures of ten megabytes each are 40 MB as base64, over the request's 32 MiB, and 30 MiB as
+  // parts, within it; four are over it either way.
   const heavy = new Uint8Array(10 * 1024 * 1024);
   heavy.set(scenePng(RED));
-  const three = Object.fromEntries(['a', 'b', 'c'].map((key) => [key, { type: 'image', source: { buffer: heavy } }]));
+  const many = (keys: string[]) =>
+    Object.fromEntries(keys.map((key) => [key, { type: 'image', source: { buffer: heavy } }]));
+  const alike: DecisionQuestions = { marked: { type: 'yes-no', question: 'Is `a` like `b` and `c`?' } };
+  const asBase64 = new DecisionManager({
+    providers: {
+      typesafe: new TypeSafeDecisionProvider({ apiKey: 'ts-key', fetch: api.fetch, pictures: 'base64' }),
+    },
+  });
   await refused(
-    ask(three, { marked: { type: 'yes-no', question: 'Is `a` like `b` and `c`?' } }),
+    asBase64.decide({ state: many(['a', 'b', 'c']), questions: alike }),
     'DECISION_INVALID',
     /takes at most 33554432/,
+  );
+  await refused(ask(many(['a', 'b', 'c', 'd']), alike), 'DECISION_INVALID', /takes at most 33554432/);
+  // The limit is in bytes: twelve million euro signs are 36 MB, in twelve million characters.
+  await refused(
+    ask({ note: '€'.repeat(12_000_000), photo: picture(RED) }),
+    'DECISION_INVALID',
+    /The decision is 3600\d{4} bytes with its pictures, and TypeSafe AI takes at most 33554432/,
   );
   await refused(
     ask({ photo: picture(RED) }, { where }, 'jev-1.13.0'),
@@ -483,6 +522,8 @@ test('TypeSafe AI: a picture it would refuse is refused first, by its path, and 
   await ask({ photo: picture({ width: 280, height: 1568 }) });
   await ask({ photo: picture(RED) }, { where }, 'jev-1.14.0');
   assert.equal(api.seen.length, 2, 'a picture at the limits, and a box of Jev 1.14, are asked');
+  assert.equal((await ask(many(['a', 'b', 'c']), alike)).answers.marked.type, 'yes-no', 'three as parts are asked');
+  assert.equal(api.seen[2]?.multipart?.names.length, 4);
 
   // What the API refuses anyway is a refused decision, not a failure to try again.
   for (const status of [400, 413]) {
@@ -519,6 +560,36 @@ test('TypeSafe AI: a picture it would refuse is refused first, by its path, and 
     (await api.fetch(url, { method: 'POST', headers: images, body: unused })).status,
     400,
     'an asset nothing references',
+  );
+  // And a multipart request to its rules: the request first, and each picture a part one asset names.
+  const multipart = (assets: Record<string, unknown>, parts: Array<[string, Uint8Array]>, first = true) => {
+    const request = JSON.stringify({ ...JSON.parse(body), assets });
+    const form = new FormData();
+    if (first) form.append('request', request);
+    for (const [name, bytes] of parts) form.append(name, new Blob([bytes], { type: 'image/png' }), `${name}.png`);
+    if (!first) form.append('request', request);
+    const { 'content-type': _json, ...headers } = images;
+    return api.fetch(url, { method: 'POST', headers, body: form });
+  };
+  const png = scenePng(RED);
+  const asset = (part: string) => ({ type: 'image', part });
+  assert.equal((await multipart({ 'ref-1': asset('p1') }, [['p1', png]])).status, 200, 'a picture by its part');
+  assert.equal((await multipart({ 'ref-1': asset('p1') }, [['p1', png]], false)).status, 400, 'the request not first');
+  assert.equal((await multipart({ 'ref-1': asset('p2') }, [['p1', png]])).status, 400, 'a part that is not there');
+  assert.equal(
+    (
+      await multipart({ 'ref-1': asset('p1') }, [
+        ['p1', png],
+        ['p2', png],
+      ])
+    ).status,
+    400,
+    'a part no asset names',
+  );
+  assert.equal(
+    (await multipart({ 'ref-1': asset('p1'), 'ref-2': asset('p1') }, [['p1', png]])).status,
+    400,
+    'a part two assets name',
   );
 });
 
