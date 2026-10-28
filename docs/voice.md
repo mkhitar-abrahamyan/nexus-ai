@@ -1,8 +1,8 @@
 # Voice
 
-<!-- covers: ./voice ./voice/openai ./voice/session -->
+<!-- covers: ./voice ./voice/openai ./voice/google ./voice/session -->
 
-Speech-to-text and text-to-speech from `nexus-ai-pro/voice`: transcribe, speak, run a full voice turn through a model, or keep a multi-turn voice session, with an OpenAI adapter on `nexus-ai-pro/voice/openai` and a contract for your own provider.
+Speech-to-text and text-to-speech from `nexus-ai-pro/voice`: transcribe, speak, run a full voice turn through a model, or keep a multi-turn voice session, with OpenAI and Gemini adapters on `nexus-ai-pro/voice/openai` and `nexus-ai-pro/voice/google`, and a contract for your own provider.
 
 ## Voice Integrations
 
@@ -248,6 +248,30 @@ registered, or no provider supports the operation; it names the provider and car
 key, base URL, organization, `transcriptionModel` (`gpt-4o-transcribe` by default), `speechModel`
 (`gpt-4o-mini-tts`), `defaultVoice` (`alloy`), extra headers, and a `fetch`.
 
+`GoogleVoiceProvider`, from `nexus-ai-pro/voice/google`, is Gemini, through `generateContent`. It takes
+`GoogleVoiceProviderConfig`: the API key, base URL, `transcriptionModel` (`gemini-3.8-flash` by
+default), `speechModel` (`gemini-3.8-flash-tts`), `defaultVoice` (`Kore`, one of Gemini's prebuilt
+voices), extra headers, and a `fetch`.
+- Speech comes back as WAV, the default, or raw 16-bit PCM, whether the model answers with a WAV file
+  or with raw PCM at the rate it names; any other format is refused before the call, since Gemini
+  makes none. `instructions`, and a `speed` other than 1, direct the delivery as a system instruction,
+  so a model that speaks its text word for word never speaks them.
+- A transcript is what a text model hears: the words alone, in the language spoken, guided by
+  `language` and by `prompt`, the names and spellings the audio may hold. Audio is sent inline, up to
+  14 MB, or by its Files API URI given as the `url`; any other URL is fetched first. The response
+  has the audio's length, from its headers. A request for timings or subtitles is refused, since
+  Gemini's transcript has none.
+
+```ts
+import { GoogleVoiceProvider } from 'nexus-ai-pro/voice/google';
+
+const ai = new NexusAI({
+  providers: { google: { apiKey: process.env.GEMINI_API_KEY! } },
+  voice: { providers: { gemini: new GoogleVoiceProvider({ apiKey: process.env.GEMINI_API_KEY! }) } },
+});
+const { audio } = await ai.speak({ provider: 'gemini', text: 'Your order has shipped.', voice: 'Puck', instructions: 'Warm and brief.' });
+```
+
 ## Sessions
 
 `VoiceSessionConfig` sets up a conversation.
@@ -285,7 +309,9 @@ configuration, a `VoiceSessionRuntime` (anything with `transcribe()` and `speak(
 
 - Each turn is a request and a reply: the user finishes speaking, then the answer is produced. For
   interruption and streamed audio, use realtime.
-- `OpenAIVoiceProvider` is the only bundled adapter; others implement `VoiceProvider`.
+- `OpenAIVoiceProvider` and `GoogleVoiceProvider` are the bundled adapters; others implement
+  `VoiceProvider`. The Gemini adapter is experimental until a live run is recorded.
+- Gemini speaks WAV or raw PCM alone, and transcribes without timings.
 - Audio preprocessing is limited to what the provider does: no resampling, denoising, or format
   conversion happens here, and providers differ in the formats and languages they accept.
 
@@ -326,6 +352,13 @@ specific entry point that provides it.
 | `VoiceTranscriptMessageConfig` | interface | How a transcript becomes a message in the completion that answers it. |
 | `VoiceTurnRequest` | interface | One spoken turn: transcribe the audio, answer it, and speak the answer. |
 | `VoiceTurnResponse` | interface | The outcome of a voice turn. |
+
+### `nexus-ai-pro/voice/google`
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `GoogleVoiceProvider` | class | Gemini speech-to-text and text-to-speech, through `generateContent`: a text model transcribes audio it hears, and a speech model speaks text in one of Gemini's voices, as WAV or raw PCM. |
+| `GoogleVoiceProviderConfig` | interface | Options for the Gemini voice provider. |
 
 ### `nexus-ai-pro/voice/openai`
 

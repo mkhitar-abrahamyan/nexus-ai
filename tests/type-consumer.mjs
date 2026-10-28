@@ -181,6 +181,7 @@ import { MemoryCache as SubpathMemoryCache } from 'nexus-ai-pro/cache/memory-cac
 import { ContextWindowManager as SubpathContextWindowManager } from 'nexus-ai-pro/context';
 import { VoiceManager as SubpathVoiceManager } from 'nexus-ai-pro/voice';
 import { OpenAIVoiceProvider } from 'nexus-ai-pro/voice/openai';
+import { GoogleVoiceProvider, type GoogleVoiceProviderConfig } from 'nexus-ai-pro/voice/google';
 import { VoiceSession as SubpathVoiceSession } from 'nexus-ai-pro/voice/session';
 import { ImageManager as SubpathImageManager } from 'nexus-ai-pro/images';
 import { MemoryAssetStore } from 'nexus-ai-pro/images/assets';
@@ -712,6 +713,10 @@ const subpathVoiceManager = new SubpathVoiceManager(voiceConfig);
 const voiceSession: VoiceSession = ai.createVoiceSession(voiceSessionConfig);
 const subpathVoiceSession = new SubpathVoiceSession(voiceSessionConfig, subpathVoiceManager, ai);
 const openAiVoice = new OpenAIVoiceProvider({ apiKey: 'test' });
+const geminiVoiceConfig: GoogleVoiceProviderConfig = { apiKey: 'test', speechModel: 'gemini-3.8-flash-tts', defaultVoice: 'Puck' };
+const geminiVoice = new GoogleVoiceProvider(geminiVoiceConfig);
+const geminiSpeech = geminiVoice.speak({ text: 'Hello', format: 'pcm', instructions: 'warmly' });
+void [geminiSpeech];
 const demoGraph = createGraph({ channels: { log: appendList<string>(), turns: counter() } })
   .addNode('think', () => ({ log: ['thought'], turns: 1 }))
   .setEntry('think')

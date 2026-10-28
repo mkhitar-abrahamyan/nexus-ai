@@ -98,7 +98,8 @@ modality `video`, `EmbeddingMeta.unpricedMedia`, and `EmbeddingModelCapabilities
 `costPerAudioSecond`, `costPerVideoFrame`, `videoFrames`, `maxAudioSeconds`, and `maxVideoSeconds`; in
 the loaders, `FileInput`'s stream form, `CsvRowParser`, `JsonLoaderOptions.recordsAt`,
 `WebLoaderOptions.render` and `renderBelow`, `browserRenderer()`, `WebPageRenderer`, `WebPageToRender`,
-`RenderingBrowser`, and `BrowserRendererOptions`.
+`RenderingBrowser`, and `BrowserRendererOptions`. Experimental: `nexus-ai-pro/voice/google`,
+`GoogleVoiceProvider` and `GoogleVoiceProviderConfig`, until a live run is recorded.
 The state store keys and sessions are kept in, under `nexus/server`, is read by every later 2.x.
 
 Changed on purpose: an answer the output guard changes or blocks keeps no `logprobs`, streamed or

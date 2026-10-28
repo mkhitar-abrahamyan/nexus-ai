@@ -198,6 +198,7 @@
     "./video/mock": 6,
     "./video/runway": 18,
     "./voice": 48,
+    "./voice/google": 28,
     "./voice/openai": 10,
     "./voice/session": 16,
     "./workflows": 22

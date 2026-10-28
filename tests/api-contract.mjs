@@ -71,6 +71,7 @@ const expectedSubpaths = [
   './context',
   './voice',
   './voice/openai',
+  './voice/google',
   './voice/session',
   './images',
   './images/assets',

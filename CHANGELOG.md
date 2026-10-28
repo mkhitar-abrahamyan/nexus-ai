@@ -75,6 +75,10 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - **Pages built by script.** `loadWebPages()` takes a `render` of the application's own for a page
   whose text a script builds, and `browserRenderer()` makes one from a Playwright or Puppeteer browser,
   with no browser a dependency of the package.
+- **Gemini voice.** `GoogleVoiceProvider`, on `nexus-ai-pro/voice/google`, speaks in Gemini's voices, as
+  WAV or raw PCM, whichever its model answers with, directed by a system instruction that is never
+  spoken; and transcribes with a text model that hears the audio, inline or by a Files API URI, guided
+  by its language and the names it may hold. Experimental until a live run is recorded.
 
 ### Changed
 

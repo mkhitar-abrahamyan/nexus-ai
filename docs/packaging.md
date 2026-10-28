@@ -174,6 +174,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/server/tenancy` | 27 KB | 7% | none |
 | `nexus-ai-pro/loaders/web` | 26 KB | 7% | none |
 | `nexus-ai-pro/runtime` | 25 KB | 7% | none |
+| `nexus-ai-pro/voice/google` | 25 KB | 7% | none |
 | `nexus-ai-pro/images/assets` | 25 KB | 7% | none |
 | `nexus-ai-pro/protocols/acp` | 25 KB | 7% | none |
 | `nexus-ai-pro/testing` | 25 KB | 7% | none |

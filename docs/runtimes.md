@@ -152,7 +152,7 @@ compatibility, such as Deno or Bun, or Workers with Node compatibility enabled, 
 
 <!-- runtimes:start -->
 
-Of 199 entry points, 160 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
+Of 200 entry points, 161 run on any runtime. These need Node.js, or a runtime with Node compatibility, and what they need:
 
 | Entry point | Needs |
 | --- | --- |
@@ -200,6 +200,7 @@ These run anywhere, and load a Node module only when a feature that needs it is 
 
 | Entry point | Loads, when used |
 | --- | --- |
+| `nexus-ai-pro/voice/google` | `node:fs/promises` |
 | `nexus-ai-pro/images/evals` | `node:zlib`; the `Buffer` global |
 | `nexus-ai-pro/embeddings/batch` | `node:crypto`; the `Buffer` global |
 | `nexus-ai-pro/agent/workspace` | `node:fs/promises`, `node:path` |

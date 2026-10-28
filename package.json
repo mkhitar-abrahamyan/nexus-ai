@@ -270,6 +270,16 @@
         "default": "./dist-cjs/voice/providers/openai.js"
       }
     },
+    "./voice/google": {
+      "import": {
+        "types": "./dist/voice/providers/google.d.ts",
+        "default": "./dist/voice/providers/google.js"
+      },
+      "require": {
+        "types": "./dist-cjs/voice/providers/google.d.ts",
+        "default": "./dist-cjs/voice/providers/google.js"
+      }
+    },
     "./voice/session": {
       "import": {
         "types": "./dist/voice/session.d.ts",
@@ -2310,6 +2320,9 @@
       ],
       "voice/openai": [
         "dist-cjs/voice/providers/openai.d.ts"
+      ],
+      "voice/google": [
+        "dist-cjs/voice/providers/google.d.ts"
       ],
       "voice/session": [
         "dist-cjs/voice/session.d.ts"
