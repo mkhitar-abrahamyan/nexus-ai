@@ -128,6 +128,108 @@ export function isResponse(message: JsonRpcMessage): message is JsonRpcResponse 
   return !('method' in message) && 'id' in message;
 }
 
+// ── What a server asks of its client ──────────────────────────────
+
+/** A sampled message's content: text, or an image or audio as base64. */
+export type McpSamplingContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string }
+  | { type: 'audio'; data: string; mimeType: string };
+
+/** One message of a conversation a server asks its client's model to continue. */
+export interface McpSamplingMessage {
+  /** Who said it. */
+  role: 'user' | 'assistant';
+  /** What was said. */
+  content: McpSamplingContent;
+}
+
+/** Which model a server would like its client to use: hints by name, and how it weighs cost, speed, and intelligence. */
+export interface McpModelPreferences {
+  /** Model names, or parts of them, most preferred first. */
+  hints?: Array<{ name?: string }>;
+  /** How much cost matters, from 0 to 1. */
+  costPriority?: number;
+  /** How much speed matters, from 0 to 1. */
+  speedPriority?: number;
+  /** How much intelligence matters, from 0 to 1. */
+  intelligencePriority?: number;
+}
+
+/** A server's `sampling/createMessage`: a conversation for the client's model to continue. */
+export interface McpSamplingRequest {
+  /** The conversation. */
+  messages: McpSamplingMessage[];
+  /** The model the server would like. The client chooses. */
+  modelPreferences?: McpModelPreferences;
+  /** A system prompt the server asks for. The client may change or ignore it. */
+  systemPrompt?: string;
+  /** Context from MCP servers the client may add: none, this server's, or every server's. */
+  includeContext?: 'none' | 'thisServer' | 'allServers';
+  /** The sampling temperature. */
+  temperature?: number;
+  /** The most tokens to sample. */
+  maxTokens: number;
+  /** Where to stop. */
+  stopSequences?: string[];
+  /** Anything else, for the client's model provider. */
+  metadata?: Record<string, unknown>;
+}
+
+/** What the client's model answered. */
+export interface McpSamplingResult {
+  /** Always `assistant`. */
+  role: 'assistant';
+  /** The answer. */
+  content: McpSamplingContent;
+  /** The model that answered. */
+  model: string;
+  /** Why it stopped: `endTurn`, `stopSequence`, `maxTokens`, or the provider's own reason. */
+  stopReason?: 'endTurn' | 'stopSequence' | 'maxTokens' | (string & {});
+}
+
+/** A server's `elicitation/create`: a question for the person using the client, with the form of its answer. */
+export interface McpElicitationRequest {
+  /** What to ask. */
+  message: string;
+  /** The answer's form: an object of flat fields, strings, numbers, booleans, or enums. */
+  requestedSchema: {
+    type: 'object';
+    properties: Record<string, Record<string, unknown>>;
+    required?: string[];
+  };
+}
+
+/** What the person answered: accepted with the fields, declined, or cancelled. */
+export interface McpElicitationResult {
+  /** `accept` with `content`, `decline`, or `cancel`. */
+  action: 'accept' | 'decline' | 'cancel';
+  /** The fields, when accepted. */
+  content?: Record<string, string | number | boolean | string[]>;
+}
+
+/** A root the client lets a server work within: a `file://` URI, and a name for it. */
+export interface McpRoot {
+  /** The root's URI. */
+  uri: string;
+  /** A name for it. */
+  name?: string;
+}
+
+/**
+ * What a tool served over MCP may ask the client that called it, as `ToolContext.mcp`: its model
+ * for a completion, its person for an answer, and its roots. Each fails with `McpError` when the
+ * client did not declare it can.
+ */
+export interface McpCallerRequests {
+  /** Asks the client's model to continue a conversation. */
+  createMessage(request: McpSamplingRequest, options?: { signal?: AbortSignal }): Promise<McpSamplingResult>;
+  /** Asks the client's person a question, with the form of its answer. */
+  elicit(request: McpElicitationRequest, options?: { signal?: AbortSignal }): Promise<McpElicitationResult>;
+  /** Lists the roots the client lets the server work within. */
+  listRoots(options?: { signal?: AbortSignal }): Promise<McpRoot[]>;
+}
+
 /** Text content, the shape MCP tool results use for anything that is not an image or a resource. */
 export function textContent(value: unknown): Array<{ type: 'text'; text: string }> {
   const text = typeof value === 'string' ? value : JSON.stringify(value ?? null);

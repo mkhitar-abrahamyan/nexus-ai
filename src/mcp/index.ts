@@ -23,7 +23,27 @@ export {
   type JsonRpcResponse,
   LineDecoder,
   MCP_PROTOCOL_VERSION,
+  type McpCallerRequests,
+  type McpElicitationRequest,
+  type McpElicitationResult,
   McpError,
+  type McpModelPreferences,
+  type McpRoot,
+  type McpSamplingContent,
+  type McpSamplingMessage,
+  type McpSamplingRequest,
+  type McpSamplingResult,
   type McpTransport,
 } from './protocol.js';
-export { createStdioServerTransport, McpServer, type McpServerOptions, mcpToolAnnotations } from './server.js';
+export { type McpHttpHandler, mcpHttpHandler, type McpHttpOptions } from './http.js';
+export { type McpSamplingClient, type McpSamplingOptions, samplingFrom } from './sampling.js';
+export {
+  createStdioServerTransport,
+  type McpPromptArgument,
+  type McpPromptMessage,
+  McpServer,
+  type McpServerOptions,
+  type McpServerPrompt,
+  type McpServerResource,
+  mcpToolAnnotations,
+} from './server.js';

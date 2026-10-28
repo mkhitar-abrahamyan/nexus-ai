@@ -28,8 +28,8 @@ import { McpServer, createStdioServerTransport } from 'nexus-ai-pro/mcp';
 await new McpServer({ name: 'my-app', tools: [refundTool] }).connect(createStdioServerTransport());
 ```
 
-Stdio and HTTP transports are included, and the transport is an interface, so a test can wire a
-client to a server in memory.
+Stdio, streamable HTTP, and SSE transports are included, both ways, and the transport is an
+interface, so a test can wire a client to a server in memory.
 
 ## The client
 
@@ -45,8 +45,36 @@ handshake; the first request that needs it calls it for you.
 | `readResource()` | One resource, as content parts. |
 | `listPrompts()`, `getPrompt()` | The server's prompts, and one rendered into messages. |
 | `toNexusTools()` | The tools as `ToolDefinition` values an agent or `ToolExecutor` can run. |
-| `onToolsChanged()` | Hears each time the server says its tools changed; returns a function that stops hearing. |
+| `onToolsChanged()`, `onPromptsChanged()`, `onResourcesChanged()` | Hears each time the server says that list changed; each returns a function that stops hearing. |
+| `subscribeResource()`, `unsubscribeResource()`, `onResourceUpdated()` | Asks to hear when a resource changes, stops, and hears its URI each time it does. |
+| `rootsChanged()` | Tells the server this client's roots changed. |
 | `close()` | Closes the transport, rejecting requests still waiting. |
+
+### What a server asks of the client
+
+A server may ask its client for things while it works: a completion from the client's model, an
+answer from the person using it, or the roots it may work within. `McpClientOptions` answers each it
+is given, and declares it to the server at the handshake:
+- `sampling` answers `sampling/createMessage`, an `McpSamplingRequest` of `McpSamplingMessage` values,
+  each `McpSamplingContent` text, an image, or audio, with `McpModelPreferences`, with an
+  `McpSamplingResult`. `samplingFrom()` is one, from any `McpSamplingClient`, such as `NexusAI`, so
+  each request is routed, budgeted, traced, and priced as every completion is. `McpSamplingOptions`
+  set the `model`, the `models` a server's hints pick from, a `maxTokens` cap, whether to keep its
+  `systemPrompt`, and `approve`, which sees each request first, as MCP expects a person to;
+- `elicitation` answers `elicitation/create`, an `McpElicitationRequest` with the form of its answer,
+  with an `McpElicitationResult`: accepted with its fields, declined, or cancelled;
+- `roots` answers `roots/list` with each `McpRoot`.
+
+```ts
+const client = new McpClient(createHttpTransport({ url }), {
+  sampling: samplingFrom(ai, { model: 'gpt-5-mini', maxTokens: 1_000, approve: (request) => confirm(request) }),
+  roots: () => [{ uri: 'file:///work/acme', name: 'acme' }],
+});
+```
+
+A request it was not given is refused with method-not-found, as is anything else a server asks but
+`ping`, which it answers. A request the server cancels stops its handler, through the `signal` it is
+given, and is not answered.
 
 Two kinds of failure are kept apart. A tool that fails answers with `isError`; it does not throw. A
 protocol failure throws `McpError`.
@@ -129,10 +157,13 @@ An API key or a database URL reaches a server only when `env` names it. `inherit
 list adds variables by name, `true` passes the whole environment, as releases before 2.4 did, and
 `false` passes nothing but `env`.
 
-`createHttpTransport()` speaks to a remote server with one POST per message, carrying the
-`mcp-session-id` the server assigns and reading either a JSON body or an event-stream reply.
-`HttpClientOptions` gives the `url`, `headers` such as authorization, and a `fetch` to use instead of
-the global one.
+`createHttpTransport()` speaks streamable HTTP, MCP's transport since 2025-03-26: one POST per
+message, carrying the `mcp-session-id` the server assigns and the protocol version, answered as JSON
+or as a stream of events. A stream is read as it comes, so the server's progress, and a question it
+asks the client in the middle of a call, arrive while the call runs. With `listen`, a `GET` stream
+carries what the server sends of its own accord, such as its tools changing; a server that answers it
+with 405 offers none. `close()` ends the session with a `DELETE`. `HttpClientOptions` gives the
+`url`, `headers` such as authorization, `listen`, and a `fetch` to use instead of the global one.
 
 `createSseTransport()` speaks to a server over HTTP with Server-Sent Events, the transport before
 streamable HTTP that many servers still serve. It opens one `GET` on the server's event stream, posts
@@ -154,11 +185,40 @@ skipping a malformed line rather than losing the stream.
 
 ## The server
 
-`McpServer` takes `McpServerOptions`: a `name` and `version` to report, the `tools` to expose, and
-`resources`, each a URI with a name, description, MIME type, and a `read()` function. `register()`
-adds a tool later, and tells a connected client with `notifications/tools/list_changed`, as the
-server's `tools.listChanged` capability promises. `connect()` starts serving over a transport,
-`close()` stops, and `handle()` takes one message directly, for a host that carries messages itself.
+`McpServer` takes `McpServerOptions`: a `name` and `version` to report, the `tools` to expose, its
+`resources`, each an `McpServerResource`, a URI with a name, description, MIME type, and a `read()`
+function, its `prompts`, and `timeoutMs`, how long a question it asks a client waits (60 seconds).
+`register()`, `registerPrompt()`, and `registerResource()` add one later and tell every connected
+client that list changed. `connect()` starts serving a client over a transport, and serves each
+client connected to it at once; `close()` stops, and `handle()` takes one message directly, for a
+host that carries messages itself.
+
+An `McpServerPrompt` has a name, a title and description, the `McpPromptArgument` values it takes,
+and `get()`, which renders it: text, which is one user message, or each `McpPromptMessage`. A
+required argument a client leaves out is refused with invalid-params. A client may subscribe to a
+resource; `resourceUpdated()` tells each subscribed client it changed, and only those.
+
+A tool the server runs may ask the client that called it for what it needs, through `context.mcp`, the
+`McpCallerRequests` of that call: `createMessage()` asks its model, `elicit()` asks its person, and
+`listRoots()` its roots. Each is refused before it is sent when the client did not declare it, waits
+`timeoutMs`, and is cancelled, and the client told, when the call is. `createMessage()`, `elicit()`,
+and `listRoots()` on the server itself ask the one client connected, and refuse when several are,
+since only a tool's context knows which called. `onRootsChanged()` hears a client's roots change.
+
+```ts
+const summarize = tool({
+  name: 'summarize',
+  description: 'Summarizes a document with the caller’s own model',
+  parameters: { type: 'object', properties: { id: { type: 'string' } } },
+  execute: async ({ id }, context) => {
+    const answer = await context?.mcp?.createMessage({
+      messages: [{ role: 'user', content: { type: 'text', text: `Summarize: ${await read(String(id))}` } }],
+      maxTokens: 300,
+    });
+    return answer?.content.type === 'text' ? answer.content.text : '';
+  },
+});
+```
 
 Each tool is listed with the annotations its capabilities give it, from `mcpToolAnnotations()`, read
 so a client is never told less than the tool may do. It is read-only only when every capability reads
@@ -167,13 +227,38 @@ files or is `mcp.read`, or there are none. It is not destructive only when every
 A tool whose capabilities depend on its arguments, or that declares none, is listed without
 annotations, which a client reads as able to do anything.
 
-It answers `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, and `resources/read`.
+It answers `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`,
+`resources/subscribe`, `resources/unsubscribe`, `prompts/list`, and `prompts/get`, and stops a tool's
+call when its client cancels it, through the call's `signal`.
 A tool with neither `execute` nor `stream` is a schema for a model to call elsewhere, so the server
 reports it as unknown when called. A `stream` tool runs too, and when the call names a
 `progressToken`, each report goes back as `notifications/progress`: a number is the progress, an
 object's `progress`, `total`, and `message` are used, and anything else is the message. A tool that throws answers with `isError` and the message rather
 than failing the request. `createStdioServerTransport()` serves over this process's stdin and stdout,
 which is how an editor or desktop assistant launches it; nothing else may be written to stdout.
+
+### Serving over HTTP
+
+`mcpHttpHandler()` serves an `McpServer` over streamable HTTP as a Web handler, an `McpHttpHandler`,
+for any server that speaks `Request` and `Response`. Each client that sends `initialize` gets a
+session of its own, named in the `Mcp-Session-Id` header it sends from then on. A request is answered
+as a stream of events that carries the server's progress, and its questions for the client, before
+the answer; two requests in flight are each answered on their own stream. A notification, or an
+answer to the server's question, is taken with 202. A `GET` holds the session's own stream, for what
+the server sends of its own accord, and a `DELETE` ends it.
+
+```ts
+const handle = mcpHttpHandler(new McpServer({ tools: [summarize], prompts: [triage] }));
+Bun.serve({ port: 3001, fetch: handle });
+```
+
+`McpHttpOptions` sets `allowedOrigins`: a request from a web page on any other origin than the
+endpoint's own is refused with 403, so a page cannot reach a server on the person's machine through
+their browser. `json` answers each request as JSON, once the server finishes. `sessionTtlMs` ends a
+session idle that long (30 minutes), unless a stream of it is open; `maxSessions` refuses more than
+that many at once with 503 (1,000); and `sessionId` makes the ids. A message without a session, or
+naming one that has ended, is refused with 400 or 404, a protocol version it does not speak with 400,
+and a batch, which 2025-06-18 dropped, with 400.
 
 ## A registry of servers
 
@@ -245,12 +330,13 @@ with method-not-found, so a client can tell an unsupported feature from a failur
 
 ## Limitations
 
-- The HTTP transport covers request and response; server-initiated streaming is not implemented.
+- A stream that drops is not resumed from where it was: the HTTP handler numbers no events, and a
+  client reads a dropped answer's request as failed.
 - A request in flight when a connection drops fails, rather than being sent again, since it may have
   run. A registry's tool lists are read again only after `refresh()`.
 - A tool's capabilities from its annotations are only as true as its server is honest.
-- The server exposes tools and resources. Prompts and sampling are not served, and of change
-  notifications only its tools' are sent.
+- The server offers no resource templates and no completions, and a client's sampling handler is
+  given no other server's context: `includeContext` is the server's request, not a promise.
 
 <!-- reference:start -->
 ## Reference
@@ -262,7 +348,7 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
-| `createHttpTransport` | function | Speaks to an MCP server over HTTP, one POST per message. |
+| `createHttpTransport` | function | Speaks to an MCP server over streamable HTTP, MCP's transport since 2025-03-26: a `POST` per message, answered as JSON or as a stream of events the transport reads as they come, so a server may report progress and ask this client for something in the middle of a call. |
 | `createSseTransport` | function | Speaks to an MCP server over HTTP with Server-Sent Events, as MCP's 2024-11-05 transport: one long `GET` the server answers on, and a `POST` per message to the endpoint the stream names first. |
 | `createStdioServerTransport` | function | Serves MCP over this process's stdin and stdout. |
 | `createStdioTransport` | function | Runs an MCP server as a child process and speaks to it over its stdin and stdout. |
@@ -274,13 +360,31 @@ specific entry point that provides it.
 | `JsonRpcResponse` | interface | A JSON-RPC response: a result or an error, for the request with the same id. |
 | `LineDecoder` | class | Splits a byte stream into newline-delimited JSON messages. |
 | `MCP_PROTOCOL_VERSION` | constant | The MCP protocol revision this client and server speak, sent during `initialize`. |
+| `McpCallerRequests` | interface | What a tool served over MCP may ask the client that called it, as `ToolContext.mcp`: its model for a completion, its person for an answer, and its roots. |
 | `McpClient` | class | Talks to an MCP server. |
 | `McpClientOptions` | interface | Options for an MCP client. |
 | `McpContent` | interface | One piece of content from an MCP server: text, or base64 data with a MIME type. |
+| `McpElicitationRequest` | interface | A server's `elicitation/create`: a question for the person using the client, with the form of its answer. |
+| `McpElicitationResult` | interface | What the person answered: accepted with the fields, declined, or cancelled. |
 | `McpError` | class | An MCP protocol error, carrying a JSON-RPC error code. |
+| `mcpHttpHandler` | function | Serves an MCP server over streamable HTTP, MCP's transport since 2025-03-26: each client that sends `initialize` gets a session, named in the `Mcp-Session-Id` header it sends from then on. |
+| `McpHttpHandler` | interface | A Web handler serving an MCP server over streamable HTTP, and what it holds. |
+| `McpHttpOptions` | interface | Options for `mcpHttpHandler()`. |
+| `McpModelPreferences` | interface | Which model a server would like its client to use: hints by name, and how it weighs cost, speed, and intelligence. |
+| `McpPromptArgument` | interface | One argument a prompt takes. |
+| `McpPromptMessage` | interface | One message of a rendered prompt. |
 | `McpResourceDescriptor` | interface | A resource an MCP server offers. |
-| `McpServer` | class | Exposes tools over MCP, so other assistants can call them. |
+| `McpRoot` | interface | A root the client lets a server work within: a `file://` URI, and a name for it. |
+| `McpSamplingClient` | interface | Anything that completes a request, such as a `NexusAI` client. |
+| `McpSamplingContent` | type | A sampled message's content: text, or an image or audio as base64. |
+| `McpSamplingMessage` | interface | One message of a conversation a server asks its client's model to continue. |
+| `McpSamplingOptions` | interface | Options for `samplingFrom()`. |
+| `McpSamplingRequest` | interface | A server's `sampling/createMessage`: a conversation for the client's model to continue. |
+| `McpSamplingResult` | interface | What the client's model answered. |
+| `McpServer` | class | Exposes tools, resources, and prompts over MCP, so other assistants can use them. |
 | `McpServerOptions` | interface | Options for an MCP server. |
+| `McpServerPrompt` | interface | A prompt a server offers: a template a client renders with its arguments. |
+| `McpServerResource` | interface | A resource a server exposes, read by its URI. |
 | `mcpToolAnnotations` | function | The annotations a tool is served with, from the capabilities it declares, read so a client is never told less than the tool may do: - read-only only when every capability reads, `filesystem:read` or `mcp.read`, or there are none; - not destructive only when everything else it does is `mcp.write`; - closed to the world only when every capability is the filesystem's or an MCP tool's effect. |
 | `McpToolAnnotations` | interface | What a server says a tool does, as MCP's tool annotations: hints, which a client trusts only as far as it trusts the server. |
 | `mcpToolCapabilities` | function | The capabilities an MCP tool declares, from what its server says of it in its annotations, so a permission policy decides it as it decides any tool: - `mcp.read:<server>/<tool>` for a tool that only reads; - `mcp.write:<server>/<tool>` for one that changes things but destroys nothing; - `mcp.destructive:<server>/<tool>` for one that may destroy or overwrite; - and `network`, beside it, for one that reaches beyond its server. |
@@ -288,6 +392,7 @@ specific entry point that provides it.
 | `McpToolResult` | interface | What a tool call returned. |
 | `McpToolsOptions` | interface | Options for `McpClient.toNexusTools()`. |
 | `McpTransport` | interface | Carries a transport's messages in both directions. |
+| `samplingFrom` | function | A sampling handler for \`McpClientOptions.sampling\`, answering a server's requests with a client's own completions: the conversation as messages, an image or audio as a part, the server's system prompt, temperature, stop sequences, and token limit, the model chosen by its hints. |
 | `SseClientOptions` | interface | Connects to a remote MCP server over HTTP with Server-Sent Events, the transport before streamable HTTP. |
 | `StdioClientOptions` | interface | Launches a local MCP server as a child process and talks to it over stdin and stdout. |
 

@@ -62,7 +62,9 @@ its `result`. From there it reaches everything that reads the agent's events:
 
 An `execute` tool can report too, through `context.progress`. `tool()` gives a `stream` tool an
 `execute` as well, which runs the stream and reports each yield to `context.progress`, so it works
-wherever a tool is executed. `ToolBody` is the type of the choice between the two.
+wherever a tool is executed. `ToolBody` is the type of the choice between the two. A tool an MCP server
+runs also finds `context.mcp`, which asks the client that called it for a completion from its model,
+an answer from its person, or its roots, as the [MCP guide](./mcp.md#the-server) describes.
 
 ## Tools that return images and files
 

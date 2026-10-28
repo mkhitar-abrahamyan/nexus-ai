@@ -1,3 +1,4 @@
+import type { McpCallerRequests } from '../mcp/protocol.js';
 import type { CacheTtl, ReasoningEffort } from './providers.js';
 import type { GraphEvent } from './graph.js';
 import type { AssetInput } from './images.js';
@@ -240,6 +241,12 @@ export interface ToolContext {
    * subgraph events, so a tool calls it as `context.forward?.()`.
    */
   forward?: (event: GraphEvent, namespace: readonly string[]) => void;
+  /**
+   * When an MCP server runs the tool, what it may ask the client that called it: a completion from
+   * its model, an answer from its person, and its roots. Absent elsewhere, so a tool calls it as
+   * `context.mcp?.createMessage()`.
+   */
+  mcp?: McpCallerRequests;
 }
 
 /** What a tool returned, correlated with the call that asked for it. */

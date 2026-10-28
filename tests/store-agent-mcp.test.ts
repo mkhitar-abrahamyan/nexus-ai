@@ -486,7 +486,7 @@ test('an MCP server answers an unknown method with the method-not-found code', a
     close: () => undefined,
   });
 
-  await server.handle({ jsonrpc: '2.0', id: 1, method: 'prompts/list' });
+  await server.handle({ jsonrpc: '2.0', id: 1, method: 'completion/complete' });
   await server.handle({ jsonrpc: '2.0', id: 2, method: 'resources/read', params: { uri: 'missing://x' } });
 
   const codes = sent.map((message) => ('error' in message ? message.error?.code : undefined));

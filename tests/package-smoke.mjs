@@ -191,6 +191,8 @@ const imports = [
     exports: [
       'McpClient',
       'McpServer',
+      'mcpHttpHandler',
+      'samplingFrom',
       'createStdioTransport',
       'createSseTransport',
       'mcpToolCapabilities',

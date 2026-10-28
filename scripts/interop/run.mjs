@@ -447,6 +447,99 @@ const check = (label, condition, detail = '') => {
   }
 }
 
+// ── MCP, this package's server driven by the reference client ──────
+
+// This package's MCP server over streamable HTTP, driven by @modelcontextprotocol/sdk's own client:
+// its tools, its prompts, a resource it was subscribed to changing, and a tool that asks the client
+// for a completion in the middle of its call, which the reference client answers on its own transport.
+{
+  const { Client } = await load('@modelcontextprotocol/sdk/client/index.js');
+  const { StreamableHTTPClientTransport } = await load('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const types = await load('@modelcontextprotocol/sdk/types.js');
+  const ours = await import('../../dist/mcp/index.js');
+  const server = new ours.McpServer({
+    name: 'nexus-interop',
+    tools: [
+      tool({
+        name: 'summarize',
+        description: 'Summarizes, asking the client’s model',
+        parameters: { type: 'object', properties: { text: { type: 'string' } } },
+        execute: async (args, context) => {
+          context?.progress?.({ progress: 1, total: 2, message: 'asking the client' });
+          const answer = await context?.mcp?.createMessage({
+            messages: [{ role: 'user', content: { type: 'text', text: `Summarize: ${args.text}` } }],
+            maxTokens: 50,
+          });
+          return answer?.content?.text ?? '';
+        },
+      }),
+    ],
+    prompts: [
+      {
+        name: 'triage',
+        arguments: [{ name: 'ticket', required: true }],
+        get: (args) => `Triage ticket ${args.ticket}`,
+      },
+    ],
+    resources: [{ uri: 'note://today', name: 'Today', read: () => 'all quiet' }],
+  });
+  const handler = ours.mcpHttpHandler(server);
+  const served = await serve(handler);
+  const client = new Client({ name: 'interop', version: '1.0.0' }, { capabilities: { sampling: {} } });
+  const sampled = [];
+  client.setRequestHandler(types.CreateMessageRequestSchema, async (request) => {
+    sampled.push(request.params.messages[0]?.content?.text);
+    return { role: 'assistant', content: { type: 'text', text: 'A short summary' }, model: 'reference-model' };
+  });
+  const updated = [];
+  client.setNotificationHandler(types.ResourceUpdatedNotificationSchema, (notification) => {
+    updated.push(notification.params.uri);
+  });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${served.url}/mcp`)));
+    const listed = await client.listTools();
+    check(
+      'MCP server: the reference client lists its tools',
+      listed.tools.some((item) => item.name === 'summarize'),
+    );
+    const progress = [];
+    const result = await client.callTool({ name: 'summarize', arguments: { text: 'the outage' } }, undefined, {
+      onprogress: (report) => progress.push(report.message),
+    });
+    check(
+      'MCP server: a tool asks the reference client for a completion mid-call, and gets it',
+      result.content?.[0]?.text === 'A short summary' && sampled[0] === 'Summarize: the outage',
+      JSON.stringify({ result, sampled }),
+    );
+    check(
+      'MCP server: its progress reaches the reference client',
+      progress.includes('asking the client'),
+      JSON.stringify(progress),
+    );
+    const prompt = await client.getPrompt({ name: 'triage', arguments: { ticket: '42' } });
+    check(
+      'MCP server: the reference client renders its prompt',
+      prompt.messages?.[0]?.content?.text === 'Triage ticket 42',
+      JSON.stringify(prompt),
+    );
+    await client.subscribeResource({ uri: 'note://today' });
+    server.resourceUpdated('note://today');
+    for (let tries = 0; tries < 100 && updated.length === 0; tries += 1)
+      await new Promise((done) => setTimeout(done, 20));
+    check(
+      'MCP server: a resource the reference client subscribed to is told when it changes',
+      updated.includes('note://today'),
+      JSON.stringify(updated),
+    );
+  } catch (error) {
+    failures.push(`MCP server: ${error?.stack ?? error}`);
+  } finally {
+    await client.close().catch(() => undefined);
+    await handler.close();
+    await served.close();
+  }
+}
+
 // ── ACP ────────────────────────────────────────────────────────────
 
 {

@@ -11,6 +11,20 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   the chunks' together are what `complete()` reports.
 - Cohere reports log probabilities, `complete()` and streamed: a piece of text at a time, each piece's
   the sum of its tokens', with no alternatives.
+- **MCP both ways.** A server offers prompts (`McpServerPrompt`, `registerPrompt()`), resources a client
+  subscribes to (`resourceUpdated()`), and tells every client each list's changes; a tool it runs may ask
+  the client that called it for a completion from its model, an answer from its person, or its roots,
+  through `context.mcp`, and is stopped when the client cancels it. A client answers a server's
+  `sampling`, `elicitation`, and `roots` with handlers of its own, `samplingFrom()` answering with
+  the application's own model, and hears each list change and each resource it subscribed to.
+- **MCP over streamable HTTP, both ways.** `mcpHttpHandler()` serves an `McpServer` as a Web handler:
+  a session per client, a stream of events per request carrying the server's progress and questions
+  before its answer, a `GET` stream for what it sends of its own accord, `DELETE` to end a session, and
+  a request from another origin refused. The client's HTTP transport reads a stream as it comes, so a
+  question in the middle of a call arrives in time, listens on a `GET` stream with `listen`, sends the
+  protocol version, and ends its session on `close()`. The nightly interoperability run drives the
+  server with `@modelcontextprotocol/sdk`'s own client: its tools, a completion asked mid-call, its
+  progress, a prompt, and a subscribed resource's change.
 - **Signed A2A cards.** `signA2aCard()` and `verifyA2aCard()`, with `canonicalA2aCard()`, sign and check
   a card as protocol 1.0 does, a flattened JWS over its canonical form, which is the A2A project's SDK's
   form: a card either signs, the other verifies. A handler's `sign` signs every card it serves, each

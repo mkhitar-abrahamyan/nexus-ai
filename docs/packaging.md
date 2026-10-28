@@ -132,6 +132,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/operations` | 58 KB | 16% | none |
 | `nexus-ai-pro/video` | 58 KB | 16% | none |
 | `nexus-ai-pro/evaluate/media` | 54 KB | 15% | none |
+| `nexus-ai-pro/mcp` | 53 KB | 14% | none |
 | `nexus-ai-pro/evaluate` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/openai` | 52 KB | 14% | none |
 | `nexus-ai-pro/batch/anthropic` | 51 KB | 14% | none |
@@ -155,6 +156,8 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/models` | 37 KB | 10% | none |
 | `nexus-ai-pro/prompts/registry` | 36 KB | 10% | none |
 | `nexus-ai-pro/lifecycle` | 35 KB | 10% | none |
+| `nexus-ai-pro/mcp/registry` | 34 KB | 9% | none |
+| `nexus-ai-pro/protocols/acp/editor` | 34 KB | 9% | none |
 | `nexus-ai-pro/media/rag` | 34 KB | 9% | none |
 | `nexus-ai-pro/graph/functional` | 33 KB | 9% | none |
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
@@ -164,9 +167,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/telephony/twilio` | 30 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
 | `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |
-| `nexus-ai-pro/mcp` | 28 KB | 8% | none |
-| `nexus-ai-pro/mcp/registry` | 28 KB | 8% | none |
-| `nexus-ai-pro/protocols/acp/editor` | 28 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 7% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 7% | none |
 | `nexus-ai-pro/server/tenancy` | 27 KB | 7% | none |

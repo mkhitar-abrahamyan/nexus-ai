@@ -7,7 +7,12 @@ import {
   type JsonRpcMessage,
   LineDecoder,
   MCP_PROTOCOL_VERSION,
+  type McpElicitationRequest,
+  type McpElicitationResult,
   McpError,
+  type McpRoot,
+  type McpSamplingRequest,
+  type McpSamplingResult,
   type McpTransport,
 } from './protocol.js';
 
@@ -120,6 +125,28 @@ export interface McpClientOptions {
    * `reopen` a new stream.
    */
   reconnect?: boolean;
+  /**
+   * Answers a server's `sampling/createMessage` with this client's model, so a server's tool can ask
+   * for a completion: `samplingFrom(ai, { model })` is one. Declared to the server when given;
+   * without it, a server's request for one is refused.
+   */
+  sampling?: (
+    request: McpSamplingRequest,
+    context: { signal: AbortSignal },
+  ) => McpSamplingResult | Promise<McpSamplingResult>;
+  /**
+   * Answers a server's `elicitation/create`, a question for the person using this client, with the
+   * form of its answer. Declared to the server when given; without it, a request is refused.
+   */
+  elicitation?: (
+    request: McpElicitationRequest,
+    context: { signal: AbortSignal },
+  ) => McpElicitationResult | Promise<McpElicitationResult>;
+  /**
+   * The roots a server may work within, answered to its `roots/list`. Declared to the server when
+   * given; `rootsChanged()` tells it they changed.
+   */
+  roots?: () => McpRoot[] | Promise<McpRoot[]>;
 }
 
 /**
@@ -145,6 +172,10 @@ export class McpClient {
   private serverInfo: { name?: string; version?: string } = {};
   /** Who hears that the server's tools changed. */
   private readonly toolsChanged = new Set<() => void>();
+  /** Who hears each of the server's notifications, by method. */
+  private readonly listeners = new Map<string, Set<(params: Record<string, unknown>) => void>>();
+  /** Requests the server is waiting on this client for, by id, so a cancellation stops them. */
+  private readonly answering = new Map<JsonRpcId, AbortController>();
   private stopped = false;
 
   constructor(
@@ -170,6 +201,54 @@ export class McpClient {
     };
   }
 
+  /** Hears each `notifications/prompts/list_changed`: the server's prompts changed. Returns a function that stops hearing. */
+  onPromptsChanged(handler: () => void): () => void {
+    return this.listen('notifications/prompts/list_changed', () => handler());
+  }
+
+  /** Hears each `notifications/resources/list_changed`: the server's resources changed. Returns a function that stops hearing. */
+  onResourcesChanged(handler: () => void): () => void {
+    return this.listen('notifications/resources/list_changed', () => handler());
+  }
+
+  /**
+   * Hears each `notifications/resources/updated`, for a resource this client subscribed to with
+   * `subscribeResource()`: its URI. Returns a function that stops hearing.
+   */
+  onResourceUpdated(handler: (uri: string) => void): () => void {
+    return this.listen('notifications/resources/updated', (params) => handler(String(params.uri ?? '')));
+  }
+
+  /** Asks the server to say when a resource changes, by `onResourceUpdated()`. */
+  async subscribeResource(uri: string): Promise<void> {
+    await this.connect();
+    await this.request('resources/subscribe', { uri });
+  }
+
+  /** Stops hearing that a resource changed. */
+  async unsubscribeResource(uri: string): Promise<void> {
+    await this.connect();
+    await this.request('resources/unsubscribe', { uri });
+  }
+
+  /** Tells the server this client's roots changed, so it lists them again. */
+  async rootsChanged(): Promise<void> {
+    await this.connect();
+    await this.notify('notifications/roots/list_changed');
+  }
+
+  private listen(method: string, handler: (params: Record<string, unknown>) => void): () => void {
+    let handlers = this.listeners.get(method);
+    if (!handlers) {
+      handlers = new Set();
+      this.listeners.set(method, handlers);
+    }
+    handlers.add(handler);
+    return () => {
+      handlers.delete(handler);
+    };
+  }
+
   /**
    * Performs the handshake and returns the server's name and version. Called automatically by the
    * first request that needs it; requests made together share one handshake.
@@ -186,7 +265,15 @@ export class McpClient {
     await this.transport.start?.();
     const result = (await this.request('initialize', {
       protocolVersion: MCP_PROTOCOL_VERSION,
-      capabilities: { tools: {}, resources: {}, prompts: {} },
+      capabilities: {
+        tools: {},
+        resources: {},
+        prompts: {},
+        // What this client answers, when the server asks.
+        ...(this.options.sampling ? { sampling: {} } : {}),
+        ...(this.options.elicitation ? { elicitation: {} } : {}),
+        ...(this.options.roots ? { roots: { listChanged: true } } : {}),
+      },
       clientInfo: this.options.clientInfo ?? { name: 'nexus-ai-pro', version: '1.x' },
     })) as { serverInfo?: { name?: string; version?: string } };
 
@@ -346,6 +433,22 @@ export class McpClient {
       }
       return;
     }
+    if (isNotification(message) && message.method === 'notifications/cancelled') {
+      const requestId = (message.params as { requestId?: JsonRpcId } | undefined)?.requestId;
+      if (requestId !== undefined)
+        this.answering.get(requestId)?.abort(new McpError('The server cancelled its request'));
+      return;
+    }
+    if (isNotification(message) && this.listeners.has(message.method)) {
+      for (const handler of this.listeners.get(message.method) ?? []) {
+        try {
+          handler((message.params ?? {}) as Record<string, unknown>);
+        } catch {
+          // One listener's failure does not keep the others from hearing it.
+        }
+      }
+      return;
+    }
     if (isNotification(message) && message.method === 'notifications/progress') {
       const params = (message.params ?? {}) as {
         progressToken?: unknown;
@@ -361,14 +464,54 @@ export class McpClient {
       });
       return;
     }
-    // A server may ask the client for things (sampling, roots). Refusing politely is better than
-    // leaving it waiting for a reply that never comes.
-    if (isRequest(message)) {
-      void this.transport.send({
-        jsonrpc: '2.0',
-        id: message.id,
-        error: { code: -32_601, message: `This client does not implement "${message.method}"` },
-      });
+    // A server may ask the client for things: a completion, a person's answer, its roots, or a ping.
+    // What this client was not given is refused, rather than left waiting for a reply that never comes.
+    if (isRequest(message)) void this.answer(message.id, message.method, message.params);
+  }
+
+  /** Answers one request the server sent, with its result or why not. */
+  private async answer(id: JsonRpcId, method: string, params: unknown): Promise<void> {
+    const controller = new AbortController();
+    this.answering.set(id, controller);
+    const handlers: Record<string, (() => unknown) | undefined> = {
+      ping: () => ({}),
+      'sampling/createMessage': this.options.sampling
+        ? () =>
+            (this.options.sampling as NonNullable<McpClientOptions['sampling']>)(params as McpSamplingRequest, {
+              signal: controller.signal,
+            })
+        : undefined,
+      'elicitation/create': this.options.elicitation
+        ? () =>
+            (this.options.elicitation as NonNullable<McpClientOptions['elicitation']>)(
+              params as McpElicitationRequest,
+              { signal: controller.signal },
+            )
+        : undefined,
+      'roots/list': this.options.roots
+        ? async () => ({ roots: await (this.options.roots as NonNullable<McpClientOptions['roots']>)() })
+        : undefined,
+    };
+    const handler = Object.hasOwn(handlers, method) ? handlers[method] : undefined;
+    try {
+      if (!handler) throw new McpError(`This client does not implement "${method}"`, -32_601);
+      const result = await handler();
+      if (controller.signal.aborted) return;
+      await this.transport.send({ jsonrpc: '2.0', id, result });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      await Promise.resolve(
+        this.transport.send({
+          jsonrpc: '2.0',
+          id,
+          error: {
+            code: error instanceof McpError ? error.code : -32_603,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        }),
+      ).catch(() => undefined);
+    } finally {
+      this.answering.delete(id);
     }
   }
 
@@ -543,51 +686,117 @@ export interface HttpClientOptions {
   headers?: Record<string, string>;
   /** Replaces the global `fetch`. */
   fetch?: typeof globalThis.fetch;
+  /**
+   * Holds a `GET` stream open once the server names a session, for what the server sends of its own
+   * accord: notifications that its tools or resources changed, and requests outside any call. A server
+   * that answers it with 405 does not offer one, and none is opened. Off by default.
+   */
+  listen?: boolean;
 }
 
 /**
- * Speaks to an MCP server over HTTP, one POST per message.
- *
- * Server-initiated streaming is not implemented: this covers request and response, which is what
- * calling a tool needs.
+ * Speaks to an MCP server over streamable HTTP, MCP's transport since 2025-03-26: a `POST` per
+ * message, answered as JSON or as a stream of events the transport reads as they come, so a server
+ * may report progress and ask this client for something in the middle of a call. With `listen`, a
+ * `GET` stream carries what the server sends of its own accord. It keeps the session the server
+ * names, sends the protocol version on every request, and ends the session when it closes.
  */
 export function createHttpTransport(options: HttpClientOptions): McpTransport {
   const fetchImplementation = options.fetch ?? globalThis.fetch;
   let onMessage: (message: JsonRpcMessage) => void = () => undefined;
   let sessionId: string | undefined;
+  /** The `GET` stream: open, or known to be refused. */
+  let listening: AbortController | undefined;
+  let refused = false;
+  const deliver = (data: string) => {
+    try {
+      onMessage(JSON.parse(data) as JsonRpcMessage);
+    } catch {
+      // A frame that is not JSON-RPC is skipped, rather than failing the whole exchange.
+    }
+  };
+  const headers = () => ({
+    'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+    ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
+    ...options.headers,
+  });
+  /** Opens the `GET` stream once a session exists, and again after it ends. */
+  const listen = () => {
+    if (!options.listen || !sessionId || listening || refused) return;
+    const own = new AbortController();
+    listening = own;
+    void (async () => {
+      try {
+        const response = await fetchImplementation(options.url, {
+          method: 'GET',
+          headers: { accept: 'text/event-stream', ...headers() },
+          signal: own.signal,
+        });
+        if (response.status === 405) refused = true;
+        if (!response.ok || !response.body) {
+          await response.body?.cancel().catch(() => undefined);
+          return;
+        }
+        await readEvents(response.body.getReader(), (_name, data) => deliver(data));
+      } catch {
+        // A stream that fails is opened again by the next message sent.
+      } finally {
+        if (listening === own) listening = undefined;
+      }
+    })();
+  };
 
   return {
     async send(message) {
       const response = await fetchImplementation(options.url, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json, text/event-stream',
-          ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
-          ...options.headers,
-        },
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers() },
         body: JSON.stringify(message),
       });
       sessionId = response.headers.get('mcp-session-id') ?? sessionId;
-      if (!response.ok) throw new McpError(`MCP HTTP transport failed with ${response.status}`);
-      if (response.status === 202) return;
-
+      if (response.status === 404 && sessionId) {
+        // The server ended the session: the next handshake starts another.
+        sessionId = undefined;
+        await response.body?.cancel().catch(() => undefined);
+        throw new McpError('The MCP server ended the session');
+      }
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new McpError(`MCP HTTP transport failed with ${response.status}`);
+      }
+      listen();
+      if (response.status === 202 || !response.body) return;
+      if ((response.headers.get('content-type') ?? '').includes('text/event-stream')) {
+        // Read as it comes, not awaited: the server may ask this client something before it answers,
+        // and this client's reply is another POST.
+        void readEvents(response.body.getReader(), (_name, data) => deliver(data)).catch(() => undefined);
+        return;
+      }
       const body = await response.text();
       if (!body.trim()) return;
-      // A server may answer as JSON or as a one-event SSE stream; both carry the same JSON-RPC body.
+      // A server may answer as JSON or, labelled otherwise, as events; both carry the same JSON-RPC body.
       for (const payload of body.startsWith('event:') || body.startsWith('data:') ? sseData(body) : [body]) {
-        try {
-          onMessage(JSON.parse(payload) as JsonRpcMessage);
-        } catch {
-          // Ignore a frame that is not JSON-RPC, rather than failing the whole exchange.
-        }
+        deliver(payload);
       }
     },
     onMessage(handler) {
       onMessage = handler;
     },
-    close() {
+    async close() {
+      listening?.abort();
+      listening = undefined;
+      const ending = sessionId;
       sessionId = undefined;
+      refused = false;
+      // The session is over: the server may let it go now rather than when it expires.
+      if (ending) {
+        await fetchImplementation(options.url, {
+          method: 'DELETE',
+          headers: { ...options.headers, 'mcp-protocol-version': MCP_PROTOCOL_VERSION, 'mcp-session-id': ending },
+        })
+          .then((response) => response.body?.cancel())
+          .catch(() => undefined);
+      }
     },
   };
 }
