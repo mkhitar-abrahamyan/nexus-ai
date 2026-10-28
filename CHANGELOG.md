@@ -52,6 +52,9 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   last used. `createSessions()` signs browsers in after a sign-in of the application's own: an
   `HttpOnly`, `Secure`, `SameSite=Lax` cookie of a random secret whose hash alone is kept, an idle
   and a total lifetime, sign-out here or everywhere, and a request from another site's page refused.
+- **A Pinecone store makes its own index.** `PineconeVectorStore.create()` creates a serverless index
+  with the cosine metric and the store's width, or uses one of that name that fits, waits until it is
+  ready, and returns a store over its host; `ensurePineconeIndex()` does the first part alone.
 
 ### Changed
 

@@ -247,10 +247,26 @@ version lacks never survives. Under `tenantVectorStore()`, declare `tenantId` to
 
 ### Pinecone
 
-`PineconeVectorStore` upserts, queries, and deletes in batches. Create the index yourself, with the
-cosine metric and the store's width. `PineconeVectorStoreOptions` takes the index `host`, the `apiKey`,
-a `namespace`, the `apiVersion` header, and the upsert `batchSize` (100). A failed request raises a
-`PineconeError` with the status and body.
+`PineconeVectorStore` upserts, queries, and deletes in batches. `PineconeVectorStoreOptions` takes the
+index `host`, the `apiKey`, a `namespace`, the `apiVersion` header, and the upsert `batchSize` (100). A
+failed request raises a `PineconeError` with the status and body.
+
+`PineconeVectorStore.create()` makes the index first, through Pinecone's control plane, and returns a
+store over its host. It takes `PineconeCreateOptions`: the store's, without the host, and the index's
+from `PineconeIndexOptions`. `ensurePineconeIndex()` does that part alone and returns a `PineconeIndex`,
+its `host` and whether it was `created`:
+- a new index is serverless, with the cosine metric and the store's width, on the `cloud` and `region`
+  given, `aws` and `us-east-1` by default, with `deletionProtection` and `tags` if asked;
+- an index of that name that exists is used when its width and metric are the store's, and refused
+  otherwise, as is one another process creates at the same moment;
+- it waits until the index is ready, asking every `pollMs` (2 seconds) for up to `readyTimeoutMs` (5
+  minutes), and refuses one whose initialization failed or that is being deleted.
+
+```ts
+import { PineconeVectorStore } from 'nexus-ai-pro/rag/pinecone';
+
+const store = await PineconeVectorStore.create({ apiKey: process.env.PINECONE_API_KEY ?? '', name: 'docs', dimensions: 1536, region: 'eu-west-1', embed });
+```
 
 ### Weaviate
 
@@ -308,8 +324,8 @@ the vectors live.
   of your own.
 - `modelReranker()` and `modelQueryVariants()` cost a model call per retrieval; a cross-encoder or a
   hosted rerank API is faster and cheaper where you have one.
-- The Pinecone store does not create the index, which is a control-plane operation; create it in the
-  console or with Pinecone's client.
+- `ensurePineconeIndex()` creates serverless indexes alone; a pod-based index, or one with another
+  metric, is made in the console or with Pinecone's client, and given to the store by its host.
 - The Pinecone store is experimental until it passes the live checks the other remote stores pass.
 - A Chroma store without `filterFields` reads before it replaces, so two writers replacing one id at
   once can leave a stale filter field. Declare `filterFields` when writers can race.
@@ -341,7 +357,11 @@ specific entry point that provides it.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `ensurePineconeIndex` | function | Creates a serverless index with the cosine metric and the store's width, unless one of that name exists, and waits until it is ready. |
+| `PineconeCreateOptions` | type | What `PineconeVectorStore.create()` takes: the store's options, its host aside, and the index's. |
 | `PineconeError` | class | Raised when Pinecone answers with an error. |
+| `PineconeIndex` | interface | An index ready to take vectors. |
+| `PineconeIndexOptions` | interface | Options for `ensurePineconeIndex()`: the index, and how to reach Pinecone's control plane. |
 | `PineconeVectorStore` | class | Retrieval chunks in a Pinecone index, through its data-plane REST API. |
 | `PineconeVectorStoreOptions` | interface | Options for the Pinecone store. |
 

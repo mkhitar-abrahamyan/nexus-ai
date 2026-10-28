@@ -208,6 +208,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/protocols/ag-ui` | 14 KB | 4% | none |
 | `nexus-ai-pro/server/regions` | 14 KB | 4% | none |
 | `nexus-ai-pro/postgres/operations` | 14 KB | 4% | none |
+| `nexus-ai-pro/rag/pinecone` | 14 KB | 4% | none |
 | `nexus-ai-pro/voice/session` | 13 KB | 4% | none |
 | `nexus-ai-pro/sqlite/vectors` | 13 KB | 4% | none |
 | `nexus-ai-pro/residency` | 13 KB | 4% | none |
@@ -233,7 +234,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/postgres/migrations` | 10 KB | 3% | none |
 | `nexus-ai-pro/prompts` | 10 KB | 3% | none |
 | `nexus-ai-pro/postgres/tenancy` | 10 KB | 3% | none |
-| `nexus-ai-pro/rag/pinecone` | 10 KB | 3% | none |
 | `nexus-ai-pro/voice/openai` | 9 KB | 2% | none |
 | `nexus-ai-pro/images/moderation` | 9 KB | 2% | none |
 | `nexus-ai-pro/embeddings/models` | 9 KB | 2% | none |

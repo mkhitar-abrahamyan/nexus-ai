@@ -145,7 +145,7 @@
     "./rag/chroma": 14,
     "./rag/elasticsearch": 8,
     "./rag/files": 14,
-    "./rag/pinecone": 12,
+    "./rag/pinecone": 16,
     "./rag/pipeline": 20,
     "./rag/qdrant": 14,
     "./rag/redis": 16,

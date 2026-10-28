@@ -90,7 +90,9 @@ options, `onPromptsChanged()`, `onResourcesChanged()`, `onResourceUpdated()`, `s
 `createJwtSigner()`, `JwtSigner`, `JwtSignerOptions`, `JwtSignOptions`, `generateJwtKey()`,
 `jwksHandler()`, `createApiKeyStore()`, `ApiKeyStore`, `ApiKeyStoreOptions`, `ApiKeyRecord`,
 `IssuedApiKey`, `ApiKeyIssueOptions`, `createSessions()`, `Sessions`, `SessionOptions`,
-`SessionCookieOptions`, `SessionRecord`, and `StartedSession`, and the principal method `session`.
+`SessionCookieOptions`, `SessionRecord`, and `StartedSession`, and the principal method `session`; in
+`nexus-ai-pro/rag/pinecone`, `PineconeVectorStore.create()`, `ensurePineconeIndex()`,
+`PineconeIndexOptions`, `PineconeIndex`, and `PineconeCreateOptions`, experimental with the store.
 The state store keys and sessions are kept in, under `nexus/server`, is read by every later 2.x.
 
 Changed on purpose: an answer the output guard changes or blocks keeps no `logprobs`, streamed or

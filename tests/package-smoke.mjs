@@ -465,7 +465,7 @@ const imports = [
     exports: ['ContextHub', 'contextExperimentGate', 'bindTools', 'evaluateContext'],
   },
   { specifier: 'nexus-ai-pro/insights', exports: ['findIssues', 'detectRegressions', 'proposeFix', 'ProposalInbox'] },
-  { specifier: 'nexus-ai-pro/rag/pinecone', exports: ['PineconeVectorStore', 'PineconeError'] },
+  { specifier: 'nexus-ai-pro/rag/pinecone', exports: ['PineconeVectorStore', 'PineconeError', 'ensurePineconeIndex'] },
   { specifier: 'nexus-ai-pro/rag/weaviate', exports: ['WeaviateVectorStore', 'WeaviateError'] },
   { specifier: 'nexus-ai-pro/rag/chroma', exports: ['ChromaVectorStore', 'ChromaError'] },
   { specifier: 'nexus-ai-pro/rag/elasticsearch', exports: ['ElasticsearchKeywordIndex', 'ElasticsearchError'] },

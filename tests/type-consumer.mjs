@@ -240,7 +240,7 @@ import { PostgresStore as SubpathPostgresStore } from 'nexus-ai-pro/postgres/sto
 import { PostgresVectorStore } from 'nexus-ai-pro/postgres/vectors';
 import { QdrantVectorStore } from 'nexus-ai-pro/rag/qdrant';
 import { ChromaVectorStore } from 'nexus-ai-pro/rag/chroma';
-import { PineconeVectorStore } from 'nexus-ai-pro/rag/pinecone';
+import { ensurePineconeIndex, PineconeVectorStore, type PineconeCreateOptions, type PineconeIndex } from 'nexus-ai-pro/rag/pinecone';
 import { RedisVectorStore, type RedisVectorLikeClient } from 'nexus-ai-pro/rag/redis';
 import { WeaviateVectorStore } from 'nexus-ai-pro/rag/weaviate';
 import { SqliteVectorStore } from 'nexus-ai-pro/sqlite/vectors';
@@ -872,6 +872,10 @@ const retrievalStores: VectorStore[] = [
 ];
 const redisClient: RedisVectorLikeClient = { call: async () => [0] };
 retrievalStores.push(new RedisVectorStore(redisClient, { dimensions: 1536, filterFields: ['tenant'] }));
+const pineconeCreate: PineconeCreateOptions = { apiKey: 'key', name: 'docs', dimensions: 1536, region: 'eu-west-1', cloud: 'aws', deletionProtection: true, tags: { team: 'search' }, readyTimeoutMs: 60_000, namespace: 'acme' };
+const createdPinecone: Promise<PineconeVectorStore> = PineconeVectorStore.create(pineconeCreate);
+const pineconeIndex: Promise<PineconeIndex> = ensurePineconeIndex({ apiKey: 'key', name: 'docs', dimensions: 1536, pollMs: 500 });
+void [createdPinecone, pineconeIndex];
 retrievalStores.push(
   new SqliteVectorStore({ run: () => ({ changes: 0 }), all: () => [], exec: () => undefined }, { dimensions: 1536 }),
 );
