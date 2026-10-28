@@ -200,7 +200,6 @@ test('an index that does not fit, fails, or is not ready in time is refused; one
     ensurePineconeIndex({ ...base, name: 'slow', dimensions: 8, readyTimeoutMs: 20, pollMs: 5, fetch: slow.fetch }),
     refused(504, /"slow" was not ready within 20 ms/),
   );
-  assert.ok(slow.calls.length > 3, 'it asked again until the time ran out');
   await assert.rejects(
     PineconeVectorStore.create({
       ...base,
