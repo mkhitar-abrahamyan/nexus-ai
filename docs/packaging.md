@@ -151,6 +151,7 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/tracing` | 40 KB | 11% | none |
 | `nexus-ai-pro/optimizer/cost` | 40 KB | 11% | none |
 | `nexus-ai-pro/context-hub` | 40 KB | 11% | none |
+| `nexus-ai-pro/server/auth` | 39 KB | 11% | none |
 | `nexus-ai-pro/agent/workspace` | 38 KB | 10% | none |
 | `nexus-ai-pro/tracing/otlp-grpc` | 38 KB | 10% | none |
 | `nexus-ai-pro/images/stores` | 38 KB | 10% | none |
@@ -188,7 +189,6 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/connectors` | 19 KB | 5% | none |
 | `nexus-ai-pro/workflows` | 19 KB | 5% | none |
 | `nexus-ai-pro/evaluate/emulate` | 18 KB | 5% | none |
-| `nexus-ai-pro/server/auth` | 18 KB | 5% | none |
 | `nexus-ai-pro/doctor` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/conversation` | 18 KB | 5% | none |
 | `nexus-ai-pro/realtime/mock` | 18 KB | 5% | none |

@@ -86,7 +86,12 @@ options, `onPromptsChanged()`, `onResourcesChanged()`, `onResourceUpdated()`, `s
 `McpCallerRequests`, and `ToolContext.mcp`; in `nexus-ai-pro/agent/openapi`, `swaggerToOpenApi()`,
 `bundleOpenApiDocument()`, `OpenApiBundleOptions`, `OpenApiCredential`, `OpenApiWebhook`,
 `OpenApiToolsOptions.credentials`, `OpenApiOperation.security`, `OpenApiTools.webhooks`, and
-`loadOpenApiTools()`'s `references`, `maxDocuments`, and `maxBytes`.
+`loadOpenApiTools()`'s `references`, `maxDocuments`, and `maxBytes`; in `nexus-ai-pro/server/auth`,
+`createJwtSigner()`, `JwtSigner`, `JwtSignerOptions`, `JwtSignOptions`, `generateJwtKey()`,
+`jwksHandler()`, `createApiKeyStore()`, `ApiKeyStore`, `ApiKeyStoreOptions`, `ApiKeyRecord`,
+`IssuedApiKey`, `ApiKeyIssueOptions`, `createSessions()`, `Sessions`, `SessionOptions`,
+`SessionCookieOptions`, `SessionRecord`, and `StartedSession`, and the principal method `session`.
+The state store keys and sessions are kept in, under `nexus/server`, is read by every later 2.x.
 
 Changed on purpose: an answer the output guard changes or blocks keeps no `logprobs`, streamed or
 not; a typed decision of a model that reports the chosen token alone is sampled; an Ollama stream

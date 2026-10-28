@@ -343,7 +343,20 @@ const imports = [
   { specifier: 'nexus-ai-pro/server/tenancy', exports: ['tenantLimits', 'MemoryTenantUsage', 'RedisTenantUsage'] },
   {
     specifier: 'nexus-ai-pro/server/auth',
-    exports: ['jwtAuth', 'apiKeyAuth', 'trustedProxyAuth', 'anyAuth', 'createJwtVerifier', 'hashApiKey', 'JwtError'],
+    exports: [
+      'jwtAuth',
+      'apiKeyAuth',
+      'trustedProxyAuth',
+      'anyAuth',
+      'createJwtVerifier',
+      'hashApiKey',
+      'JwtError',
+      'createJwtSigner',
+      'generateJwtKey',
+      'jwksHandler',
+      'createApiKeyStore',
+      'createSessions',
+    ],
   },
   {
     specifier: 'nexus-ai-pro/tenancy',

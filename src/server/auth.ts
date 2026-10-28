@@ -1,20 +1,25 @@
 /**
- * Authentication for the agent server: JSON Web Tokens, API keys, and a trusted proxy.
+ * Authentication for the agent server: JSON Web Tokens, API keys, sessions, and a trusted proxy.
  *
  * Each builds the `authenticate` hook of `createAgentServer()`, and each returns the same
  * `Principal`: a subject, a tenant, roles, and scopes. That principal is what scopes threads, runs,
  * budgets, and the store to a tenant, and what reaches every graph node, tool, and middleware of the
- * run. Everything is built on Web Crypto, so there is no dependency and it runs wherever `fetch` does.
+ * run. The application issues its own tokens with `createJwtSigner()`, keeps its own keys with
+ * `createApiKeyStore()`, and signs browsers in with `createSessions()`. Everything is built on Web
+ * Crypto, so there is no dependency and it runs wherever `fetch` does.
  */
 import type { webcrypto } from 'node:crypto';
 import type { Principal } from '../types/principal.js';
+import type { ServerStateStore } from '../types/server.js';
 import { assertTenantId } from '../utils/tenant.js';
+import { MemoryServerStore } from './state.js';
 
 // Types only: at run time this module uses the global Web Crypto, so it loads on any runtime.
 type JsonWebKey = webcrypto.JsonWebKey;
 type CryptoKey = webcrypto.CryptoKey;
 type SubtleCrypto = webcrypto.SubtleCrypto;
 type BufferSource = webcrypto.BufferSource;
+type CryptoKeyPair = webcrypto.CryptoKeyPair;
 
 /** The `authenticate` hook of `createAgentServer()`. */
 export type AuthHook = (
@@ -200,6 +205,11 @@ function jwkFits(jwk: JsonWebKey & { kid?: string; alg?: string; use?: string },
   if (jwk.alg && jwk.alg !== alg && !(alg === 'EdDSA' && jwk.alg === 'Ed25519')) return false;
   if (jwk.use && jwk.use !== 'sig') return false;
   if (jwk.key_ops && !jwk.key_ops.includes('verify')) return false;
+  return keyTypeFits(jwk, alg);
+}
+
+/** Whether a JWK's key type and curve are an algorithm's. */
+function keyTypeFits(jwk: JsonWebKey, alg: JwtAlgorithm): boolean {
   if (alg.startsWith('RS') || alg.startsWith('PS')) return jwk.kty === 'RSA';
   if (alg.startsWith('ES')) {
     const curve = alg === 'ES512' ? 'P-521' : `P-${alg.slice(2)}`;
@@ -604,6 +614,697 @@ export function trustedProxyAuth(options: TrustedProxyAuthOptions): AuthHook {
   };
 }
 
+// ── Issuing tokens ──────────────────────────────────────────────────
+
+/** Options for `createJwtSigner()`. Give it one key: `secret`, `privateKey`, or `keyPair`. */
+export interface JwtSignerOptions {
+  /** A shared secret, for HS256, HS384, and HS512, which `jwtAuth({ secret })` verifies with. At least 32 bytes. */
+  secret?: string | Uint8Array;
+  /** A private key: PEM (`-----BEGIN PRIVATE KEY-----`, PKCS #8), or a private JWK, as `generateJwtKey()` makes one. */
+  privateKey?: string | JsonWebKey;
+  /** A Web Crypto key pair, as `crypto.subtle.generateKey()` makes one, its public key extractable. */
+  keyPair?: { privateKey: CryptoKey; publicKey: CryptoKey };
+  /**
+   * The algorithm. Defaults to HS256 for a secret, and to the key's own for a JWK or a key pair: its
+   * `alg`, or RS256 for RSA, ES256, ES384, or ES512 by curve, and EdDSA for Ed25519. A PEM key names it.
+   */
+  algorithm?: JwtAlgorithm;
+  /** The key's id, in each token's header and the key set. Defaults to the public key's RFC 7638 thumbprint; a secret has none. */
+  kid?: string;
+  /** The issuer every token names. */
+  issuer?: string;
+  /** The audience every token is for, unless one is issued for another. */
+  audience?: string | readonly string[];
+  /** How long a token lasts, in seconds, unless one is issued for longer or shorter. Defaults to an hour. */
+  expiresInSec?: number;
+  /** Replaces the clock, in milliseconds since the epoch, for tests. */
+  now?: () => number;
+}
+
+/** What one token is issued with, over the signer's own. */
+export interface JwtSignOptions {
+  /** How long it lasts, in seconds. */
+  expiresInSec?: number;
+  /** Who it is for. */
+  audience?: string | readonly string[];
+  /** Seconds from now before which it is not valid. */
+  notBeforeSec?: number;
+}
+
+/** Issues tokens with one key, which `jwtAuth()`, `createJwtVerifier()`, and any other verifier read. */
+export interface JwtSigner {
+  /** The algorithm it signs with. */
+  readonly algorithm: JwtAlgorithm;
+  /**
+   * Signs claims into a token: the signer's issuer and audience, `iat`, `exp`, and a `jti` of its own,
+   * then the claims given, which win.
+   */
+  sign(claims?: JwtPayload, options?: JwtSignOptions): Promise<string>;
+  /**
+   * A token for a principal: its user as `sub`, its tenant, roles, and scopes, under the claim names
+   * `jwtAuth()` reads them from, so the same `claims` names read it back.
+   */
+  issue(principal: Principal, options?: JwtSignOptions & { claims?: JwtClaimNames }): Promise<string>;
+  /** The public key, as a JWK with its `kid`, `alg`, and `use`, for a key set; none for a secret. */
+  publicKey(): Promise<JsonWebKey | undefined>;
+}
+
+/**
+ * Builds a signer, to issue tokens of your own: for a service, after a sign-in, or for a test.
+ *
+ * ```ts
+ * const signer = createJwtSigner({ privateKey: JSON.parse(process.env.JWT_KEY ?? ''), issuer: 'https://agents.example.com' });
+ * const token = await signer.issue({ userId: 'ana', tenantId: 'acme', scopes: ['read'] }, { audience: 'agents-api' });
+ * ```
+ */
+export function createJwtSigner(options: JwtSignerOptions): JwtSigner {
+  const sources = [options.secret, options.privateKey, options.keyPair].filter((source) => source !== undefined);
+  if (sources.length !== 1) {
+    throw new TypeError('createJwtSigner() needs exactly one of secret, privateKey, or keyPair');
+  }
+  if (typeof options.privateKey === 'string' && !options.privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+    throw new TypeError('The private key is not a PKCS #8 PEM key, beginning -----BEGIN PRIVATE KEY-----');
+  }
+  const algorithm = options.algorithm ?? signingAlgorithm(options);
+  if (HMAC.includes(algorithm) !== (options.secret !== undefined)) {
+    throw new TypeError(
+      options.secret !== undefined
+        ? `A secret signs HS256, HS384, or HS512, not ${algorithm}`
+        : `${algorithm} is signed with a secret, not a private key`,
+    );
+  }
+  if (options.secret !== undefined) {
+    const raw = typeof options.secret === 'string' ? new TextEncoder().encode(options.secret) : options.secret;
+    if (raw.byteLength < 32)
+      throw new TypeError('A secret that signs tokens is at least 32 bytes, or it can be guessed');
+  }
+  if (typeof options.privateKey === 'object' && typeof options.privateKey.d !== 'string') {
+    throw new TypeError('The JWK is a public key: a signer needs the private one');
+  }
+  const named = typeof options.privateKey === 'object' ? (options.privateKey as { alg?: string }).alg : undefined;
+  if (named !== undefined && named !== algorithm && !(algorithm === 'EdDSA' && named === 'Ed25519')) {
+    throw new TypeError(`The JWK is for ${named}, not ${algorithm}`);
+  }
+  if (typeof options.privateKey === 'object' && !keyTypeFits(options.privateKey, algorithm)) {
+    throw new TypeError(`The JWK cannot sign ${algorithm}`);
+  }
+  const subtle = globalThis.crypto.subtle;
+  const now = options.now ?? Date.now;
+  const { importAs, verifyAs } = cryptoParams(algorithm);
+  // The key is imported once, when the first token is signed.
+  let loaded: Promise<{ key: CryptoKey; jwk?: JsonWebKey; kid?: string }> | undefined;
+  const load = () => {
+    loaded ??= (async () => {
+      if (options.secret !== undefined) {
+        const raw = typeof options.secret === 'string' ? new TextEncoder().encode(options.secret) : options.secret;
+        const key = await subtle.importKey('raw', raw as BufferSource, importAs, false, ['sign']);
+        return { key, ...(options.kid !== undefined ? { kid: options.kid } : {}) };
+      }
+      let key: CryptoKey;
+      let jwk: JsonWebKey;
+      if (options.keyPair) {
+        key = options.keyPair.privateKey;
+        jwk = publicPart(await subtle.exportKey('jwk', options.keyPair.publicKey));
+      } else if (typeof options.privateKey === 'string') {
+        // Imported once to read its public half, then again as a key that can only sign.
+        const der = pemToDer(options.privateKey, 'PRIVATE KEY');
+        jwk = publicPart(await subtle.exportKey('jwk', await subtle.importKey('pkcs8', der, importAs, true, ['sign'])));
+        key = await subtle.importKey('pkcs8', der, importAs, false, ['sign']);
+      } else {
+        const { key_ops: _ops, use: _use, ext: _ext, alg: _alg, ...given } = options.privateKey as JsonWebKey;
+        key = await subtle.importKey('jwk', given, importAs, false, ['sign']);
+        jwk = publicPart(given);
+      }
+      const kid = options.kid ?? (await thumbprint(jwk));
+      return { key, kid, jwk: { ...jwk, kid, alg: algorithm, use: 'sig' } as JsonWebKey };
+    })();
+    return loaded;
+  };
+  const signer: JwtSigner = {
+    algorithm,
+    async sign(claims = {}, signOptions = {}) {
+      const { key, kid } = await load();
+      const issuedAt = Math.floor(now() / 1000);
+      const audience = signOptions.audience ?? options.audience;
+      const payload: JwtPayload = {
+        ...(options.issuer !== undefined ? { iss: options.issuer } : {}),
+        ...(audience !== undefined ? { aud: typeof audience === 'string' ? audience : [...audience] } : {}),
+        iat: issuedAt,
+        ...(signOptions.notBeforeSec !== undefined ? { nbf: issuedAt + signOptions.notBeforeSec } : {}),
+        exp: issuedAt + (signOptions.expiresInSec ?? options.expiresInSec ?? 3_600),
+        jti: globalThis.crypto.randomUUID(),
+        ...claims,
+      };
+      const header: JwtHeader = { alg: algorithm, typ: 'JWT', ...(kid !== undefined ? { kid } : {}) };
+      const input = `${base64UrlJson(header)}.${base64UrlJson(payload)}`;
+      const signature = await subtle.sign(verifyAs, key, new TextEncoder().encode(input));
+      return `${input}.${base64UrlText(new Uint8Array(signature))}`;
+    },
+    async issue(principal, issueOptions = {}) {
+      const { claims: names, ...signOptions } = issueOptions;
+      return signer.sign(claimsFromPrincipal(principal, names), signOptions);
+    },
+    async publicKey() {
+      return (await load()).jwk;
+    },
+  };
+  return signer;
+}
+
+/**
+ * A new private key for `createJwtSigner()`, as a JWK with its `kid`, `alg`, and `use`: keep it in a
+ * secret store, and the signer publishes its public half. Defaults to ES256.
+ */
+export async function generateJwtKey(
+  algorithm: Exclude<JwtAlgorithm, 'HS256' | 'HS384' | 'HS512'> = 'ES256',
+): Promise<JsonWebKey & { kid: string; alg: string }> {
+  if (!ASYMMETRIC.includes(algorithm)) throw new TypeError(`${algorithm} is not a key pair's algorithm`);
+  const { importAs } = cryptoParams(algorithm);
+  const rsa = algorithm.startsWith('RS') || algorithm.startsWith('PS');
+  const pair = (await globalThis.crypto.subtle.generateKey(
+    (rsa
+      ? {
+          ...(importAs as webcrypto.RsaHashedImportParams),
+          modulusLength: 2048,
+          publicExponent: new Uint8Array([1, 0, 1]),
+        }
+      : importAs) as webcrypto.Algorithm,
+    true,
+    ['sign', 'verify'],
+  )) as CryptoKeyPair;
+  const { key_ops: _ops, ext: _ext, ...jwk } = await globalThis.crypto.subtle.exportKey('jwk', pair.privateKey);
+  return { ...jwk, kid: await thumbprint(publicPart(jwk)), alg: algorithm, use: 'sig' };
+}
+
+/**
+ * Serves signers' public keys as a JSON Web Key Set, at the URL `jwtAuth({ jwks })` and other services
+ * read. Give it the signer in use and those whose tokens may still be live, so a key rotation never
+ * refuses a token signed before it.
+ *
+ * ```ts
+ * if (new URL(request.url).pathname === '/.well-known/jwks.json') return jwks(request);
+ * ```
+ */
+export function jwksHandler(...signers: JwtSigner[]): (request: Request) => Promise<Response> {
+  return async (request) => {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      return new Response(null, { status: 405, headers: { allow: 'GET, HEAD' } });
+    }
+    const keys = (await Promise.all(signers.map((signer) => signer.publicKey()))).filter(
+      (key): key is JsonWebKey => key !== undefined,
+    );
+    return new Response(request.method === 'HEAD' ? null : JSON.stringify({ keys }), {
+      headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' },
+    });
+  };
+}
+
+/** The algorithm a key signs with when none is named. */
+function signingAlgorithm(options: JwtSignerOptions): JwtAlgorithm {
+  if (options.secret !== undefined) return 'HS256';
+  if (typeof options.privateKey === 'string') {
+    throw new TypeError('A PEM key does not say what it signs: set algorithm');
+  }
+  if (options.privateKey) {
+    const jwk = options.privateKey as JsonWebKey & { alg?: string };
+    if (jwk.alg === 'Ed25519') return 'EdDSA';
+    if (jwk.alg !== undefined) {
+      if (!ASYMMETRIC.includes(jwk.alg as JwtAlgorithm))
+        throw new TypeError(`The JWK's algorithm ${jwk.alg} is not one a signer uses`);
+      return jwk.alg as JwtAlgorithm;
+    }
+    return algorithmOfKey(jwk.kty, jwk.crv, 'SHA-256', false);
+  }
+  const algorithm = options.keyPair?.privateKey.algorithm as {
+    name: string;
+    namedCurve?: string;
+    hash?: { name: string };
+  };
+  return algorithmOfKey(
+    algorithm.name === 'ECDSA' ? 'EC' : algorithm.name === 'Ed25519' ? 'OKP' : 'RSA',
+    algorithm.name === 'Ed25519' ? 'Ed25519' : algorithm.namedCurve,
+    algorithm.hash?.name ?? 'SHA-256',
+    algorithm.name === 'RSA-PSS',
+  );
+}
+
+function algorithmOfKey(kty: string | undefined, crv: string | undefined, hash: string, pss: boolean): JwtAlgorithm {
+  if (kty === 'RSA') return `${pss ? 'PS' : 'RS'}${hash.replace('SHA-', '')}` as JwtAlgorithm;
+  if (kty === 'EC' && (crv === 'P-256' || crv === 'P-384')) return `ES${crv.slice(2)}` as JwtAlgorithm;
+  if (kty === 'EC' && crv === 'P-521') return 'ES512';
+  if (kty === 'OKP' && crv === 'Ed25519') return 'EdDSA';
+  throw new TypeError(`A ${kty ?? 'key'}${crv ? ` on ${crv}` : ''} key signs no algorithm a token uses: set algorithm`);
+}
+
+/** A JWK's public members alone. */
+function publicPart(jwk: JsonWebKey): JsonWebKey {
+  if (jwk.kty === 'RSA') return { kty: 'RSA', n: jwk.n, e: jwk.e } as JsonWebKey;
+  if (jwk.kty === 'EC') return { kty: 'EC', crv: jwk.crv, x: jwk.x, y: jwk.y } as JsonWebKey;
+  return { kty: jwk.kty, crv: jwk.crv, x: jwk.x } as JsonWebKey;
+}
+
+/** A public JWK's RFC 7638 thumbprint: the SHA-256 of its required members, in order, as base64url. */
+async function thumbprint(jwk: JsonWebKey): Promise<string> {
+  const members =
+    jwk.kty === 'RSA'
+      ? { e: jwk.e, kty: jwk.kty, n: jwk.n }
+      : jwk.kty === 'EC'
+        ? { crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y }
+        : { crv: jwk.crv, kty: jwk.kty, x: jwk.x };
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(members)));
+  return base64UrlText(new Uint8Array(digest));
+}
+
+/** The claims a principal is issued as, under the names `jwtAuth()` reads them from. */
+function claimsFromPrincipal(principal: Principal, names: JwtClaimNames = {}): JwtPayload {
+  const claims: JwtPayload = {};
+  const set = (path: string, value: unknown) => {
+    const segments = path.split('.');
+    if (segments.some((segment) => segment === '__proto__' || segment === 'constructor' || segment === 'prototype')) {
+      throw new TypeError(`"${path}" is not a claim name`);
+    }
+    let target: Record<string, unknown> = claims;
+    for (const segment of segments.slice(0, -1)) {
+      const next = target[segment];
+      const nested = (next && typeof next === 'object' ? next : {}) as Record<string, unknown>;
+      target[segment] = nested;
+      target = nested;
+    }
+    target[segments.at(-1) as string] = value;
+  };
+  if (principal.userId !== undefined) set(names.subject ?? 'sub', principal.userId);
+  if (principal.tenantId !== undefined) set(names.tenant ?? 'tenant_id', assertTenantId(principal.tenantId));
+  if (principal.roles?.length) set(names.roles ?? 'roles', [...principal.roles]);
+  if (principal.scopes?.length) set(names.scopes ?? 'scope', principal.scopes.join(' '));
+  return claims;
+}
+
+// ── Keeping API keys ────────────────────────────────────────────────
+
+const API_KEYS: readonly string[] = ['nexus', 'server', 'api-keys'];
+const API_KEY_HASHES: readonly string[] = ['nexus', 'server', 'api-key-hashes'];
+const API_KEY_USES: readonly string[] = ['nexus', 'server', 'api-key-uses'];
+
+/** An API key as it is kept: its hash, never the key, with the principal it stands for. */
+export interface ApiKeyRecord {
+  /** Its id, which names it in a list and to `revoke()` and `rotate()`. Not a secret. */
+  id: string;
+  /** The key's SHA-256, as `hashApiKey()` gives it. */
+  hash: string;
+  /** The key's first characters, its prefix and four more, to recognise it by. */
+  start: string;
+  /** Who the key stands for. */
+  principal: Principal;
+  /** What it is for, in words. */
+  label?: string;
+  /** When it was issued, in milliseconds since the epoch. */
+  createdAt: number;
+  /** When it stops working, in milliseconds since the epoch. */
+  expiresAt?: number;
+  /** When it was last used, to the store's `touchEveryMs`. */
+  lastUsedAt?: number;
+  /** When it was revoked. */
+  revokedAt?: number;
+  /** The id of the key that replaced it, when it was rotated. */
+  replacedBy?: string;
+}
+
+/** A key just issued: the key itself, shown this once, and its record. */
+export interface IssuedApiKey {
+  /** The key, to hand to whoever will use it. It is never stored, so it cannot be shown again. */
+  key: string;
+  /** Its record. */
+  record: ApiKeyRecord;
+}
+
+/** What a key is issued with. */
+export interface ApiKeyIssueOptions {
+  /** What it is for, in words. */
+  label?: string;
+  /** How long it works, in seconds. Without it, until it is revoked. */
+  expiresInSec?: number;
+}
+
+/** Options for `createApiKeyStore()`. */
+export interface ApiKeyStoreOptions {
+  /**
+   * Where keys are kept: the server's state store, so every replica reads the same keys. Defaults to
+   * a `MemoryServerStore`, which one process alone reads.
+   */
+  store?: ServerStateStore;
+  /** What every key begins with, so it is recognised in a log or by a secret scanner. Defaults to `nxk_`. */
+  prefix?: string;
+  /** The least time between two writes of a key's `lastUsedAt`, in milliseconds. Defaults to a minute. */
+  touchEveryMs?: number;
+  /** Replaces the clock, in milliseconds since the epoch, for tests. */
+  now?: () => number;
+}
+
+/** API keys issued, rotated, and revoked by the application, which `apiKeyAuth()` reads by their hash. */
+export interface ApiKeyStore {
+  /** Issues a key for a principal. */
+  issue(principal: Principal, options?: ApiKeyIssueOptions): Promise<IssuedApiKey>;
+  /**
+   * Replaces a key with a new one for the same principal and label. The old one works for `graceSec`
+   * more, 0 by default, so what uses it can move to the new one first.
+   */
+  rotate(id: string, options?: ApiKeyIssueOptions & { graceSec?: number }): Promise<IssuedApiKey>;
+  /** Revokes a key at once. Resolves whether there was one to revoke. */
+  revoke(id: string): Promise<boolean>;
+  /** A key's record. */
+  get(id: string): Promise<ApiKeyRecord | undefined>;
+  /** Records, newest first, a tenant's alone when `tenantId` is given; `limit` read, 1,000 by default. */
+  list(options?: { tenantId?: string; limit?: number }): Promise<ApiKeyRecord[]>;
+  /** The principal a key stands for, by its hash, while it works: `apiKeyAuth({ lookup })`. */
+  lookup(hash: string): Promise<Principal | undefined>;
+  /** `apiKeyAuth()` over this store, taking only keys with its prefix. */
+  auth(options?: Pick<ApiKeyAuthOptions, 'header'>): AuthHook;
+}
+
+/**
+ * API keys the application issues and revokes itself, kept as hashes in the server's state store.
+ *
+ * ```ts
+ * const keys = createApiKeyStore({ store: fromStore(redisStore) });
+ * const { key } = await keys.issue({ userId: 'ci', tenantId: 'acme', scopes: ['write'] }, { label: 'CI' });
+ * createAgentServer({ assistants, state: fromStore(redisStore), authenticate: anyAuth(jwtAuth({ ... }), keys.auth()) });
+ * ```
+ */
+export function createApiKeyStore(options: ApiKeyStoreOptions = {}): ApiKeyStore {
+  const store = options.store ?? new MemoryServerStore();
+  const prefix = options.prefix ?? 'nxk_';
+  if (!/^[A-Za-z0-9_-]{1,16}$/.test(prefix)) throw new TypeError('A key prefix is 1 to 16 letters, digits, _ or -');
+  const now = options.now ?? Date.now;
+  const touchEveryMs = options.touchEveryMs ?? 60_000;
+  const read = async (id: string): Promise<ApiKeyRecord | undefined> => {
+    const record = await store.get<ApiKeyRecord>(API_KEYS, id);
+    if (!record) return undefined;
+    const used = await store.get<number>(API_KEY_USES, id);
+    return used === undefined ? record : { ...record, lastUsedAt: used };
+  };
+  const issue = async (principal: Principal, issueOptions: ApiKeyIssueOptions = {}): Promise<IssuedApiKey> => {
+    if (principal.tenantId !== undefined) assertTenantId(principal.tenantId);
+    const key = `${prefix}${randomText(32)}`;
+    const record: ApiKeyRecord = {
+      id: `key_${randomText(12)}`,
+      hash: await hashApiKey(key),
+      start: key.slice(0, prefix.length + 4),
+      principal,
+      ...(issueOptions.label !== undefined ? { label: issueOptions.label } : {}),
+      createdAt: now(),
+      ...(issueOptions.expiresInSec !== undefined ? { expiresAt: now() + issueOptions.expiresInSec * 1_000 } : {}),
+    };
+    // The record first: a hash that names no record yet is not a key, so a half-written issue lets no one in.
+    await store.put(API_KEYS, record.id, record);
+    await store.put(API_KEY_HASHES, record.hash, record.id);
+    return { key, record };
+  };
+  const keys: ApiKeyStore = {
+    issue,
+    async rotate(id, rotateOptions = {}) {
+      const old = await store.get<ApiKeyRecord>(API_KEYS, id);
+      if (!old) throw new TypeError(`No API key "${id}"`);
+      if (old.revokedAt !== undefined) throw new TypeError(`The API key "${id}" is revoked: issue a new one`);
+      const { graceSec, ...issueOptions } = rotateOptions;
+      const replacement = await issue(old.principal, {
+        ...(old.label !== undefined ? { label: old.label } : {}),
+        ...issueOptions,
+      });
+      const until = now() + (graceSec ?? 0) * 1_000;
+      await store.put(API_KEYS, id, {
+        ...old,
+        expiresAt: Math.min(old.expiresAt ?? Number.POSITIVE_INFINITY, until),
+        replacedBy: replacement.record.id,
+      });
+      return replacement;
+    },
+    async revoke(id) {
+      const record = await store.get<ApiKeyRecord>(API_KEYS, id);
+      if (!record || record.revokedAt !== undefined) return false;
+      await store.put(API_KEYS, id, { ...record, revokedAt: now() });
+      return true;
+    },
+    get: read,
+    async list(listOptions = {}) {
+      const records = await store.list<ApiKeyRecord>(API_KEYS, { limit: listOptions.limit ?? 1_000 });
+      const chosen = records.filter(
+        (record) => listOptions.tenantId === undefined || record.principal.tenantId === listOptions.tenantId,
+      );
+      return Promise.all(chosen.map(async (record) => (await read(record.id)) ?? record));
+    },
+    async lookup(hash) {
+      const id = await store.get<string>(API_KEY_HASHES, hash);
+      const record = id === undefined ? undefined : await store.get<ApiKeyRecord>(API_KEYS, id);
+      if (!record || record.hash !== hash || record.revokedAt !== undefined) return undefined;
+      const at = now();
+      if (record.expiresAt !== undefined && at >= record.expiresAt) return undefined;
+      // Its use is kept apart from the record, so recording it never undoes a revocation written meanwhile.
+      const used = await store.get<number>(API_KEY_USES, record.id);
+      if (used === undefined || at - used >= touchEveryMs) await store.put(API_KEY_USES, record.id, at);
+      return record.principal;
+    },
+    auth(authOptions = {}) {
+      return apiKeyAuth({ ...authOptions, prefix, lookup: (hash) => keys.lookup(hash) });
+    },
+  };
+  return keys;
+}
+
+// ── Sessions ────────────────────────────────────────────────────────
+
+const SESSIONS: readonly string[] = ['nexus', 'server', 'sessions'];
+const SESSIONS_SEEN: readonly string[] = ['nexus', 'server', 'sessions-seen'];
+
+/** How the session cookie is written. */
+export interface SessionCookieOptions {
+  /** Its name. Defaults to `__Host-nexus_session`, which a browser binds to this host alone, or `nexus_session` where that cannot be used. */
+  name?: string;
+  /** The domain it is sent to, besides this host. Defaults to none: this host alone. */
+  domain?: string;
+  /** The path it is sent for. Defaults to `/`. */
+  path?: string;
+  /** Sent over HTTPS alone. Defaults to true; false for plain HTTP on a developer's machine. */
+  secure?: boolean;
+  /** Whether a browser sends it from another site. Defaults to `Lax`; `None` needs `secure`. */
+  sameSite?: 'Strict' | 'Lax' | 'None';
+}
+
+/** Options for `createSessions()`. */
+export interface SessionOptions {
+  /** Where sessions are kept: the server's state store, so every replica reads them. Defaults to a `MemoryServerStore`. */
+  store?: ServerStateStore;
+  /** How the cookie is written. */
+  cookie?: SessionCookieOptions;
+  /** The longest a session lasts from its start, in seconds. Defaults to 8 hours. */
+  maxAgeSec?: number;
+  /** How long a session lasts unused, in seconds. Defaults to the longest it lasts. */
+  idleSec?: number;
+  /**
+   * Origins a request that changes something may come from, besides the request URL's own: the
+   * application's public origin, when a proxy in front makes the server see another.
+   */
+  origins?: readonly string[];
+  /** Replaces the clock, in milliseconds since the epoch, for tests. */
+  now?: () => number;
+}
+
+/** A session as it is kept: the hash of its secret, never the secret, with whom it is for. */
+export interface SessionRecord {
+  /** Its id, which names it to `revoke()`. Not a secret. */
+  id: string;
+  /** The SHA-256 of the secret the cookie carries. */
+  hash: string;
+  /** Who signed in. */
+  principal: Principal;
+  /** When it started, in milliseconds since the epoch. */
+  createdAt: number;
+  /** When it ends, however much it is used. */
+  expiresAt: number;
+  /** When it was last used, to the minute. */
+  lastSeenAt?: number;
+}
+
+/** A session just started. */
+export interface StartedSession {
+  /** The value of a `Set-Cookie` header, for the response to the sign-in. */
+  cookie: string;
+  /** Its record. */
+  record: SessionRecord;
+}
+
+/** Browser sessions: a cookie after a sign-in of the application's own, and the hook that reads it. */
+export interface Sessions {
+  /** Starts a session for a principal: set the cookie it returns on the sign-in's response. */
+  start(principal: Principal): Promise<StartedSession>;
+  /** Ends the request's session, and returns the `Set-Cookie` value that clears its cookie. */
+  end(request: Request): Promise<string>;
+  /** Ends a session by its id, wherever its cookie is. Resolves whether there was one. */
+  revoke(id: string): Promise<boolean>;
+  /** Live sessions, newest first, a user's or a tenant's alone when one is given; `limit` read, 1,000 by default. */
+  list(options?: { userId?: string; tenantId?: string; limit?: number }): Promise<SessionRecord[]>;
+  /** Removes sessions that have ended, up to 10,000 at a time, and resolves how many. Call it now and then, from a cron job. */
+  sweep(): Promise<number>;
+  /**
+   * The `authenticate` hook. A request with no cookie is passed over; an ended or forged one answers
+   * 401 and clears the cookie; a request that changes something, from a page of another origin,
+   * answers 403. The principal carries `method: 'session'` and its id as the `sid` claim.
+   */
+  readonly auth: AuthHook;
+}
+
+/**
+ * Browser sessions after a sign-in of the application's own: a password, a magic link, or an identity
+ * provider's redirect. The cookie carries a random secret, the store its hash, so a copy of the store
+ * signs no one in; it is `HttpOnly`, `Secure`, and `SameSite=Lax` by default, and a request that
+ * changes something must come from the application's own origin.
+ *
+ * ```ts
+ * const sessions = createSessions({ store: fromStore(redisStore), origins: ['https://agents.example.com'] });
+ * // In the sign-in route, once the user is known:
+ * const { cookie } = await sessions.start({ userId: user.id, tenantId: user.orgId, scopes: ['read', 'write'] });
+ * return new Response(null, { status: 303, headers: { location: '/', 'set-cookie': cookie } });
+ * ```
+ */
+export function createSessions(options: SessionOptions = {}): Sessions {
+  const store = options.store ?? new MemoryServerStore();
+  const now = options.now ?? Date.now;
+  const maxAgeSec = options.maxAgeSec ?? 8 * 3_600;
+  const idleMs = (options.idleSec ?? maxAgeSec) * 1_000;
+  const path = options.cookie?.path ?? '/';
+  const domain = options.cookie?.domain;
+  const secure = options.cookie?.secure ?? true;
+  const sameSite = options.cookie?.sameSite ?? 'Lax';
+  if (sameSite === 'None' && !secure)
+    throw new TypeError('A cookie sent from other sites, SameSite=None, must be secure');
+  const name =
+    options.cookie?.name ?? (secure && domain === undefined && path === '/' ? '__Host-nexus_session' : 'nexus_session');
+  if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) throw new TypeError(`"${name}" is not a cookie name`);
+  const attributes = [
+    `Path=${path}`,
+    ...(domain !== undefined ? [`Domain=${domain}`] : []),
+    'HttpOnly',
+    ...(secure ? ['Secure'] : []),
+    `SameSite=${sameSite}`,
+  ].join('; ');
+  const cleared = `${name}=; ${attributes}; Max-Age=0`;
+  const origins = new Set(options.origins ?? []);
+
+  /** The request's session, by its cookie, or why it has none. */
+  const find = async (request: Request): Promise<SessionRecord | 'none' | 'ended'> => {
+    const value = cookieOf(request, name);
+    if (value === undefined) return 'none';
+    const match = /^([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{43})$/.exec(value);
+    if (!match) return 'ended';
+    const [, id, secret] = match as unknown as [string, string, string];
+    const record = await store.get<SessionRecord>(SESSIONS, id);
+    if (!record || !sameText(record.hash, await hashApiKey(secret))) return 'ended';
+    const at = now();
+    const seen = (await store.get<number>(SESSIONS_SEEN, id)) ?? record.createdAt;
+    if (at >= record.expiresAt || at - seen >= idleMs) {
+      await revoke(id);
+      return 'ended';
+    }
+    // Written at most once a minute, and apart from the record, so a revocation meanwhile stays one.
+    if (at - seen >= Math.min(60_000, idleMs / 2)) await store.put(SESSIONS_SEEN, id, at);
+    return record;
+  };
+  const revoke = async (id: string): Promise<boolean> => {
+    const found = (await store.get<SessionRecord>(SESSIONS, id)) !== undefined;
+    await store.delete(SESSIONS, id);
+    await store.delete(SESSIONS_SEEN, id);
+    return found;
+  };
+  const live = async (limit: number): Promise<{ live: SessionRecord[]; ended: string[] }> => {
+    const at = now();
+    const records = await store.list<SessionRecord>(SESSIONS, { limit });
+    const found: { live: SessionRecord[]; ended: string[] } = { live: [], ended: [] };
+    for (const record of records) {
+      const seen = await store.get<number>(SESSIONS_SEEN, record.id);
+      if (at >= record.expiresAt || at - (seen ?? record.createdAt) >= idleMs) found.ended.push(record.id);
+      else found.live.push(seen === undefined ? record : { ...record, lastSeenAt: seen });
+    }
+    return found;
+  };
+
+  return {
+    async start(principal) {
+      if (principal.tenantId !== undefined) assertTenantId(principal.tenantId);
+      const id = randomText(12);
+      const secret = randomText(32);
+      const record: SessionRecord = {
+        id,
+        hash: await hashApiKey(secret),
+        principal,
+        createdAt: now(),
+        expiresAt: now() + maxAgeSec * 1_000,
+      };
+      await store.put(SESSIONS, id, record);
+      return { cookie: `${name}=${id}.${secret}; ${attributes}; Max-Age=${maxAgeSec}`, record };
+    },
+    async end(request) {
+      const value = cookieOf(request, name);
+      const id = value?.split('.')[0];
+      if (id) await revoke(id);
+      return cleared;
+    },
+    revoke,
+    async list(listOptions = {}) {
+      return (await live(listOptions.limit ?? 1_000)).live.filter(
+        (record) =>
+          (listOptions.userId === undefined || record.principal.userId === listOptions.userId) &&
+          (listOptions.tenantId === undefined || record.principal.tenantId === listOptions.tenantId),
+      );
+    },
+    async sweep() {
+      const { ended } = await live(10_000);
+      for (const id of ended) await revoke(id);
+      return ended.length;
+    },
+    async auth(request) {
+      const found = await find(request);
+      if (found === 'none') return undefined;
+      if (found === 'ended')
+        return refuse(401, 'The session has ended: sign in again', undefined, { 'set-cookie': cleared });
+      if (!SAFE_METHODS.has(request.method) && !fromOwnOrigin(request, origins)) {
+        return refuse(403, 'A request from another site cannot use this session');
+      }
+      return {
+        ...found.principal,
+        method: 'session',
+        claims: { ...(found.principal.claims ?? {}), sid: found.id },
+      };
+    },
+  };
+}
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Whether a request came from the application's own pages: its `Origin` the request's own or one
+ * allowed, or, without one, the browser's `Sec-Fetch-Site` saying so. A request with neither is
+ * refused, since a browser sends one of them on every request that changes something.
+ */
+function fromOwnOrigin(request: Request, origins: ReadonlySet<string>): boolean {
+  const origin = request.headers.get('origin');
+  if (origin !== null) return origin === new URL(request.url).origin || origins.has(origin);
+  const site = request.headers.get('sec-fetch-site');
+  return site === 'same-origin' || site === 'none';
+}
+
+/** A cookie's value from a request, by its name. */
+function cookieOf(request: Request, name: string): string | undefined {
+  for (const pair of (request.headers.get('cookie') ?? '').split(';')) {
+    const at = pair.indexOf('=');
+    if (at > 0 && pair.slice(0, at).trim() === name) return pair.slice(at + 1).trim();
+  }
+  return undefined;
+}
+
+/** Random bytes as base64url text. */
+function randomText(bytes: number): string {
+  return base64UrlText(globalThis.crypto.getRandomValues(new Uint8Array(bytes)));
+}
+
 // ── Several at once ─────────────────────────────────────────────────
 
 /**
@@ -636,12 +1337,18 @@ function bearerToken(request: Request): string | undefined {
 }
 
 /** A refusal shaped as the server's own errors are, with a challenge when there is one. */
-function refuse(status: 401 | 403, message: string, challenge?: string): Response {
+function refuse(
+  status: 401 | 403,
+  message: string,
+  challenge?: string,
+  headers: Readonly<Record<string, string>> = {},
+): Response {
   return new Response(JSON.stringify({ error: { code: status === 401 ? 'UNAUTHORIZED' : 'FORBIDDEN', message } }), {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
       ...(challenge ? { 'www-authenticate': challenge } : {}),
+      ...headers,
     },
   });
 }
@@ -667,6 +1374,16 @@ function base64UrlBytes(text: string): Uint8Array {
   return bytes;
 }
 
+function base64UrlText(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlJson(value: unknown): string {
+  return base64UrlText(new TextEncoder().encode(JSON.stringify(value)));
+}
+
 function decodeJson<T>(part: string, what: string): T {
   try {
     const value = JSON.parse(new TextDecoder().decode(base64UrlBytes(part)));
@@ -677,9 +1394,11 @@ function decodeJson<T>(part: string, what: string): T {
   throw new JwtError('JWT_MALFORMED', `The token's ${what} is not a JSON object`);
 }
 
-function pemToDer(pem: string): ArrayBuffer {
-  const body = pem.replace(/-----(?:BEGIN|END) PUBLIC KEY-----/g, '').replace(/\s+/g, '');
-  if (!body || pem.includes('PRIVATE KEY')) throw new JwtError('JWT_KEY', 'The public key is not a PEM public key');
+function pemToDer(pem: string, label: 'PUBLIC KEY' | 'PRIVATE KEY' = 'PUBLIC KEY'): ArrayBuffer {
+  const body = pem.replace(new RegExp(`-----(?:BEGIN|END) ${label}-----`, 'g'), '').replace(/\s+/g, '');
+  if (!body || (label === 'PUBLIC KEY' && pem.includes('PRIVATE KEY'))) {
+    throw new JwtError('JWT_KEY', `The ${label.toLowerCase()} is not a PEM ${label.toLowerCase()}`);
+  }
   return base64UrlBytes(body.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')).buffer as ArrayBuffer;
 }
 

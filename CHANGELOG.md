@@ -44,6 +44,14 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - OpenAPI tools send a multipart form, its file fields given as base64, a text or XML body, and a body
   of bytes, such as an image, so every operation becomes a tool. `webhooks` lists what the API sends
   the application, its webhooks and its operations' callbacks, each with its JSON body's schema.
+- **Tokens, keys, and sessions the server issues.** `createJwtSigner()` issues tokens with a secret, a
+  PEM or JWK private key, or a Web Crypto key pair, and `issue()` writes a principal under the claim
+  names `jwtAuth()` reads back; `generateJwtKey()` makes a key, and `jwksHandler()` publishes the
+  public halves, for a rotation that refuses no live token. `createApiKeyStore()` issues, rotates with
+  a grace period, and revokes API keys, kept as hashes in the server's state store with when each was
+  last used. `createSessions()` signs browsers in after a sign-in of the application's own: an
+  `HttpOnly`, `Secure`, `SameSite=Lax` cookie of a random secret whose hash alone is kept, an idle
+  and a total lifetime, sign-out here or everywhere, and a request from another site's page refused.
 
 ### Changed
 

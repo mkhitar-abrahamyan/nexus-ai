@@ -296,8 +296,10 @@ The principal goes everywhere the run goes:
 - An agent passes it to every tool, middleware, and permission policy. A tool can therefore act as
   that user and no one else.
 
-**Built-in hooks.** `nexus-ai-pro/server/auth` has three hooks, each an `AuthHook` that returns the
-same `Principal`. They are built on Web Crypto, so they need no dependency.
+**Built-in hooks.** `nexus-ai-pro/server/auth` has hooks for tokens, keys, sessions, and a proxy,
+each an `AuthHook` that returns the same `Principal`, and the pieces that issue what they read: tokens,
+keys, and sessions of the application's own. They are built on Web Crypto, so they need no
+dependency.
 
 `jwtAuth()` verifies a JSON Web Token, read from `Authorization: Bearer` unless `token` reads it from
 elsewhere, such as a cookie. The key comes from one of three places:
@@ -382,6 +384,84 @@ Errors extend `ServerError` and have a stable code: `BadRequestError`, `Unauthor
 `ForbiddenError`, `NotFoundError`, `ThreadBusyError`, `AssistantCapabilityError`, and
 `TenantLimitError`. An error with a `retryAfterSeconds` is answered with a `Retry-After` header.
 
+### Tokens of your own
+
+`createJwtSigner()` issues tokens that `jwtAuth()`, or any other service, verifies. Its
+`JwtSignerOptions` take one key: a `secret` of at least 32 bytes, for HMAC; a `privateKey`, as a
+PKCS #8 PEM or a private JWK; or a Web Crypto `keyPair`. The algorithm is the key's own unless
+`algorithm` names it, which a PEM key must. A `JwtSigner`:
+- `sign()`s claims, adding the signer's `issuer` and `audience`, `iat`, `exp` an hour on by
+  default, and a `jti` of its own; a claim given wins, and `JwtSignOptions` set one token's
+  lifetime, audience, and `nbf`;
+- `issue()`s a token for a `Principal`, its user, tenant, roles, and scopes under the claim names
+  `jwtAuth()` reads, so the same `JwtClaimNames` read it back as the same principal;
+- gives its `publicKey()`, with a `kid` that defaults to the key's RFC 7638 thumbprint.
+
+`generateJwtKey()` makes a private JWK, ES256 by default, to keep in a secret store. `jwksHandler()`
+serves signers' public keys as a key set, cached for five minutes. Give it the signer in use and the
+one before it, and a rotation refuses no token issued before it.
+
+```ts
+import { createJwtSigner, jwksHandler, jwtAuth } from 'nexus-ai-pro/server/auth';
+
+const signer = createJwtSigner({ privateKey: JSON.parse(process.env.JWT_KEY ?? ''), issuer: 'https://agents.example.com', audience: 'agents-api' });
+const jwks = jwksHandler(signer);
+const token = await signer.issue({ userId: 'reporting', tenantId: 'acme', scopes: ['read'] });
+// Another service verifies it against https://agents.example.com/.well-known/jwks.json.
+```
+
+### API keys you keep
+
+`createApiKeyStore()` issues, rotates, and revokes keys for services and scripts, keeping each as an
+`ApiKeyRecord` in the server's state store, so every replica reads the same keys. A record holds the
+key's SHA-256, never the key: `issue()` returns it once, in an `IssuedApiKey`, with `ApiKeyIssueOptions`
+for a `label` and a lifetime. A key begins with the store's `prefix`, `nxk_` by default, so a secret
+scanner recognises it and `apiKeyAuth()` leaves a token alone. An `ApiKeyStore` also:
+- `rotate()`s a key: a new one for the same principal, while the old works for `graceSec` more,
+  none by default, and names its replacement;
+- `revoke()`s one at once;
+- `get()`s and `list()`s records, a tenant's alone if asked, with when each was last used;
+- `lookup()`s a principal by hash, which `auth()` passes to `apiKeyAuth()`.
+
+`ApiKeyStoreOptions` take the `store`, a `MemoryServerStore` by default, the prefix, and
+`touchEveryMs`: how often a key's last use is written, once a minute by default. The use is kept
+apart from the record, so recording it never undoes a revocation made at the same moment.
+
+```ts
+const keys = createApiKeyStore({ store: state });
+const { key } = await keys.issue({ userId: 'ci', tenantId: 'acme', scopes: ['write'] }, { label: 'CI' });
+createAgentServer({ assistants, state, authenticate: anyAuth(sessions.auth, keys.auth(), jwtAuth({ ... })) });
+```
+
+### Browser sessions
+
+`createSessions()` signs browsers in after a sign-in of the application's own: a password, a magic
+link, or an identity provider's redirect. Its `Sessions` `start()` one, returning a `StartedSession`: the `Set-Cookie`
+value for the sign-in's response, and its `SessionRecord`. The cookie carries a random secret and the
+store keeps its SHA-256, so a copy of the store signs no one in. `end()` signs the request's session
+out and returns the value that clears the cookie; `revoke()` ends one by id, wherever its browser
+is; `list()` shows live sessions, a user's or a tenant's, so "sign out everywhere" is a list and a
+revoke; `sweep()` removes those that have ended. `auth` is the hook:
+- a request with no cookie is passed over;
+- an ended, idle, or forged one answers `401` and clears the cookie;
+- a request that changes something, other than `GET`, `HEAD`, or `OPTIONS`, must come from the
+  application's own pages. Its `Origin` must be the request's own or one of `origins`, or, with
+  none, `Sec-Fetch-Site` must say so. Otherwise it answers `403`;
+- the principal carries `method: 'session'` and the session's id as the `sid` claim.
+
+`SessionOptions` take the `store`, `maxAgeSec` (8 hours), `idleSec` (the same), and `origins`,
+the application's public origin when a proxy makes the server see another. `SessionCookieOptions`
+write the cookie: `HttpOnly`, `Secure`, and `SameSite=Lax` by default, named
+`__Host-nexus_session`, which a browser binds to this host alone; `secure: false` for plain HTTP on a
+developer's machine.
+
+```ts
+const sessions = createSessions({ store: state, origins: ['https://agents.example.com'] });
+// The sign-in route, once the user is known:
+const { cookie } = await sessions.start({ userId: user.id, tenantId: user.orgId, scopes: ['read', 'write'] });
+return new Response(null, { status: 303, headers: { location: '/', 'set-cookie': cookie } });
+```
+
 ## Where state lives
 
 Threads, runs, and cron jobs are records in a `ServerStateStore`. A `ThreadRecord` is a conversation:
@@ -465,8 +545,9 @@ const graph = createGraph({ channels })
   newest. A record a client had not reached when it was written again moves to the first page, so a
   walk of a list that changes does not see it. Two records written by replicas whose clocks disagree,
   closer together than that, may be listed in the order the store wrote them.
-- Authentication is a hook, not an implementation: there is no bundled token format, user store, or
-  session handling.
+- The server signs people in by a session after a sign-in of the application's own: it keeps no
+  users or passwords, and runs no identity provider's redirect itself.
+- A session's last use is written at most once a minute, so it idles out up to a minute early.
 
 <!-- reference:start -->
 ## Reference
@@ -536,9 +617,19 @@ specific entry point that provides it.
 | `anyAuth` | function | Tries hooks in order and takes the first principal: tokens for people and keys for services on one server. |
 | `apiKeyAuth` | function | Authenticates requests by an API key, for services and scripts rather than people. |
 | `ApiKeyAuthOptions` | interface | Options for `apiKeyAuth()`. |
+| `ApiKeyIssueOptions` | interface | What a key is issued with. |
+| `ApiKeyRecord` | interface | An API key as it is kept: its hash, never the key, with the principal it stands for. |
+| `ApiKeyStore` | interface | API keys issued, rotated, and revoked by the application, which `apiKeyAuth()` reads by their hash. |
+| `ApiKeyStoreOptions` | interface | Options for `createApiKeyStore()`. |
 | `AuthHook` | type | The `authenticate` hook of `createAgentServer()`. |
+| `createApiKeyStore` | function | API keys the application issues and revokes itself, kept as hashes in the server's state store. |
+| `createJwtSigner` | function | Builds a signer, to issue tokens of your own: for a service, after a sign-in, or for a test. |
 | `createJwtVerifier` | function | Builds a verifier for tokens from one issuer. |
+| `createSessions` | function | Browser sessions after a sign-in of the application's own: a password, a magic link, or an identity provider's redirect. |
+| `generateJwtKey` | function | A new private key for `createJwtSigner()`, as a JWK with its `kid`, `alg`, and `use`: keep it in a secret store, and the signer publishes its public half. |
 | `hashApiKey` | function | The SHA-256 of an API key, as hex: what `apiKeyAuth({ keys })` is configured with. |
+| `IssuedApiKey` | interface | A key just issued: the key itself, shown this once, and its record. |
+| `jwksHandler` | function | Serves signers' public keys as a JSON Web Key Set, at the URL `jwtAuth({ jwks })` and other services read. |
 | `JwtAlgorithm` | type | The signature algorithms a token may use. |
 | `jwtAuth` | function | Authenticates requests by a JSON Web Token: an identity provider's, through its key set, or your own, signed with a shared secret. |
 | `JwtAuthOptions` | interface | Options for `jwtAuth()`. |
@@ -547,8 +638,16 @@ specific entry point that provides it.
 | `JwtErrorCode` | type | Why a token was refused. |
 | `JwtHeader` | interface | A token's header. |
 | `JwtPayload` | interface | A token's claims, the registered ones typed. |
+| `JwtSigner` | interface | Issues tokens with one key, which `jwtAuth()`, `createJwtVerifier()`, and any other verifier read. |
+| `JwtSignerOptions` | interface | Options for `createJwtSigner()`. |
+| `JwtSignOptions` | interface | What one token is issued with, over the signer's own. |
 | `JwtVerifier` | interface | A reusable verifier: it keeps imported keys and the fetched key set between tokens. |
 | `JwtVerifyOptions` | interface | Options for `createJwtVerifier()`. |
+| `SessionCookieOptions` | interface | How the session cookie is written. |
+| `SessionOptions` | interface | Options for `createSessions()`. |
+| `SessionRecord` | interface | A session as it is kept: the hash of its secret, never the secret, with whom it is for. |
+| `Sessions` | interface | Browser sessions: a cookie after a sign-in of the application's own, and the hook that reads it. |
+| `StartedSession` | interface | A session just started. |
 | `trustedProxyAuth` | function | Takes the caller from headers an authenticating proxy sets: an identity-aware proxy, an API gateway, a service mesh. |
 | `TrustedProxyAuthOptions` | interface | Options for `trustedProxyAuth()`. |
 | `TrustedProxyHeaders` | interface | The headers a proxy names the caller in. |

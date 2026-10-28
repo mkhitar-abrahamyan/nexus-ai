@@ -285,6 +285,21 @@ import {
   type RevisionStats,
 } from 'nexus-ai-pro/server/deployments';
 import { RedisTenantUsage, tenantLimits, type TenantUsage } from 'nexus-ai-pro/server/tenancy';
+import {
+  anyAuth as anyServerAuth,
+  createApiKeyStore,
+  createJwtSigner,
+  createSessions,
+  generateJwtKey,
+  jwksHandler,
+  type ApiKeyRecord,
+  type ApiKeyStore,
+  type IssuedApiKey,
+  type JwtSigner,
+  type SessionRecord,
+  type Sessions,
+  type StartedSession,
+} from 'nexus-ai-pro/server/auth';
 import { PromptClient } from 'nexus-ai-pro/prompts/client';
 import { PromptRegistry, experimentGate, servedByGate, evaluatePrompt, formatPromptDiff } from 'nexus-ai-pro/prompts/registry';
 import { FilePromptStore } from 'nexus-ai-pro/prompts/file';
@@ -1422,6 +1437,19 @@ const bundleOptions: OpenApiBundleOptions = {
 const bundledDocument: Promise<OpenApiDocument> = bundleOpenApiDocument(shopDocument, bundleOptions);
 const loadedAnywhere: Promise<OpenApiTools> = loadOpenApiTools('https://shop.example.com/openapi.json', { references: 'any', maxBytes: 2_000_000 });
 void [securityAsked, hookSource, fromSwagger, bundledDocument, loadedAnywhere];
+// Tokens, keys, and sessions the server issues itself.
+const tokenSigner: JwtSigner = createJwtSigner({ secret: 'a-secret-of-at-least-thirty-two-bytes', issuer: 'https://agents.example.com', audience: 'agents-api', expiresInSec: 900 });
+const issuedToken: Promise<string> = tokenSigner.issue({ userId: 'ana', tenantId: 'acme' }, { claims: { tenant: 'org_id' }, expiresInSec: 60 });
+const keySet: (request: Request) => Promise<Response> = jwksHandler(tokenSigner);
+const keyStore: ApiKeyStore = createApiKeyStore({ prefix: 'acme_', touchEveryMs: 5_000 });
+const issuedKey: Promise<IssuedApiKey> = keyStore.issue({ userId: 'ci' }, { label: 'CI', expiresInSec: 86_400 });
+const keyRecords: Promise<ApiKeyRecord[]> = keyStore.list({ tenantId: 'acme' });
+const browserSessions: Sessions = createSessions({ maxAgeSec: 3_600, idleSec: 900, origins: ['https://agents.example.com'], cookie: { sameSite: 'Strict' } });
+const started: Promise<StartedSession> = browserSessions.start({ userId: 'ana' });
+const sessionList: Promise<SessionRecord[]> = browserSessions.list({ userId: 'ana' });
+const everyCredential = anyServerAuth(browserSessions.auth, keyStore.auth({ header: 'x-service-key' }));
+const generatedKey: Promise<{ kid: string; alg: string }> = generateJwtKey('EdDSA');
+void [issuedToken, keySet, issuedKey.then((issued) => issued.record.start), keyRecords, started.then((session) => session.cookie), sessionList, everyCredential, generatedKey];
 void grpcExporter.close();
 const encoded: Uint8Array = encodeOtlpTraceRequest({ resourceSpans: [] });
 void encoded;

@@ -14,7 +14,7 @@ export interface Principal {
   scopes?: readonly string[];
   /** The caller's roles, for policies and tools that decide by role rather than by scope. */
   roles?: readonly string[];
-  /** How the caller was authenticated: `jwt`, `api-key`, `proxy`, or a name of your own. */
+  /** How the caller was authenticated: `jwt`, `api-key`, `session`, `proxy`, or a name of your own. */
   method?: string;
   /** The verified claims or attributes the principal was built from, for anything the fields above leave out. */
   claims?: Readonly<Record<string, unknown>>;
