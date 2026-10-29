@@ -581,7 +581,58 @@ test('lists models overall and per provider', () => {
     'embed-english-v3.0',
     'embed-multilingual-v3.0',
     'embed-v4.0',
+    'embed-v5.0-fast',
+    'embed-v5.0-pro',
   ]);
+});
+
+test('Cohere’s Embed 5 takes its own sizes, which embed-v4.0 does not, and is registered without a price', async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  const cohere = new CohereEmbeddingProvider({
+    apiKey: 'key',
+    fetch: (async (_url: string | URL, init: RequestInit = {}) => {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      sent.push(body);
+      const size = (body.output_dimension as number | undefined) ?? 2048;
+      return Response.json({
+        embeddings: { float: (body.texts as string[]).map(() => Array.from({ length: size }, () => 0.5)) },
+        meta: { billed_units: { input_tokens: 3 } },
+      });
+    }) as typeof fetch,
+  });
+  const manager = new EmbeddingManager({ providers: { cohere } });
+
+  for (const model of ['embed-v5.0-pro', 'embed-v5.0-fast']) {
+    for (const dimensions of [768, 2048]) {
+      const response = await manager.embed({ input: 'a', model, dimensions });
+      assert.equal(response.meta.dimensions, dimensions, `${model} at ${dimensions}`);
+      assert.equal(sent.at(-1)?.output_dimension, dimensions);
+      assert.equal(sent.at(-1)?.model, model);
+    }
+  }
+  const native = await manager.embed({ input: 'a', model: 'embed-v5.0-pro' });
+  assert.equal(native.meta.dimensions, 2048, 'its own size, unasked');
+  assert.equal(native.meta.cost.amount, 0, 'no published price, so nothing is charged against a budget');
+  await assert.rejects(
+    () => manager.embed({ input: 'a', model: 'embed-v4.0', dimensions: 768 }),
+    /accepts 256, 512, 1024, 1536 dimensions/,
+  );
+  await assert.rejects(
+    () => manager.embed({ input: 'a', model: 'embed-v5.0-fast', dimensions: 3072 }),
+    /accepts 256, 512, 768, 1024, 1536, 2048 dimensions/,
+  );
+
+  const pro = KNOWN_EMBEDDING_MODELS['embed-v5.0-pro'];
+  assert.deepEqual(
+    [pro?.dimensions, pro?.maxInputTokens, pro?.costPer1kInput, pro?.inputModalities],
+    [2048, 128000, 0, ['text', 'image']],
+  );
+  assert.match(pro?.notes ?? '', /publishes no per-token price/);
+  assert.deepEqual(
+    cohere.info.capabilities.models?.filter((model) => model.startsWith('embed-v5')),
+    ['embed-v5.0-pro', 'embed-v5.0-fast'],
+    'the adapter lists both',
+  );
 });
 
 test('bundled defaults can be replaced entirely', () => {

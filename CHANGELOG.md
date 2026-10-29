@@ -99,6 +99,9 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - **The kernel in Firefox and WebKit.** The portable kernel's own tests, the file Node.js, Deno, Bun,
   and the edge runtime run, now run in a browser page too, in headless Chromium on every build and in
   Firefox and WebKit, Safari's engine, in CI, with a graph, an agent with a streaming tool, and AG-UI.
+- **Cohere's Embed 5.** `embed-v5.0-pro` and `embed-v5.0-fast` are in the registry, with their
+  sizes from 256 to 2,048, 128,000 tokens, and images. Cohere publishes no per-token price for them,
+  so they are registered without one.
 
 ### Changed
 

@@ -145,6 +145,7 @@ entry is judged by its adapter's capabilities. Anything else is refused with an
 | Model | Takes | Notes |
 | --- | --- | --- |
 | `gemini-embedding-2` | text, image, audio, video, document | Up to 6 images, 180 seconds of audio, 120 seconds of video, its sound not heard, or a 6-page PDF an input. The task is a prefix on the text, which the adapter writes from `inputType`. |
+| `embed-v5.0-pro`, `embed-v5.0-fast` | text, image | One vector space: index with Pro, query with Fast. 2,048 dimensions, or 256 to 1,536. |
 | `embed-v4.0` | text, image | Images as JPEG, PNG, WebP, or GIF, 20 MB a request. |
 | Every other bundled model | text | |
 
@@ -424,6 +425,8 @@ Every embedding error extends `EmbeddingError` and has a stable code.
 - Two processes that miss the same text at once both embed it; the shared cache keeps one vector.
 - A Google batch file leaves its input file in the Files API, which deletes it after 48 hours.
 - Audio or video given by URL is not priced, since its length is not read; `unpricedMedia` counts it.
+- Cohere publishes no per-token price for `embed-v5.0-pro` or `embed-v5.0-fast`, so their cost reads
+  as zero and a budget cannot hold them. Give a price through `embeddings.models.registry`.
 
 <!-- reference:start -->
 ## Reference

@@ -269,10 +269,11 @@ export class CohereEmbeddingProvider extends HttpEmbeddingProvider {
       name: 'cohere',
       defaultModel: options.model || 'embed-v4.0',
       capabilities: {
-        models: ['embed-v4.0', 'embed-english-v3.0', 'embed-multilingual-v3.0'],
+        models: ['embed-v5.0-pro', 'embed-v5.0-fast', 'embed-v4.0', 'embed-english-v3.0', 'embed-multilingual-v3.0'],
         maxBatchSize: 96,
         inputModalities: ['text', 'image'],
-        dimensions: [256, 512, 1024, 1536],
+        // Every size any of its models takes; the registry holds each model to its own.
+        dimensions: [256, 512, 768, 1024, 1536, 2048],
         inputTypes: ['document', 'query', 'classification', 'clustering'],
         encodingFormats: ['float'],
         truncate: true,
