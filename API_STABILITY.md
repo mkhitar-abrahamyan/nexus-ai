@@ -67,7 +67,7 @@ graduation:
 | Upgrade | A migration test from the previous minor |
 | Soak | A long-running test with flat memory and no leaked handles |
 
-## 2.22 stage (Unreleased)
+## 2.22 stage (2.22.0)
 
 Everything 2.22 adds is stable from the start and additive, unless this section says otherwise.
 

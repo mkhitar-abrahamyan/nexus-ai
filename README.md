@@ -341,11 +341,15 @@ Shipped so far:
   evaluated with nothing sent, and one A2A handler serving many tenants, each seeing only its own;
 - 2.21 typed decisions about pictures, a yes or no, a choice, a score, or a box around something in
   one, from TypeSafe AI's Jev or any vision model; community adapters' compatibility records gathered
-  from their own CI, a failing one turning red; and 3.0's defaults behind one switch today.
+  from their own CI, a failing one turning red; and 3.0's defaults behind one switch today;
+- 2.22 MCP over streamable HTTP both ways, with prompts, resources, and a server's questions back to
+  the client; OpenAPI tools that send each operation's credentials; tokens, API keys, and sessions the
+  server issues; and a studio that signs people in with your identity provider and serves many
+  tenants, each seeing only its own.
 
 Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
-Next, in 2.22, Pinecone, images, the Gemini embedding batch tier, media understanding, video, typed
+Next, in 2.23, Pinecone, images, the Gemini embedding batch tier, media understanding, video, typed
 decisions, Gemini Live, SIP, and both phone providers graduate once the live workflow passes against
 each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order

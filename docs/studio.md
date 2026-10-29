@@ -272,7 +272,9 @@ signed in; a change still needs the page token. `auth`, when also given, is aske
 send bearer tokens to the same studio. Any flow of the same shape works as `signIn`: an
 `authenticate` for a request's session, and a `handle` for the paths under `/auth/`.
 
-`oidcSignIn()` needs nexus-ai-pro 2.3 or newer, for its token verifier.
+`oidcSignIn()` needs nexus-ai-pro 2.3 or newer, for its token verifier. It is experimental until a
+sign-in against a live provider is recorded; its tests run against a provider written from the
+specification, which signs real tokens.
 
 ## Tenants
 

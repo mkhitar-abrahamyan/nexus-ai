@@ -4,6 +4,13 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-10-29
+
+MCP over streamable HTTP both ways, OpenAPI tools that send each operation's credentials, tokens, keys,
+and sessions the server issues, and a studio that signs people in and serves many tenants; with signed
+A2A cards, embeddings of video, loaders that stream, Gemini's voice, and the kernel in Firefox and
+WebKit.
+
 ### Added
 
 - **Log probabilities from a stream.** Each `text` chunk's `StreamChunk.logprobs` holds its tokens'
@@ -3485,7 +3492,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.21.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.22.0...HEAD
+[2.22.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.2...v2.21.0
 [2.20.2]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.1...v2.20.2
 [2.20.1]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.0...v2.20.1
