@@ -121,16 +121,21 @@ const consumerDir = path.join(tempRoot, 'consumer');
 // log probabilities in the providers. 2.17's and 2.18's editor MCP, video inputs, span events, and
 // lists that page had already brought it close to the caps. None is loaded by the root. Measured at
 // 1,651,508 bytes packed and 9,881,023 unpacked.
-const MAX_PACKED_BYTES = 1_750_000;
-const MAX_UNPACKED_BYTES = 10_350_000;
+// Raised again in 2.22.0 for one opt-in entry point (Gemini's voice), and for what 2.22 adds to
+// entry points that already ship: MCP over streamable HTTP both ways, signed A2A cards, OpenAPI
+// credentials and Swagger 2.0, the server's token signer, API keys, and sessions, streaming loaders,
+// Google's large embedding batches, and Telnyx's speech gathers. None is loaded by the root. Measured
+// at 1,785,292 bytes packed and 10,484,384 unpacked.
+const MAX_PACKED_BYTES = 1_880_000;
+const MAX_UNPACKED_BYTES = 10_950_000;
 // What a consumer actually installs: this package plus the dependencies it forces on them. Until 2.0
 // that was about 7 MB of `zod`, `ajv`, and `@types/node` on top of the package, for 12.3 MB in all.
 // 2.0 made all three optional peers, so a production install is the package alone, and this ceiling
 // came down from 13 MB to hold that. It follows the unpacked package: raised with it in 2.2.0 and
 // 2.3.0 and 2.4.0 and 2.5.0 and 2.7.0 and 2.8.0 and 2.9.0 and 2.10.0 and 2.11.0 and 2.12.0 and 2.13.0
-// and 2.16.0 and 2.19.0, for the same reasons, and still nothing but the package itself: 6,908,187
-// bytes in 2.4.0.
-const MAX_INSTALLED_BYTES = 10_450_000;
+// and 2.16.0 and 2.19.0 and 2.22.0, for the same reasons, and still nothing but the package itself:
+// 6,908,187 bytes in 2.4.0.
+const MAX_INSTALLED_BYTES = 11_050_000;
 mkdirSync(packDir);
 mkdirSync(consumerDir);
 let keepTempDir = false;
