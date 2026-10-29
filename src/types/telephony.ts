@@ -91,6 +91,39 @@ export interface TelephonyGatherConfig {
   prompts?: string[];
 }
 
+/** What a caller gave a gather: what they said, the keys they pressed, or both. */
+export interface TelephonyGatherResult {
+  /** Provider that collected it. */
+  providerUsed: string;
+  /** The provider's id for the call. */
+  callId: string;
+  /** What the caller said, as transcribed. */
+  speech?: string;
+  /** How sure the transcription is, from 0 to 1, when the provider says. */
+  confidence?: number;
+  /** The keys the caller pressed. */
+  digits?: string;
+  /**
+   * False for speech still being transcribed, which a later result replaces; true for what the
+   * caller finished saying, and for keys.
+   */
+  final: boolean;
+  /** The webhook, unmodified. */
+  raw?: unknown;
+}
+
+/** Stops a gather still listening: on Telnyx, the transcription a speech gather started. */
+export interface EndGatherRequest {
+  /** Provider the call belongs to. */
+  provider?: string;
+  /** The provider's id for the call. */
+  callId: string;
+  /** The tenant it is for: its credentials, regions, and budget apply. */
+  tenantId?: string;
+  /** Aborts the request. */
+  signal?: AbortSignal;
+}
+
 /** A conference a call joins, created by the first call to join it. */
 export interface TelephonyConferenceConfig {
   /** The conference's name: every call that joins the same name meets in it. */
@@ -819,6 +852,13 @@ export interface TelephonyProvider {
   ): Promise<TelephonyRecordingAudio>;
   /** Deletes a recording at the provider. */
   deleteRecording?(request: DeleteRecordingRequest, context?: ProviderCallContext): Promise<void>;
+  /**
+   * Parses what a gather collected, from the webhook that carries it, or returns `undefined` for a
+   * body that is not one.
+   */
+  parseGatherResult?(body: string | URLSearchParams | Record<string, unknown>): TelephonyGatherResult | undefined;
+  /** Stops a gather still listening, on a provider whose gather does not end by itself. */
+  endGather?(request: EndGatherRequest, context?: ProviderCallContext): Promise<void>;
   /** Sends a text message. */
   sendMessage?(request: SendMessageRequest, context?: ProviderCallContext): Promise<TelephonyMessage>;
   /**

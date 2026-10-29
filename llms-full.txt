@@ -12284,6 +12284,24 @@ A `TelephonyStreamConfig` has:
 The answer comes back as a `TelephonyWebhookResponse`: the provider, the content type, and the body to
 return. `createVoiceTwiML()` renders TwiML directly, without a client, escaping every value.
 
+What a gather collected arrives in a webhook: Twilio posts it to the gather's `actionUrl`, and Telnyx
+sends it to the call's webhook. `parseGatherResult()` reads either as a `TelephonyGatherResult`: the
+call, what the caller said with how sure the transcription is, the keys they pressed, and whether it is
+`final`. On Telnyx a speech gather transcribes the caller's side of the call: each phrase arrives as
+the caller speaks it, final once they finish it, until `endGather()` stops listening, with an
+`EndGatherRequest` naming the call. A Twilio gather ends by itself, so there `endGather()` has nothing
+to stop.
+
+```ts
+await telephony.answer({ provider: 'telnyx', callId, gather: { input: ['speech'], prompts: ['How can I help?'] } });
+// The call's webhook:
+const heard = telephony.parseGatherResult('telnyx', body);
+if (heard?.final && heard.speech) {
+  await telephony.endGather({ provider: 'telnyx', callId: heard.callId });
+  await respondTo(heard.speech);
+}
+```
+
 ## Calls
 
 `CreateCallRequest` places a call. Give `to` and `from` in E.164 form, and one way to handle the call:
@@ -12360,7 +12378,8 @@ and auth token (the token also validates webhooks), a REST base URL, and a `fetc
 `TelnyxTelephonyProvider` implements all of it too, on Telnyx's Call Control API. Its
 `TelnyxTelephonyProviderConfig` takes the API key, the Call Control application calls are placed
 through, the messaging profile messages are sent through, the public key webhooks are verified with,
-the voice and language it speaks in, a base URL, a `fetch`, and a clock. It runs on any runtime with
+the voice and language it speaks in and a speech gather listens for, the `transcriptionEngine` that
+transcribes one (Telnyx's own default unless named), a base URL, a `fetch`, and a clock. It runs on any runtime with
 `fetch` and Web Crypto. `TelephonyProviderInfo.supports` says, for each provider, whether it
 transfers, conferences, records, and messages.
 
@@ -12402,8 +12421,10 @@ again; the day before its 30 days end it is there, and the day after a sweep rem
 ## Limitations
 
 - Twilio and Telnyx are the bundled providers; another implements `TelephonyProvider`.
-- On Telnyx, a gather collects keypad digits, not speech, and there is no redirect to another webhook.
-  A stream carries no custom parameters, so they ride in its URL, which your socket server reads.
+- On Telnyx, a speech gather listens until `endGather()`: its `timeoutSeconds` and `speechTimeout` are
+  for keys alone, and the application decides when the caller has said enough. There is no redirect
+  to another webhook. A stream carries no custom parameters, so they ride in its URL, which your socket
+  server reads.
 - On Telnyx, a number's calls go to its Call Control application and its messages to its messaging
   profile, so updating a number's `voiceUrl` or `smsUrl` changes them for every number that shares
   them.
@@ -15259,8 +15280,8 @@ declarations, which carry every doc comment to your editor.
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
 | `nexus-ai-pro` | 366 KB | 100% | none |
-| `nexus-ai-pro/config` | 358 KB | 98% | none |
-| `nexus-ai-pro/core` | 352 KB | 96% | none |
+| `nexus-ai-pro/config` | 359 KB | 98% | none |
+| `nexus-ai-pro/core` | 353 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 228 KB | 62% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 58% | none |
 | `nexus-ai-pro/server/deployments` | 153 KB | 42% | none |
@@ -15330,10 +15351,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 8% | none |
+| `nexus-ai-pro/telephony/telnyx` | 31 KB | 8% | none |
 | `nexus-ai-pro/tracing/otlp` | 30 KB | 8% | none |
 | `nexus-ai-pro/telephony/twilio` | 30 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
-| `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 7% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 7% | none |
 | `nexus-ai-pro/server/tenancy` | 27 KB | 7% | none |

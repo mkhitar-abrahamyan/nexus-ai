@@ -34,6 +34,7 @@ import type {
   TelephonyWebhookResponse,
   TelephonyWebhookValidationRequest,
   UpdatePhoneNumberRequest,
+  TelephonyGatherResult,
 } from '../../types/telephony.js';
 import { TelephonyProviderError } from '../errors.js';
 import { createVoiceTwiML } from '../twiml.js';
@@ -207,6 +208,25 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       durationSeconds,
       // Twilio only sets SipResponseCode/ErrorCode when a call failed to complete normally.
       endedReason: params.ErrorCode || params.SipResponseCode || undefined,
+      raw: params,
+    };
+  }
+
+  /** Parses what a `<Gather>` posted to its action: `SpeechResult` with its `Confidence`, and `Digits`. */
+  parseGatherResult(body: string | URLSearchParams | Record<string, unknown>): TelephonyGatherResult | undefined {
+    const params = toParamRecord(
+      body as string | URLSearchParams | Record<string, string | number | boolean | undefined>,
+    );
+    const callId = params.CallSid;
+    if (!callId || (params.SpeechResult === undefined && params.Digits === undefined)) return undefined;
+    const confidence = numberValue(params.Confidence);
+    return {
+      providerUsed: 'twilio',
+      callId,
+      ...(params.SpeechResult !== undefined ? { speech: params.SpeechResult } : {}),
+      ...(confidence !== undefined ? { confidence } : {}),
+      ...(params.Digits !== undefined ? { digits: params.Digits } : {}),
+      final: true,
       raw: params,
     };
   }

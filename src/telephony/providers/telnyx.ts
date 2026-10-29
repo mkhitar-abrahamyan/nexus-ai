@@ -39,6 +39,8 @@ import type {
   TelephonyWebhookValidationRequest,
   TransferCallRequest,
   UpdatePhoneNumberRequest,
+  EndGatherRequest,
+  TelephonyGatherResult,
 } from '../../types/telephony.js';
 import { decodeBase64 } from '../../utils/base64.js';
 import { TelephonyProviderError } from '../errors.js';
@@ -57,8 +59,13 @@ export interface TelnyxTelephonyProviderConfig {
   webhookToleranceSeconds?: number;
   /** The voice the call speaks in. Defaults to `female`. */
   voice?: string;
-  /** The language the call speaks in. Defaults to `en-US`. */
+  /** The language the call speaks in, and a speech gather listens for. Defaults to `en-US`. */
   language?: string;
+  /**
+   * The engine that transcribes a speech gather, as Telnyx names it: `Google`, `Telnyx`, `Deepgram`, or
+   * `Azure`. Defaults to Telnyx's own default.
+   */
+  transcriptionEngine?: string;
   /** API base URL. Defaults to `https://api.telnyx.com/v2`. */
   baseUrl?: string;
   /** Replaces the global `fetch`. */
@@ -137,16 +144,14 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   }
 
   /**
-   * Answers a call, then speaks, collects digits, plays audio, dials, or hangs up, as the request
-   * asks, each as a command on the call. Resolves to the empty response the webhook returns.
-   * Telnyx gathers keypad digits, not speech, and has no redirect to another webhook.
+   * Answers a call, then speaks, gathers speech or digits, plays audio, dials, or hangs up, as the
+   * request asks, each as a command on the call. Resolves to the empty response the webhook returns.
+   * A speech gather transcribes the caller until `endGather()`; Telnyx has no redirect to another
+   * webhook.
    */
   async answerCall(request: AnswerCallRequest, context?: ProviderCallContext): Promise<TelephonyWebhookResponse> {
     if (request.redirectUrl) {
       throw new TelephonyProviderError('Telnyx calls are controlled by command, not redirected to a webhook', 'telnyx');
-    }
-    if (request.gather?.input && !request.gather.input.includes('dtmf')) {
-      throw new TelephonyProviderError('Telnyx gathers keypad digits, not speech', 'telnyx');
     }
     const sent: Array<{ action: string; body: Payload }> = [];
     const run = async (action: string, body: Payload) => {
@@ -165,14 +170,25 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
     }
     if (request.gather) {
       const gather = request.gather;
+      const input = gather.input ?? ['dtmf'];
+      // Speech is transcribed from the caller's side alone, so prompts spoken meanwhile are not heard as theirs.
+      if (input.includes('speech')) {
+        await run('transcription_start', {
+          language: voice.language,
+          transcription_tracks: 'inbound',
+          ...(this.config.transcriptionEngine ? { transcription_engine: this.config.transcriptionEngine } : {}),
+        });
+      }
       const digits = {
         ...(gather.numDigits !== undefined ? { minimum_digits: 1, maximum_digits: gather.numDigits } : {}),
         ...(gather.timeoutSeconds !== undefined ? { timeout_millis: gather.timeoutSeconds * 1_000 } : {}),
         ...(gather.finishOnKey ? { terminating_digit: gather.finishOnKey } : {}),
       };
-      if (gather.prompts?.length)
-        await run('gather_using_speak', { payload: gather.prompts.join(' '), ...voice, ...digits });
-      else await run('gather', digits);
+      if (input.includes('dtmf')) {
+        if (gather.prompts?.length)
+          await run('gather_using_speak', { payload: gather.prompts.join(' '), ...voice, ...digits });
+        else await run('gather', digits);
+      } else if (gather.prompts?.length) await run('speak', { payload: gather.prompts.join(' '), ...voice });
     }
     if (request.dial?.conference) {
       await this.joinConference({
@@ -543,6 +559,38 @@ export class TelnyxTelephonyProvider implements TelephonyProvider {
   /** Stops recording a call. */
   async stopRecording(request: StopRecordingRequest, context?: ProviderCallContext): Promise<void> {
     await this.command(request.callId, 'record_stop', {}, request.signal, context);
+  }
+
+  /**
+   * Parses what a gather collected: `call.gather.ended`, the keys pressed, and `call.transcription`,
+   * what the caller said, final once they finish a phrase.
+   */
+  parseGatherResult(body: string | URLSearchParams | Record<string, unknown>): TelephonyGatherResult | undefined {
+    const event = webhookEvent(body);
+    if (!event) return undefined;
+    const { type, payload } = event;
+    const callId = stringValue(payload.call_control_id) ?? '';
+    if (type === 'call.gather.ended') {
+      return { providerUsed: 'telnyx', callId, digits: stringValue(payload.digits) ?? '', final: true, raw: event.raw };
+    }
+    if (type !== 'call.transcription') return undefined;
+    const data = objectValue(payload.transcription_data);
+    const speech = stringValue(data.transcript);
+    if (speech === undefined) return undefined;
+    const confidence = numberValue(data.confidence);
+    return {
+      providerUsed: 'telnyx',
+      callId,
+      speech,
+      ...(confidence !== undefined ? { confidence } : {}),
+      final: data.is_final === true,
+      raw: event.raw,
+    };
+  }
+
+  /** Stops the transcription a speech gather started. */
+  async endGather(request: EndGatherRequest, context?: ProviderCallContext): Promise<void> {
+    await this.command(request.callId, 'transcription_stop', {}, request.signal, context);
   }
 
   /** Parses a `call.recording.saved` webhook. */

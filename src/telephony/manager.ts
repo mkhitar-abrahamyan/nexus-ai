@@ -29,6 +29,8 @@ import type {
   TelephonyWebhookResponse,
   TelephonyWebhookValidationRequest,
   UpdatePhoneNumberRequest,
+  EndGatherRequest,
+  TelephonyGatherResult,
 } from '../types/telephony.js';
 import { TelephonyCapabilityError, TelephonyProviderError } from './errors.js';
 import { FamilyTelemetry, type FamilyRuntime } from '../ops/family-telemetry.js';
@@ -53,6 +55,8 @@ type TelephonyCapability =
   | 'parseRecordingCallback'
   | 'downloadRecording'
   | 'deleteRecording'
+  | 'parseGatherResult'
+  | 'endGather'
   | 'sendMessage'
   | 'parseMessageWebhook';
 
@@ -234,6 +238,29 @@ export class TelephonyManager {
     if (!stopRecording) throw new TelephonyCapabilityError(provider.info.name, 'call recording');
     return this.call('stopRecording', provider, request, 'Telephony recording stop', (context) =>
       stopRecording.call(provider, request, context),
+    );
+  }
+
+  /** Parses what a gather collected, speech or keys, through the named provider. */
+  parseGatherResult(
+    providerName: string,
+    body: string | URLSearchParams | Record<string, unknown>,
+  ): TelephonyGatherResult | undefined {
+    const provider = this.resolveProvider('parseGatherResult', providerName);
+    if (!provider.parseGatherResult) throw new TelephonyCapabilityError(provider.info.name, 'gather results');
+    return provider.parseGatherResult(body);
+  }
+
+  /**
+   * Stops a gather still listening. On a provider whose gather ends by itself, such as Twilio's,
+   * there is nothing to stop, and this resolves at once.
+   */
+  async endGather(request: EndGatherRequest): Promise<void> {
+    const provider = this.resolveProvider('endGather', request.provider || this.config.defaultProvider);
+    const endGather = provider.endGather;
+    if (!endGather) return;
+    return this.call('endGather', provider, request, 'Telephony gather end', (context) =>
+      endGather.call(provider, request, context),
     );
   }
 

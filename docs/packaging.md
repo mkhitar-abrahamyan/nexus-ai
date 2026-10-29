@@ -94,8 +94,8 @@ declarations, which carry every doc comment to your editor.
 | Import | Size | Share of root | Third-party install |
 | --- | --- | --- | --- |
 | `nexus-ai-pro` | 366 KB | 100% | none |
-| `nexus-ai-pro/config` | 358 KB | 98% | none |
-| `nexus-ai-pro/core` | 352 KB | 96% | none |
+| `nexus-ai-pro/config` | 359 KB | 98% | none |
+| `nexus-ai-pro/core` | 353 KB | 96% | none |
 | `nexus-ai-pro/realtime` | 228 KB | 62% | none |
 | `nexus-ai-pro/deep-agent` | 213 KB | 58% | none |
 | `nexus-ai-pro/server/deployments` | 153 KB | 42% | none |
@@ -165,10 +165,10 @@ declarations, which carry every doc comment to your editor.
 | `nexus-ai-pro/agent/middleware` | 33 KB | 9% | none |
 | `nexus-ai-pro/evals` | 32 KB | 9% | none |
 | `nexus-ai-pro/insights` | 31 KB | 8% | none |
+| `nexus-ai-pro/telephony/telnyx` | 31 KB | 8% | none |
 | `nexus-ai-pro/tracing/otlp` | 30 KB | 8% | none |
 | `nexus-ai-pro/telephony/twilio` | 30 KB | 8% | none |
 | `nexus-ai-pro/realtime/openai-websocket` | 29 KB | 8% | none |
-| `nexus-ai-pro/telephony/telnyx` | 29 KB | 8% | none |
 | `nexus-ai-pro/images/inputs` | 27 KB | 7% | none |
 | `nexus-ai-pro/evaluate/generate` | 27 KB | 7% | none |
 | `nexus-ai-pro/server/tenancy` | 27 KB | 7% | none |

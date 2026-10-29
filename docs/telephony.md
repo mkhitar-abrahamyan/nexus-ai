@@ -286,6 +286,24 @@ A `TelephonyStreamConfig` has:
 The answer comes back as a `TelephonyWebhookResponse`: the provider, the content type, and the body to
 return. `createVoiceTwiML()` renders TwiML directly, without a client, escaping every value.
 
+What a gather collected arrives in a webhook: Twilio posts it to the gather's `actionUrl`, and Telnyx
+sends it to the call's webhook. `parseGatherResult()` reads either as a `TelephonyGatherResult`: the
+call, what the caller said with how sure the transcription is, the keys they pressed, and whether it is
+`final`. On Telnyx a speech gather transcribes the caller's side of the call: each phrase arrives as
+the caller speaks it, final once they finish it, until `endGather()` stops listening, with an
+`EndGatherRequest` naming the call. A Twilio gather ends by itself, so there `endGather()` has nothing
+to stop.
+
+```ts
+await telephony.answer({ provider: 'telnyx', callId, gather: { input: ['speech'], prompts: ['How can I help?'] } });
+// The call's webhook:
+const heard = telephony.parseGatherResult('telnyx', body);
+if (heard?.final && heard.speech) {
+  await telephony.endGather({ provider: 'telnyx', callId: heard.callId });
+  await respondTo(heard.speech);
+}
+```
+
 ## Calls
 
 `CreateCallRequest` places a call. Give `to` and `from` in E.164 form, and one way to handle the call:
@@ -362,7 +380,8 @@ and auth token (the token also validates webhooks), a REST base URL, and a `fetc
 `TelnyxTelephonyProvider` implements all of it too, on Telnyx's Call Control API. Its
 `TelnyxTelephonyProviderConfig` takes the API key, the Call Control application calls are placed
 through, the messaging profile messages are sent through, the public key webhooks are verified with,
-the voice and language it speaks in, a base URL, a `fetch`, and a clock. It runs on any runtime with
+the voice and language it speaks in and a speech gather listens for, the `transcriptionEngine` that
+transcribes one (Telnyx's own default unless named), a base URL, a `fetch`, and a clock. It runs on any runtime with
 `fetch` and Web Crypto. `TelephonyProviderInfo.supports` says, for each provider, whether it
 transfers, conferences, records, and messages.
 
@@ -404,8 +423,10 @@ again; the day before its 30 days end it is there, and the day after a sweep rem
 ## Limitations
 
 - Twilio and Telnyx are the bundled providers; another implements `TelephonyProvider`.
-- On Telnyx, a gather collects keypad digits, not speech, and there is no redirect to another webhook.
-  A stream carries no custom parameters, so they ride in its URL, which your socket server reads.
+- On Telnyx, a speech gather listens until `endGather()`: its `timeoutSeconds` and `speechTimeout` are
+  for keys alone, and the application decides when the caller has said enough. There is no redirect
+  to another webhook. A stream carries no custom parameters, so they ride in its URL, which your socket
+  server reads.
 - On Telnyx, a number's calls go to its Call Control application and its messages to its messaging
   profile, so updating a number's `voiceUrl` or `smsUrl` changes them for every number that shares
   them.
@@ -433,6 +454,7 @@ specific entry point that provides it.
 | `DeleteRecordingRequest` | interface | Deletes a recording at the provider, once it is kept elsewhere. |
 | `DownloadRecordingRequest` | interface | Fetches a recording's audio from the provider. |
 | `EndCallRequest` | interface | Ends a call. |
+| `EndGatherRequest` | interface | Stops a gather still listening: on Telnyx, the transcription a speech gather started. |
 | `GetCallRequest` | interface | Looks up one call. |
 | `JoinConferenceRequest` | interface | Puts a call into a conference. |
 | `KeptRecording` | interface | A recording kept. |
@@ -456,6 +478,7 @@ specific entry point that provides it.
 | `TelephonyDialConfig` | interface | Connects the caller to someone else: a number, a SIP address, or a conference. |
 | `TelephonyDtmfEvent` | interface | A keypad digit the caller pressed during a stream. |
 | `TelephonyGatherConfig` | interface | Collects spoken input or keypad digits from the caller. |
+| `TelephonyGatherResult` | interface | What a caller gave a gather: what they said, the keys they pressed, or both. |
 | `TelephonyHttpMethod` | type | HTTP method a provider uses to call your webhook. |
 | `TelephonyManager` | class | Routes telephony operations to registered providers: the one a request names, the configured default, or the first that supports the operation. |
 | `TelephonyMarkEvent` | interface | Confirms that audio you sent has finished playing, so you know what the caller has heard. |

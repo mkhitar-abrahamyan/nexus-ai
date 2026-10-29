@@ -86,6 +86,10 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 - **Images in the realtime record.** An image sent in a realtime conversation is kept as an `ImageItem`,
   with its digest and, unless `recordImages` is `digest`, the image, and a resumed session gives it
   back to the model. Video frames are not kept.
+- **Telnyx gathers speech.** A gather that listens for speech on Telnyx transcribes the caller's side of
+  the call, with its prompts spoken and keys still taken, until `endGather()`. `parseGatherResult()`
+  reads what a gather collected on either provider, Twilio's `SpeechResult` and `Digits` or Telnyx's
+  `call.transcription` and `call.gather.ended`, as one `TelephonyGatherResult`.
 
 ### Changed
 
