@@ -281,9 +281,23 @@ Findings, each fixed in 2.5 with a test in `studio/test/security.test.ts`:
 - **A proposal's pull-request link was rendered as stored.** The content security policy already
   blocked a `javascript:` address. Only `http` and `https` links are rendered now.
 
+Signing in and tenants, reviewed for 2.22, with tests in `studio/test/signin.test.ts` and
+`studio/test/tenants.test.ts`:
+- The provider's configuration must name the issuer the studio was given. An ID token must verify
+  against the provider's keys, name that issuer and the studio's client as its audience, and carry
+  the sign-in's nonce; a token for several clients must name the studio as `azp`.
+- The state, nonce, and PKCE verifier travel in a cookie signed for that purpose alone, for ten
+  minutes, so a callback from another browser, a late one, or a changed one is refused, and a sign-in
+  cookie is never taken as a session.
+- The page to come back to is always a path on the studio, never another site.
+- A tenant's people read only what `tenantSources` gives for their tenant. The studio itself keeps
+  comments and audit entries to their tenant, whatever the store does, and binds the page token to it.
+  `headerAuth()` with a tenant header refuses a request that lacks it.
+
 Documented limitations, which the studio guide states:
-- The studio has no tenants of its own. Every account sees every source the studio is given, so a
-  tenant's people get a studio over that tenant's `tenantScope()` views.
+- Someone without a tenant reads the studio's own sources, the operators' view.
+- A session is a signed cookie, so one person's cannot be ended before it expires; rotating the
+  sign-in secret signs everyone out. Signing out is a plain link, which another site can follow.
 - A page token stays valid while the secret, the user, and their role do. Rotate `secret` to revoke
   every page at once.
 - Someone without a session who opens another person's personal link is signed in as that person.

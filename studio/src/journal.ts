@@ -15,6 +15,8 @@ export interface StudioAuditEntry {
   method: string;
   /** The path, which names the target, such as `/api/prompts/answer/promote`. */
   path: string;
+  /** The user's tenant, when they belong to one. */
+  tenant?: string;
   /** `ok` when it happened, `denied` when their role did not allow it, `failed` when it went wrong. */
   outcome: 'ok' | 'denied' | 'failed';
   /** The HTTP status the studio answered with. */
@@ -27,13 +29,22 @@ export interface StudioAuditEntry {
 export interface StudioAuditLog {
   /** Records an entry. */
   append(entry: StudioAuditEntry): Promise<void> | void;
-  /** Entries, newest first, optionally for one user or action, or since a time. */
-  list(query?: {
-    user?: string;
-    action?: string;
-    since?: string;
-    limit?: number;
-  }): Promise<StudioAuditEntry[]> | StudioAuditEntry[];
+  /** Entries, newest first, optionally for one user, action, or tenant, or since a time. */
+  list(query?: StudioAuditQuery): Promise<StudioAuditEntry[]> | StudioAuditEntry[];
+}
+
+/** Which audit entries to list. */
+export interface StudioAuditQuery {
+  /** One user's. */
+  user?: string;
+  /** One action's, such as `prompt.promote`. */
+  action?: string;
+  /** One tenant's. */
+  tenant?: string;
+  /** Those at or after this ISO-8601 time. */
+  since?: string;
+  /** At most this many. Defaults to 200. */
+  limit?: number;
 }
 
 /** A comment on something in the studio. */
@@ -51,6 +62,8 @@ export interface StudioComment {
   author: string;
   /** The author's display name, when known. */
   authorName?: string;
+  /** The author's tenant, when they belong to one: only that tenant's people see the comment. */
+  tenant?: string;
   /** ISO-8601 time. */
   at: string;
 }
@@ -90,7 +103,7 @@ export class MemoryStudioJournal implements StudioAuditLog, StudioCommentStore {
   }
 
   /** Audit entries, newest first. */
-  list(query: { user?: string; action?: string; since?: string; limit?: number } = {}): StudioAuditEntry[] {
+  list(query: StudioAuditQuery = {}): StudioAuditEntry[] {
     return filterAudit([...this.entries].reverse(), query);
   }
 
@@ -120,9 +133,7 @@ export class FileStudioJournal implements StudioAuditLog, StudioCommentStore {
   }
 
   /** Audit entries, newest first. */
-  async list(
-    query: { user?: string; action?: string; since?: string; limit?: number } = {},
-  ): Promise<StudioAuditEntry[]> {
+  async list(query: StudioAuditQuery = {}): Promise<StudioAuditEntry[]> {
     return filterAudit((await this.read<StudioAuditEntry>('audit.jsonl')).reverse(), query);
   }
 
@@ -170,13 +181,11 @@ export function commentId(): string {
   return `c-${randomUUID()}`;
 }
 
-function filterAudit(
-  entries: StudioAuditEntry[],
-  query: { user?: string; action?: string; since?: string; limit?: number },
-): StudioAuditEntry[] {
+function filterAudit(entries: StudioAuditEntry[], query: StudioAuditQuery): StudioAuditEntry[] {
   return entries
     .filter((entry) => !query.user || entry.user === query.user)
     .filter((entry) => !query.action || entry.action === query.action)
+    .filter((entry) => query.tenant === undefined || entry.tenant === query.tenant)
     .filter((entry) => !query.since || entry.at >= query.since)
     .slice(0, query.limit ?? 200);
 }

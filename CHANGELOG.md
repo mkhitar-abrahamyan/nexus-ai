@@ -90,6 +90,12 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   the call, with its prompts spoken and keys still taken, until `endGather()`. `parseGatherResult()`
   reads what a gather collected on either provider, Twilio's `SpeechResult` and `Digits` or Telnyx's
   `call.transcription` and `call.gather.ended`, as one `TelephonyGatherResult`.
+- **The studio signs people in, and serves many tenants.** `oidcSignIn()` signs people in with any
+  OpenID Connect provider, with no proxy in front: the code flow with PKCE, a state, and a nonce, the ID
+  token verified against the provider's keys, and a signed session cookie that replicas share, with
+  sign-out at the provider too. A person's `tenant`, from a claim, a header, or the users file, picks
+  the sources they read, from `tenantSources`; they see their tenant's comments and audit entries
+  alone, and their page token is bound to it.
 
 ### Changed
 

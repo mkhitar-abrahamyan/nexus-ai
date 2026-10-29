@@ -22,6 +22,11 @@ export interface StudioUser {
   email?: string;
   /** What they may do. */
   role: StudioRole;
+  /**
+   * The tenant they belong to. They read what `StudioOptions.tenantSources` gives for it, and see
+   * their tenant's comments and audit entries alone. Without one, they read the studio's own sources.
+   */
+  tenant?: string;
 }
 
 /** What the server knows about a request beyond the request itself. */
@@ -39,6 +44,20 @@ export type StudioAuthenticator = (
   request: Request,
   info: StudioRequestInfo,
 ) => Promise<StudioUser | undefined> | StudioUser | undefined;
+
+/**
+ * A sign-in flow the studio runs itself, such as `oidcSignIn()`. A person who opens the studio
+ * without a session is sent to its `/auth/login`, with the page to come back to as `return`.
+ */
+export interface StudioSignIn {
+  /** Who a request's session is from, or `undefined` when it has none. */
+  authenticate: StudioAuthenticator;
+  /**
+   * Answers a request under `/auth/`: `/auth/login` starts signing in, and the other paths are the
+   * flow's own. `undefined` for a path it does not serve.
+   */
+  handle(request: Request, info: StudioRequestInfo): Promise<Response | undefined>;
+}
 
 /** Whether a user's role includes another. */
 export function hasRole(user: StudioUser | undefined, role: StudioRole): boolean {
@@ -84,6 +103,11 @@ export interface HeaderAuthOptions {
   /** The role of a user `role` does not decide, when it is not given. Defaults to `viewer`. */
   defaultRole?: StudioRole;
   /**
+   * The header holding the user's tenant. Once it is named, a request without it is refused, so a
+   * proxy that loses it never lets someone read every tenant's sources.
+   */
+  tenant?: string;
+  /**
    * A header only your proxy sets, and the value it sets, so a request that bypassed the proxy cannot
    * claim an identity. Give this or `trustedProxies`.
    */
@@ -125,7 +149,9 @@ export function headerAuth(options: HeaderAuthOptions): StudioAuthenticator {
       : (options.defaultRole ?? 'viewer');
     if (!role) return undefined;
     const name = options.name ? request.headers.get(options.name)?.trim() : undefined;
-    return { id: user, role, ...(email ? { email } : {}), ...(name ? { name } : {}) };
+    const tenant = options.tenant ? request.headers.get(options.tenant)?.trim() : undefined;
+    if (options.tenant && !tenant) return undefined;
+    return { id: user, role, ...(email ? { email } : {}), ...(name ? { name } : {}), ...(tenant ? { tenant } : {}) };
   };
 }
 
@@ -140,6 +166,8 @@ export interface BearerAuthOptions {
   role: (claims: Record<string, unknown>) => StudioRole | undefined;
   /** The user's id from the claims. Defaults to `sub`. */
   id?: (claims: Record<string, unknown>) => string | undefined;
+  /** The user's tenant from the claims, or `undefined` for someone who belongs to none. */
+  tenant?: (claims: Record<string, unknown>) => string | undefined;
 }
 
 /**
@@ -162,9 +190,11 @@ export function bearerAuth(options: BearerAuthOptions): StudioAuthenticator {
     const id = options.id ? options.id(claims) : typeof claims.sub === 'string' ? claims.sub : undefined;
     const role = options.role(claims);
     if (!id || !role) return undefined;
+    const tenant = options.tenant?.(claims);
     return {
       id,
       role,
+      ...(tenant === undefined ? {} : { tenant }),
       ...(typeof claims.email === 'string' ? { email: claims.email } : {}),
       ...(typeof claims.name === 'string' ? { name: claims.name } : {}),
     };
@@ -183,12 +213,14 @@ export function anyOf(...authenticators: StudioAuthenticator[]): StudioAuthentic
 }
 
 /**
- * The token a user's page sends with every change, derived from a server secret and the user's id. A
- * page on another site can neither read it nor set the header it travels in, which is what stops a
- * signed-in person's browser from being used against the studio.
+ * The token a user's page sends with every change, derived from a server secret and the user's id,
+ * role, and tenant. A page on another site can neither read it nor set the header it travels in, which
+ * is what stops a signed-in person's browser from being used against the studio.
  */
 export function csrfToken(secret: string, user: StudioUser): string {
-  return createHmac('sha256', secret).update(`${user.id}\u0000${user.role}`).digest('base64url');
+  // Without a tenant, the token is what it always was, so pages stay valid across an upgrade.
+  const tenant = user.tenant === undefined ? '' : `\u0000${user.tenant}`;
+  return createHmac('sha256', secret).update(`${user.id}\u0000${user.role}${tenant}`).digest('base64url');
 }
 
 function normalizeAddress(address: string | undefined): string {

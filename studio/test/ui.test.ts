@@ -11,6 +11,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { MemoryTraceStore } from 'nexus-ai-pro/tracing';
 import type { Run } from 'nexus-ai-pro/tracing';
+import { personalTokens } from '../src/auth.js';
+import { oidcSignIn } from '../src/oidc.js';
 import { startStudio } from '../src/server.js';
 
 function chromium(): string | undefined {
@@ -121,6 +123,40 @@ test('a run’s events and links, in the trace view a link to the run opens on',
       /href="#\/traces\/trace-ui\/run-branch">research \(run-branch\)<\/a> nexus\.link=previous_step/,
     );
     assert.match(listed, /href="#\/traces\/trace-upstream\/run-queued">trace-upstream \/ run-queued<\/a>/);
+  } finally {
+    await running.close();
+  }
+});
+
+test('the header says who is signed in, in which tenant, and offers to sign out when the studio signs people in', {
+  skip: browser || process.env.CI ? false : 'no Chromium-family browser is installed',
+  timeout: 120_000,
+}, async () => {
+  assert.ok(browser, 'a Chromium-family browser, which CI has');
+  const personal = 'ana-token-0123456789abcdef';
+  const running = await startStudio(
+    {},
+    {
+      port: 0,
+      auth: personalTokens([{ id: 'ana@example.com', name: 'Ana', role: 'admin', tenant: 'acme', token: personal }]),
+      // Never reached here: the link signs Ana in first.
+      signIn: oidcSignIn({
+        issuer: 'https://login.example.com',
+        clientId: 'nexus-studio',
+        role: () => 'viewer',
+        secret: 'the-studio-session-secret-0123456789',
+        fetch: async () => new Response('offline', { status: 503 }),
+      }),
+      tenantSources: () => ({}),
+    },
+  );
+  try {
+    const dom = await rendered(browser as string, `${new URL(running.url).origin}/?token=${personal}`);
+    assert.match(
+      dom,
+      /<span id="who" class="who">Ana · acme · admin · <a href="\/auth\/logout">Sign out<\/a><\/span>/,
+      `the header rendered:\n${dom.slice(0, 1_500)}`,
+    );
   } finally {
     await running.close();
   }

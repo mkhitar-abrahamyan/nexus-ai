@@ -12871,7 +12871,8 @@ Source: https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md
 
 A UI for what a nexus-ai-pro application records: traces, threads, approvals, experiments, prompts,
 context bundles, issues found in traces, proposed fixes, costs, provider health, and the operation
-queue. Local and token-only by default, or shared by a team with accounts and roles. It is a separate package,
+queue. Local and token-only by default, or shared by a team with accounts and roles, signed in with
+your identity provider, and across tenants. It is a separate package,
 `nexus-ai-pro-studio`, so the core install never carries a UI. It runs wherever you start it — your
 machine, or a server your team reaches — reads your application's own stores through the adapters
 it already uses, and needs no hosted service.
@@ -13037,6 +13038,8 @@ Four authenticators come bundled:
   claims to a role.
 - `anyOf()` tries several in turn, such as bearer tokens for scripts and a proxy for people.
 
+Or the studio signs people in itself, with no proxy in front: see [Signing people in](#signing-people-in).
+
 ```js
 // studio.config.mjs
 import { headerAuth, FileStudioJournal } from 'nexus-ai-pro-studio';
@@ -13083,6 +13086,94 @@ With accounts, the studio can safely listen beyond the loopback interface:
 
 `options.insights.slowMs` sets the latency the issues view reports as slow.
 
+## Signing people in
+
+`oidcSignIn()` signs people in with any OpenID Connect provider, given its issuer, the studio's
+client id, and a role for each person. Give the `StudioSignIn` it returns to the studio as `signIn`:
+
+```js
+// studio.config.mjs
+import { FileStudioJournal, oidcSignIn } from 'nexus-ai-pro-studio';
+
+export default { traces, prompts: registry };
+const journal = new FileStudioJournal('/var/lib/nexus-studio');
+export const options = {
+  host: '0.0.0.0',
+  allowedHosts: ['studio.example.com'],
+  signIn: oidcSignIn({
+    issuer: 'https://login.example.com',
+    clientId: 'nexus-studio',
+    clientSecret: process.env.STUDIO_CLIENT_SECRET,
+    redirectUri: 'https://studio.example.com/auth/callback',
+    role: ({ groups = [] }) => (groups.includes('ml-admins') ? 'admin' : groups.includes('ml') ? 'editor' : undefined),
+    secret: process.env.STUDIO_SECRET,
+  }),
+  secret: process.env.STUDIO_SECRET,
+  audit: journal,
+  comments: journal,
+};
+```
+
+Someone who opens the studio without a session is sent to `/auth/login`, which sends them on to the
+provider: the authorization code flow, with PKCE, a state, and a nonce, kept in a signed cookie for the
+ten minutes they have to finish. `/auth/callback` exchanges the code, verifies the ID token against
+the provider's keys, its issuer, the client as its audience, and the nonce, and takes them back to the
+page they opened. `/auth/logout` signs them out, and out of the provider too when its configuration
+has an `end_session_endpoint`. The page shows a link to it.
+
+`OidcSignInOptions`:
+
+- `role` decides each person's role from their ID token's claims, and `undefined` keeps them out;
+- `id` picks their id, `sub` by default, and `tenant` their tenant;
+- `clientSecret` makes a confidential client, sent in a Basic header, or in the body when the
+  provider takes only that. Without it the studio signs in as a public client, by PKCE alone;
+- `scopes` replaces `profile email`; `openid` is always asked for;
+- `redirectUri` is the callback as registered with the provider. It defaults to `/auth/callback` on
+  the address the request came to, so set it behind a proxy;
+- `secret` signs the cookies: at least 32 characters, the same on every replica;
+- `maxAgeSec` is how long a session lasts, 8 hours by default.
+
+The session is a signed, HTTP-only cookie, `SIGN_IN_COOKIE`, so replicas that share the secret share
+sessions, with no store. It is `SameSite=Lax`, so the page the provider sends someone back to opens
+signed in; a change still needs the page token. `auth`, when also given, is asked first, so scripts
+send bearer tokens to the same studio. Any flow of the same shape works as `signIn`: an
+`authenticate` for a request's session, and a `handle` for the paths under `/auth/`.
+
+`oidcSignIn()` needs nexus-ai-pro 2.3 or newer, for its token verifier.
+
+## Tenants
+
+One studio can serve many tenants. A `StudioUser` with a `tenant` reads the sources
+`tenantSources` gives for it, instead of the studio's own:
+
+```js
+// studio.config.mjs
+import { tenantScope } from 'nexus-ai-pro/tenancy';
+
+export default {}; // Everyone belongs to a tenant, so the studio's own sources are empty.
+export const options = {
+  signIn: oidcSignIn({ ...provider, tenant: (claims) => claims.org_id }),
+  tenantSources: async (tenant) =>
+    (await customers.has(tenant)) ? tenantScope(tenant, { traces, prompts, datasets, experiments }) : undefined,
+};
+```
+
+Each tenant's sources are opened once and kept. A tenant `tenantSources` does not know, by returning
+`undefined`, is refused with `403`, as is anyone with a tenant on a studio given no `tenantSources`.
+A tenant whose sources fail to open is an error, and is opened again on the next request.
+
+- Comments record their author's tenant, and only that tenant's people see them.
+- Audit entries record the tenant too. A tenant's admin reads their tenant's entries alone, whatever
+  the audit log does with the filter; an admin without a tenant reads every entry, or one tenant's with
+  `?tenant=`. A `StudioAuditQuery` is what `StudioAuditLog.list()` is asked.
+- A page token is bound to its tenant, so a page in one tenant cannot carry a change in another.
+
+The authenticators carry the tenant: `oidcSignIn()` and `bearerAuth()` take a `tenant` function of
+the claims, and `headerAuth()` a `tenant` header, after which a request without it is refused. Each
+person given to `personalTokens()`, and each entry of `--users`, may name a `tenant`.
+
+Someone without a tenant reads the studio's own sources: the operators' view.
+
 ## Pieces you can reuse
 
 `layoutGraph()`, re-exported from `nexus-ai-pro/graph/visualize`, lays a graph out in layers for
@@ -13094,9 +13185,12 @@ up — cycles — are marked, so they can be drawn around the side.
 
 ## Limitations
 
-- The studio has no tenants of its own. Every account sees every source the studio is given, so
-  give a tenant's people a studio over `tenantScope()` views of the stores, from
-  `nexus-ai-pro/tenancy`.
+- Someone without a tenant reads the studio's own sources. Give a studio where everyone belongs to a
+  tenant empty sources of its own.
+- Each tenant's sources stay open while the studio runs.
+- A session is a signed cookie, not a record, so one person's cannot be ended before it expires.
+  Rotate the sign-in `secret` to sign everyone out. A new role applies at the next sign-in.
+- Signing out is a plain link, so another site can sign someone out of the studio, though never in.
 - A page token stays valid while the `secret`, the user, and their role do. Rotate the secret to
   revoke every page at once.
 - Someone without a session who opens another person's personal link is signed in as that person.
@@ -13106,8 +13200,6 @@ up — cycles — are marked, so they can be drawn around the side.
   graph given without a way to list threads can only open a thread by id.
 - Without `rollups`, the costs view reads up to 100,000 runs in its window, which is slow on a very
   large trace store. Give it rollups.
-- Accounts come from an authenticator you configure; the studio does not run a sign-in flow of its
-  own. For people in a browser, put a signing-in proxy in front, or give each person a link.
 
 ---
 

@@ -15,7 +15,7 @@ import type { PromptRegistry } from 'nexus-ai-pro/prompts/registry';
 import type { Deployments } from 'nexus-ai-pro/server/deployments';
 import type { TenantLimiter } from 'nexus-ai-pro/server/tenancy';
 import type { Run, RunQuery, TraceStore } from 'nexus-ai-pro/tracing';
-import type { StudioAuthenticator } from './auth.js';
+import type { StudioAuthenticator, StudioSignIn } from './auth.js';
 import type { StudioAuditLog, StudioCommentStore } from './journal.js';
 
 /** The part of a compiled graph the threads view uses. A compiled graph satisfies it as it is. */
@@ -270,6 +270,18 @@ export interface StudioOptions {
   audit?: StudioAuditLog;
   /** Where comments on runs, review items, proposals, and threads are kept. Defaults to memory. */
   comments?: StudioCommentStore;
+  /**
+   * A sign-in flow the studio runs itself, such as `oidcSignIn()`: someone who opens the studio
+   * without a session is sent through it. `auth`, when also given, is asked first, such as for the
+   * bearer tokens scripts send.
+   */
+  signIn?: StudioSignIn;
+  /**
+   * Each tenant's sources. A user with a `tenant` reads what this returns for it instead of the
+   * studio's own sources; each tenant's are opened once and kept. `undefined` refuses a tenant it
+   * does not know. Without it, a user with a tenant is refused.
+   */
+  tenantSources?: (tenant: string) => StudioSources | undefined | Promise<StudioSources | undefined>;
   /**
    * Signs the per-user tokens pages send with changes. Defaults to a random one per process; give
    * several replicas the same one so a page stays valid across them.

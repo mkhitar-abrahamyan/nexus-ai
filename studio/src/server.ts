@@ -34,7 +34,7 @@ export interface RunningStudio {
 export async function startStudio(sources: StudioSources, options: StartStudioOptions = {}): Promise<RunningStudio> {
   const studio = createStudio(sources, options);
   const host = options.host ?? '127.0.0.1';
-  if (!LOOPBACK.has(host) && !options.auth) {
+  if (!LOOPBACK.has(host) && !options.auth && !options.signIn) {
     process.emitWarning(
       `The studio is listening on ${host} with one shared token. Give it an auth option so each person signs in with a role.`,
       { code: 'NEXUS_STUDIO_SHARED_TOKEN' },

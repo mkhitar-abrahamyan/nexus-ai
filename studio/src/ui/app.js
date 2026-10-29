@@ -2000,7 +2000,14 @@ async function start() {
   try {
     session = await api('/api/session');
     overview = await api('/api/overview');
-    if (overview.accounts) who.textContent = `${session.user.name ?? session.user.id} · ${session.user.role}`;
+    if (overview.accounts) {
+      const { name, id, tenant, role } = session.user;
+      replace(
+        who,
+        [name ?? id, tenant, role].filter(Boolean).join(' · '),
+        overview.signOut && [' · ', h('a', { href: '/auth/logout' }, 'Sign out')],
+      );
+    }
   } catch (error) {
     replace(
       view,

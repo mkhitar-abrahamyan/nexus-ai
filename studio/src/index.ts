@@ -22,6 +22,7 @@ export {
   type StudioAuthenticator,
   type StudioRequestInfo,
   type StudioRole,
+  type StudioSignIn,
   type StudioUser,
 } from './auth.js';
 export { loadConfig, loadSources, loadUsers, parseArgs } from './cli.js';
@@ -31,10 +32,12 @@ export {
   type MemoryStudioJournalOptions,
   type StudioAuditEntry,
   type StudioAuditLog,
+  type StudioAuditQuery,
   type StudioComment,
   type StudioCommentStore,
 } from './journal.js';
 export { type GraphLayout, type LaidOutEdge, type LaidOutNode, layoutGraph } from './layout.js';
+export { type OidcSignInOptions, oidcSignIn, SIGN_IN_COOKIE } from './oidc.js';
 export { createToken, hostAllowed, tokensMatch } from './security.js';
 export { type RunningStudio, type StartStudioOptions, startStudio } from './server.js';
 export type {

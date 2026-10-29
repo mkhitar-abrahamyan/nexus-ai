@@ -68,9 +68,15 @@ export async function loadUsers(file: string): Promise<Array<StudioUser & { toke
   const users = JSON.parse(await readFile(file, 'utf8')) as unknown;
   if (
     !Array.isArray(users) ||
-    users.some((user) => !user || typeof user.id !== 'string' || typeof user.token !== 'string')
+    users.some(
+      (user) =>
+        !user ||
+        typeof user.id !== 'string' ||
+        typeof user.token !== 'string' ||
+        (user.tenant !== undefined && typeof user.tenant !== 'string'),
+    )
   ) {
-    throw new Error(`${file} must be a JSON list of { "id", "role", "token" }`);
+    throw new Error(`${file} must be a JSON list of { "id", "role", "token" }, each with an optional "tenant"`);
   }
   return users as Array<StudioUser & { token: string }>;
 }
@@ -113,10 +119,10 @@ async function main(argv: readonly string[]): Promise<void> {
     .filter(([, value]) => value !== undefined)
     .map(([key]) => key)
     .join(', ');
-  if (settings.auth) {
+  if (settings.auth || settings.signIn) {
     const address = running.url.slice(0, running.url.indexOf('/?'));
     console.log(
-      `Nexus studio is running at ${address}\n\nEach person signs in with their own link or through your proxy.\nSources: ${shown || 'none'}`,
+      `Nexus studio is running at ${address}\n\nEach person signs in ${settings.signIn ? 'with your identity provider' : 'with their own link or through your proxy'}.\nSources: ${shown || 'none'}`,
     );
   } else {
     console.log(`Nexus studio is running. Open:\n\n  ${running.url}\n\nSources: ${shown || 'none'}`);

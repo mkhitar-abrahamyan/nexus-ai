@@ -4,7 +4,8 @@ A studio for [nexus-ai-pro](https://www.npmjs.com/package/nexus-ai-pro): traces,
 experiments, prompts, context bundles, issues found in traces, proposed fixes, deployments and
 canaries, costs, provider health, and the operation queue. It reads your application's own stores through the adapters it
 already uses and needs no hosted service. It runs locally behind a token by default, or is shared by
-a team with accounts, roles, an audit log, and comments.
+a team with accounts, roles, an audit log, and comments, signed in with your OpenID Connect provider,
+and across tenants.
 
 ```bash
 npm install --save-dev nexus-ai-pro-studio

@@ -72,7 +72,14 @@ export class StudioError extends Error {
   }
 }
 
-type Context = { request: Request; url: URL; params: Record<string, string>; user: StudioUser };
+type Context = {
+  request: Request;
+  url: URL;
+  params: Record<string, string>;
+  user: StudioUser;
+  /** What the request reads: the studio's sources, or the user's tenant's. */
+  sources: StudioSources;
+};
 type Handler = (context: Context) => Promise<unknown>;
 
 const UI_FILES: Record<string, string> = {
@@ -100,12 +107,15 @@ const SECURITY_HEADERS: Record<string, string> = {
  * interrupt, submitting a review, promoting a prompt — go through the same APIs the application
  * calls, so the studio can do nothing the application could not.
  */
-export function createStudio(sources: StudioSources, options: StudioOptions = {}): Studio {
+export function createStudio(base: StudioSources, options: StudioOptions = {}): Studio {
   const token = options.token ?? createToken();
   const actor = options.actor ?? 'studio';
   const now = options.now ?? (() => new Date());
   const secret = options.secret ?? createToken();
   const journal = new MemoryStudioJournal();
+  // People sign in when the studio has an authenticator or runs a sign-in flow of its own.
+  const accounts = Boolean(options.auth || options.signIn);
+  const tenantSources = new Map<string, Promise<StudioSources | undefined>>();
   const audit = options.audit ?? journal;
   const comments = options.comments ?? journal;
   // On its single token the studio has one user, who may do everything: the local default.
@@ -129,16 +139,17 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   // The page's own script reads the token here to send it on changes. The session cookie is HTTP-only
   // and same-site, so another site can neither send it nor read this response.
   route('GET', '/api/session', async ({ user }) => ({
-    token: options.auth ? csrfToken(secret, user) : token,
+    token: accounts ? csrfToken(secret, user) : token,
     actor: user.id,
     user,
   }));
 
   // ── Overview ─────────────────────────────────────────────────────
-  route('GET', '/api/overview', async ({ user }) => ({
+  route('GET', '/api/overview', async ({ user, sources }) => ({
     actor: user.id,
     user,
-    accounts: Boolean(options.auth),
+    accounts,
+    signOut: Boolean(options.signIn),
     sources: {
       traces: Boolean(sources.traces),
       graphs: Object.keys(sources.graphs ?? {}),
@@ -165,7 +176,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   }));
 
   // ── Traces ───────────────────────────────────────────────────────
-  route('GET', '/api/traces', async ({ url }) => {
+  route('GET', '/api/traces', async ({ url, sources }) => {
     const store = need(sources.traces, 'traces');
     const limit = intParam(url, 'limit') ?? 50;
     const all = url.searchParams.get('roots') === 'false';
@@ -174,12 +185,12 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     const shown = (all ? runs : runs.filter((run) => !run.parentId)).slice(0, limit);
     return { runs: shown.map(summarizeRun) };
   });
-  route('GET', '/api/traces/:traceId', async ({ params }) => {
+  route('GET', '/api/traces/:traceId', async ({ params, sources }) => {
     const tree = await need(sources.traces, 'traces').tree(params.traceId as string);
     if (!tree) throw notFound('Trace', params.traceId as string);
     return { tree, text: formatTree(tree) };
   });
-  route('GET', '/api/compare/traces', async ({ url }) => {
+  route('GET', '/api/compare/traces', async ({ url, sources }) => {
     const store = need(sources.traces, 'traces');
     const [left, right] = await Promise.all([store.tree(required(url, 'left')), store.tree(required(url, 'right'))]);
     if (!left) throw notFound('Trace', required(url, 'left'));
@@ -189,7 +200,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/runs/:runId/feedback',
-    async ({ request, params, user }) => {
+    async ({ request, params, user, sources }) => {
       const store = need(sources.traces, 'traces');
       if (!store.addFeedback) throw new StudioError('This trace store cannot record feedback', 'UNSUPPORTED', 409);
       const body = await readJson<{ key?: string; score?: number; comment?: string }>(request);
@@ -210,7 +221,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   );
 
   // ── Threads ──────────────────────────────────────────────────────
-  route('GET', '/api/graphs', async () => ({
+  route('GET', '/api/graphs', async ({ sources }) => ({
     graphs: Object.entries(sources.graphs ?? {}).map(([name, source]) => {
       const { graph } = graphSource(source);
       const description = graph.describe();
@@ -227,8 +238,8 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       };
     }),
   }));
-  route('GET', '/api/graphs/:graph/threads', async ({ params }) => {
-    const source = graphNamed(params.graph as string);
+  route('GET', '/api/graphs/:graph/threads', async ({ params, sources }) => {
+    const source = graphNamed(sources, params.graph as string);
     const ids = await threadIdsOf(source);
     const threads = await Promise.all(
       ids.slice(0, 200).map(async (threadId) => {
@@ -238,15 +249,15 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     );
     return { threads, listed: ids.length > 0 || Boolean(source.threads || source.checkpointer?.threadIds) };
   });
-  route('GET', '/api/graphs/:graph/threads/:threadId', async ({ params }) => {
-    const { graph } = graphNamed(params.graph as string);
+  route('GET', '/api/graphs/:graph/threads/:threadId', async ({ params, sources }) => {
+    const { graph } = graphNamed(sources, params.graph as string);
     const checkpoint = await graph.state(params.threadId as string);
     if (!checkpoint) throw notFound('Thread', params.threadId as string);
     const history = await graph.history(params.threadId as string, 50);
     return { checkpoint, history: history.map(summarizeCheckpoint), highlight: checkpoint.next };
   });
-  route('GET', '/api/graphs/:graph/threads/:threadId/steps/:step', async ({ params }) => {
-    const { graph } = graphNamed(params.graph as string);
+  route('GET', '/api/graphs/:graph/threads/:threadId/steps/:step', async ({ params, sources }) => {
+    const { graph } = graphNamed(sources, params.graph as string);
     const checkpoint = await graph.state(params.threadId as string, Number(params.step));
     if (!checkpoint) throw notFound('Step', `${params.threadId}@${params.step}`);
     return { checkpoint };
@@ -254,8 +265,8 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/graphs/:graph/threads/:threadId/fork',
-    async ({ request, params }) => {
-      const { graph } = graphNamed(params.graph as string);
+    async ({ request, params, sources }) => {
+      const { graph } = graphNamed(sources, params.graph as string);
       if (!graph.fork) throw new StudioError('This graph cannot fork threads', 'UNSUPPORTED', 409);
       const body = await readJson<{ step?: number; threadId?: string }>(request);
       return { threadId: await graph.fork(params.threadId as string, body) };
@@ -265,8 +276,8 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/graphs/:graph/threads/:threadId/state',
-    async ({ request, params }) => {
-      const { graph } = graphNamed(params.graph as string);
+    async ({ request, params, sources }) => {
+      const { graph } = graphNamed(sources, params.graph as string);
       if (!graph.updateState) throw new StudioError('This graph cannot edit state', 'UNSUPPORTED', 409);
       const body = await readJson<{ values?: Record<string, unknown>; asNode?: string }>(request);
       if (!body.values || typeof body.values !== 'object') throw badRequest('An edit needs "values"');
@@ -283,8 +294,8 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/graphs/:graph/threads/:threadId/resume',
-    async ({ request, params }) => {
-      const { graph } = graphNamed(params.graph as string);
+    async ({ request, params, sources }) => {
+      const { graph } = graphNamed(sources, params.graph as string);
       const body = await readJson<{ value?: unknown; answers?: Record<string, unknown> }>(request);
       if (body.answers) {
         if (!graph.resumeInterruptsWith)
@@ -298,7 +309,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   );
 
   // ── Inbox ────────────────────────────────────────────────────────
-  route('GET', '/api/inbox', async () => {
+  route('GET', '/api/inbox', async ({ sources }) => {
     const interrupts: Array<Record<string, unknown>> = [];
     for (const [name, raw] of Object.entries(sources.graphs ?? {})) {
       const source = graphSource(raw);
@@ -326,8 +337,8 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/reviews/:queue/claim',
-    async ({ request, params, user }) => {
-      const queue = reviewNamed(params.queue as string);
+    async ({ request, params, user, sources }) => {
+      const queue = reviewNamed(sources, params.queue as string);
       const body = await readJson<{ reviewer?: string }>(request);
       const item = queue.claim(reviewerOf(user, body.reviewer));
       return { item: item ?? null };
@@ -337,8 +348,8 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/reviews/:queue/items/:itemId',
-    async ({ request, params, user }) => {
-      const queue = reviewNamed(params.queue as string);
+    async ({ request, params, user, sources }) => {
+      const queue = reviewNamed(sources, params.queue as string);
       const body = await readJson<{
         reviewer?: string;
         scores?: Array<{ key: string; score: number; comment?: string }>;
@@ -357,8 +368,8 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   );
 
   // ── Datasets and experiments ─────────────────────────────────────
-  route('GET', '/api/datasets', async () => ({ datasets: await need(sources.datasets, 'datasets').list() }));
-  route('GET', '/api/datasets/:name', async ({ params, url }) => {
+  route('GET', '/api/datasets', async ({ sources }) => ({ datasets: await need(sources.datasets, 'datasets').list() }));
+  route('GET', '/api/datasets/:name', async ({ params, url, sources }) => {
     const dataset = await need(sources.datasets, 'datasets').get(
       params.name as string,
       url.searchParams.get('version') ?? undefined,
@@ -366,7 +377,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     if (!dataset) throw notFound('Dataset', params.name as string);
     return { dataset };
   });
-  route('GET', '/api/experiments', async ({ url }) => {
+  route('GET', '/api/experiments', async ({ url, sources }) => {
     const experiments = await need(sources.experiments, 'experiments').list({
       ...(url.searchParams.get('name') ? { name: url.searchParams.get('name') as string } : {}),
       ...(url.searchParams.get('dataset') ? { dataset: url.searchParams.get('dataset') as string } : {}),
@@ -386,12 +397,12 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       })),
     };
   });
-  route('GET', '/api/experiments/:id', async ({ params }) => {
+  route('GET', '/api/experiments/:id', async ({ params, sources }) => {
     const experiment = await need(sources.experiments, 'experiments').get(params.id as string);
     if (!experiment) throw notFound('Experiment', params.id as string);
     return { experiment };
   });
-  route('GET', '/api/compare/experiments', async ({ url }) => {
+  route('GET', '/api/compare/experiments', async ({ url, sources }) => {
     const store = need(sources.experiments, 'experiments');
     const [baseline, candidate] = await Promise.all([
       store.get(required(url, 'baseline')),
@@ -404,12 +415,12 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   });
 
   // ── Prompts ──────────────────────────────────────────────────────
-  route('GET', '/api/prompts', async () => {
+  route('GET', '/api/prompts', async ({ sources }) => {
     const registry = need(sources.prompts, 'prompts');
     const names = await registry.names();
     return { prompts: await Promise.all(names.map(async (name) => ({ name, labels: await registry.labels(name) }))) };
   });
-  route('GET', '/api/prompts/:name', async ({ params }) => {
+  route('GET', '/api/prompts/:name', async ({ params, sources }) => {
     const registry = need(sources.prompts, 'prompts');
     const name = params.name as string;
     const [versions, labels, history] = await Promise.all([
@@ -419,7 +430,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     ]);
     return { name, versions, labels, history };
   });
-  route('GET', '/api/prompts/:name/diff', async ({ params, url }) => ({
+  route('GET', '/api/prompts/:name/diff', async ({ params, url, sources }) => ({
     diff: await need(sources.prompts, 'prompts').diff(
       params.name as string,
       required(url, 'from'),
@@ -429,7 +440,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/prompts/:name/promote',
-    async ({ request, params, user }) => {
+    async ({ request, params, user, sources }) => {
       const body = await readJson<{ to?: string; from?: string; version?: string; force?: boolean; note?: string }>(
         request,
       );
@@ -450,7 +461,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/prompts/:name/rollback',
-    async ({ request, params, user }) => {
+    async ({ request, params, user, sources }) => {
       const body = await readJson<{ label?: string; note?: string }>(request);
       if (!body.label) throw badRequest('A rollback needs "label"');
       return {
@@ -465,7 +476,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/prompts/:name/playground',
-    async ({ request, params }) => {
+    async ({ request, params, sources }) => {
       const registry = need(sources.prompts, 'prompts');
       const body = await readJson<{ ref?: string; variables?: Record<string, unknown>; model?: string; run?: boolean }>(
         request,
@@ -483,12 +494,12 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   );
 
   // ── Context bundles ──────────────────────────────────────────────
-  route('GET', '/api/contexts', async () => {
+  route('GET', '/api/contexts', async ({ sources }) => {
     const hub = need(sources.contexts, 'contexts');
     const names = await hub.names();
     return { contexts: await Promise.all(names.map(async (name) => ({ name, labels: await hub.labels(name) }))) };
   });
-  route('GET', '/api/contexts/:name', async ({ params }) => {
+  route('GET', '/api/contexts/:name', async ({ params, sources }) => {
     const hub = need(sources.contexts, 'contexts');
     const name = params.name as string;
     const [versions, labels, history] = await Promise.all([
@@ -498,7 +509,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     ]);
     return { name, versions, labels, history };
   });
-  route('GET', '/api/contexts/:name/diff', async ({ params, url }) => {
+  route('GET', '/api/contexts/:name/diff', async ({ params, url, sources }) => {
     const diff = await need(sources.contexts, 'contexts').diff(
       params.name as string,
       required(url, 'from'),
@@ -509,7 +520,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/contexts/:name/promote',
-    async ({ request, params, user }) => {
+    async ({ request, params, user, sources }) => {
       const body = await readJson<{ to?: string; from?: string; version?: string; force?: boolean; note?: string }>(
         request,
       );
@@ -530,7 +541,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/contexts/:name/rollback',
-    async ({ request, params, user }) => {
+    async ({ request, params, user, sources }) => {
       const body = await readJson<{ label?: string; note?: string }>(request);
       if (!body.label) throw badRequest('A rollback needs "label"');
       return {
@@ -544,11 +555,11 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   );
 
   // ── Proposals ────────────────────────────────────────────────────
-  route('GET', '/api/proposals', async ({ url }) => {
+  route('GET', '/api/proposals', async ({ url, sources }) => {
     const status = (url.searchParams.get('status') ?? 'pending') as 'pending' | 'all';
     return { proposals: await need(sources.proposals, 'proposals').list(status) };
   });
-  route('GET', '/api/proposals/:id', async ({ params }) => {
+  route('GET', '/api/proposals/:id', async ({ params, sources }) => {
     const proposal = await need(sources.proposals, 'proposals').get(params.id as string);
     if (!proposal) throw notFound('Proposal', params.id as string);
     return { proposal };
@@ -556,7 +567,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/proposals/:id/promote',
-    async ({ request, params, user }) => {
+    async ({ request, params, user, sources }) => {
       const body = await readJson<{ note?: string }>(request);
       return {
         proposal: await decision(() =>
@@ -572,7 +583,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/proposals/:id/reject',
-    async ({ request, params, user }) => {
+    async ({ request, params, user, sources }) => {
       const body = await readJson<{ note?: string }>(request);
       return {
         proposal: await decision(() =>
@@ -587,7 +598,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   );
 
   // ── Issues ───────────────────────────────────────────────────────
-  route('GET', '/api/issues', async ({ url }) => {
+  route('GET', '/api/issues', async ({ url, sources }) => {
     const store = need(sources.traces, 'traces');
     const hours = intParam(url, 'hours', 24 * 90) ?? 24;
     const end = now();
@@ -616,8 +627,11 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   });
 
   // ── Comments and audit ───────────────────────────────────────────
-  route('GET', '/api/comments', async ({ url }) => ({
-    comments: await comments.listComments(subjectOf(required(url, 'subject'))),
+  // A tenant's comments are its own: the same subject, such as a prompt's name, is another thing in another tenant.
+  route('GET', '/api/comments', async ({ url, user }) => ({
+    comments: (await comments.listComments(subjectOf(required(url, 'subject')))).filter(
+      (comment) => comment.tenant === user.tenant,
+    ),
   }));
   route(
     'POST',
@@ -633,6 +647,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
         body: text,
         author: user.id,
         ...(user.name ? { authorName: user.name } : {}),
+        ...(user.tenant === undefined ? {} : { tenant: user.tenant }),
         at: now().toISOString(),
       };
       await comments.addComment(comment);
@@ -643,22 +658,26 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'GET',
     '/api/audit',
-    async ({ url }) => ({
-      entries: await audit.list({
+    async ({ url, user }) => {
+      // A tenant's admin reads their tenant's entries alone, even from a log that ignores the filter.
+      const tenant = user.tenant ?? url.searchParams.get('tenant') ?? undefined;
+      const entries = await audit.list({
         ...(url.searchParams.get('user') ? { user: url.searchParams.get('user') as string } : {}),
         ...(url.searchParams.get('action') ? { action: url.searchParams.get('action') as string } : {}),
         ...(url.searchParams.get('since') ? { since: url.searchParams.get('since') as string } : {}),
+        ...(tenant === undefined ? {} : { tenant }),
         limit: intParam(url, 'limit', 10_000) ?? 200,
-      }),
-    }),
+      });
+      return { entries: tenant === undefined ? entries : entries.filter((entry) => entry.tenant === tenant) };
+    },
     { role: 'admin', action: 'audit.read' },
   );
 
   // ── Costs ────────────────────────────────────────────────────────
-  route('GET', '/api/costs', async ({ url }) => costReport(intParam(url, 'days', 366) ?? 7));
+  route('GET', '/api/costs', async ({ url, sources }) => costReport(sources, intParam(url, 'days', 366) ?? 7));
 
   // ── Health ───────────────────────────────────────────────────────
-  route('GET', '/api/health', async () => ({
+  route('GET', '/api/health', async ({ sources }) => ({
     providers: sources.client?.getProviderHealth?.() ?? null,
     circuits: sources.client?.getCircuitBreakerStatus?.() ?? null,
     shared: sources.circuits ? await sources.circuits.read() : null,
@@ -667,7 +686,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   }));
 
   // ── Operations and assets ────────────────────────────────────────
-  route('GET', '/api/operations', async ({ url }) => {
+  route('GET', '/api/operations', async ({ url, sources }) => {
     const store = sources.operations;
     if (!store?.list) throw notConfigured('operations');
     const status = url.searchParams.get('status');
@@ -683,7 +702,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     return { operations: records.map(({ result: _result, ...rest }) => rest), counts };
   });
   // ── Deployments ──────────────────────────────────────────────────
-  route('GET', '/api/deployments', async () => {
+  route('GET', '/api/deployments', async ({ sources }) => {
     const deployments = need(sources.deployments, 'deployments');
     const records = await deployments.list();
     return {
@@ -706,7 +725,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   route(
     'POST',
     '/api/deployments/:assistant',
-    async ({ request, params, user }) => {
+    async ({ request, params, user, sources }) => {
       const change = await readJson<DeploymentChange & { expectedVersion?: number }>(request);
       if (!change.action) {
         throw badRequest('A change needs an "action": split, canary, promote, rollback, bucketing, or health');
@@ -718,7 +737,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     { role: 'admin', action: 'deployment.change' },
   );
 
-  route('GET', '/api/assets', async () => {
+  route('GET', '/api/assets', async ({ sources }) => {
     const store = sources.assets;
     if (!store) throw notConfigured('assets');
     return { snapshot: store.snapshot?.() ?? null, assets: store.list ? await store.list() : null };
@@ -727,7 +746,34 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
   // ── Helpers ──────────────────────────────────────────────────────
   /** With accounts, a person reviews as themselves; on the single token, the body may name a reviewer. */
   function reviewerOf(user: StudioUser, named: string | undefined): string {
-    return options.auth ? user.id : (named ?? user.id);
+    return accounts ? user.id : (named ?? user.id);
+  }
+  /**
+   * The sources a user reads: the studio's own, or their tenant's, opened once per tenant. A tenant
+   * the application does not know, or a tenant on a studio given no `tenantSources`, is refused.
+   */
+  async function sourcesFor(user: StudioUser): Promise<StudioSources> {
+    const tenant = user.tenant;
+    if (tenant === undefined) return base;
+    const open = options.tenantSources;
+    if (!open) {
+      throw new StudioError(`${user.id} belongs to a tenant, and this studio has none`, 'FORBIDDEN_TENANT', 403);
+    }
+    let opened = tenantSources.get(tenant);
+    if (!opened) {
+      opened = (async () => open(tenant))();
+      tenantSources.set(tenant, opened);
+      // A tenant that failed to open, or is not known yet, is asked for again next time.
+      opened.then(
+        (sources) => {
+          if (!sources) tenantSources.delete(tenant);
+        },
+        () => tenantSources.delete(tenant),
+      );
+    }
+    const sources = await opened;
+    if (!sources) throw new StudioError(`There is no tenant "${tenant}"`, 'FORBIDDEN_TENANT', 403);
+    return sources;
   }
   /** A decision on a proposal that is not pending, or does not exist, is a conflict or a 404, not a crash. */
   async function decision<T>(run: () => Promise<T>): Promise<T> {
@@ -745,13 +791,13 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       ? (raw as StudioGraphSource)
       : { graph: raw as StudioGraphLike };
   }
-  function graphNamed(name: string): StudioGraphSource {
+  function graphNamed(sources: StudioSources, name: string): StudioGraphSource {
     // Only the application's own entries: a name such as "constructor" must not reach the prototype.
     const raw = sources.graphs && Object.hasOwn(sources.graphs, name) ? sources.graphs[name] : undefined;
     if (!raw) throw notFound('Graph', name);
     return graphSource(raw);
   }
-  function reviewNamed(name: string) {
+  function reviewNamed(sources: StudioSources, name: string) {
     const queue = sources.reviews && Object.hasOwn(sources.reviews, name) ? sources.reviews[name] : undefined;
     if (!queue) throw notFound('Review queue', name);
     return queue;
@@ -762,8 +808,8 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     return [];
   }
 
-  async function costReport(days: number): Promise<StudioCostReport> {
-    if (sources.rollups) return rollupCostReport(sources.rollups, days);
+  async function costReport(sources: StudioSources, days: number): Promise<StudioCostReport> {
+    if (sources.rollups) return rollupCostReport(sources, sources.rollups, days);
     const store = need(sources.traces, 'traces');
     const end = now();
     const since = new Date(end.getTime() - days * 86_400_000).toISOString();
@@ -811,7 +857,11 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
    * The cost report from hourly rows. The costliest runs still come from the traces, from the most
    * recent 1,000 in the window, since a rollup holds totals rather than runs.
    */
-  async function rollupCostReport(rollups: StudioRollups, days: number): Promise<StudioCostReport> {
+  async function rollupCostReport(
+    sources: StudioSources,
+    rollups: StudioRollups,
+    days: number,
+  ): Promise<StudioCostReport> {
     const end = now();
     const since = new Date(end.getTime() - days * 86_400_000).toISOString();
     const rows = await rollups.query({ since, until: end.toISOString() });
@@ -889,7 +939,11 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
 
   async function identify(request: Request, url: URL, info: StudioRequestInfo) {
     const presented = tokenOf(request, url);
-    if (options.auth) return { user: await options.auth(request, info), presented };
+    if (accounts) {
+      // The authenticator first, such as bearer tokens for scripts, then the sign-in flow's session.
+      const user = (await options.auth?.(request, info)) ?? (await options.signIn?.authenticate(request, info));
+      return { user, presented };
+    }
     return { user: tokensMatch(token, presented.token) ? tokenUser : undefined, presented };
   }
 
@@ -899,7 +953,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
    * must carry the person's page token, or the request must bring its own `Authorization`.
    */
   function sameOrigin(request: Request, presented: ReturnType<typeof tokenOf>, user: StudioUser): boolean {
-    if (!options.auth) return presented.via === 'header';
+    if (!accounts) return presented.via === 'header';
     // A browser adds Basic and Negotiate credentials to another site's request by itself, but never a
     // bearer token, which only a script can set, and a script on another site needs a CORS grant the
     // studio never gives.
@@ -924,6 +978,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
         action,
         method: request.method,
         path: url.pathname,
+        ...(user.tenant === undefined ? {} : { tenant: user.tenant }),
         outcome,
         status,
         ...(message ? { message } : {}),
@@ -965,6 +1020,14 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     if (!hostAllowed(incoming.headers.get('host') ?? url.host, options.allowedHosts)) {
       return text('This host is not allowed. Open the studio at 127.0.0.1 or localhost.', 403);
     }
+    if (options.signIn && url.pathname.startsWith('/auth/')) {
+      const answered = await options.signIn.handle(incoming, info);
+      if (answered) {
+        const headers = new Headers(answered.headers);
+        for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value);
+        return new Response(answered.body, { status: answered.status, headers });
+      }
+    }
     // The body is bounded before anything else reads it, and before anyone is signed in.
     let request = incoming;
     let body: string | undefined;
@@ -980,6 +1043,13 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     const secure = url.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
 
     if (url.pathname in UI_FILES) {
+      if (!user && options.signIn) {
+        const back = `${url.pathname}${url.search}`;
+        return new Response(null, {
+          status: 303,
+          headers: { location: `/auth/login?return=${encodeURIComponent(back)}`, ...SECURITY_HEADERS },
+        });
+      }
       if (!user) {
         return text(
           options.auth
@@ -1006,7 +1076,7 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
     if (!user) {
       return json(
         {
-          error: { code: 'UNAUTHORIZED', message: options.auth ? 'Sign in first' : 'A valid studio token is required' },
+          error: { code: 'UNAUTHORIZED', message: accounts ? 'Sign in first' : 'A valid studio token is required' },
         },
         401,
       );
@@ -1043,7 +1113,8 @@ export function createStudio(sources: StudioSources, options: StudioOptions = {}
       return json({ error: { code: 'FORBIDDEN_ROLE', message } }, 403);
     }
     try {
-      const response = json(await candidate.handler({ request, url, params, user }));
+      const sources = await sourcesFor(user);
+      const response = json(await candidate.handler({ request, url, params, user, sources }));
       if (change) await record(user, candidate.action, request, url, 'ok', 200);
       return response;
     } catch (error) {

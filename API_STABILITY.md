@@ -101,7 +101,11 @@ the loaders, `FileInput`'s stream form, `CsvRowParser`, `JsonLoaderOptions.recor
 `RenderingBrowser`, and `BrowserRendererOptions`; in the realtime family, `ImageItem`, the `message.image`
 event, and `RealtimeConversationOptions.recordImages`; in telephony, `TelephonyGatherResult`,
 `EndGatherRequest`, `parseGatherResult()` and `endGather()` on the manager and the providers, and
-`TelnyxTelephonyProviderConfig.transcriptionEngine`. Experimental: `nexus-ai-pro/voice/google`,
+`TelnyxTelephonyProviderConfig.transcriptionEngine`; in the studio, `StudioOptions.tenantSources`,
+`StudioUser.tenant`, `StudioAuditEntry.tenant`, `StudioComment.tenant`, `StudioAuditQuery`,
+`HeaderAuthOptions.tenant`, `BearerAuthOptions.tenant`, `StudioSignIn`, and `StudioOptions.signIn`.
+Experimental: in the studio, `oidcSignIn()`, `OidcSignInOptions`, `SIGN_IN_COOKIE`, and the
+`/auth/` routes, until a sign-in against a live provider is recorded; `nexus-ai-pro/voice/google`,
 `GoogleVoiceProvider` and `GoogleVoiceProviderConfig`, until a live run is recorded.
 The state store keys and sessions are kept in, under `nexus/server`, is read by every later 2.x.
 
