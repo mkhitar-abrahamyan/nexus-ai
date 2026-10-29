@@ -1,11 +1,10 @@
 /**
- * Which release's defaults apply where an option is left out: 2.x's, or a preview of 3.0's. 3.0 turns on
- * three settings that 2.x keeps opt-in, because turning them on changes what an upgrade does; the
- * preview turns on all three at once, so an application can run as 3.0 will before it upgrades. An
- * option set explicitly always wins, under either.
+ * Which release's defaults apply where an option is left out: 3.0's, or 2.x's. 3.0 turns on three
+ * settings that 2.x kept opt-in; `2.x` keeps all three off at once, so an application can upgrade first
+ * and turn them on when it is ready. An option set explicitly always wins, under either.
  */
 
-/** A release whose defaults apply: `2.x`, the default, or `3.0`, a preview of the next major release's. */
+/** A release whose defaults apply: `3.0`, the default, or `2.x`, which keeps 2.x's three settings off. */
 export type NexusDefaults = '2.x' | '3.0';
 
 /** One default that 3.0 changes: what it is, what 2.x does, what 3.0 does, and what to do first. */
@@ -14,15 +13,15 @@ export interface DefaultChange {
   setting: string;
   /** Where it is set. */
   module: string;
-  /** What 2.x does when the option is left out. */
+  /** What 2.x did when the option is left out, as `useDefaults('2.x')` still does. */
   today: string;
-  /** What 3.0, and the preview, does when it is left out. */
+  /** What 3.0 does when it is left out. */
   next: string;
   /** What to do before turning it on, if anything. */
   before: string;
 }
 
-/** The defaults 3.0 changes, each turned on by the preview. */
+/** The defaults 3.0 changes, each kept as 2.x had it by `useDefaults('2.x')`. */
 export const DEFAULT_CHANGES: readonly DefaultChange[] = [
   {
     setting: 'Tracer incremental',
@@ -36,7 +35,8 @@ export const DEFAULT_CHANGES: readonly DefaultChange[] = [
     module: 'nexus-ai-pro/operations',
     today: 'false: finding queued work reads every record',
     next: 'true where the client has zadd, zrem, and zrangebyscore: queued and leased work is kept in sorted sets',
-    before: 'Run 2.2 or later on every worker sharing the prefix, and call reindex() once.',
+    before:
+      'Call reindex() once no worker without the index shares the prefix: work such a worker queued is in the index only after it.',
   },
   {
     setting: 'Deployments bucketStrategy',
@@ -50,9 +50,10 @@ export const DEFAULT_CHANGES: readonly DefaultChange[] = [
 let chosen: NexusDefaults | undefined;
 
 /**
- * Chooses which release's defaults apply to everything created after it: `3.0` previews the next
- * major release's, `2.x` returns to today's. Call it before creating a tracer, an operation store, or
- * a deployment: each reads the defaults when it is created. Overrides `NEXUS_DEFAULTS`.
+ * Chooses which release's defaults apply to everything created after it: `3.0`, the default, or `2.x`,
+ * which keeps the three settings 3.0 turns on off, for an application that upgrades before it turns them
+ * on. Call it before creating a tracer, an operation store, or a deployment: each reads the defaults when
+ * it is created. Overrides `NEXUS_DEFAULTS`.
  */
 export function useDefaults(release: NexusDefaults): void {
   chosen = checked(release, 'useDefaults()');
@@ -60,13 +61,13 @@ export function useDefaults(release: NexusDefaults): void {
 
 /**
  * The defaults in effect: as `useDefaults()` chose, else the `NEXUS_DEFAULTS` environment variable,
- * `2.x` or `3.0`, else `2.x`. Throws for any other value of the variable, rather than ignore a typo.
+ * `2.x` or `3.0`, else `3.0`. Throws for any other value of the variable, rather than ignore a typo.
  */
 export function nexusDefaults(): NexusDefaults {
   if (chosen) return chosen;
   const variable = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
     ?.NEXUS_DEFAULTS;
-  return variable === undefined || variable === '' ? '2.x' : checked(variable, 'NEXUS_DEFAULTS');
+  return variable === undefined || variable === '' ? '3.0' : checked(variable, 'NEXUS_DEFAULTS');
 }
 
 function checked(release: string, where: string): NexusDefaults {

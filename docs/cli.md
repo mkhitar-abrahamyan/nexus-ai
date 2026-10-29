@@ -122,7 +122,7 @@ which suits a deploy step. `migrate --dry-run` prints the statements it would ru
 | Provider health | a provider is stale or unhealthy (warns) |
 | One-process settings | with more than one replica, a store keeps its state in process memory: a memory checkpointer, operation store, server state, or tenant usage fails; a memory rate-limit, circuit, trace, prompt, cache, or rollup store warns |
 | Opt-in settings | a store lacks a setting that stays opt-in through 2.x but that a deployment needs: a `RedisOperationStore` without `index: true`, or a `Tracer` writing to a persistent store without `incremental` (warns, with the setting that fixes it) |
-| What 3.0 changes | with `--upgrade 3.0`, a store whose behaviour 3.0's defaults change: a tracer that writes at the end, a Redis operation store without its index, or an assistant whose deployment is not yet recorded (warns, saying what to do first and how to keep 2.x's behaviour); `ok` once the [preview of 3.0's defaults](./core.md#previewing-30s-defaults) is on |
+| What 3.0 changes | with `--upgrade 3.0`, a store whose behaviour 3.0's defaults change: a tracer that writes at the end, a Redis operation store without its index, or an assistant whose deployment is not yet recorded (warns, saying what to do first and how to keep 2.x's behaviour), when [2.x's defaults](./core.md#30s-defaults-and-keeping-2xs) are kept; `ok` under 3.0's |
 
 Without `--module` it checks what a shell can see. A module reaches the rest, exporting any of
 `database` (or `client`, so a `nexus db` module works unchanged), `redis`, `operations`, `ai`,
@@ -192,7 +192,9 @@ build output, and version control.
 
 A second run changes nothing. Comments inside an import list that it splits are not kept. It works on
 text, so an import statement inside a string is rewritten too. The
-[migration guide](../MIGRATING.md) covers what 2.0 changes beyond imports.
+[migration guide](../MIGRATING.md) covers what 2.0 and 3.0 change beyond imports. It also renames 3.0's
+removed `GraphCheckpointV2`, and reports reads of the OpenAPI tools' `skipped` and a `useDefaults('3.0')`
+that 3.0 makes redundant.
 
 ## Linting a graph
 

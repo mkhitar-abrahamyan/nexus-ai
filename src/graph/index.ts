@@ -1,7 +1,6 @@
 export { CompiledGraph, StateGraph, createGraph } from './graph.js';
 export {
   type CheckpointDraft,
-  type GraphCheckpointV2,
   migrateCheckpoint,
   toCheckpoint,
 } from './checkpoint-migration.js';

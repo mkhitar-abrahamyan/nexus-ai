@@ -8,13 +8,6 @@ import type {
 } from '../types/graph.js';
 
 /**
- * The 2.0 checkpoint schema under the name 1.25 gave it, so code written against 1.25 compiles.
- *
- * @deprecated Use `GraphCheckpoint`, which is this schema in 2.0.
- */
-export type GraphCheckpointV2<S extends ChannelSchema = ChannelSchema> = GraphCheckpoint<S>;
-
-/**
  * Reads a checkpoint in the current schema from one in either schema. A custom checkpointer whose
  * store still holds 1.x checkpoints can return them as they are, since the graph calls this on every
  * read; a tool that reads a store directly calls it too. A version 2 checkpoint is returned as it is.

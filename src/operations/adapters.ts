@@ -135,11 +135,12 @@ export interface RedisOperationStoreOptions {
    * truth; an index entry only says where to look, and one that no longer matches its record is
    * skipped and removed.
    *
-   * Off by default, because a 2.1 worker writes records without index entries. Turn it on once every
-   * worker sharing the prefix runs 2.2, then call `reindex()` once to index what is already there.
-   * Under 3.0's defaults, `useDefaults('3.0')`, on where the client has the commands it needs.
-   * Needs `zadd`, `zrem`, and `zrangebyscore`; with `eval`, a record and its index entries change in
-   * one step.
+   * On by default where the client has the commands it needs, and off under 2.x's defaults,
+   * `useDefaults('2.x')`. A worker without the index writes records without index entries, so what it
+   * queued is found once `reindex()` indexes what is already there: call it once no such worker
+   * shares the prefix. Needs
+   * `zadd`, `zrem`, and `zrangebyscore`; with `eval`, a record and its index entries change in one
+   * step.
    */
   index?: boolean;
 }

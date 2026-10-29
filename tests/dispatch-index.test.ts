@@ -39,7 +39,7 @@ function queued(index: number, overrides: Partial<OperationRecord<string>> = {})
 test('the indexed Redis store keeps the queue contract, with its Lua run for real', async () => {
   const store = new RedisOperationStore<string>(redis, { prefix: 'contract:', index: true });
   await queueContract('redis indexed', store);
-  const plain = new RedisOperationStore<string>(redis, { prefix: 'contract-plain:' });
+  const plain = new RedisOperationStore<string>(redis, { prefix: 'contract-plain:', index: false });
   await queueContract('redis', plain);
 });
 
@@ -70,7 +70,7 @@ test('an indexed claim reads the same few records with 1,000 or 100,000 queued',
   assert.equal(large, small, `a claim read ${small} records at 1,000 and ${large} at 100,000`);
   assert.ok(small < 100, `a claim read ${small} records`);
 
-  const unindexed = new RedisOperationStore<string>(redis, { prefix: 'flat-100000:' });
+  const unindexed = new RedisOperationStore<string>(redis, { prefix: 'flat-100000:', index: false });
   redis.reads = 0;
   await unindexed.listQueued(5);
   assert.ok(redis.reads >= 100_000, 'without the index, a claim reads the whole queue');
@@ -124,7 +124,7 @@ test('an index entry another writer left behind is skipped, then removed', async
   await store.create(queued(1));
   await store.create(queued(2));
   // A 2.1 worker finishes op 1 without touching the index.
-  const legacy = new RedisOperationStore<string>(redis, { prefix: 'stale:' });
+  const legacy = new RedisOperationStore<string>(redis, { prefix: 'stale:', index: false });
   await legacy.update({ ...queued(1), status: 'succeeded', sequence: 1 }, 0);
   assert.notEqual(redis.zscore('stale:queued', 'op-000001'), null);
   assert.deepEqual(
@@ -161,7 +161,7 @@ test('without eval, the index is kept by separate commands and stale entries are
     () => new RedisOperationStore({ hget: () => null, hset: () => 1, hdel: () => 1, hvals: () => [] }, { index: true }),
     /needs zadd, zrem, and zrangebyscore/,
   );
-  await assert.rejects(new RedisOperationStore(redis, { prefix: 'x:' }).reindex(), /index: true/);
+  await assert.rejects(new RedisOperationStore(redis, { prefix: 'x:', index: false }).reindex(), /index: true/);
 });
 
 test('Postgres claims queued work through the age index, without sorting the queue', async () => {

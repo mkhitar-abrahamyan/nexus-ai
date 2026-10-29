@@ -347,8 +347,9 @@ Shipped so far:
   server issues; and a studio that signs people in with your identity provider and serves many
   tenants, each seeing only its own.
 
-Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
-[MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
+Upgrading from 2.x: 3.0 turns on three defaults 2.x kept opt-in, and `useDefaults('2.x')` keeps them
+off until you are ready; from 1.x, `npx nexus migrate src --write` moves your imports.
+[MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers both.
 Next, in 2.23, Pinecone, images, the Gemini embedding batch tier, media understanding, video, typed
 decisions, Gemini Live, SIP, and both phone providers graduate once the live workflow passes against
 each. The

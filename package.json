@@ -2204,6 +2204,7 @@
     "express": "^5.1.0",
     "nexus-ai-pro-2-0": "npm:nexus-ai-pro@^2.0.0",
     "nexus-ai-pro-2-1": "npm:nexus-ai-pro@^2.1.0",
+    "nexus-ai-pro-2-21": "npm:nexus-ai-pro@^2.21.0",
     "nexus-ai-pro-2-3": "npm:nexus-ai-pro@^2.3.0",
     "nexus-ai-pro-2-5": "npm:nexus-ai-pro@^2.5.0",
     "nexus-ai-pro-2-7": "npm:nexus-ai-pro@^2.7.0",

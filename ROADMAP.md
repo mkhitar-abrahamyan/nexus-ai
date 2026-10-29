@@ -46,9 +46,8 @@ Nothing else is placed in 2.23 yet: it takes the top of Unscheduled when somethi
 
 Nothing else is placed yet.
 
-**Held for 3.0.** Settings that 2.x keeps opt-in because turning them on changes what an upgrade
-does. In 3.0 they become defaults, each with a migration note; since 2.21, `useDefaults('3.0')` or
-`NEXUS_DEFAULTS=3.0` runs all three now, and `nexus doctor --upgrade 3.0` says what they change:
+**Done in 3.0.** The settings 2.x kept opt-in are defaults, each with a migration note in
+MIGRATING.md, and `useDefaults('2.x')` keeps all three off for an application that upgrades first:
 - incremental tracing on a persistent trace store;
 - the Redis operation store's dispatch index;
 - `hash-v2` bucketing for deployments created on 3.0. A deployment keeps the strategy it records.

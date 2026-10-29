@@ -359,8 +359,9 @@ Shipped so far:
   server issues; and a studio that signs people in with your identity provider and serves many
   tenants, each seeing only its own.
 
-Upgrading from 1.x: `npx nexus migrate src --write` moves your imports, and
-[MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers the rest.
+Upgrading from 2.x: 3.0 turns on three defaults 2.x kept opt-in, and `useDefaults('2.x')` keeps them
+off until you are ready; from 1.x, `npx nexus migrate src --write` moves your imports.
+[MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers both.
 Next, in 2.23, Pinecone, images, the Gemini embedding batch tier, media understanding, video, typed
 decisions, Gemini Live, SIP, and both phone providers graduate once the live workflow passes against
 each. The
@@ -957,21 +958,21 @@ For a full HTTP surface — threads, background runs, resumable streams — see 
 - Guardrails reduce risk; keep server-side authorization and provider moderation around high-impact
   actions, as the [security guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/security.md) says.
 
-## Previewing 3.0's defaults
+## 3.0's defaults, and keeping 2.x's
 
-3.0 turns on three settings that 2.x keeps opt-in, because turning them on changes what an upgrade
-does. One switch turns all three on now, so an application runs as 3.0 will before it upgrades:
+3.0 turns on three settings that 2.x kept opt-in. One switch keeps all three as 2.x had them, so an
+application can upgrade first and turn them on when it is ready:
 
 ```ts
 import { useDefaults } from 'nexus-ai-pro/config';
 
-useDefaults('3.0'); // before creating a tracer, an operation store, or a deployment
+useDefaults('2.x'); // before creating a tracer, an operation store, or a deployment
 ```
 
-or, without a change to the code, `NEXUS_DEFAULTS=3.0` in the environment. `DEFAULT_CHANGES` lists
-each `DefaultChange`: the setting, where it is set, what 2.x does, what 3.0 does, and what to do first.
+or, without a change to the code, `NEXUS_DEFAULTS=2.x` in the environment. `DEFAULT_CHANGES` lists
+each `DefaultChange`: the setting, where it is set, what 2.x did, what 3.0 does, and what to do first.
 
-| Setting | 2.x | 3.0, and the preview |
+| Setting | 2.x, and `useDefaults('2.x')` | 3.0 |
 | --- | --- | --- |
 | `Tracer` `incremental` | A trace is written when its root run finishes | Each run is written as it starts and ends, on a durable trace store: one whose `durable` is not `false`, as `MemoryTraceStore`'s is |
 | `RedisOperationStore` `index` | Finding queued work reads every record | Queued and leased work is kept in sorted sets, where the client has `zadd`, `zrem`, and `zrangebyscore`; first run 2.2 or later on every worker sharing the prefix, and call `reindex()` once |
@@ -979,10 +980,11 @@ each `DefaultChange`: the setting, where it is set, what 2.x does, what 3.0 does
 
 Each is read when the object is created, so switch before creating anything, and on every replica
 together. An option set explicitly wins under either: `incremental: false`, `index: false`, or
-`bucketStrategy: 'fnv1a-v1'` keeps 2.x's behaviour under 3.0 too. `nexusDefaults()` returns the
-`NexusDefaults` in effect, `2.x` or `3.0`, and a value of `NEXUS_DEFAULTS` that is neither is refused
-rather than ignored. `nexus doctor --upgrade 3.0` says what 3.0 would change for a deployment, as the
-[CLI guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md#checking-a-deployment) shows.
+`bucketStrategy: 'fnv1a-v1'` keeps 2.x's behaviour for that one object. `nexusDefaults()` returns the
+`NexusDefaults` in effect, `3.0` unless chosen otherwise, and a value of `NEXUS_DEFAULTS` that is
+neither is refused rather than ignored. Under 2.x's, `nexus doctor --upgrade 3.0` says what turning
+3.0's on would change for a deployment, as the [CLI guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/cli.md#checking-a-deployment) shows.
+[MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers each change.
 
 ## The registry's types, in passing
 
@@ -1014,7 +1016,7 @@ subpaths:
 npx nexus migrate src --write
 ```
 
-The [migration guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) lists every change 2.0 makes, with before-and-after code.
+The [migration guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) lists every change 3.0 and 2.0 make, with before-and-after code.
 
 ---
 
@@ -2349,7 +2351,7 @@ operation store — memory, Redis, or Postgres — makes a thread durable.
 
 ### Checkpoints 1.x wrote
 
-2.x writes version 2 and reads version 1 for the whole 2.x line, so a thread a 1.x deployment left
+2.x and 3.0 write version 2 and read version 1, so a thread a 1.x deployment left
 waiting resumes after the upgrade. A `GraphCheckpointV1` is that older shape: no version or id, tasks
 only when `next` could not say them, and the first question repeated in `interrupt`.
 
@@ -2368,8 +2370,7 @@ checkpoint?.interrupts; // every pending question, empty when none
 ```
 
 A version 1 checkpoint gains its id, its tasks spelled out from `next` when it carried none, and its
-question moved into `interrupts`. A version 2 checkpoint passes through unchanged. `GraphCheckpointV2`
-is kept as another name for `GraphCheckpoint`, so code written against 1.25 compiles.
+question moved into `interrupts`. A version 2 checkpoint passes through unchanged.
 
 To build a checkpoint by hand, for a seed or a test, write a `CheckpointDraft` — a checkpoint without
 its version, id, tasks, and questions — and pass it to `toCheckpoint()`. It fills those in, and always
@@ -5094,13 +5095,19 @@ run of the trace, so a link can be shared.
 
 ### Writing as it runs
 
-By default a trace is written when its root finishes. That lets sampling decide with the whole trace
-in hand, but a process that dies mid-run takes its trace with it — the trace you most needed.
-`TracerOptions.incremental` writes each run when it starts and again when it ends instead:
+On a durable store, a tracer writes each run when it starts and again when it ends. Written only once
+its root finishes, a trace would let sampling decide with the whole of it in hand, but a process that
+dies mid-run would take its trace with it — the trace you most needed. `TracerOptions.incremental`
+chooses: it is on by default for a store whose `durable` is not `false`, and off for a store in
+memory, such as `MemoryTraceStore`, which a dead process takes with it anyway.
 
 ```ts
-const tracer = new Tracer({ store, incremental: true });
+const tracer = new Tracer({ store }); // writes as it runs
+const atTheEnd = new Tracer({ store, incremental: false }); // writes each trace when its root finishes
 ```
+
+2.x wrote at the end unless asked; `useDefaults('2.x')` still does, as the
+[core guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/core.md#30s-defaults-and-keeping-2xs) explains.
 
 A crash then leaves the run in the store with every run beneath it that finished, and a run in
 progress can be watched while it goes. Each trace's writes are chained, so a run's end never lands
@@ -5132,8 +5139,8 @@ into the 32 and 16 hex digits W3C and OpenTelemetry use, the same way in every p
 
 ### Sampling and redaction
 
-Without `incremental`, a trace is written when its root finishes, so sampling decides with the whole
-trace in hand.
+With `incremental: false`, a trace is written when its root finishes, so sampling decides with the
+whole trace in hand.
 `SamplingPolicy.rate` keeps that share of traces. Three options keep a trace whatever the rate:
 `keepErrors`, `keepSlowerThanMs`, and `keepCostlierThan`.
 
@@ -5422,8 +5429,8 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
 
 ## Limitations
 
-- Without `incremental`, traces are written when the root finishes, so a process that dies mid-run
-  loses that trace.
+- With `incremental: false`, or on a store in memory, traces are written when the root finishes, so
+  a process that dies mid-run loses that trace.
 - With `incremental`, a run is written twice, so a store pays twice the writes. A run left by a dead
   process stays `running` until `closeAbandonedRuns()` closes it.
 - `OtlpGrpcTraceExporter` runs on Node.js only. On another runtime, send OTLP/HTTP with
@@ -7652,7 +7659,7 @@ An `OperationStoreFilter` narrows both by `kindPrefix`, such as `assistant:` for
 runs, and by `kinds`, a list of exact kinds. `claimQueued()` checks a candidate against the filter
 itself too, so a store of your own that ignores a filter field never hands a worker the wrong work. `operationStats()` calls `stats()`, or counts `list()` for a store without it. Every store
 here has both methods. Postgres and SQLite answer `listQueued()` from an index of queued work by age,
-so a claim reads the oldest few rows however long the queue is. Redis does too with `index: true`;
+so a claim reads the oldest few rows however long the queue is. Redis does too, with its index;
 without it, Redis reads every record.
 
 Every store refuses a second record under an idempotency key another record holds, with
@@ -7669,7 +7676,7 @@ all ten handles resolve to its result. The in-memory and Redis stores enforce it
 
 ### The Redis dispatch index
 
-With `index: true`, `RedisOperationStore` keeps queued work in a sorted set by age and leased work in
+With its index, `RedisOperationStore` keeps queued work in a sorted set by age and leased work in
 one by lease expiry. `listQueued()` reads the oldest few records from the first, and `claimExpired()`
 reads only lapsed leases from the second, so a claim reads the same handful of records with 100,000
 operations queued as with 1,000. The records stay the source of truth: an index entry only says where
@@ -7677,13 +7684,15 @@ to look, and one that no longer matches its record is skipped, then removed by a
 checks the record in the same step. It needs `zadd`, `zrem`, and `zrangebyscore`, which `ioredis`
 has; with `eval`, a record and its index entries change together.
 
-It is off by default, because a 2.1 worker writes records without index entries. Turn it on once
-every worker sharing the prefix runs 2.2, then call `reindex()` once to index what is already stored.
-`reindex()` is safe while workers are busy, and resolves to how many records it read.
+It is on by default where the client has those commands, and `index: false` turns it off; 2.x kept it
+off unless asked, as `useDefaults('2.x')` still does. A worker without the index writes records
+without index entries, so what it queued is found once `reindex()` indexes what is already stored: call
+it once no worker without the index shares the prefix. `reindex()` is safe while workers are busy, and
+resolves to how many records it read.
 
 ```ts
-const operations = new RedisOperationStore(redis, { index: true });
-await operations.reindex(); // once, after the last 2.1 worker is gone
+const operations = new RedisOperationStore(redis);
+await operations.reindex(); // once no worker without the index shares the prefix
 ```
 
 An `OperationDispatcher` hands an accepted record to a worker. `BullMQOperationDispatcher` queues only
@@ -13852,12 +13861,13 @@ How the key becomes a place is the deployment's `BucketStrategy`:
 
 | Strategy | Places |
 | --- | --- |
-| `fnv1a-v1` | By FNV-1a. Random ids, which the server gives by default, spread evenly. Ids that differ only in their last characters, such as `user-1` to `user-500`, cluster, so a canary's share of them drifts from its weight. The default, and what every deployment recorded before 2.5 uses. |
-| `hash-v2` | By FNV-1a mixed with MurmurHash3's finalizer, so sequential ids spread as evenly as random ones. |
+| `fnv1a-v1` | By FNV-1a. Random ids, which the server gives by default, spread evenly. Ids that differ only in their last characters, such as `user-1` to `user-500`, cluster, so a canary's share of them drifts from its weight. What every deployment recorded before 2.5 uses, and 2.x's default. |
+| `hash-v2` | By FNV-1a mixed with MurmurHash3's finalizer, so sequential ids spread as evenly as random ones. The default for a deployment first recorded on 3.0. |
 
 A deployment records its strategy, so every replica places a thread the same way, and no thread
-moves through an upgrade. `Deployments.assistant()` takes `bucketStrategy` for a deployment recorded
-from then on, and `bucketing()` changes a recorded one. A thread already on a revision that takes
+moves through an upgrade: one recorded before 3.0 keeps `fnv1a-v1`. `Deployments.assistant()` takes
+`bucketStrategy` for a deployment recorded from then on, and `bucketing()` changes a recorded one.
+`bucket()` places a key by `fnv1a-v1` unless given the strategy, so pass it the deployment's. A thread already on a revision that takes
 traffic stays there; only new threads are placed by the new strategy.
 
 Every run records its `RunRevision`: the revision, its share, the deployment version, and the reason.
@@ -14367,9 +14377,8 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   in the same instant can lose one change: give the server one of the included stores, or pass
   `expectedVersion` and retry a conflict.
 - A replica that dies loses the runs it counted in its last `rollupMs`. The run records stay whole.
-- `fnv1a-v1` stays the default bucket strategy through 2.x, so a deployment keyed by sequential ids
-  needs `bucketStrategy: 'hash-v2'` to split them evenly, or the preview of 3.0's defaults,
-  `useDefaults('3.0')`, which records a new deployment with it.
+- A deployment recorded before 3.0 keeps `fnv1a-v1`, so one keyed by sequential ids splits them
+  evenly only once `bucketing()` moves it to `hash-v2`.
 - A worker of 2.4 or earlier claims a run of any revision, and runs its live revision when it lacks
   the one routed. Finish a rollout from 2.4 before images start carrying different revisions.
 - A replica that both serves the API and claims runs routes a run it has room for only among its own
@@ -15161,7 +15170,7 @@ which suits a deploy step. `migrate --dry-run` prints the statements it would ru
 | Provider health | a provider is stale or unhealthy (warns) |
 | One-process settings | with more than one replica, a store keeps its state in process memory: a memory checkpointer, operation store, server state, or tenant usage fails; a memory rate-limit, circuit, trace, prompt, cache, or rollup store warns |
 | Opt-in settings | a store lacks a setting that stays opt-in through 2.x but that a deployment needs: a `RedisOperationStore` without `index: true`, or a `Tracer` writing to a persistent store without `incremental` (warns, with the setting that fixes it) |
-| What 3.0 changes | with `--upgrade 3.0`, a store whose behaviour 3.0's defaults change: a tracer that writes at the end, a Redis operation store without its index, or an assistant whose deployment is not yet recorded (warns, saying what to do first and how to keep 2.x's behaviour); `ok` once the [preview of 3.0's defaults](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/core.md#previewing-30s-defaults) is on |
+| What 3.0 changes | with `--upgrade 3.0`, a store whose behaviour 3.0's defaults change: a tracer that writes at the end, a Redis operation store without its index, or an assistant whose deployment is not yet recorded (warns, saying what to do first and how to keep 2.x's behaviour), when [2.x's defaults](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/core.md#30s-defaults-and-keeping-2xs) are kept; `ok` under 3.0's |
 
 Without `--module` it checks what a shell can see. A module reaches the rest, exporting any of
 `database` (or `client`, so a `nexus db` module works unchanged), `redis`, `operations`, `ai`,
@@ -15231,7 +15240,9 @@ build output, and version control.
 
 A second run changes nothing. Comments inside an import list that it splits are not kept. It works on
 text, so an import statement inside a string is rewritten too. The
-[migration guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers what 2.0 changes beyond imports.
+[migration guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers what 2.0 and 3.0 change beyond imports. It also renames 3.0's
+removed `GraphCheckpointV2`, and reports reads of the OpenAPI tools' `skipped` and a `useDefaults('3.0')`
+that 3.0 makes redundant.
 
 ## Linting a graph
 
@@ -15298,7 +15309,7 @@ pays only for what it imports. This guide lists the entry points and what each o
 The root import holds the core client and nothing else: the client, its config builders, its types,
 the errors it throws, and the lifecycle every call runs through. Code written for 1.x imported
 families from the root too; `nexus migrate` moves those imports to their subpaths, and the
-[migration guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) has the details.
+[migration guide](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) has the details, for 2.0 and for 3.0.
 
 ```ts
 import { NexusAI, createNexus, createNexusConfig } from 'nexus-ai-pro';

@@ -572,21 +572,21 @@ For a full HTTP surface — threads, background runs, resumable streams — see 
 - Guardrails reduce risk; keep server-side authorization and provider moderation around high-impact
   actions, as the [security guide](./security.md) says.
 
-## Previewing 3.0's defaults
+## 3.0's defaults, and keeping 2.x's
 
-3.0 turns on three settings that 2.x keeps opt-in, because turning them on changes what an upgrade
-does. One switch turns all three on now, so an application runs as 3.0 will before it upgrades:
+3.0 turns on three settings that 2.x kept opt-in. One switch keeps all three as 2.x had them, so an
+application can upgrade first and turn them on when it is ready:
 
 ```ts
 import { useDefaults } from 'nexus-ai-pro/config';
 
-useDefaults('3.0'); // before creating a tracer, an operation store, or a deployment
+useDefaults('2.x'); // before creating a tracer, an operation store, or a deployment
 ```
 
-or, without a change to the code, `NEXUS_DEFAULTS=3.0` in the environment. `DEFAULT_CHANGES` lists
-each `DefaultChange`: the setting, where it is set, what 2.x does, what 3.0 does, and what to do first.
+or, without a change to the code, `NEXUS_DEFAULTS=2.x` in the environment. `DEFAULT_CHANGES` lists
+each `DefaultChange`: the setting, where it is set, what 2.x did, what 3.0 does, and what to do first.
 
-| Setting | 2.x | 3.0, and the preview |
+| Setting | 2.x, and `useDefaults('2.x')` | 3.0 |
 | --- | --- | --- |
 | `Tracer` `incremental` | A trace is written when its root run finishes | Each run is written as it starts and ends, on a durable trace store: one whose `durable` is not `false`, as `MemoryTraceStore`'s is |
 | `RedisOperationStore` `index` | Finding queued work reads every record | Queued and leased work is kept in sorted sets, where the client has `zadd`, `zrem`, and `zrangebyscore`; first run 2.2 or later on every worker sharing the prefix, and call `reindex()` once |
@@ -594,10 +594,11 @@ each `DefaultChange`: the setting, where it is set, what 2.x does, what 3.0 does
 
 Each is read when the object is created, so switch before creating anything, and on every replica
 together. An option set explicitly wins under either: `incremental: false`, `index: false`, or
-`bucketStrategy: 'fnv1a-v1'` keeps 2.x's behaviour under 3.0 too. `nexusDefaults()` returns the
-`NexusDefaults` in effect, `2.x` or `3.0`, and a value of `NEXUS_DEFAULTS` that is neither is refused
-rather than ignored. `nexus doctor --upgrade 3.0` says what 3.0 would change for a deployment, as the
-[CLI guide](./cli.md#checking-a-deployment) shows.
+`bucketStrategy: 'fnv1a-v1'` keeps 2.x's behaviour for that one object. `nexusDefaults()` returns the
+`NexusDefaults` in effect, `3.0` unless chosen otherwise, and a value of `NEXUS_DEFAULTS` that is
+neither is refused rather than ignored. Under 2.x's, `nexus doctor --upgrade 3.0` says what turning
+3.0's on would change for a deployment, as the [CLI guide](./cli.md#checking-a-deployment) shows.
+[MIGRATING.md](../MIGRATING.md) covers each change.
 
 ## The registry's types, in passing
 
@@ -629,7 +630,7 @@ subpaths:
 npx nexus migrate src --write
 ```
 
-The [migration guide](../MIGRATING.md) lists every change 2.0 makes, with before-and-after code.
+The [migration guide](../MIGRATING.md) lists every change 3.0 and 2.0 make, with before-and-after code.
 
 <!-- reference:start -->
 ## Reference
@@ -655,13 +656,13 @@ specific entry point that provides it.
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `createNexusConfig` | function | Starts a fluent `NexusAIConfig` builder. |
-| `DEFAULT_CHANGES` | constant | The defaults 3.0 changes, each turned on by the preview. |
+| `DEFAULT_CHANGES` | constant | The defaults 3.0 changes, each kept as 2.x had it by `useDefaults('2.x')`. |
 | `DefaultChange` | interface | One default that 3.0 changes: what it is, what 2.x does, what 3.0 does, and what to do first. |
 | `defineNexusConfig` | function | Identity helper for users who prefer object literals but want type inference and validation in editors. |
 | `NexusConfigBuilder` | class | Fluent, typed builder for `NexusAIConfig`. |
-| `nexusDefaults` | function | The defaults in effect: as `useDefaults()` chose, else the `NEXUS_DEFAULTS` environment variable, `2.x` or `3.0`, else `2.x`. |
-| `NexusDefaults` | type | A release whose defaults apply: `2.x`, the default, or `3.0`, a preview of the next major release's. |
-| `useDefaults` | function | Chooses which release's defaults apply to everything created after it: `3.0` previews the next major release's, `2.x` returns to today's. |
+| `nexusDefaults` | function | The defaults in effect: as `useDefaults()` chose, else the `NEXUS_DEFAULTS` environment variable, `2.x` or `3.0`, else `3.0`. |
+| `NexusDefaults` | type | A release whose defaults apply: `3.0`, the default, or `2.x`, which keeps 2.x's three settings off. |
+| `useDefaults` | function | Chooses which release's defaults apply to everything created after it: `3.0`, the default, or `2.x`, which keeps the three settings 3.0 turns on off, for an application that upgrades before it turns them on. |
 
 ### `nexus-ai-pro/context`
 

@@ -164,13 +164,19 @@ run of the trace, so a link can be shared.
 
 ### Writing as it runs
 
-By default a trace is written when its root finishes. That lets sampling decide with the whole trace
-in hand, but a process that dies mid-run takes its trace with it — the trace you most needed.
-`TracerOptions.incremental` writes each run when it starts and again when it ends instead:
+On a durable store, a tracer writes each run when it starts and again when it ends. Written only once
+its root finishes, a trace would let sampling decide with the whole of it in hand, but a process that
+dies mid-run would take its trace with it — the trace you most needed. `TracerOptions.incremental`
+chooses: it is on by default for a store whose `durable` is not `false`, and off for a store in
+memory, such as `MemoryTraceStore`, which a dead process takes with it anyway.
 
 ```ts
-const tracer = new Tracer({ store, incremental: true });
+const tracer = new Tracer({ store }); // writes as it runs
+const atTheEnd = new Tracer({ store, incremental: false }); // writes each trace when its root finishes
 ```
+
+2.x wrote at the end unless asked; `useDefaults('2.x')` still does, as the
+[core guide](./core.md#30s-defaults-and-keeping-2xs) explains.
 
 A crash then leaves the run in the store with every run beneath it that finished, and a run in
 progress can be watched while it goes. Each trace's writes are chained, so a run's end never lands
@@ -202,8 +208,8 @@ into the 32 and 16 hex digits W3C and OpenTelemetry use, the same way in every p
 
 ### Sampling and redaction
 
-Without `incremental`, a trace is written when its root finishes, so sampling decides with the whole
-trace in hand.
+With `incremental: false`, a trace is written when its root finishes, so sampling decides with the
+whole trace in hand.
 `SamplingPolicy.rate` keeps that share of traces. Three options keep a trace whatever the rate:
 `keepErrors`, `keepSlowerThanMs`, and `keepCostlierThan`.
 
@@ -492,8 +498,8 @@ slow runs grouped by what went wrong, and metrics that got worse than the week b
 
 ## Limitations
 
-- Without `incremental`, traces are written when the root finishes, so a process that dies mid-run
-  loses that trace.
+- With `incremental: false`, or on a store in memory, traces are written when the root finishes, so
+  a process that dies mid-run loses that trace.
 - With `incremental`, a run is written twice, so a store pays twice the writes. A run left by a dead
   process stays `running` until `closeAbandonedRuns()` closes it.
 - `OtlpGrpcTraceExporter` runs on Node.js only. On another runtime, send OTLP/HTTP with

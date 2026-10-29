@@ -50,8 +50,8 @@ export interface TracerOptions {
    * run stays in the store with every run that finished, and a run in progress can be watched.
    * Sampling is then decided when the root starts. A trace not sampled is still held in memory and
    * written at the end when tail sampling keeps it, so `keepErrors` still shows every failure.
-   * Defaults to false, which writes at the end, as before; under 3.0's defaults, `useDefaults('3.0')`,
-   * to true on a durable store, one whose `durable` is not `false`.
+   * Defaults to true on a durable store, one whose `durable` is not `false`, and to false, which writes
+   * at the end, on one in memory and under 2.x's defaults, `useDefaults('2.x')`.
    */
   incremental?: boolean;
   /**

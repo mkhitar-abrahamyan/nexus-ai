@@ -100,7 +100,7 @@ test('names: by id, or by method and path; repeated, prefixed, and filtered; a D
     api.tools.map((item) => item.name),
     ['get_notes_noteId', 'remove', 'upload', 'remove_2'],
   );
-  assert.deepEqual(api.skipped, [], 'a multipart body is sent, so nothing is skipped');
+  assert.equal('skipped' in api, false, 'a multipart body is sent, so nothing is skipped, and 3.0 keeps no list of it');
   assert.deepEqual(byName(api, 'remove').capabilities, ['api.destructive:notes/remove']);
   assert.deepEqual(api.results.remove, { type: 'null' }, 'nothing comes back');
   // A filtered-out operation frees its name, so the rest keep theirs whatever the filter.

@@ -83,11 +83,13 @@ test('a canary takes a tenth of new traffic, and every run records the revision 
     await call(app, 'POST', '/runs', { assistant: 'support', input: { index } });
   }
   const runs = await allSettled(state, 1_000);
-  // Each run is placed by its own id, exactly where `bucket()` puts it: the canary holds [0, 0.1).
+  // Each run is placed by its own id, exactly where `bucket()` puts it with the deployment's strategy,
+  // hash-v2 for one first recorded on 3.0: the canary holds [0, 0.1).
+  assert.equal(deployment.bucketStrategy, 'hash-v2');
   for (const run of runs) {
     assert.equal(
       run.revision?.id,
-      bucket(`support:${run.id}`) < 0.1 ? 'canary' : 'stable',
+      bucket(`support:${run.id}`, deployment.bucketStrategy) < 0.1 ? 'canary' : 'stable',
       `${run.id} lands by its bucket`,
     );
   }

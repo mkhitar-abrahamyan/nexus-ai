@@ -173,7 +173,7 @@ test('traces: no cross-tenant get, query, tree, or feedback', async () => {
 test('operations: no cross-tenant read, update, delete, idempotency replay, claim, or count', async () => {
   const stores: Array<[string, OperationStore<string>]> = [
     ['memory', new MemoryOperationStore<string>()],
-    ['redis', new RedisOperationStore<string>(redis, { prefix: `iso-ops-${++tables}:` })],
+    ['redis', new RedisOperationStore<string>(redis, { prefix: `iso-ops-${++tables}:`, index: false })],
     ['redis indexed', new RedisOperationStore<string>(redis, { prefix: `iso-ops-${++tables}:`, index: true })],
     ['postgres', await migrated(new PostgresOperationStore<string>(client, { table: table('iso_ops') }))],
     ['sqlite', await migrated(new SqliteOperationStore<string>(new DatabaseSync(':memory:')))],

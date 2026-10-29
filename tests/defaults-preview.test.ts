@@ -1,9 +1,9 @@
 /**
- * A preview of 3.0's defaults: one switch, `useDefaults('3.0')` or `NEXUS_DEFAULTS=3.0`, turns on the
- * three settings 2.x keeps opt-in, so an application runs as 3.0 will before it upgrades: incremental
- * tracing on a durable trace store, the Redis operation store's dispatch index, and `hash-v2` for a
- * deployment first recorded. An option set explicitly wins under either; without the switch nothing
- * changes; and `nexus doctor --upgrade 3.0` says what 3.0 would change for a deployment.
+ * 3.0's defaults: the three settings 2.x kept opt-in are on — incremental tracing on a durable trace
+ * store, the Redis operation store's dispatch index, and `hash-v2` for a deployment first recorded — and
+ * one switch, `useDefaults('2.x')` or `NEXUS_DEFAULTS=2.x`, keeps all three as 2.x had them. An option
+ * set explicitly wins under either; and `nexus doctor --upgrade 3.0` says what turning them on would
+ * change for a deployment that keeps 2.x's.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -43,13 +43,15 @@ async function writesWhileRunning(tracer: Tracer, store: { saved: () => number }
 
 const answering = functionAssistant(() => ({ answer: 'ok' }));
 
-test('the switch: 2.x by default, NEXUS_DEFAULTS chooses 3.0, useDefaults() wins, and anything else is refused', () => {
+test('the switch: 3.0 by default, NEXUS_DEFAULTS chooses 2.x, useDefaults() wins, and anything else is refused', () => {
   const saved = process.env.NEXUS_DEFAULTS;
   try {
     delete process.env.NEXUS_DEFAULTS;
-    assert.equal(nexusDefaults(), '2.x');
+    assert.equal(nexusDefaults(), '3.0');
     process.env.NEXUS_DEFAULTS = '';
-    assert.equal(nexusDefaults(), '2.x', 'an empty variable is unset');
+    assert.equal(nexusDefaults(), '3.0', 'an empty variable is unset');
+    process.env.NEXUS_DEFAULTS = '2.x';
+    assert.equal(nexusDefaults(), '2.x');
     process.env.NEXUS_DEFAULTS = '3.0';
     assert.equal(nexusDefaults(), '3.0');
     process.env.NEXUS_DEFAULTS = '3';
@@ -66,15 +68,15 @@ test('the switch: 2.x by default, NEXUS_DEFAULTS chooses 3.0, useDefaults() wins
   } finally {
     if (saved === undefined) delete process.env.NEXUS_DEFAULTS;
     else process.env.NEXUS_DEFAULTS = saved;
-    useDefaults('2.x');
+    useDefaults('3.0');
   }
 });
 
-test('proof: the preview turns on all three of 3.0’s defaults at once, an explicit option wins, and without it nothing changes', async () => {
+test('proof: 3.0’s three defaults are on, 2.x’s keep all three off at once, and an explicit option wins under either', async () => {
   const redis = await FakeRedis.create();
   const withoutIndexCommands = { ...redis, zadd: undefined, zrem: undefined, zrangebyscore: undefined } as never;
   try {
-    // 2.x: each setting as it has always been.
+    // 2.x's defaults, kept: each setting as 2.x had it.
     useDefaults('2.x');
     const durable2 = durableStore();
     const tracer2 = new Tracer({ store: durable2 });
@@ -89,7 +91,7 @@ test('proof: the preview turns on all three of 3.0’s defaults at once, an expl
     await before.canary('recorded', 'v2', 0.5);
     assert.equal((await before.get('recorded'))?.bucketStrategy, undefined);
 
-    // 3.0's defaults, previewed.
+    // 3.0's defaults.
     useDefaults('3.0');
     const durable3 = durableStore();
     const tracer3 = new Tracer({ store: durable3 });
@@ -115,7 +117,7 @@ test('proof: the preview turns on all three of 3.0’s defaults at once, an expl
     );
     assert.equal((await after.get('recorded'))?.bucketStrategy, undefined, 'a recorded deployment keeps its own');
 
-    // An option set explicitly wins under the preview, as it will under 3.0.
+    // An option set explicitly wins under 3.0's defaults.
     assert.equal(new Tracer({ store: durableStore(), incremental: false }).incremental, false);
     assert.equal(new RedisOperationStore(redis as never, { index: false }).indexed, false);
     assert.throws(
@@ -127,12 +129,12 @@ test('proof: the preview turns on all three of 3.0’s defaults at once, an expl
     kept.assistant('support', { v1: answering }, { live: 'v1', bucketStrategy: 'fnv1a-v1' });
     assert.equal((await kept.get('support'))?.bucketStrategy, 'fnv1a-v1');
 
-    // Back to 2.x: what is created next is as before.
+    // Back to 2.x's: what is created next is as 2.x made it.
     useDefaults('2.x');
     assert.equal(new Tracer({ store: durableStore() }).incremental, false);
     assert.equal(new RedisOperationStore(redis as never).indexed, false);
   } finally {
-    useDefaults('2.x');
+    useDefaults('3.0');
   }
 });
 
@@ -175,7 +177,7 @@ test('nexus doctor --upgrade 3.0 says what 3.0 would change for a deployment, an
       /local|billing|orders/,
       'a store in memory, a strategy chosen, and a deployment recorded are not changed',
     );
-    assert.match(readiness?.hint ?? '', /useDefaults\('3\.0'\).*NEXUS_DEFAULTS=3\.0/);
+    assert.match(readiness?.hint ?? '', /remove useDefaults\('2\.x'\) and NEXUS_DEFAULTS=2\.x, which keep 2\.x's/);
 
     const ready = await upgrade({
       upgrade: '3.0',
@@ -199,6 +201,6 @@ test('nexus doctor --upgrade 3.0 says what 3.0 would change for a deployment, an
       ['ok', "3.0's defaults are on already: what runs here is what 3.0 runs."],
     );
   } finally {
-    useDefaults('2.x');
+    useDefaults('3.0');
   }
 });

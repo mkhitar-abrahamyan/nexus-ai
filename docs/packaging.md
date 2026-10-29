@@ -10,7 +10,7 @@ pays only for what it imports. This guide lists the entry points and what each o
 The root import holds the core client and nothing else: the client, its config builders, its types,
 the errors it throws, and the lifecycle every call runs through. Code written for 1.x imported
 families from the root too; `nexus migrate` moves those imports to their subpaths, and the
-[migration guide](../MIGRATING.md) has the details.
+[migration guide](../MIGRATING.md) has the details, for 2.0 and for 3.0.
 
 ```ts
 import { NexusAI, createNexus, createNexusConfig } from 'nexus-ai-pro';

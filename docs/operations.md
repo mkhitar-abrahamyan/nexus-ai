@@ -261,7 +261,7 @@ An `OperationStoreFilter` narrows both by `kindPrefix`, such as `assistant:` for
 runs, and by `kinds`, a list of exact kinds. `claimQueued()` checks a candidate against the filter
 itself too, so a store of your own that ignores a filter field never hands a worker the wrong work. `operationStats()` calls `stats()`, or counts `list()` for a store without it. Every store
 here has both methods. Postgres and SQLite answer `listQueued()` from an index of queued work by age,
-so a claim reads the oldest few rows however long the queue is. Redis does too with `index: true`;
+so a claim reads the oldest few rows however long the queue is. Redis does too, with its index;
 without it, Redis reads every record.
 
 Every store refuses a second record under an idempotency key another record holds, with
@@ -278,7 +278,7 @@ all ten handles resolve to its result. The in-memory and Redis stores enforce it
 
 ### The Redis dispatch index
 
-With `index: true`, `RedisOperationStore` keeps queued work in a sorted set by age and leased work in
+With its index, `RedisOperationStore` keeps queued work in a sorted set by age and leased work in
 one by lease expiry. `listQueued()` reads the oldest few records from the first, and `claimExpired()`
 reads only lapsed leases from the second, so a claim reads the same handful of records with 100,000
 operations queued as with 1,000. The records stay the source of truth: an index entry only says where
@@ -286,13 +286,15 @@ to look, and one that no longer matches its record is skipped, then removed by a
 checks the record in the same step. It needs `zadd`, `zrem`, and `zrangebyscore`, which `ioredis`
 has; with `eval`, a record and its index entries change together.
 
-It is off by default, because a 2.1 worker writes records without index entries. Turn it on once
-every worker sharing the prefix runs 2.2, then call `reindex()` once to index what is already stored.
-`reindex()` is safe while workers are busy, and resolves to how many records it read.
+It is on by default where the client has those commands, and `index: false` turns it off; 2.x kept it
+off unless asked, as `useDefaults('2.x')` still does. A worker without the index writes records
+without index entries, so what it queued is found once `reindex()` indexes what is already stored: call
+it once no worker without the index shares the prefix. `reindex()` is safe while workers are busy, and
+resolves to how many records it read.
 
 ```ts
-const operations = new RedisOperationStore(redis, { index: true });
-await operations.reindex(); // once, after the last 2.1 worker is gone
+const operations = new RedisOperationStore(redis);
+await operations.reindex(); // once no worker without the index shares the prefix
 ```
 
 An `OperationDispatcher` hands an accepted record to a worker. `BullMQOperationDispatcher` queues only

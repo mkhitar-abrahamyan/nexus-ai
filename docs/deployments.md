@@ -83,12 +83,13 @@ How the key becomes a place is the deployment's `BucketStrategy`:
 
 | Strategy | Places |
 | --- | --- |
-| `fnv1a-v1` | By FNV-1a. Random ids, which the server gives by default, spread evenly. Ids that differ only in their last characters, such as `user-1` to `user-500`, cluster, so a canary's share of them drifts from its weight. The default, and what every deployment recorded before 2.5 uses. |
-| `hash-v2` | By FNV-1a mixed with MurmurHash3's finalizer, so sequential ids spread as evenly as random ones. |
+| `fnv1a-v1` | By FNV-1a. Random ids, which the server gives by default, spread evenly. Ids that differ only in their last characters, such as `user-1` to `user-500`, cluster, so a canary's share of them drifts from its weight. What every deployment recorded before 2.5 uses, and 2.x's default. |
+| `hash-v2` | By FNV-1a mixed with MurmurHash3's finalizer, so sequential ids spread as evenly as random ones. The default for a deployment first recorded on 3.0. |
 
 A deployment records its strategy, so every replica places a thread the same way, and no thread
-moves through an upgrade. `Deployments.assistant()` takes `bucketStrategy` for a deployment recorded
-from then on, and `bucketing()` changes a recorded one. A thread already on a revision that takes
+moves through an upgrade: one recorded before 3.0 keeps `fnv1a-v1`. `Deployments.assistant()` takes
+`bucketStrategy` for a deployment recorded from then on, and `bucketing()` changes a recorded one.
+`bucket()` places a key by `fnv1a-v1` unless given the strategy, so pass it the deployment's. A thread already on a revision that takes
 traffic stays there; only new threads are placed by the new strategy.
 
 Every run records its `RunRevision`: the revision, its share, the deployment version, and the reason.
@@ -598,9 +599,8 @@ nexus deploy promote support 2026-09-30 --url https://agents.internal
   in the same instant can lose one change: give the server one of the included stores, or pass
   `expectedVersion` and retry a conflict.
 - A replica that dies loses the runs it counted in its last `rollupMs`. The run records stay whole.
-- `fnv1a-v1` stays the default bucket strategy through 2.x, so a deployment keyed by sequential ids
-  needs `bucketStrategy: 'hash-v2'` to split them evenly, or the preview of 3.0's defaults,
-  `useDefaults('3.0')`, which records a new deployment with it.
+- A deployment recorded before 3.0 keeps `fnv1a-v1`, so one keyed by sequential ids splits them
+  evenly only once `bucketing()` moves it to `hash-v2`.
 - A worker of 2.4 or earlier claims a run of any revision, and runs its live revision when it lacks
   the one routed. Finish a rollout from 2.4 before images start carrying different revisions.
 - A replica that both serves the API and claims runs routes a run it has room for only among its own

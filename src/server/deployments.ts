@@ -83,8 +83,8 @@ export interface RevisionedAssistantOptions {
   /** What the assistant is, reported by the assistants endpoint. */
   description?: string;
   /**
-   * How the deployment places threads, when it is first recorded. Defaults to `fnv1a-v1`, and under
-   * 3.0's defaults, `useDefaults('3.0')`, to `hash-v2`. A deployment already recorded keeps its own;
+   * How the deployment places threads, when it is first recorded. Defaults to `hash-v2`, and under
+   * 2.x's defaults, `useDefaults('2.x')`, to `fnv1a-v1`. A deployment already recorded keeps its own;
    * `Deployments.bucketing()` changes it.
    */
   bucketStrategy?: BucketStrategy;

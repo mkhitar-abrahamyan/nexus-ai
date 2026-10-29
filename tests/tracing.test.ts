@@ -241,9 +241,11 @@ test('the JSONL store survives a restart and a later line wins', async (context)
   assert.equal(tree?.children.length, 1);
 
   const rootRun = runs.find((run) => run.name === 'root') as Run;
+  const lines = async () => (await readFile(file, 'utf8')).trim().split('\n').length;
+  assert.equal(await lines(), 4, 'each run written as it starts and again as it ends, the later line winning');
   await reopened.addFeedback(rootRun.id, { key: 'useful', score: 1, createdAt: new Date().toISOString() });
   assert.equal((await reopened.get(rootRun.id))?.feedback?.length, 1);
-  assert.equal((await readFile(file, 'utf8')).trim().split('\n').length, 3, 'feedback is appended, not rewritten');
+  assert.equal(await lines(), 5, 'feedback is appended, not rewritten');
 
   assert.equal(await reopened.prune(new Date(Date.now() + 60_000).toISOString()), 2);
   assert.deepEqual(await reopened.query(), []);

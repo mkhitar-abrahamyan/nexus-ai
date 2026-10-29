@@ -59,7 +59,7 @@ async function operationStores(): Promise<Array<[string, OperationStore<unknown>
     ['memory', new MemoryOperationStore<unknown>()],
     ['sqlite', sqlite],
     ['postgres', postgres],
-    ['redis', new RedisOperationStore<unknown>(redis, { prefix: `race-${tables}:` })],
+    ['redis', new RedisOperationStore<unknown>(redis, { prefix: `race-${tables}:`, index: false })],
     ['redis indexed', new RedisOperationStore<unknown>(redis, { prefix: `race-indexed-${tables}:`, index: true })],
   ];
 }

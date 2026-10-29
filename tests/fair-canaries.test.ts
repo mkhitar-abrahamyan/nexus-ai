@@ -56,10 +56,12 @@ test('a deployment records its bucket strategy, routes by it, and a thread stays
   const state = new MemoryServerStore();
   const deployments = new Deployments({ state, cacheMs: 0 });
   deployments.assistant('support', revisions(), { live: 'stable', bucketStrategy: 'hash-v2' });
-  deployments.assistant('billing', revisions(), { live: 'stable' });
+  deployments.assistant('billing', revisions(), { live: 'stable', bucketStrategy: 'fnv1a-v1' });
+  deployments.assistant('triage', revisions(), { live: 'stable' });
 
   assert.equal((await deployments.get('support'))?.bucketStrategy, 'hash-v2');
-  assert.equal((await deployments.get('billing'))?.bucketStrategy, undefined, 'fnv1a-v1, as before 2.5');
+  assert.equal((await deployments.get('billing'))?.bucketStrategy, 'fnv1a-v1', 'as before 2.5, chosen');
+  assert.equal((await deployments.get('triage'))?.bucketStrategy, 'hash-v2', 'by default since 3.0');
   await deployments.canary('support', 'canary', 0.25);
   assert.equal((await deployments.get('support'))?.bucketStrategy, 'hash-v2', 'a change keeps the strategy');
 

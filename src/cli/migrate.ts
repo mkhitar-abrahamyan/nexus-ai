@@ -3,8 +3,11 @@ import path from 'node:path';
 import { CliUsageError, flagBool, type ParsedArgs, writeJson } from './args.js';
 import { ROOT_MOVES } from './root-moves.js';
 
-/** Deprecated type aliases 2.0 removes, and what replaces each, wherever it is imported from. */
-const RENAMES: Readonly<Record<string, string>> = { ImageManagerConfig: 'ImageConfig' };
+/** Deprecated type aliases a major release removed, and what replaces each, wherever it is imported from. */
+const RENAMES: Readonly<Record<string, string>> = {
+  ImageManagerConfig: 'ImageConfig',
+  GraphCheckpointV2: 'GraphCheckpoint',
+};
 const PACKAGE = 'nexus-ai-pro';
 const CODE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.mdx']);
@@ -30,10 +33,11 @@ export interface MigrationOutcome {
 }
 
 /**
- * Migrates one file's text to the 2.0 imports: names the root import drops are imported from their
- * subpaths, names that moved under another name keep their local name through an alias, and deprecated
- * aliases are replaced. What cannot be rewritten safely — a namespace import of the root, a dynamic
- * import, a read of `estimatedCost` — is reported instead of guessed at.
+ * Migrates one file's text to 2.0's imports and 3.0's names: names the root import drops are imported
+ * from their subpaths, names that moved under another name keep their local name through an alias, and
+ * deprecated aliases are replaced. What cannot be rewritten safely — a namespace import of the root, a
+ * dynamic import, a read of `estimatedCost` or of the OpenAPI tools' `skipped` — is reported instead
+ * of guessed at.
  *
  * Markdown is migrated inside its TypeScript and JavaScript code blocks only. Running it twice changes
  * nothing the second time.
@@ -237,6 +241,22 @@ function migrateCode(text: string, lineOffset: number): MigrationOutcome {
     notes.push({
       line: at(match.index ?? 0),
       message: "a response's `estimatedCost` string is removed in 2.0: read `cost.amount`, a number, and format it",
+    });
+  }
+  // `skipped` is a common name, so it is reported only where the OpenAPI tools are used.
+  if (/nexus-ai-pro\/agent\/openapi|\b(?:loadOpenApiTools|openApiTools)\(/.test(text)) {
+    for (const match of text.matchAll(/\.skipped\b/g)) {
+      notes.push({
+        line: at(match.index ?? 0),
+        message:
+          'if this reads the OpenAPI tools, `skipped` was always empty since 2.22 and is removed in 3.0: delete the read',
+      });
+    }
+  }
+  for (const match of text.matchAll(/\buseDefaults\(\s*(['"])3\.0\1\s*\)/g)) {
+    notes.push({
+      line: at(match.index ?? 0),
+      message: "3.0's defaults are the default in 3.0: the call changes nothing, and can go",
     });
   }
   for (const { pattern, message } of REMOVED_OPTIONS) {

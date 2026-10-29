@@ -82,8 +82,8 @@ test('every seeded misconfiguration is reported, each by its own check', async (
         checkpointer: new MemoryGraphCheckpointer(),
         tenantUsage: new MemoryTenantUsage(),
         circuits: new MemoryCircuitStateStore(),
-        queue: new RedisOperationStore(redisClient() as never),
-        tracer: new Tracer({ store: new PostgresTraceStore() as never }),
+        queue: new RedisOperationStore(redisClient() as never, { index: false }),
+        tracer: new Tracer({ store: new PostgresTraceStore() as never, incremental: false }),
       },
     },
   });

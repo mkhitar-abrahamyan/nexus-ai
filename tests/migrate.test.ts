@@ -60,6 +60,38 @@ test('deprecated aliases are replaced wherever they are imported from', () => {
   );
 });
 
+test('3.0: its removed alias is renamed, and the OpenAPI tools’ skipped and a redundant useDefaults are reported', () => {
+  assert.equal(
+    migrate("import { migrateCheckpoint, type GraphCheckpointV2 } from 'nexus-ai-pro/graph';\n").text,
+    "import { migrateCheckpoint, type GraphCheckpoint as GraphCheckpointV2 } from 'nexus-ai-pro/graph';\n",
+  );
+  const source = [
+    "import { loadOpenApiTools } from 'nexus-ai-pro/agent/openapi';",
+    "import { useDefaults } from 'nexus-ai-pro/config';",
+    "const api = await loadOpenApiTools('https://api.example.com/openapi.json');",
+    'if (api.skipped.length) console.warn(api.skipped);',
+    "useDefaults('3.0');",
+    "useDefaults('2.x');",
+  ].join('\n');
+  const { text, notes } = migrate(source);
+  assert.equal(text, source, 'nothing is rewritten');
+  assert.deepEqual(
+    notes.map((note) => [note.line, note.message.split(':')[0]]),
+    [
+      [4, 'if this reads the OpenAPI tools, `skipped` was always empty since 2.22 and is removed in 3.0'],
+      [4, 'if this reads the OpenAPI tools, `skipped` was always empty since 2.22 and is removed in 3.0'],
+      [5, "3.0's defaults are the default in 3.0"],
+    ],
+    'useDefaults(2.x) is a choice, and stays unremarked',
+  );
+  assert.deepEqual(
+    migrate('const report = { skipped: tests.skipped };').notes,
+    [],
+    'a `skipped` elsewhere is not the OpenAPI tools’',
+  );
+  assert.equal(migrate('const api = openApiTools(document);\napi.skipped;\n').notes[0]?.line, 2);
+});
+
 test('re-exports and CommonJS requires move too', () => {
   const { text } = migrate(
     "export { OperationRunner, NexusAI } from 'nexus-ai-pro';\nconst { runBatch, NexusAI: Client } = require('nexus-ai-pro');\n",

@@ -417,10 +417,10 @@ function settingsCheck(deployment: DoctorDeployment | undefined): Omit<DoctorChe
 }
 
 /**
- * What 3.0's defaults would change for the stores described: a tracer on a durable store that writes
- * at the end, a Redis operation store without its index, and assistants whose deployments are not yet
- * recorded, which 3.0 would first record with `hash-v2`. An option set explicitly is kept by 3.0, so
- * each finding says how to keep 2.x's behaviour too.
+ * What 3.0's defaults would change for the stores described, when 2.x's are kept: a tracer on a durable
+ * store that writes at the end, a Redis operation store without its index, and assistants whose
+ * deployments are not yet recorded, which 3.0 would first record with `hash-v2`. An option set
+ * explicitly is kept by 3.0, so each finding says how to keep 2.x's behaviour too.
  */
 async function upgradeCheck(
   upgrade: DoctorOptions['upgrade'],
@@ -465,7 +465,7 @@ async function upgradeCheck(
   return {
     status: 'warn',
     detail: `${findings.join('; ')}.`,
-    hint: "Run with 3.0's defaults now: call useDefaults('3.0') before creating anything, or set NEXUS_DEFAULTS=3.0.",
+    hint: "Turn 3.0's defaults on, on every replica together: remove useDefaults('2.x') and NEXUS_DEFAULTS=2.x, which keep 2.x's.",
   };
 }
 

@@ -4,6 +4,25 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+3.0, a major release. It turns on the three defaults 2.21 previewed, and removes the two names 2.x
+deprecated; nothing stored changes, and `useDefaults('2.x')` keeps 2.x's defaults for an application
+that upgrades first. [MIGRATING.md](./MIGRATING.md) covers each change, and `nexus migrate` finds what
+it touches.
+
+### Breaking
+
+- **A tracer on a durable store writes as it runs.** `TracerOptions.incremental` defaults to true on a
+  store whose `durable` is not `false`: each run is written as it starts and again as it ends, so a
+  run in a process that dies is not lost, at twice the writes. A store in memory still writes at the end.
+- **The Redis operation store keeps its dispatch index**, where the client has `zadd`, `zrem`, and
+  `zrangebyscore`, so a claim reads the same few records however long the queue. Work a worker
+  without the index queued is found once `reindex()` runs: call it once the last 2.x worker sharing the
+  prefix has stopped.
+- **A deployment first recorded on 3.0 places threads by `hash-v2`**, which spreads sequential ids
+  evenly. A deployment already recorded keeps its strategy, so no thread moves.
+- **`OpenApiTools.skipped` is removed.** It was always empty since every operation became a tool.
+- **`GraphCheckpointV2` is removed**, for `GraphCheckpoint`, which it named. `nexus migrate` renames it.
+
 ### Changed
 
 - **The studio's sign-in is stable.** Every build signs a person in through Dex, an OpenID Connect

@@ -450,7 +450,7 @@ operation store — memory, Redis, or Postgres — makes a thread durable.
 
 ### Checkpoints 1.x wrote
 
-2.x writes version 2 and reads version 1 for the whole 2.x line, so a thread a 1.x deployment left
+2.x and 3.0 write version 2 and read version 1, so a thread a 1.x deployment left
 waiting resumes after the upgrade. A `GraphCheckpointV1` is that older shape: no version or id, tasks
 only when `next` could not say them, and the first question repeated in `interrupt`.
 
@@ -469,8 +469,7 @@ checkpoint?.interrupts; // every pending question, empty when none
 ```
 
 A version 1 checkpoint gains its id, its tasks spelled out from `next` when it carried none, and its
-question moved into `interrupts`. A version 2 checkpoint passes through unchanged. `GraphCheckpointV2`
-is kept as another name for `GraphCheckpoint`, so code written against 1.25 compiles.
+question moved into `interrupts`. A version 2 checkpoint passes through unchanged.
 
 To build a checkpoint by hand, for a seed or a test, write a `CheckpointDraft` — a checkpoint without
 its version, id, tasks, and questions — and pass it to `toCheckpoint()`. It fills those in, and always
@@ -851,7 +850,6 @@ specific entry point that provides it.
 | `GraphCheckpoint` | interface | A graph's full state after a superstep, which is everything needed to resume the run elsewhere. |
 | `GraphCheckpointer` | interface | Durable storage for checkpoints. |
 | `GraphCheckpointV1` | interface | A checkpoint as 1.x stored it: no version or id, tasks only when `next` could not say them, and the first question repeated in `interrupt`. |
-| `GraphCheckpointV2` | type | Deprecated: Use `GraphCheckpoint`, which is this schema in 2.0. The 2.0 checkpoint schema under the name 1.25 gave it, so code written against 1.25 compiles. |
 | `GraphDescription` | interface | A graph's shape, as data: what `describe()` returns and what the visualizer draws. |
 | `GraphDrainedError` | class | Raised when a run stops because its `RunControl` was drained. |
 | `GraphError` | class | Base class for graph errors, each with a stable `code`. |

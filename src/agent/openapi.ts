@@ -136,13 +136,6 @@ export interface OpenApiTools {
   operations: OpenApiOperation[];
   /** The JSON Schema of what each tool returns, by name: its first success response's. Pass it to `emulatedTools()` as `results`. */
   results: Record<string, Record<string, unknown>>;
-  /**
-   * Operations that could not become tools, and why.
-   *
-   * @deprecated Every operation becomes a tool since 2.22, its body sent whatever its type, so this is
-   * always empty. It is removed in 3.0.
-   */
-  skipped: Array<{ method: string; path: string; reason: string }>;
   /** What the API sends the application, which no tool calls: its webhooks and its operations' callbacks. */
   webhooks: OpenApiWebhook[];
 }
@@ -278,7 +271,6 @@ export function openApiTools(document: OpenApiDocument | string, options: OpenAp
     tools,
     operations,
     results,
-    skipped: [],
     webhooks: webhooksOf(doc),
   };
 }

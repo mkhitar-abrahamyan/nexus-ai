@@ -67,9 +67,21 @@ graduation:
 | Upgrade | A migration test from the previous minor |
 | Soak | A long-running test with flat memory and no leaked handles |
 
-## 2.23 stage (Unreleased)
+## 3.0 stage (Unreleased)
 
-Everything 2.23 adds is stable from the start and additive, unless this section says otherwise.
+3.0 is a major release. It turns on the three defaults 2.21 previewed — incremental tracing on a
+durable trace store, the Redis operation store's dispatch index, and `hash-v2` for a deployment first
+recorded — and removes `OpenApiTools.skipped` and `GraphCheckpointV2`, both deprecated in 2.x. Nothing
+stored changes: checkpoints of version 1 and 2, the state store's keys, operation records, and recorded
+deployments read as they did, and the state store's keys are read by every later 3.x.
+`useDefaults('2.x')` and `NEXUS_DEFAULTS=2.x` keep 2.x's three defaults through 3.x.
+[MIGRATING.md](./MIGRATING.md) covers each change. The rollout is proven against the published 2.21.0
+package, in `tests/upgrade-3.test.ts`: a 2.21 worker and a 3.0 worker share a Redis prefix, each
+claiming what it should and 3.0 finding the rest after one `reindex()`, and 2.21 and 3.0 replicas
+place every thread alike, whichever records a deployment first.
+
+Removed: `OpenApiTools.skipped`, always empty since 2.22, and `GraphCheckpointV2`, for `GraphCheckpoint`.
+Everything else 3.0 adds is stable from the start and additive, unless this section says otherwise.
 
 ### Graduation
 
@@ -78,7 +90,7 @@ The studio's sign-in leaves experimental status: `oidcSignIn()`, `OidcSignInOpti
 
 | Requirement | Evidence |
 | --- | --- |
-| API stability | Covered by the 2.x compatibility rules, with no planned breaking change |
+| API stability | Covered by the compatibility rules, with no planned breaking change |
 | Conformance | Signs a person in through Dex v2.46.0, run in a container on every build, where a wrong password is kept and a reused code refused: `studio/test/signin-dex.test.ts`; every way a callback can be wrong, a token for another client among them, against a provider written from the specification: `studio/test/signin.test.ts` |
 | Crash recovery | n/a: it keeps nothing; a session is a signed cookie, and a sign-in in progress is one the person carries |
 | Concurrency | A sign-in begun on one replica finishes on another, and every replica sharing the secret reads the session: `studio/test/signin.test.ts` |
