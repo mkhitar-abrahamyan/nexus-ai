@@ -451,7 +451,13 @@ test('streamable HTTP refuses what it should: another origin, no session, an unk
 });
 
 test('a session idle past its time is ended, and one still streaming is kept', async () => {
-  const handler = mcpHttpHandler(new McpServer(), { sessionTtlMs: 1 });
+  const ttl = 500;
+  const handler = mcpHttpHandler(new McpServer(), { sessionTtlMs: ttl });
+  // Waits by the wall clock the handler reads, which can step behind timers, past a session's time.
+  const pastTtl = async () => {
+    const from = Date.now();
+    while (Date.now() - from <= ttl) await new Promise((resolve) => setTimeout(resolve, 25));
+  };
   const open = async () => {
     const response = await handler(
       new Request('https://mcp.example/mcp', {
@@ -466,11 +472,12 @@ test('a session idle past its time is ended, and one still streaming is kept', a
   const streaming = await handler(
     new Request('https://mcp.example/mcp', { headers: { accept: 'text/event-stream', 'mcp-session-id': first } }),
   );
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(streaming.status, 200, 'the stream opened while the session was fresh');
+  await pastTtl();
   await open();
   assert.equal(handler.sessions(), 2, 'the first kept, its stream open');
   await streaming.body?.cancel();
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await pastTtl();
   await open();
   assert.equal(handler.sessions(), 1, 'idle and without a stream, both earlier ones are ended');
   await handler.close();
