@@ -110,15 +110,19 @@ available synchronously, and the digest is the same either way. Ids come from We
 ## Proof
 
 The kernel's tests are written against web-standard APIs only, with no test framework and nothing
-of Node's. One file, `tests/portable/kernel.mjs`, runs on four runtimes against the built package:
+of Node's. One file, `tests/portable/kernel.mjs`, runs against the built package on four runtimes
+and in three browser engines:
 - **Node.js and an edge runtime** run on every build. The edge runtime is Vercel's, which exposes
   no `process`, `Buffer`, or `require`, and the tests are bundled first, as a platform's build would
   bundle them.
 - **Deno and Bun** run in CI beside it.
 - **A browser** runs on every build too. `tests/browser.mjs` serves the build to headless Chromium,
   the browser the machine has or `CHROME_BIN`, with nothing installed for it. The page imports every
-  kernel entry point, then runs a graph, an agent with a streaming tool against a mock model, and the
-  AG-UI adapter. It fails if the page ever sees a Node.js `process`.
+  kernel entry point and runs the kernel's tests, then a graph, an agent with a streaming tool against
+  a mock model, and the AG-UI adapter. It fails if the page ever sees a Node.js `process`.
+- **Firefox and WebKit**, Safari's engine, run the same page in CI beside Deno and Bun, in
+  Playwright's builds of each: `npm run test:browser:firefox` and `npm run test:browser:webkit`,
+  after `npx playwright-core install firefox webkit`.
 
 On each runtime, the tests check the following:
 - tools and capabilities;
@@ -137,8 +141,8 @@ the build in two cases:
 
 ## Limitations
 
-- **The browser run is Chromium.** Firefox and Safari are covered by the checks and the web
-  platform's APIs, not by a run of their own.
+- **WebKit is Playwright's build, not Safari itself.** It is the engine Safari runs, built for Linux,
+  so a difference that lives in Safari's shell rather than its engine is not seen.
 - **A provider key in a browser is visible to every user.** Call providers from a server or an edge
   function, or through a proxy that holds the key. Some providers also refuse cross-origin requests.
 - **SHA-256 in plain JavaScript is slower on large inputs.** It takes about 7 µs for a typical

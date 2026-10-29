@@ -46,13 +46,13 @@ jobs:
 
   kernel:
     # Node.js, an edge runtime, and headless Chromium run the kernel inside check:release; these are the
-    # other two.
+    # other runtimes, and the other two browser engines.
     name: Portable kernel on ${{ matrix.runtime }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        runtime: [deno, bun]
+        runtime: [deno, bun, firefox, webkit]
 
     steps:
       - name: Check out repository
@@ -85,3 +85,11 @@ jobs:
       - name: Run the kernel tests on Bun
         if: matrix.runtime == 'bun'
         run: bun tests/portable/run.mjs bun
+
+      - name: Install ${{ matrix.runtime }}
+        if: matrix.runtime == 'firefox' || matrix.runtime == 'webkit'
+        run: npx playwright-core install --with-deps ${{ matrix.runtime }}
+
+      - name: Run the kernel tests in ${{ matrix.runtime }}
+        if: matrix.runtime == 'firefox' || matrix.runtime == 'webkit'
+        run: node tests/browser.mjs ${{ matrix.runtime }}

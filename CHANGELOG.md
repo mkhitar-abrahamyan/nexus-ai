@@ -96,6 +96,9 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
   sign-out at the provider too. A person's `tenant`, from a claim, a header, or the users file, picks
   the sources they read, from `tenantSources`; they see their tenant's comments and audit entries
   alone, and their page token is bound to it.
+- **The kernel in Firefox and WebKit.** The portable kernel's own tests, the file Node.js, Deno, Bun,
+  and the edge runtime run, now run in a browser page too, in headless Chromium on every build and in
+  Firefox and WebKit, Safari's engine, in CI, with a graph, an agent with a streaming tool, and AG-UI.
 
 ### Changed
 
