@@ -49,5 +49,5 @@ review is in [SECURITY.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/m
 
 Full guide: [docs/studio.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/docs/studio.md).
 
-Requires Node.js 22 and nexus-ai-pro 2.0 or newer. Stable from 2.5, with its graduation evidence in
+Requires Node.js 22 and nexus-ai-pro 3.0 or newer. Stable from 2.5, with its graduation evidence in
 [API_STABILITY.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/API_STABILITY.md).

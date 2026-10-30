@@ -2,9 +2,9 @@
   "format": "nexus-compatibility/1",
   "adapter": {
     "name": "nexus-ai-pro/sqlite/vectors SqliteVectorStore",
-    "version": "2.x",
+    "version": "3.x",
     "kind": "vector-store",
-    "nexus": ">=2.4.0 <3",
+    "nexus": ">=2.4.0 <4",
     "capabilities": {
       "filters": "typed"
     },
@@ -18,14 +18,14 @@
     "kind": "vector-store",
     "version": 2
   },
-  "nexusVersion": "2.22.0",
-  "verifiedAt": "2026-10-29T14:49:04.707Z",
+  "nexusVersion": "3.0.0",
+  "verifiedAt": "2026-10-30T05:32:29.485Z",
   "runtime": "node 24.22.1 win32 x64",
   "compatible": true,
   "passed": true,
   "checks": [
     {
-      "name": "declares support for nexus-ai-pro 2.22.0",
+      "name": "declares support for nexus-ai-pro 3.0.0",
       "ok": true
     },
     {
@@ -80,24 +80,24 @@
   "benchmark": {
     "add": {
       "calls": 4,
-      "p50Ms": 0.04,
-      "p95Ms": 0.48
+      "p50Ms": 0.05,
+      "p95Ms": 0.43
     },
     "search": {
       "calls": 9,
-      "p50Ms": 0.11,
-      "p95Ms": 0.31
+      "p50Ms": 0.1,
+      "p95Ms": 0.3
     },
     "searchVector": {
       "calls": 1,
-      "p50Ms": 0.09,
-      "p95Ms": 0.09
+      "p50Ms": 0.12,
+      "p95Ms": 0.12
     },
     "delete": {
       "calls": 2,
       "p50Ms": 0,
-      "p95Ms": 0.08
+      "p95Ms": 0.09
     }
   },
-  "digest": "fd4a3e47296592671c7458d28ea10307d4b7fd2c86a80aff4b95b58ecee1ee3f"
+  "digest": "3e10f08766e2d1b75b2f0b50fe9b44814afdf2cd4b319a06f52e78d64636699e"
 }

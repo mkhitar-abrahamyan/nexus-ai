@@ -272,7 +272,7 @@ signed in; a change still needs the page token. `auth`, when also given, is aske
 send bearer tokens to the same studio. Any flow of the same shape works as `signIn`: an
 `authenticate` for a request's session, and a `handle` for the paths under `/auth/`.
 
-`oidcSignIn()` needs nexus-ai-pro 2.3 or newer, for its token verifier. Every build signs a person in
+`oidcSignIn()` reads tokens with nexus-ai-pro's own verifier. Every build signs a person in
 through Dex, an OpenID Connect provider run in a container, so the flow is proven against a provider
 written by others, not only against the specification.
 

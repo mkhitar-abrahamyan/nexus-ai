@@ -1,6 +1,6 @@
 {
   "name": "nexus-ai-pro-studio",
-  "version": "2.22.0",
+  "version": "3.0.0",
   "description": "A studio for nexus-ai-pro: traces, threads, approvals, experiments, prompts, context bundles, issues, and proposed fixes, run locally or shared by a team with roles and an audit log, with no hosted service.",
   "type": "module",
   "bin": {
@@ -23,7 +23,7 @@
     "node": ">=22"
   },
   "peerDependencies": {
-    "nexus-ai-pro": ">=2.0.0 <3"
+    "nexus-ai-pro": ">=3.0.0 <4"
   },
   "keywords": [
     "nexus-ai-pro",

@@ -2,9 +2,9 @@
   "format": "nexus-compatibility/1",
   "adapter": {
     "name": "nexus-ai-pro/store MemoryStore",
-    "version": "2.x",
+    "version": "3.x",
     "kind": "store",
-    "nexus": ">=2.4.0 <3",
+    "nexus": ">=2.4.0 <4",
     "capabilities": {},
     "budgets": {
       "search": 100
@@ -16,14 +16,14 @@
     "kind": "store",
     "version": 1
   },
-  "nexusVersion": "2.22.0",
-  "verifiedAt": "2026-10-29T14:49:04.431Z",
+  "nexusVersion": "3.0.0",
+  "verifiedAt": "2026-10-30T05:32:29.229Z",
   "runtime": "node 24.22.1 win32 x64",
   "compatible": true,
   "passed": true,
   "checks": [
     {
-      "name": "declares support for nexus-ai-pro 2.22.0",
+      "name": "declares support for nexus-ai-pro 3.0.0",
       "ok": true
     },
     {
@@ -63,12 +63,12 @@
     "put": {
       "calls": 5,
       "p50Ms": 0.01,
-      "p95Ms": 0.85
+      "p95Ms": 0.63
     },
     "get": {
       "calls": 5,
       "p50Ms": 0,
-      "p95Ms": 0.04
+      "p95Ms": 0.03
     },
     "delete": {
       "calls": 1,
@@ -77,8 +77,8 @@
     },
     "search": {
       "calls": 3,
-      "p50Ms": 0.08,
-      "p95Ms": 0.12
+      "p50Ms": 0.05,
+      "p95Ms": 0.1
     },
     "listNamespaces": {
       "calls": 1,
@@ -86,5 +86,5 @@
       "p95Ms": 0.04
     }
   },
-  "digest": "5626e3a4b0ba662719821e5b7b93e50937700fd96fad7534e97619255429e48d"
+  "digest": "597bc84f5c841fdd2459e84f2cdfa8ab8598caf5d1641f91b31b6c415ad052fc"
 }

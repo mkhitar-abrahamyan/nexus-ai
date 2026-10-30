@@ -1,7 +1,7 @@
 # API Stability Policy
 
-This policy describes compatibility guarantees for `nexus-ai-pro`. The 2.x guarantees apply beginning
-with version 2.0.0, as the 1.x guarantees applied from 1.0.0. The sections for the 1.x stages below
+This policy describes compatibility guarantees for `nexus-ai-pro`. The 3.x guarantees apply beginning
+with version 3.0.0, as the 2.x guarantees applied from 2.0.0 and the 1.x guarantees from 1.0.0. The sections for the 1.x stages below
 still describe each surface; where they say "the 1.x rules", read the rules of the current major line.
 
 ## Release stages
@@ -67,7 +67,7 @@ graduation:
 | Upgrade | A migration test from the previous minor |
 | Soak | A long-running test with flat memory and no leaked handles |
 
-## 3.0 stage (Unreleased)
+## 3.0 stage (3.0.0)
 
 3.0 is a major release. It turns on the three defaults 2.21 previewed — incremental tracing on a
 durable trace store, the Redis operation store's dispatch index, and `hash-v2` for a deployment first

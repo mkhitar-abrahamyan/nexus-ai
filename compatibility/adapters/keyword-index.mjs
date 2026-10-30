@@ -4,8 +4,8 @@ import { KeywordIndex } from 'nexus-ai-pro/rag/retrievers';
 
 export const adapter = defineRetrieverAdapter({
   name: 'nexus-ai-pro/rag/retrievers KeywordIndex',
-  version: '2.x',
-  nexus: '>=2.4.0 <3',
+  version: '3.x',
+  nexus: '>=2.4.0 <4',
   capabilities: { writes: true },
   create: () => new KeywordIndex(),
   budgets: { retrieve: 100 },

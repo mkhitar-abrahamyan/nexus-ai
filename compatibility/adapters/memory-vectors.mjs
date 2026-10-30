@@ -5,8 +5,8 @@ import { embed } from './embed.mjs';
 
 export const adapter = defineVectorStoreAdapter({
   name: 'nexus-ai-pro/rag MemoryVectorStore',
-  version: '2.x',
-  nexus: '>=2.4.0 <3',
+  version: '3.x',
+  nexus: '>=2.4.0 <4',
   capabilities: { filters: 'typed' },
   create: () => new MemoryVectorStore(embed),
   budgets: { search: 250 },

@@ -129,7 +129,7 @@ crash-injection test, a race test, a benchmark with a budget, or a conformance s
 a release touches gets its line in the semantics tables, saying what can repeat after a crash, what is
 durable, and what a side effect must do.
 
-**The 2.x line hardens before it widens.** Most of each release goes to correctness, crash recovery,
+**The 3.x line hardens before it widens.** Most of each release goes to correctness, crash recovery,
 races, and proving what has shipped, and every release also delivers one capability an application
 did not have before: gaps are never shipped alone.
 

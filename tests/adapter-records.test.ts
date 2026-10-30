@@ -47,7 +47,7 @@ const embed = async (texts: string[]) =>
 const memory = defineVectorStoreAdapter({
   name: '@acme/memory-vectors',
   version: '1.2.0',
-  nexus: '^2.4.0',
+  nexus: '>=2.4.0 <4',
   capabilities: { filters: 'exact' },
   create: () => new MemoryVectorStore(embed),
   budgets: { search: 500 },
@@ -88,7 +88,7 @@ test('a record seals what verify() proved: the contract, the release, the runtim
     name: '@acme/memory-vectors',
     version: '1.2.0',
     kind: 'vector-store',
-    nexus: '^2.4.0',
+    nexus: '>=2.4.0 <4',
     capabilities: { filters: 'exact' },
     budgets: { search: 500 },
     package: '@acme/memory-vectors@1.2.0',
@@ -161,9 +161,9 @@ test('a record’s state: passing, failing, outside the release’s range, or ve
     reasons: ['verified against vector-store contract v1; v2 adds “adds a passage again under an id it deleted”'],
     unverified: ['adds a passage again under an id it deleted'],
   });
-  assert.equal(recordStatus(old, { nexusVersion: '3.0.0' }).state, 'incompatible');
-  assert.deepEqual(recordStatus(old, { nexusVersion: '3.0.0' }).reasons, [
-    'declares nexus-ai-pro ^2.4.0, which leaves out 3.0.0',
+  assert.equal(recordStatus(old, { nexusVersion: '4.0.0' }).state, 'incompatible');
+  assert.deepEqual(recordStatus(old, { nexusVersion: '4.0.0' }).reasons, [
+    'declares nexus-ai-pro >=2.4.0 <4, which leaves out 4.0.0',
   ]);
 
   const broken = madeAgainst(
@@ -186,7 +186,7 @@ test('a record’s state: passing, failing, outside the release’s range, or ve
   const store = defineStoreAdapter({
     name: 'memory-store',
     version: '1.0.0',
-    nexus: '>=2.4.0 <3',
+    nexus: '>=2.4.0 <4',
     capabilities: {},
     create: () => new MemoryStore(),
   });
@@ -247,7 +247,7 @@ test('one page lists every record, by kind and name, the same records making the
   const store = defineStoreAdapter({
     name: '<memory-store>',
     version: '1.0.0',
-    nexus: '>=2.4.0 <3',
+    nexus: '>=2.4.0 <4',
     capabilities: {},
     create: () => new MemoryStore(),
   });

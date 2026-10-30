@@ -391,7 +391,7 @@ class ArrayVectorStore {
 export const adapter = defineVectorStoreAdapter({
   name: '@community/array-vectors',
   version: '0.1.0',
-  nexus: '^2.3.0',
+  nexus: '>=2.3.0 <4',
   capabilities: { filters: 'typed' },
   create: () => new ArrayVectorStore(),
   budgets: { search: 250 },

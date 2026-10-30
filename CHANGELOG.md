@@ -4,6 +4,8 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-30
+
 3.0, a major release. It turns on the three defaults 2.21 previewed, and removes the two names 2.x
 deprecated; nothing stored changes, and `useDefaults('2.x')` keeps 2.x's defaults for an application
 that upgrades first. [MIGRATING.md](./MIGRATING.md) covers each change, and `nexus migrate` finds what
@@ -3521,7 +3523,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.22.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.22.0...v3.0.0
 [2.22.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.2...v2.21.0
 [2.20.2]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.1...v2.20.2

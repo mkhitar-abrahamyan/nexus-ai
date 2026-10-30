@@ -345,14 +345,17 @@ Shipped so far:
 - 2.22 MCP over streamable HTTP both ways, with prompts, resources, and a server's questions back to
   the client; OpenAPI tools that send each operation's credentials; tokens, API keys, and sessions the
   server issues; and a studio that signs people in with your identity provider and serves many
-  tenants, each seeing only its own.
+  tenants, each seeing only its own;
+- 3.0 the three defaults 2.21 previewed, on: tracing written as it runs, the Redis dispatch index, and
+  `hash-v2` for a new deployment, with `useDefaults('2.x')` for an application that upgrades first;
+  and the studio's sign-in, stable, proven against a real OpenID Connect provider on every build.
 
 Upgrading from 2.x: 3.0 turns on three defaults 2.x kept opt-in, and `useDefaults('2.x')` keeps them
 off until you are ready; from 1.x, `npx nexus migrate src --write` moves your imports.
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers both.
-Next, in 2.23, Pinecone, images, the Gemini embedding batch tier, media understanding, video, typed
-decisions, Gemini Live, SIP, and both phone providers graduate once the live workflow passes against
-each. The
+Next, in 3.1, Pinecone, images, the Gemini embedding batch tier, media understanding, video, typed
+decisions, Gemini Live, SIP, both phone providers, and Gemini's voice graduate once the live workflow
+passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order
 applications ask for it.
 

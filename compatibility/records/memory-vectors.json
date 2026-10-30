@@ -2,9 +2,9 @@
   "format": "nexus-compatibility/1",
   "adapter": {
     "name": "nexus-ai-pro/rag MemoryVectorStore",
-    "version": "2.x",
+    "version": "3.x",
     "kind": "vector-store",
-    "nexus": ">=2.4.0 <3",
+    "nexus": ">=2.4.0 <4",
     "capabilities": {
       "filters": "typed"
     },
@@ -18,14 +18,14 @@
     "kind": "vector-store",
     "version": 2
   },
-  "nexusVersion": "2.22.0",
-  "verifiedAt": "2026-10-29T14:49:04.568Z",
+  "nexusVersion": "3.0.0",
+  "verifiedAt": "2026-10-30T05:32:29.356Z",
   "runtime": "node 24.22.1 win32 x64",
   "compatible": true,
   "passed": true,
   "checks": [
     {
-      "name": "declares support for nexus-ai-pro 2.22.0",
+      "name": "declares support for nexus-ai-pro 3.0.0",
       "ok": true
     },
     {
@@ -81,17 +81,17 @@
     "add": {
       "calls": 4,
       "p50Ms": 0.02,
-      "p95Ms": 0.3
+      "p95Ms": 0.26
     },
     "search": {
       "calls": 9,
-      "p50Ms": 0.02,
+      "p50Ms": 0.03,
       "p95Ms": 0.16
     },
     "searchVector": {
       "calls": 1,
-      "p50Ms": 0.02,
-      "p95Ms": 0.02
+      "p50Ms": 0.03,
+      "p95Ms": 0.03
     },
     "delete": {
       "calls": 2,
@@ -99,5 +99,5 @@
       "p95Ms": 0.01
     }
   },
-  "digest": "54d30286a722fd7e404607eb452361fbf413bfcf2cf3510ae6f40f82e33422ed"
+  "digest": "75536c3b2bffc13bf028ab45cabe005708a0e70d079cd328ca05d6863056cd25"
 }

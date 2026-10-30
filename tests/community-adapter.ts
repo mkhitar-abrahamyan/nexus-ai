@@ -62,7 +62,7 @@ class TombstoneStore {
 export const adapter = defineVectorStoreAdapter({
   name: '@community/tombstone-vectors',
   version: ${JSON.stringify(version)},
-  nexus: '^2.4.0',
+  nexus: '>=2.4.0 <4',
   capabilities: { filters: 'exact' },
   create: () => new TombstoneStore(),
 });

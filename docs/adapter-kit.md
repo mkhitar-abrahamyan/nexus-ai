@@ -25,7 +25,7 @@ import { defineVectorStoreAdapter } from 'nexus-ai-pro/adapter-kit';
 export const milvus = defineVectorStoreAdapter({
   name: '@acme/nexus-milvus',
   version: '0.3.0',
-  nexus: '>=2.4.0 <3',
+  nexus: '>=3.0.0 <4',
   capabilities: { filters: 'typed', minScore: true },
   create: (config: MilvusConfig) => new MilvusVectorStore(config),
   normalizeError: (error) => ((error as { code?: string }).code === 'QUOTA' ? { code: 'RATE_LIMIT', retryable: true } : undefined),

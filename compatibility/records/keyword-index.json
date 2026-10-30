@@ -2,9 +2,9 @@
   "format": "nexus-compatibility/1",
   "adapter": {
     "name": "nexus-ai-pro/rag/retrievers KeywordIndex",
-    "version": "2.x",
+    "version": "3.x",
     "kind": "retriever",
-    "nexus": ">=2.4.0 <3",
+    "nexus": ">=2.4.0 <4",
     "capabilities": {
       "writes": true
     },
@@ -18,14 +18,14 @@
     "kind": "retriever",
     "version": 1
   },
-  "nexusVersion": "2.22.0",
-  "verifiedAt": "2026-10-29T14:49:04.270Z",
+  "nexusVersion": "3.0.0",
+  "verifiedAt": "2026-10-30T05:32:29.096Z",
   "runtime": "node 24.22.1 win32 x64",
   "compatible": true,
   "passed": true,
   "checks": [
     {
-      "name": "declares support for nexus-ai-pro 2.22.0",
+      "name": "declares support for nexus-ai-pro 3.0.0",
       "ok": true
     },
     {
@@ -65,12 +65,12 @@
     "add": {
       "calls": 2,
       "p50Ms": 0.01,
-      "p95Ms": 0.44
+      "p95Ms": 0.39
     },
     "retrieve": {
       "calls": 6,
       "p50Ms": 0.01,
-      "p95Ms": 0.12
+      "p95Ms": 0.11
     },
     "delete": {
       "calls": 1,
@@ -78,5 +78,5 @@
       "p95Ms": 0.02
     }
   },
-  "digest": "8afbbc56d96846d3b6121122093cfa8053f8bb96e4552084df3cdc4c18def382"
+  "digest": "5c810ae0ddd1fefcdfc98015628f23fc46ba46a1b6ad81a5a0768b4599733b71"
 }

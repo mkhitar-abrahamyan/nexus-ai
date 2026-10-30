@@ -4,8 +4,8 @@ import { MemoryStore } from 'nexus-ai-pro/store';
 
 export const adapter = defineStoreAdapter({
   name: 'nexus-ai-pro/store MemoryStore',
-  version: '2.x',
-  nexus: '>=2.4.0 <3',
+  version: '3.x',
+  nexus: '>=2.4.0 <4',
   capabilities: {},
   create: () => new MemoryStore(),
   budgets: { search: 100 },

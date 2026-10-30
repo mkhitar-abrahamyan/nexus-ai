@@ -7,8 +7,8 @@ import { embed } from './embed.mjs';
 const databases = [];
 export const adapter = defineVectorStoreAdapter({
   name: 'nexus-ai-pro/sqlite/vectors SqliteVectorStore',
-  version: '2.x',
-  nexus: '>=2.4.0 <3',
+  version: '3.x',
+  nexus: '>=2.4.0 <4',
   capabilities: { filters: 'typed' },
   create: async () => {
     const database = new DatabaseSync(':memory:');
