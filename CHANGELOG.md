@@ -4,6 +4,16 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- **The studio's sign-in is stable.** Every build signs a person in through Dex, an OpenID Connect
+  provider run in a container: its configuration read, the code exchanged with the client secret and
+  PKCE, its ID token verified against its keys, a wrong password kept at Dex, and a used code refused.
+  `oidcSignIn()`, `OidcSignInOptions`, `SIGN_IN_COOKIE`, and the `/auth/` routes leave experimental
+  status, with their evidence in API_STABILITY.md.
+- **Gemini's voice is in the live workflow.** It speaks a sentence in one of Gemini's voices and hears it
+  back; it graduates when that run passes.
+
 ## [2.22.0] - 2026-10-29
 
 MCP over streamable HTTP both ways, OpenAPI tools that send each operation's credentials, tokens, keys,

@@ -2,7 +2,8 @@
  * The experimental families against the live services, each where its secret is set: media
  * understanding through a vision model and through Mistral's OCR, the Gemini embedding batch tier,
  * video generation on Veo and on Runway, which costs a few seconds of video and so runs only when
- * `NEXUS_LIVE_VIDEO` is set too, a Gemini Live session that calls a tool, OpenAI's SIP call control,
+ * `NEXUS_LIVE_VIDEO` is set too, a Gemini Live session that calls a tool, Gemini's voice speaking a
+ * sentence and hearing it back, OpenAI's SIP call control,
  * the phone numbers of Twilio and Telnyx, read only, and typed decisions on TypeSafe AI's Jev and from
  * OpenAI's and Gemini's log probabilities. Each check is what graduation asks for: the family's conformance
  * suite, passed against the real service. Writes what it measured to `NEXUS_LIVE_REPORT` when set.
@@ -26,6 +27,7 @@ import { defineTool } from '../src/realtime/tools.js';
 import { TelnyxTelephonyProvider } from '../src/telephony/providers/telnyx.js';
 import { TwilioTelephonyProvider } from '../src/telephony/providers/twilio.js';
 import { GoogleVideoProvider } from '../src/video/google.js';
+import { GoogleVoiceProvider } from '../src/voice/providers/google.js';
 import { RunwayVideoProvider } from '../src/video/runway.js';
 
 interface Outcome {
@@ -285,6 +287,29 @@ if (env.GOOGLE_API_KEY) {
     }
   });
 } else skip('realtime: Gemini Live', 'no GOOGLE_API_KEY');
+
+// ── Voice ────────────────────────────────────────────────────────────
+
+if (env.GOOGLE_API_KEY) {
+  await check('voice: Gemini speaks a sentence in one of its voices, and hears it back', async () => {
+    const voice = new GoogleVoiceProvider({ apiKey: env.GOOGLE_API_KEY as string });
+    const sentence = 'The invoice for forty two euros was paid on Tuesday.';
+    const spoken = await within(voice.speak({ text: sentence, voice: 'Puck' }), 60_000, 'speaking');
+    const audio = spoken.audio.data;
+    // A WAV file: its RIFF header, then at least half a second of 24 kHz, 16-bit, mono speech.
+    if (new TextDecoder().decode(audio.subarray(0, 4)) !== 'RIFF') throw new Error('the speech is not a WAV file');
+    if (audio.byteLength < 24_000) throw new Error(`only ${audio.byteLength} bytes of speech`);
+    const heard = await within(
+      voice.transcribe({ audio: { buffer: audio, filename: 'speech.wav', mimeType: 'audio/wav' }, language: 'en' }),
+      60_000,
+      'transcribing',
+    );
+    const words = heard.text.toLowerCase();
+    const missing = ['invoice', 'paid', 'tuesday'].filter((word) => !words.includes(word));
+    if (missing.length) throw new Error(`the transcript lost ${missing.join(', ')}: ${heard.text}`);
+    return `${spoken.modelUsed ?? 'speech'} spoke ${audio.byteLength} bytes; ${heard.modelUsed ?? 'transcription'} heard "${heard.text}"`;
+  });
+} else skip('voice: Gemini', 'no GOOGLE_API_KEY');
 
 if (env.OPENAI_API_KEY) {
   await check("realtime: OpenAI's SIP call control answers for a call it does not know", async () => {

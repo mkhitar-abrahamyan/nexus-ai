@@ -26,7 +26,6 @@ the theme after it that owns it.
 | Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 2.23 |
 | Typed decisions have passed against a stand-in of TypeSafe AI's API, not the live service | Decisions guide | 2.23 |
 | Gemini's voice has passed against a stand-in written from its API, not the live service | Voice guide | 2.23 |
-| The studio's sign-in has passed against a provider written from the specification, not a live one | Studio guide | 2.23 |
 
 ---
 
@@ -36,8 +35,8 @@ the theme after it that owns it.
 understanding, video, typed decisions, Gemini Live, SIP call control, and both phone providers
 graduate when the scheduled live workflow passes against each, published with their checklists. Every
 check runs there now; what stands in the way is the repository's live credentials, and for video, the
-variable that lets it spend seconds of video. Gemini's voice and the studio's sign-in, experimental since
-2.22, join them: 2.23 adds a live check for each.
+variable that lets it spend seconds of video. Gemini's voice, experimental since 2.22, joins them: it
+speaks a sentence there and hears it back.
 
 Nothing else is placed in 2.23 yet: it takes the top of Unscheduled when something is placed there.
 

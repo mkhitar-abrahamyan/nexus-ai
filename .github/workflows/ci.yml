@@ -36,12 +36,13 @@ jobs:
         run: |
           docker pull node:22-alpine
           docker pull otel/opentelemetry-collector:0.111.0
+          docker pull ghcr.io/dexidp/dex:v2.46.0
 
       - name: Build, lint, test, type-check, and verify package
         run: npm run check:release
         env:
-          # The container sandbox's proof and the OTLP collector's run against the runner's Docker,
-          # and must not be skipped.
+          # The container sandbox's proof, the OTLP collector's, and the studio's sign-in through Dex
+          # run against the runner's Docker, and must not be skipped.
           NEXUS_REQUIRE_CONTAINER: '1'
 
   kernel:

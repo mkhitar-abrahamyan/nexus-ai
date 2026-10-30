@@ -67,6 +67,27 @@ graduation:
 | Upgrade | A migration test from the previous minor |
 | Soak | A long-running test with flat memory and no leaked handles |
 
+## 2.23 stage (Unreleased)
+
+Everything 2.23 adds is stable from the start and additive, unless this section says otherwise.
+
+### Graduation
+
+The studio's sign-in leaves experimental status: `oidcSignIn()`, `OidcSignInOptions`,
+`SIGN_IN_COOKIE`, and the `/auth/login`, `/auth/callback`, and `/auth/logout` routes.
+
+| Requirement | Evidence |
+| --- | --- |
+| API stability | Covered by the 2.x compatibility rules, with no planned breaking change |
+| Conformance | Signs a person in through Dex v2.46.0, run in a container on every build, where a wrong password is kept and a reused code refused: `studio/test/signin-dex.test.ts`; every way a callback can be wrong, a token for another client among them, against a provider written from the specification: `studio/test/signin.test.ts` |
+| Crash recovery | n/a: it keeps nothing; a session is a signed cookie, and a sign-in in progress is one the person carries |
+| Concurrency | A sign-in begun on one replica finishes on another, and every replica sharing the secret reads the session: `studio/test/signin.test.ts` |
+| Load | 500 reads on a sign-in session cost at most twice the same reads on a personal token: `studio/test/signin.test.ts` |
+| Tenant isolation | A tenant from a claim reads only that tenant's sources, comments, and audit entries: `studio/test/signin.test.ts`, `studio/test/tenants.test.ts` |
+| Security | [Review](./SECURITY.md#the-studio-and-its-accounts), reviewed for 2.22, its findings closed |
+| Upgrade | A session sealed by 2.22.0 is read: `studio/test/signin.test.ts` |
+| Soak | 1,000 sign-ins and their reads with flat memory: `studio/test/signin.test.ts` |
+
 ## 2.22 stage (2.22.0)
 
 Everything 2.22 adds is stable from the start and additive, unless this section says otherwise.

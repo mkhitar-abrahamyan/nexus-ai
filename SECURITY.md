@@ -281,8 +281,8 @@ Findings, each fixed in 2.5 with a test in `studio/test/security.test.ts`:
 - **A proposal's pull-request link was rendered as stored.** The content security policy already
   blocked a `javascript:` address. Only `http` and `https` links are rendered now.
 
-Signing in and tenants, reviewed for 2.22, with tests in `studio/test/signin.test.ts` and
-`studio/test/tenants.test.ts`:
+Signing in and tenants, reviewed for 2.22, with tests in `studio/test/signin.test.ts`,
+`studio/test/tenants.test.ts`, and, against Dex, a real provider, `studio/test/signin-dex.test.ts`:
 - The provider's configuration must name the issuer the studio was given. An ID token must verify
   against the provider's keys, name that issuer and the studio's client as its audience, and carry
   the sign-in's nonce; a token for several clients must name the studio as `azp`.

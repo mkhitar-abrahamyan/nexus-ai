@@ -8,7 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createJwtSigner, generateJwtKey, jwksHandler } from 'nexus-ai-pro/server/auth';
 import { createStudio, type Studio } from '../src/api.js';
-import { bearerAuth } from '../src/auth.js';
+import { bearerAuth, personalTokens } from '../src/auth.js';
 import { MemoryStudioJournal, type StudioAuditEntry } from '../src/journal.js';
 import { type OidcSignInOptions, oidcSignIn } from '../src/oidc.js';
 import { startStudio } from '../src/server.js';
@@ -514,4 +514,105 @@ test('a studio beyond the loopback address warns of its one shared token, and no
     process.off('warning', listen);
   }
   assert.deepEqual(warnings, ['NEXUS_STUDIO_SHARED_TOKEN'], 'the single token alone is warned of');
+});
+
+/** A whole sign-in at a provider: the session cookie it ends with. */
+async function signedIn(studio: Studio, idp: Provider, claims: Record<string, unknown> = ANA): Promise<string> {
+  const started = await startSignIn(studio);
+  const back = await studio.handle(
+    new Request(idp.authorize(started.location, claims), { headers: { cookie: pair(started.flow) } }),
+  );
+  assert.equal(back.status, 303, await back.clone().text());
+  return pair(cookieNamed(back, 'nexus_studio_session'));
+}
+
+test('replicas that share the secret share sign-ins: begun on one, finished on another, and read by both', async () => {
+  const idp = await provider();
+  const one = createStudio({}, { signIn: sign(idp) });
+  const two = createStudio({}, { signIn: sign(idp) });
+  const started = await startSignIn(one);
+  const back = await two.handle(
+    new Request(idp.authorize(started.location, ANA), { headers: { cookie: pair(started.flow) } }),
+  );
+  assert.equal(back.status, 303, 'the callback reached the other replica, and was taken');
+  const cookie = pair(cookieNamed(back, 'nexus_studio_session'));
+  for (const replica of [one, two]) {
+    const session = await replica.handle(new Request(`${ORIGIN}/api/session`, { headers: { cookie } }));
+    assert.equal(((await session.json()) as { user: { id: string } }).user.id, 'u-ana');
+  }
+  assert.equal(idp.state.discoveries, 2, 'each replica read the configuration once');
+});
+
+test('a session sealed in 2.22.0 is still read', async () => {
+  // Sealed by 2.22.0, the first release with the sign-in, under this secret, valid for 8 hours from START.
+  const sealed =
+    'eyJ1c2VyIjp7ImlkIjoidS1hbmEiLCJyb2xlIjoiYWRtaW4iLCJuYW1lIjoiQW5hIiwiZW1haWwiOiJhbmFAZXhhbXBsZS5jb20iLCJ0ZW5hbnQiOiJhY21lIn0sImV4cCI6MTczNjk2MDQwMH0.l0XDbmtIAHb3stNupTHJSKNcND_VV9SqBZCjM-3AFfU';
+  const studio = createStudio({}, { signIn: sign(await provider()), tenantSources: () => ({}) });
+  const answer = await studio.handle(
+    new Request(`${ORIGIN}/api/session`, { headers: { cookie: `nexus_studio_session=${sealed}` } }),
+  );
+  assert.equal(answer.status, 200);
+  assert.deepEqual(((await answer.json()) as { user: unknown }).user, {
+    id: 'u-ana',
+    role: 'admin',
+    name: 'Ana',
+    email: 'ana@example.com',
+    tenant: 'acme',
+  });
+});
+
+test('load: 500 reads on a sign-in session cost at most twice the same reads on a personal token', async () => {
+  const idp = await provider();
+  const token = 'vic-token-0123456789abcdef';
+  const studio = createStudio({}, { auth: personalTokens([{ id: 'vic', role: 'admin', token }]), signIn: sign(idp) });
+  const sessions = { signIn: await signedIn(studio, idp), token: `nexus_studio=${token}` };
+  const reads = async (cookie: string) => {
+    const started = performance.now();
+    for (let index = 0; index < 250; index += 1) {
+      for (const path of ['/api/session', '/api/overview']) {
+        const answer = await studio.handle(new Request(`${ORIGIN}${path}`, { headers: { cookie } }));
+        assert.equal(answer.status, 200);
+        await answer.arrayBuffer();
+      }
+    }
+    return performance.now() - started;
+  };
+  for (let pass = 0; pass < 3; pass += 1) {
+    await reads(sessions.signIn);
+    await reads(sessions.token);
+  }
+  // The fastest of five passes each, taken in turn on the same machine: a busy runner only adds time, to
+  // both, and a real slowdown slows every pass.
+  const timed = { signIn: [] as number[], token: [] as number[] };
+  for (let pass = 0; pass < 5; pass += 1) {
+    timed.signIn.push(await reads(sessions.signIn));
+    timed.token.push(await reads(sessions.token));
+  }
+  const ratio = Math.min(...timed.signIn) / Math.min(...timed.token);
+  assert.ok(ratio <= 2, `a sign-in session's reads took ${ratio.toFixed(2)} times a personal token's`);
+});
+
+test('soak: 1,000 sign-ins and their reads leave memory flat', async () => {
+  const gc = (globalThis as { gc?: () => void }).gc;
+  assert.ok(gc, 'the studio tests run with --expose-gc');
+  const idp = await provider();
+  const studio = createStudio({}, { signIn: sign(idp) });
+  const cycle = async () => {
+    const cookie = await signedIn(studio, idp);
+    const answer = await studio.handle(new Request(`${ORIGIN}/api/session`, { headers: { cookie } }));
+    assert.equal(answer.status, 200);
+    await answer.arrayBuffer();
+    // The provider in this file keeps what it was sent; only the studio's memory is measured.
+    idp.exchanges.length = 0;
+  };
+  for (let index = 0; index < 100; index += 1) await cycle();
+  gc();
+  gc();
+  const before = process.memoryUsage().heapUsed;
+  for (let index = 0; index < 1_000; index += 1) await cycle();
+  gc();
+  gc();
+  const grownMb = (process.memoryUsage().heapUsed - before) / 1_048_576;
+  // Nothing is kept per session: a session is a signed cookie, and the provider's keys are read once.
+  assert.ok(grownMb < 4, `the heap grew ${grownMb.toFixed(2)} MB over 1,000 sign-ins`);
 });
