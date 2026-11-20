@@ -67,6 +67,13 @@ graduation:
 | Upgrade | A migration test from the previous minor |
 | Soak | A long-running test with flat memory and no leaked handles |
 
+## 3.1 stage (3.1.0)
+
+3.1 changes registry data only, as the compatibility rules allow in a minor release: models are
+added, the ones their providers shut down (`o1`, `o3-mini`, `o4-mini`, and `gpt-4.1-nano`) are removed,
+announced shutdowns are marked `deprecated`, prices and limits are corrected, and intent aliases such as
+`anthropic/best` resolve to newer models. No API changes; pin a resolved model name for a reproducible run.
+
 ## 3.0 stage (3.0.0)
 
 3.0 is a major release. It turns on the three defaults 2.21 previewed — incremental tracing on a

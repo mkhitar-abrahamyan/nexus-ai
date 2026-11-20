@@ -348,12 +348,14 @@ Shipped so far:
   tenants, each seeing only its own;
 - 3.0 the three defaults 2.21 previewed, on: tracing written as it runs, the Redis dispatch index, and
   `hash-v2` for a new deployment, with `useDefaults('2.x')` for an application that upgrades first;
-  and the studio's sign-in, stable, proven against a real OpenID Connect provider on every build.
+  and the studio's sign-in, stable, proven against a real OpenID Connect provider on every build;
+- 3.1 the model registry, current as of 2026-11-20: Claude Fable 5.2 and Haiku 5.5, GPT-6.2 Astra
+  and Sol and GPT-6.1 Terra, Gemini 4, and Mistral Large 4, with shut-down models removed.
 
 Upgrading from 2.x: 3.0 turns on three defaults 2.x kept opt-in, and `useDefaults('2.x')` keeps them
 off until you are ready; from 1.x, `npx nexus migrate src --write` moves your imports.
 [MIGRATING.md](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/MIGRATING.md) covers both.
-Next, in 3.1, Pinecone, images, the Gemini embedding batch tier, media understanding, video, typed
+Next, in 3.2, Pinecone, images, the Gemini embedding batch tier, media understanding, video, typed
 decisions, Gemini Live, SIP, both phone providers, and Gemini's voice graduate once the live workflow
 passes against each. The
 [roadmap](https://github.com/mkhitar-abrahamyan/nexus-ai/blob/main/ROADMAP.md) lists what comes after, in the order

@@ -6,30 +6,30 @@ graduate, is defined in [API_STABILITY.md](./API_STABILITY.md); what has shipped
 [CHANGELOG.md](./CHANGELOG.md); how releases are planned is in [CONTRIBUTING.md](./CONTRIBUTING.md).
 Work leaves this page when it ships.
 
-Current release: **3.0.0**.
+Current release: **3.1.0**.
 
 ---
 
 ## Open gaps
 
-Each gap is written down in a guide's limitations today, and each is closed by one release: 3.1, or
+Each gap is written down in a guide's limitations today, and each is closed by one release: 3.2, or
 the theme after it that owns it.
 
 | Gap | Where it shows | Closed in |
 | --- | --- | --- |
-| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 3.1 |
-| Images have not recorded live conformance on all three backends | API stability | 3.1 |
-| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 3.1 |
-| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 3.1 |
-| Video generation has not passed its conformance suite against Gemini Omni Flash, Veo, and Runway | Video guide | 3.1 |
-| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 3.1 |
-| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 3.1 |
-| Typed decisions have passed against a stand-in of TypeSafe AI's API, not the live service | Decisions guide | 3.1 |
-| Gemini's voice has passed against a stand-in written from its API, not the live service | Voice guide | 3.1 |
+| The Pinecone store has passed its graduation checks only against a stand-in | API stability | 3.2 |
+| Images have not recorded live conformance on all three backends | API stability | 3.2 |
+| The Gemini embedding batch tier has not run against Gemini | Embeddings guide | 3.2 |
+| Media understanding has not passed its conformance suite against a vision model and the OCR service | Media guide | 3.2 |
+| Video generation has not passed its conformance suite against Gemini Omni Flash, Veo, and Runway | Video guide | 3.2 |
+| Gemini Live and SIP calls have been verified against their protocols, not against the live services | Realtime guide | 3.2 |
+| Calls and messages have been verified against stand-ins for Twilio's and Telnyx's APIs | Telephony guide | 3.2 |
+| Typed decisions have passed against a stand-in of TypeSafe AI's API, not the live service | Decisions guide | 3.2 |
+| Gemini's voice has passed against a stand-in written from its API, not the live service | Voice guide | 3.2 |
 
 ---
 
-## 3.1.0: Live graduation
+## 3.2.0: Live graduation
 
 **Carried: live graduation.** The Pinecone store, images, the Gemini embedding batch tier, media
 understanding, video, typed decisions, Gemini Live, SIP call control, and both phone providers
@@ -38,7 +38,7 @@ check runs there now; what stands in the way is the repository's live credential
 variable that lets it spend seconds of video. Gemini's voice, experimental since 2.22, joins them: it
 speaks a sentence there and hears it back.
 
-Nothing else is placed in 3.1 yet: it takes the top of Unscheduled when something is placed there.
+Nothing else is placed in 3.2 yet: it takes the top of Unscheduled when something is placed there.
 
 ---
 
