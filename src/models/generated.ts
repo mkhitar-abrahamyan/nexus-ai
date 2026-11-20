@@ -6,7 +6,7 @@ import type { AliasMetadata, ModelCapabilities } from '../types/providers.js';
 
 /** Provenance of the generated data, mirroring data/models/provenance.json. */
 export const GENERATED_REGISTRY_PROVENANCE = {
-  "verifiedAt": "2026-10-02",
+  "verifiedAt": "2026-11-20",
   "source": "provider documentation"
 } as const;
 
@@ -118,6 +118,60 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
       "messages"
     ],
     "sampling": false,
+    "notes": "Thinking is always on. Rejects forced tool choice. Superseded by claude-fable-5-2."
+  },
+  "claude-fable-5-2": {
+    "provider": "anthropic",
+    "family": "claude-fable-5.2",
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": false,
+    "jsonMode": false,
+    "reasoning": {
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    "promptCaching": {
+      "explicit": true,
+      "ttls": [
+        "5m",
+        "1h"
+      ],
+      "minTokens": 1024,
+      "maxBreakpoints": 4
+    },
+    "toolChoice": false,
+    "parallelToolCalls": true,
+    "topK": false,
+    "penalties": false,
+    "seed": false,
+    "maxContextTokens": 1000000,
+    "maxOutputTokens": 128000,
+    "costPer1kInput": 0.008,
+    "costPer1kOutput": 0.04,
+    "costPer1kCachedInput": 0.0002,
+    "costPer1kCacheWrite": 0.01,
+    "qualityScore": 100,
+    "speedScore": 62,
+    "release": "2026-11-09",
+    "knowledgeCutoff": "2026-06",
+    "status": "stable",
+    "endpoints": [
+      "messages"
+    ],
+    "sampling": false,
     "notes": "Thinking is always on. Rejects forced tool choice."
   },
   "claude-haiku-4-5-20251001": {
@@ -174,6 +228,61 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "endpoints": [
       "messages"
     ]
+  },
+  "claude-haiku-5-5": {
+    "provider": "anthropic",
+    "family": "claude-haiku-5.5",
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": false,
+    "jsonMode": false,
+    "reasoning": {
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    "promptCaching": {
+      "explicit": true,
+      "ttls": [
+        "5m",
+        "1h"
+      ],
+      "minTokens": 1024,
+      "maxBreakpoints": 4
+    },
+    "toolChoice": true,
+    "parallelToolCalls": true,
+    "topK": false,
+    "penalties": false,
+    "seed": false,
+    "maxContextTokens": 1000000,
+    "maxOutputTokens": 128000,
+    "costPer1kInput": 0.0001,
+    "costPer1kOutput": 0.0005,
+    "costPer1kCachedInput": 0.000010000000000000003,
+    "costPer1kCacheWrite": 0.000125,
+    "qualityScore": 90,
+    "speedScore": 99,
+    "release": "2026-10-07",
+    "knowledgeCutoff": "2026-06",
+    "status": "stable",
+    "endpoints": [
+      "messages"
+    ],
+    "sampling": false,
+    "notes": "Thinks by default at effort medium; thinking turns off only at effort high or below. Prompts over 100K tokens cost $0.50 input and $2.50 output per million tokens."
   },
   "claude-opus-4-5-20251101": {
     "provider": "anthropic",
@@ -593,7 +702,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "penalties": false,
     "seed": false,
     "maxContextTokens": 1000000,
-    "maxOutputTokens": 64000,
+    "maxOutputTokens": 128000,
     "costPer1kInput": 0.003,
     "costPer1kOutput": 0.015,
     "costPer1kCachedInput": 0.00030000000000000003,
@@ -703,7 +812,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "maxOutputTokens": 128000,
     "costPer1kInput": 0.002,
     "costPer1kOutput": 0.01,
-    "costPer1kCachedInput": 0.0002,
+    "costPer1kCachedInput": 0.0001,
     "costPer1kCacheWrite": 0.0025,
     "qualityScore": 97,
     "speedScore": 88,
@@ -1258,7 +1367,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "endpoints": [
       "generateContent"
     ],
-    "notes": "Google limits it to existing users and recommends Gemini 3 for new work."
+    "notes": "Google routes its requests to gemini-3.5-flash-lite, at that model’s rates, from 2026-12-01."
   },
   "gemini-2.5-flash-lite": {
     "provider": "google",
@@ -1346,7 +1455,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "endpoints": [
       "generateContent"
     ],
-    "notes": "Google limits it to existing users and recommends Gemini 3 for new work."
+    "notes": "Google routes its requests to gemini-3.8-flash, at that model’s rates, from 2026-12-01."
   },
   "gemini-3-flash-preview": {
     "provider": "google",
@@ -1469,11 +1578,11 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 84,
     "speedScore": 86,
     "release": "2026-02",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "generateContent"
     ],
-    "notes": "The output price is the image rate; text output costs less."
+    "notes": "The output price is the image rate; text output costs less. Google deprecated it on 2026-10-06 with no shutdown date yet; gemini-nano-banana-2.1 succeeds it."
   },
   "gemini-3.1-flash-lite": {
     "provider": "google",
@@ -1639,10 +1748,11 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 90,
     "speedScore": 94,
     "release": "2026-05",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "generateContent"
-    ]
+    ],
+    "notes": "Google deprecated it on 2026-10-08 and routes its requests to gemini-3.6-flash."
   },
   "gemini-3.5-flash-lite": {
     "provider": "google",
@@ -1677,7 +1787,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "maxOutputTokens": 65536,
     "costPer1kInput": 0.0003,
     "costPer1kOutput": 0.0025,
-    "costPer1kCachedInput": 0.000075,
+    "costPer1kCachedInput": 0.00003,
     "qualityScore": 84,
     "speedScore": 97,
     "release": "2026-07",
@@ -1719,7 +1829,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "maxOutputTokens": 65536,
     "costPer1kInput": 0.00075,
     "costPer1kOutput": 0.00375,
-    "costPer1kCachedInput": 0.0001875,
+    "costPer1kCachedInput": 0.000075,
     "qualityScore": 91,
     "speedScore": 94,
     "release": "2026",
@@ -1766,11 +1876,11 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 93,
     "speedScore": 94,
     "release": "2026",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "generateContent"
     ],
-    "notes": "Prices double on 2027-01-01, to $1.50 input and $7.50 output per million tokens."
+    "notes": "Google deprecated it on 2026-10-08 and routes its requests to gemini-3.8-flash."
   },
   "gemini-3.8-flash": {
     "provider": "google",
@@ -1805,7 +1915,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "maxOutputTokens": 65536,
     "costPer1kInput": 0.00075,
     "costPer1kOutput": 0.00375,
-    "costPer1kCachedInput": 0.0001875,
+    "costPer1kCachedInput": 0.000075,
     "qualityScore": 95,
     "speedScore": 94,
     "release": "2026-09",
@@ -1814,6 +1924,176 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
       "generateContent"
     ],
     "notes": "Prices double on 2027-01-01, to $1.50 input and $7.50 output per million tokens."
+  },
+  "gemini-4-argon": {
+    "provider": "google",
+    "family": "gemini-4",
+    "inputModalities": [
+      "text",
+      "image",
+      "audio",
+      "video",
+      "pdf"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": true,
+    "jsonMode": true,
+    "reasoning": true,
+    "promptCaching": {
+      "explicit": false,
+      "ttls": [
+        "5m",
+        "1h"
+      ]
+    },
+    "toolChoice": true,
+    "topK": true,
+    "seed": true,
+    "penalties": true,
+    "maxContextTokens": 1048576,
+    "maxOutputTokens": 65536,
+    "costPer1kInput": 0.004,
+    "costPer1kOutput": 0.02,
+    "costPer1kCachedInput": 0.0002,
+    "qualityScore": 97,
+    "speedScore": 82,
+    "release": "2026-10-13",
+    "status": "stable",
+    "endpoints": [
+      "generateContent"
+    ],
+    "notes": "Introductory price of $2 input and $10 output per million tokens through 2026-11-30."
+  },
+  "gemini-4-carbon": {
+    "provider": "google",
+    "family": "gemini-4",
+    "inputModalities": [
+      "text",
+      "image",
+      "audio",
+      "video",
+      "pdf"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": true,
+    "jsonMode": true,
+    "reasoning": true,
+    "promptCaching": {
+      "explicit": false,
+      "ttls": [
+        "5m",
+        "1h"
+      ]
+    },
+    "toolChoice": true,
+    "topK": true,
+    "seed": true,
+    "penalties": true,
+    "maxContextTokens": 1048576,
+    "maxOutputTokens": 65536,
+    "costPer1kInput": 0.004,
+    "costPer1kOutput": 0.02,
+    "costPer1kCachedInput": 0.0002,
+    "qualityScore": 99,
+    "speedScore": 70,
+    "release": "2026-11-10",
+    "status": "stable",
+    "endpoints": [
+      "generateContent"
+    ],
+    "notes": "Introductory price of $2 input and $10 output per million tokens through 2026-11-30."
+  },
+  "gemini-4-hydrogen": {
+    "provider": "google",
+    "family": "gemini-4",
+    "inputModalities": [
+      "text",
+      "image",
+      "audio",
+      "video",
+      "pdf"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": true,
+    "jsonMode": true,
+    "reasoning": true,
+    "promptCaching": {
+      "explicit": false,
+      "ttls": [
+        "5m",
+        "1h"
+      ]
+    },
+    "toolChoice": true,
+    "topK": true,
+    "seed": true,
+    "penalties": true,
+    "maxContextTokens": 1048576,
+    "maxOutputTokens": 65536,
+    "costPer1kInput": 0.0015,
+    "costPer1kOutput": 0.0075,
+    "costPer1kCachedInput": 0.000075,
+    "qualityScore": 96,
+    "speedScore": 90,
+    "release": "2026-11-12",
+    "status": "stable",
+    "endpoints": [
+      "generateContent"
+    ]
+  },
+  "gemini-4-neon": {
+    "provider": "google",
+    "family": "gemini-4",
+    "inputModalities": [
+      "text",
+      "image",
+      "audio",
+      "video",
+      "pdf"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": true,
+    "jsonMode": true,
+    "reasoning": true,
+    "promptCaching": {
+      "explicit": false,
+      "ttls": [
+        "5m",
+        "1h"
+      ]
+    },
+    "toolChoice": true,
+    "topK": true,
+    "seed": true,
+    "penalties": true,
+    "maxContextTokens": 1048576,
+    "maxOutputTokens": 65536,
+    "costPer1kInput": 0.003,
+    "costPer1kOutput": 0.015,
+    "costPer1kCachedInput": 0.00015,
+    "qualityScore": 98,
+    "speedScore": 80,
+    "release": "2026-11-18",
+    "status": "stable",
+    "endpoints": [
+      "generateContent"
+    ]
   },
   "gpt-4.1": {
     "provider": "openai",
@@ -1837,11 +2117,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 82,
     "speedScore": 80,
     "release": "2025",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "chat",
       "responses"
-    ]
+    ],
+    "notes": "OpenAI shuts down its snapshots on 2027-01-14; migrate to gpt-6-luna."
   },
   "gpt-4.1-mini": {
     "provider": "openai",
@@ -1865,39 +2146,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 78,
     "speedScore": 94,
     "release": "2025",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "chat",
       "responses"
-    ]
-  },
-  "gpt-4.1-nano": {
-    "provider": "openai",
-    "family": "gpt-4.1",
-    "inputModalities": [
-      "text",
-      "image"
     ],
-    "outputModalities": [
-      "text"
-    ],
-    "streaming": true,
-    "toolCalling": true,
-    "structuredOutputs": true,
-    "jsonMode": true,
-    "maxContextTokens": 1047576,
-    "maxOutputTokens": 32768,
-    "costPer1kInput": 0.0001,
-    "costPer1kOutput": 0.0004,
-    "costPer1kCachedInput": 0.000025,
-    "qualityScore": 70,
-    "speedScore": 98,
-    "release": "2025",
-    "status": "stable",
-    "endpoints": [
-      "chat",
-      "responses"
-    ]
+    "notes": "OpenAI shuts down its snapshots on 2027-01-14; migrate to gpt-6-luna."
   },
   "gpt-4o": {
     "provider": "openai",
@@ -1922,12 +2176,13 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 78,
     "speedScore": 84,
     "release": "2024",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "chat",
       "responses",
       "realtime"
-    ]
+    ],
+    "notes": "OpenAI shuts down its snapshots on 2027-01-14; migrate to gpt-6-luna."
   },
   "gpt-4o-mini": {
     "provider": "openai",
@@ -1951,11 +2206,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 72,
     "speedScore": 96,
     "release": "2024",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "chat",
       "responses"
-    ]
+    ],
+    "notes": "OpenAI shuts down its snapshots on 2027-01-14; migrate to gpt-6-luna."
   },
   "gpt-5": {
     "provider": "openai",
@@ -2006,7 +2262,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
       "chat",
       "responses"
     ],
-    "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-5.6-sol."
+    "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-sol."
   },
   "gpt-5-mini": {
     "provider": "openai",
@@ -2057,7 +2313,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
       "chat",
       "responses"
     ],
-    "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-5.6-terra."
+    "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-terra."
   },
   "gpt-5-nano": {
     "provider": "openai",
@@ -2108,7 +2364,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
       "chat",
       "responses"
     ],
-    "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-5.6-luna."
+    "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6-luna."
   },
   "gpt-5-pro": {
     "provider": "openai",
@@ -2154,10 +2410,11 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "speedScore": 50,
     "release": "2025",
     "knowledgeCutoff": "2024-09-30",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "responses"
-    ]
+    ],
+    "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-sol with pro reasoning in the Responses API."
   },
   "gpt-5.1": {
     "provider": "openai",
@@ -2898,7 +3155,7 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
       "responses"
     ],
     "costPer1kCacheWrite": 0.0125,
-    "notes": "OpenAI flagship for the hardest reasoning and agentic work."
+    "notes": "Superseded by gpt-6.2-astra."
   },
   "gpt-6-luna": {
     "provider": "openai",
@@ -3047,7 +3304,160 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "endpoints": [
       "responses"
     ],
-    "notes": "Near-Astra quality for coding, computer use, and professional work, at a lower price."
+    "notes": "Superseded by gpt-6.2-sol."
+  },
+  "gpt-6.1-terra": {
+    "provider": "openai",
+    "family": "gpt-6.1",
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": true,
+    "jsonMode": true,
+    "reasoning": {
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    "promptCaching": {
+      "explicit": false,
+      "ttls": [
+        "5m"
+      ]
+    },
+    "toolChoice": true,
+    "parallelToolCalls": true,
+    "topK": false,
+    "seed": true,
+    "penalties": true,
+    "maxContextTokens": 1050000,
+    "maxOutputTokens": 128000,
+    "costPer1kInput": 0.001,
+    "costPer1kOutput": 0.005,
+    "costPer1kCachedInput": 0.00005,
+    "qualityScore": 95,
+    "speedScore": 92,
+    "release": "2026-10-26",
+    "knowledgeCutoff": "2026-06-01",
+    "status": "stable",
+    "endpoints": [
+      "responses"
+    ],
+    "costPer1kCacheWrite": 0.00125,
+    "notes": "OpenAI mid-tier model. Tool calling requires the Responses API, so it is sent through Responses."
+  },
+  "gpt-6.2-astra": {
+    "provider": "openai",
+    "family": "gpt-6.2",
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": true,
+    "jsonMode": true,
+    "reasoning": {
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    "promptCaching": {
+      "explicit": false,
+      "ttls": [
+        "5m"
+      ]
+    },
+    "toolChoice": true,
+    "parallelToolCalls": true,
+    "topK": false,
+    "seed": true,
+    "penalties": true,
+    "maxContextTokens": 1050000,
+    "maxOutputTokens": 128000,
+    "costPer1kInput": 0.008,
+    "costPer1kOutput": 0.04,
+    "costPer1kCachedInput": 0.0004,
+    "qualityScore": 100,
+    "speedScore": 72,
+    "release": "2026-11-17",
+    "knowledgeCutoff": "2026-05-18",
+    "status": "stable",
+    "endpoints": [
+      "chat",
+      "responses"
+    ],
+    "costPer1kCacheWrite": 0.01,
+    "notes": "OpenAI flagship for the hardest reasoning and agentic work. Rejects reasoning effort none."
+  },
+  "gpt-6.2-sol": {
+    "provider": "openai",
+    "family": "gpt-6.2",
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": true,
+    "jsonMode": true,
+    "reasoning": {
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    "promptCaching": {
+      "explicit": false,
+      "ttls": [
+        "5m"
+      ]
+    },
+    "toolChoice": true,
+    "parallelToolCalls": true,
+    "topK": false,
+    "seed": true,
+    "penalties": true,
+    "maxContextTokens": 1050000,
+    "maxOutputTokens": 128000,
+    "costPer1kInput": 0.002,
+    "costPer1kOutput": 0.01,
+    "costPer1kCachedInput": 0.0001,
+    "qualityScore": 99,
+    "speedScore": 85,
+    "release": "2026-11-17",
+    "knowledgeCutoff": "2026-06-01",
+    "status": "stable",
+    "endpoints": [
+      "chat",
+      "responses"
+    ],
+    "costPer1kCacheWrite": 0.0025,
+    "notes": "Near-Astra quality at a lower price and higher speed. Rejects reasoning effort none."
   },
   "gpt-oss-120b": {
     "provider": "openai",
@@ -3212,6 +3622,37 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "endpoints": [
       "chat"
     ]
+  },
+  "groq/meta-models/muse-spark-open": {
+    "provider": "groq",
+    "family": "muse-spark",
+    "inputModalities": [
+      "text"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": true,
+    "jsonMode": true,
+    "reasoning": false,
+    "toolChoice": true,
+    "parallelToolCalls": true,
+    "seed": true,
+    "penalties": true,
+    "maxContextTokens": 131072,
+    "maxOutputTokens": 131072,
+    "costPer1kInput": 0,
+    "costPer1kOutput": 0,
+    "qualityScore": 86,
+    "speedScore": 88,
+    "release": "2026-10",
+    "status": "preview",
+    "endpoints": [
+      "chat"
+    ],
+    "notes": "Groq prices it through sales; override costs in models.registry."
   },
   "groq/minimaxai/minimax-m2.7": {
     "provider": "groq",
@@ -3576,10 +4017,50 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 88,
     "speedScore": 80,
     "release": "2025-12",
+    "status": "deprecated",
+    "endpoints": [
+      "chat"
+    ],
+    "notes": "Mistral retires it on 2027-04-30; migrate to mistral/mistral-large-4-0."
+  },
+  "mistral/mistral-large-4-0": {
+    "provider": "mistral",
+    "family": "mistral-large-4",
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "outputModalities": [
+      "text"
+    ],
+    "streaming": true,
+    "toolCalling": true,
+    "structuredOutputs": true,
+    "jsonMode": true,
+    "reasoning": {
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "toolChoice": true,
+    "parallelToolCalls": true,
+    "seed": true,
+    "penalties": true,
+    "maxContextTokens": 1000000,
+    "maxOutputTokens": 8192,
+    "costPer1kInput": 0.0007,
+    "costPer1kOutput": 0.0021000000000000003,
+    "qualityScore": 94,
+    "speedScore": 80,
+    "release": "2026-11",
     "status": "stable",
     "endpoints": [
       "chat"
-    ]
+    ],
+    "notes": "Rejects reasoning effort none.",
+    "costPer1kCachedInput": 0.00007
   },
   "mistral/mistral-medium-2604": {
     "provider": "mistral",
@@ -3607,10 +4088,11 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 92,
     "speedScore": 78,
     "release": "2026-04",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "chat"
-    ]
+    ],
+    "notes": "Mistral retires it on 2027-04-30; migrate to mistral/mistral-large-4-0."
   },
   "mistral/mistral-moderation-2603": {
     "provider": "mistral",
@@ -3674,40 +4156,6 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
       "chat"
     ]
   },
-  "o1": {
-    "provider": "openai",
-    "family": "o-series",
-    "inputModalities": [
-      "text",
-      "image"
-    ],
-    "outputModalities": [
-      "text"
-    ],
-    "streaming": true,
-    "toolCalling": true,
-    "structuredOutputs": true,
-    "jsonMode": true,
-    "reasoning": {
-      "efforts": [
-        "low",
-        "medium",
-        "high"
-      ]
-    },
-    "maxContextTokens": 200000,
-    "maxOutputTokens": 100000,
-    "costPer1kInput": 0.015,
-    "costPer1kOutput": 0.06,
-    "qualityScore": 80,
-    "speedScore": 60,
-    "release": "2024",
-    "status": "stable",
-    "endpoints": [
-      "chat",
-      "responses"
-    ]
-  },
   "o3": {
     "provider": "openai",
     "family": "o-series",
@@ -3737,46 +4185,12 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 84,
     "speedScore": 66,
     "release": "2025",
-    "status": "stable",
-    "endpoints": [
-      "chat",
-      "responses"
-    ]
-  },
-  "o3-mini": {
-    "provider": "openai",
-    "family": "o-series",
-    "inputModalities": [
-      "text"
-    ],
-    "outputModalities": [
-      "text"
-    ],
-    "streaming": true,
-    "toolCalling": true,
-    "structuredOutputs": true,
-    "jsonMode": true,
-    "reasoning": {
-      "efforts": [
-        "low",
-        "medium",
-        "high"
-      ]
-    },
-    "maxContextTokens": 200000,
-    "maxOutputTokens": 100000,
-    "costPer1kInput": 0.0011,
-    "costPer1kOutput": 0.0044,
-    "costPer1kCachedInput": 0.00055,
-    "qualityScore": 78,
-    "speedScore": 82,
-    "release": "2025",
     "status": "deprecated",
     "endpoints": [
       "chat",
       "responses"
     ],
-    "notes": "OpenAI shuts it down on 2026-10-23; migrate to gpt-5.6-sol."
+    "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-sol."
   },
   "o3-pro": {
     "provider": "openai",
@@ -3806,57 +4220,25 @@ export const GENERATED_MODELS: Record<string, ModelCapabilities> = {
     "qualityScore": 86,
     "speedScore": 40,
     "release": "2025",
-    "status": "stable",
+    "status": "deprecated",
     "endpoints": [
       "responses"
-    ]
-  },
-  "o4-mini": {
-    "provider": "openai",
-    "family": "o-series",
-    "inputModalities": [
-      "text",
-      "image"
     ],
-    "outputModalities": [
-      "text"
-    ],
-    "streaming": true,
-    "toolCalling": true,
-    "structuredOutputs": true,
-    "jsonMode": true,
-    "reasoning": {
-      "efforts": [
-        "low",
-        "medium",
-        "high"
-      ]
-    },
-    "maxContextTokens": 200000,
-    "maxOutputTokens": 100000,
-    "costPer1kInput": 0.0011,
-    "costPer1kOutput": 0.0044,
-    "costPer1kCachedInput": 0.000275,
-    "qualityScore": 80,
-    "speedScore": 88,
-    "release": "2025",
-    "status": "stable",
-    "endpoints": [
-      "chat",
-      "responses"
-    ]
+    "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-sol with pro reasoning in the Responses API."
   }
 };
 
 export const GENERATED_MODEL_ALIASES: Record<string, string> = {
   "anthropic/balanced": "claude-sonnet-5-5",
-  "anthropic/best": "claude-fable-5-1",
-  "anthropic/fast": "claude-haiku-4-5-20251001",
+  "anthropic/best": "claude-fable-5-2",
+  "anthropic/fast": "claude-haiku-5-5",
   "claude-fable-5.0": "claude-fable-5",
   "claude-fable-5.1": "claude-fable-5-1",
+  "claude-fable-5.2": "claude-fable-5-2",
   "claude-haiku-4-5": "claude-haiku-4-5-20251001",
   "claude-haiku-4-5-latest": "claude-haiku-4-5-20251001",
   "claude-haiku-4.5": "claude-haiku-4-5-20251001",
+  "claude-haiku-5.5": "claude-haiku-5-5",
   "claude-opus-4-5": "claude-opus-4-5-20251101",
   "claude-opus-4-5-latest": "claude-opus-4-5-20251101",
   "claude-opus-4-6-latest": "claude-opus-4-6",
@@ -3887,7 +4269,7 @@ export const GENERATED_MODEL_ALIASES: Record<string, string> = {
   "gemini-flash-lite-latest": "gemini-3.5-flash-lite",
   "gemini-pro-latest": "gemini-3.1-pro-preview",
   "google/balanced": "gemini-3.8-flash",
-  "google/best": "gemini-3.1-pro-preview",
+  "google/best": "gemini-4-carbon",
   "google/cheap": "gemini-3.5-flash-lite",
   "google/fast": "gemini-3.5-flash-lite",
   "gpt-5.6": "gpt-5.6-sol",
@@ -3895,18 +4277,19 @@ export const GENERATED_MODEL_ALIASES: Record<string, string> = {
   "groq/cheap": "groq/openai/gpt-oss-20b",
   "groq/fast": "groq/openai/gpt-oss-20b",
   "mistral/balanced": "mistral/mistral-small-2603",
-  "mistral/best": "mistral/mistral-medium-2604",
+  "mistral/best": "mistral/mistral-large-4-0",
   "mistral/cheap": "mistral/ministral-3b-2512",
   "mistral/coding": "mistral/codestral-2508",
   "mistral/fast": "mistral/ministral-8b-2512",
   "mistral/mistral-large-3": "mistral/mistral-large-2512",
+  "mistral/mistral-large-4": "mistral/mistral-large-4-0",
   "mistral/mistral-medium-3.5": "mistral/mistral-medium-2604",
   "mistral/mistral-small-4": "mistral/mistral-small-2603",
-  "openai/balanced": "gpt-6.1-sol",
-  "openai/best": "gpt-6-astra",
+  "openai/balanced": "gpt-6.2-sol",
+  "openai/best": "gpt-6.2-astra",
   "openai/cheap": "gpt-6-luna",
   "openai/codex": "gpt-5.3-codex",
-  "openai/coding": "gpt-6.1-sol",
+  "openai/coding": "gpt-6.2-sol",
   "openai/fast": "gpt-6-luna",
   "openai/pro": "gpt-5.5-pro"
 };
@@ -3915,304 +4298,319 @@ export const GENERATED_ALIAS_METADATA: Record<string, AliasMetadata> = {
   "anthropic/balanced": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "anthropic/best": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "anthropic/fast": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-fable-5.0": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-fable-5.1": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
+  },
+  "claude-fable-5.2": {
+    "stage": "stable",
+    "floating": false,
+    "verifiedAt": "2026-11-20"
   },
   "claude-haiku-4-5": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-haiku-4-5-latest": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-haiku-4.5": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
+  },
+  "claude-haiku-5.5": {
+    "stage": "stable",
+    "floating": false,
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-4-5": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-4-5-latest": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-4-6-latest": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-4-7-latest": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-4.5": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-4.6": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-4.7": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-4.8": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-5.0": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-opus-5.5": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-sonnet-4-5": {
     "stage": "deprecated",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-sonnet-4-6-latest": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-sonnet-4.5": {
     "stage": "deprecated",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-sonnet-4.6": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-sonnet-5.0": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "claude-sonnet-5.5": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "cohere/best": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "cohere/coding": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "cohere/fast": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "cohere/reasoning": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "cohere/vision": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "deepseek/balanced": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "deepseek/best": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "deepseek/cheap": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "deepseek/deepseek-v4-flash": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "deepseek/fast": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "gemini-flash-latest": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "gemini-flash-lite-latest": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "gemini-pro-latest": {
     "stage": "preview",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "google/balanced": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "google/best": {
-    "stage": "preview",
+    "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "google/cheap": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "google/fast": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "gpt-5.6": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "groq/best": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "groq/cheap": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "groq/fast": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "mistral/balanced": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "mistral/best": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "mistral/cheap": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "mistral/coding": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "mistral/fast": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "mistral/mistral-large-3": {
+    "stage": "deprecated",
+    "floating": false,
+    "verifiedAt": "2026-11-20"
+  },
+  "mistral/mistral-large-4": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "mistral/mistral-medium-3.5": {
-    "stage": "stable",
+    "stage": "deprecated",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "mistral/mistral-small-4": {
     "stage": "stable",
     "floating": false,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "openai/balanced": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "openai/best": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "openai/cheap": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "openai/codex": {
     "stage": "deprecated",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "openai/coding": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "openai/fast": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   },
   "openai/pro": {
     "stage": "stable",
     "floating": true,
-    "verifiedAt": "2026-10-02"
+    "verifiedAt": "2026-11-20"
   }
 };
 
 /** Count of generated entries, so a drift check can report a difference without a deep compare. */
-export const GENERATED_MODEL_COUNT = 98;
+export const GENERATED_MODEL_COUNT = 105;

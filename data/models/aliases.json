@@ -1,28 +1,29 @@
 {
   "aliases": {
     "gpt-5.6": "gpt-5.6-sol",
-    "openai/best": "gpt-6-astra",
+    "openai/best": "gpt-6.2-astra",
     "openai/pro": "gpt-5.5-pro",
-    "openai/balanced": "gpt-6.1-sol",
+    "openai/balanced": "gpt-6.2-sol",
     "openai/fast": "gpt-6-luna",
     "openai/cheap": "gpt-6-luna",
-    "openai/coding": "gpt-6.1-sol",
+    "openai/coding": "gpt-6.2-sol",
     "openai/codex": "gpt-5.3-codex",
-    "anthropic/best": "claude-fable-5-1",
+    "anthropic/best": "claude-fable-5-2",
     "anthropic/balanced": "claude-sonnet-5-5",
-    "anthropic/fast": "claude-haiku-4-5-20251001",
-    "google/best": "gemini-3.1-pro-preview",
+    "anthropic/fast": "claude-haiku-5-5",
+    "google/best": "gemini-4-carbon",
     "google/balanced": "gemini-3.8-flash",
     "google/fast": "gemini-3.5-flash-lite",
     "google/cheap": "gemini-3.5-flash-lite",
     "groq/best": "groq/openai/gpt-oss-120b",
     "groq/fast": "groq/openai/gpt-oss-20b",
     "groq/cheap": "groq/openai/gpt-oss-20b",
-    "mistral/best": "mistral/mistral-medium-2604",
+    "mistral/best": "mistral/mistral-large-4-0",
     "mistral/balanced": "mistral/mistral-small-2603",
     "mistral/fast": "mistral/ministral-8b-2512",
     "mistral/cheap": "mistral/ministral-3b-2512",
     "mistral/coding": "mistral/codestral-2508",
+    "mistral/mistral-large-4": "mistral/mistral-large-4-0",
     "mistral/mistral-medium-3.5": "mistral/mistral-medium-2604",
     "mistral/mistral-small-4": "mistral/mistral-small-2603",
     "mistral/mistral-large-3": "mistral/mistral-large-2512",
@@ -36,6 +37,8 @@
     "cohere/vision": "cohere/command-a-vision-07-2025",
     "cohere/coding": "cohere/north-mini-code-1-0",
     "cohere/fast": "cohere/command-r7b-12-2024",
+    "claude-fable-5.2": "claude-fable-5-2",
+    "claude-haiku-5.5": "claude-haiku-5-5",
     "claude-fable-5.1": "claude-fable-5-1",
     "claude-opus-5.5": "claude-opus-5-5",
     "claude-sonnet-5.5": "claude-sonnet-5-5",
@@ -65,302 +68,317 @@
     "gpt-5.6": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "openai/best": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "openai/pro": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "openai/balanced": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "openai/fast": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "openai/cheap": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "openai/coding": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "openai/codex": {
       "stage": "deprecated",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "anthropic/best": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "anthropic/balanced": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "anthropic/fast": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "google/best": {
-      "stage": "preview",
+      "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "google/balanced": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "google/fast": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "google/cheap": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "groq/best": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "groq/fast": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "groq/cheap": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "mistral/best": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "mistral/balanced": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "mistral/fast": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "mistral/cheap": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "mistral/coding": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
-    "mistral/mistral-medium-3.5": {
+    "mistral/mistral-large-4": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
+    },
+    "mistral/mistral-medium-3.5": {
+      "stage": "deprecated",
+      "floating": false,
+      "verifiedAt": "2026-11-20"
     },
     "mistral/mistral-small-4": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "mistral/mistral-large-3": {
-      "stage": "stable",
+      "stage": "deprecated",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "deepseek/best": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "deepseek/balanced": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "deepseek/fast": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "deepseek/cheap": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "deepseek/deepseek-v4-flash": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "cohere/best": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "cohere/reasoning": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "cohere/vision": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "cohere/coding": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "cohere/fast": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
+    },
+    "claude-fable-5.2": {
+      "stage": "stable",
+      "floating": false,
+      "verifiedAt": "2026-11-20"
+    },
+    "claude-haiku-5.5": {
+      "stage": "stable",
+      "floating": false,
+      "verifiedAt": "2026-11-20"
     },
     "claude-fable-5.1": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-5.5": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-sonnet-5.5": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-fable-5.0": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-5.0": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-sonnet-5.0": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-4.8": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-4.7": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-4-7-latest": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-4.6": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-4-6-latest": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-4.5": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-4-5": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-opus-4-5-latest": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-sonnet-4.6": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-sonnet-4-6-latest": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-sonnet-4.5": {
       "stage": "deprecated",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-sonnet-4-5": {
       "stage": "deprecated",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-haiku-4.5": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-haiku-4-5": {
       "stage": "stable",
       "floating": false,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "claude-haiku-4-5-latest": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "gemini-pro-latest": {
       "stage": "preview",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "gemini-flash-latest": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     },
     "gemini-flash-lite-latest": {
       "stage": "stable",
       "floating": true,
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-20"
     }
   }
 }

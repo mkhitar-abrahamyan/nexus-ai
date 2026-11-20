@@ -93,7 +93,9 @@ test('every store records a reservation and moves it with its total in one step'
 
 test('a lapsed reservation is settled from another process by what became of its operation', async () => {
   for (const [name, store] of await everyStore()) {
-    let clock = Date.parse('2026-10-14T12:00:00.000Z');
+    // From the real clock: the stores read it to tell whether the budget's period has ended, so a
+    // fixed date fails once its month is over.
+    let clock = Date.now();
     const now = () => new Date(clock);
     const dead = budgetLedger({ limit: 10, store, leaseMs: 1_000, now });
     const finished = await dead.reserve(operation('finished', 'job.a'), 1);

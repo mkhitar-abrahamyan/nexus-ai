@@ -4,6 +4,31 @@ Notable changes to this project are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-11-20
+
+The model registry, current as of 2026-11-20: Claude Fable 5.2 and Haiku 5.5, GPT-6.2 Astra and Sol
+and GPT-6.1 Terra, Gemini 4, and Mistral Large 4, with the models their providers shut down removed
+and announced shutdowns marked.
+
+### Changed
+
+- **The model registry is current as of 2026-11-20.** New models: `claude-fable-5-2` and
+  `claude-haiku-5-5`; `gpt-6.2-astra`, `gpt-6.2-sol`, and `gpt-6.1-terra`; `gemini-4-carbon`,
+  `gemini-4-neon`, `gemini-4-argon`, and `gemini-4-hydrogen`; `mistral/mistral-large-4-0` (alias
+  `mistral/mistral-large-4`); and Groq's preview `groq/meta-models/muse-spark-open`. Removed, because
+  OpenAI shut them down on 2026-10-23: `o1`, `o3-mini`, `o4-mini`, and `gpt-4.1-nano`. Newly marked
+  deprecated, with dates and replacements in their notes: `gpt-5-pro`, `o3`, and `o3-pro` (shut down
+  2026-12-11), the `gpt-4o` and `gpt-4.1` models (snapshots shut down 2027-01-14), `gemini-3.7-flash`,
+  `gemini-3.5-flash`, and `gemini-3.1-flash-image`, and `mistral/mistral-medium-2604` and
+  `mistral/mistral-large-2512` (retiring 2027-04-30). The `gpt-5`, `gpt-5-mini`, and `gpt-5-nano`
+  notes name OpenAI's new replacements.
+- **Intent aliases follow:** `openai/best` is `gpt-6.2-astra`, `openai/balanced` and `openai/coding` are
+  `gpt-6.2-sol`, `anthropic/best` is `claude-fable-5-2`, `anthropic/fast` is `claude-haiku-5-5`,
+  `google/best` is `gemini-4-carbon`, and `mistral/best` is `mistral/mistral-large-4-0`.
+- **Corrected prices and limits:** Claude Sonnet 5.5 cache reads are 5% of input, Claude Sonnet 4.6 writes
+  up to 128K tokens, and Gemini 3.8 Flash, 3.6 Flash, and 3.5 Flash-Lite cache reads are 10% of input.
+- **`nexus migrate` suggests current models** for retired Claude Haiku 3.x, `o1-mini`, and Gemini 1.5 Flash.
+
 ## [3.0.0] - 2026-10-30
 
 3.0, a major release. It turns on the three defaults 2.21 previewed, and removes the two names 2.x
@@ -3523,7 +3548,8 @@ shared policy vocabulary is in place for a future release that revisits this.
 - URL fetching rejects unsafe private-network targets and limits response reads.
 - CLI and audit findings no longer disclose detected secret values.
 
-[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.22.0...v3.0.0
 [2.22.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/mkhitar-abrahamyan/nexus-ai/compare/v2.20.2...v2.21.0

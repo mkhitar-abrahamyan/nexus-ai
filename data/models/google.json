@@ -1,6 +1,124 @@
 {
   "provider": "google",
   "models": {
+    "gemini-4-carbon": {
+      "provider": "google",
+      "family": "gemini-4",
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
+      "streaming": true,
+      "toolCalling": true,
+      "structuredOutputs": true,
+      "jsonMode": true,
+      "reasoning": true,
+      "promptCaching": {
+        "explicit": false,
+        "ttls": ["5m", "1h"]
+      },
+      "toolChoice": true,
+      "topK": true,
+      "seed": true,
+      "penalties": true,
+      "maxContextTokens": 1048576,
+      "maxOutputTokens": 65536,
+      "costPer1kInput": 0.004,
+      "costPer1kOutput": 0.02,
+      "costPer1kCachedInput": 0.0002,
+      "qualityScore": 99,
+      "speedScore": 70,
+      "release": "2026-11-10",
+      "status": "stable",
+      "endpoints": ["generateContent"],
+      "notes": "Introductory price of $2 input and $10 output per million tokens through 2026-11-30."
+    },
+    "gemini-4-neon": {
+      "provider": "google",
+      "family": "gemini-4",
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
+      "streaming": true,
+      "toolCalling": true,
+      "structuredOutputs": true,
+      "jsonMode": true,
+      "reasoning": true,
+      "promptCaching": {
+        "explicit": false,
+        "ttls": ["5m", "1h"]
+      },
+      "toolChoice": true,
+      "topK": true,
+      "seed": true,
+      "penalties": true,
+      "maxContextTokens": 1048576,
+      "maxOutputTokens": 65536,
+      "costPer1kInput": 0.003,
+      "costPer1kOutput": 0.015,
+      "costPer1kCachedInput": 0.00015,
+      "qualityScore": 98,
+      "speedScore": 80,
+      "release": "2026-11-18",
+      "status": "stable",
+      "endpoints": ["generateContent"]
+    },
+    "gemini-4-argon": {
+      "provider": "google",
+      "family": "gemini-4",
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
+      "streaming": true,
+      "toolCalling": true,
+      "structuredOutputs": true,
+      "jsonMode": true,
+      "reasoning": true,
+      "promptCaching": {
+        "explicit": false,
+        "ttls": ["5m", "1h"]
+      },
+      "toolChoice": true,
+      "topK": true,
+      "seed": true,
+      "penalties": true,
+      "maxContextTokens": 1048576,
+      "maxOutputTokens": 65536,
+      "costPer1kInput": 0.004,
+      "costPer1kOutput": 0.02,
+      "costPer1kCachedInput": 0.0002,
+      "qualityScore": 97,
+      "speedScore": 82,
+      "release": "2026-10-13",
+      "status": "stable",
+      "endpoints": ["generateContent"],
+      "notes": "Introductory price of $2 input and $10 output per million tokens through 2026-11-30."
+    },
+    "gemini-4-hydrogen": {
+      "provider": "google",
+      "family": "gemini-4",
+      "inputModalities": ["text", "image", "audio", "video", "pdf"],
+      "outputModalities": ["text"],
+      "streaming": true,
+      "toolCalling": true,
+      "structuredOutputs": true,
+      "jsonMode": true,
+      "reasoning": true,
+      "promptCaching": {
+        "explicit": false,
+        "ttls": ["5m", "1h"]
+      },
+      "toolChoice": true,
+      "topK": true,
+      "seed": true,
+      "penalties": true,
+      "maxContextTokens": 1048576,
+      "maxOutputTokens": 65536,
+      "costPer1kInput": 0.0015,
+      "costPer1kOutput": 0.0075,
+      "costPer1kCachedInput": 0.000075,
+      "qualityScore": 96,
+      "speedScore": 90,
+      "release": "2026-11-12",
+      "status": "stable",
+      "endpoints": ["generateContent"]
+    },
     "gemini-3.8-flash": {
       "provider": "google",
       "family": "gemini-3.8",
@@ -23,7 +141,7 @@
       "maxOutputTokens": 65536,
       "costPer1kInput": 0.00075,
       "costPer1kOutput": 0.00375,
-      "costPer1kCachedInput": 0.0001875,
+      "costPer1kCachedInput": 0.000075,
       "qualityScore": 95,
       "speedScore": 94,
       "release": "2026-09",
@@ -57,9 +175,9 @@
       "qualityScore": 93,
       "speedScore": 94,
       "release": "2026",
-      "status": "stable",
+      "status": "deprecated",
       "endpoints": ["generateContent"],
-      "notes": "Prices double on 2027-01-01, to $1.50 input and $7.50 output per million tokens."
+      "notes": "Google deprecated it on 2026-10-08 and routes its requests to gemini-3.8-flash."
     },
     "gemini-3.6-flash": {
       "provider": "google",
@@ -83,7 +201,7 @@
       "maxOutputTokens": 65536,
       "costPer1kInput": 0.00075,
       "costPer1kOutput": 0.00375,
-      "costPer1kCachedInput": 0.0001875,
+      "costPer1kCachedInput": 0.000075,
       "qualityScore": 91,
       "speedScore": 94,
       "release": "2026",
@@ -117,8 +235,9 @@
       "qualityScore": 90,
       "speedScore": 94,
       "release": "2026-05",
-      "status": "stable",
-      "endpoints": ["generateContent"]
+      "status": "deprecated",
+      "endpoints": ["generateContent"],
+      "notes": "Google deprecated it on 2026-10-08 and routes its requests to gemini-3.6-flash."
     },
     "gemini-3.5-flash-lite": {
       "provider": "google",
@@ -142,7 +261,7 @@
       "maxOutputTokens": 65536,
       "costPer1kInput": 0.0003,
       "costPer1kOutput": 0.0025,
-      "costPer1kCachedInput": 0.000075,
+      "costPer1kCachedInput": 0.00003,
       "qualityScore": 84,
       "speedScore": 97,
       "release": "2026-07",
@@ -323,9 +442,9 @@
       "qualityScore": 84,
       "speedScore": 86,
       "release": "2026-02",
-      "status": "stable",
+      "status": "deprecated",
       "endpoints": ["generateContent"],
-      "notes": "The output price is the image rate; text output costs less."
+      "notes": "The output price is the image rate; text output costs less. Google deprecated it on 2026-10-06 with no shutdown date yet; gemini-nano-banana-2.1 succeeds it."
     },
     "gemini-2.5-pro": {
       "provider": "google",
@@ -356,7 +475,7 @@
       "knowledgeCutoff": "2025-01",
       "status": "deprecated",
       "endpoints": ["generateContent"],
-      "notes": "Google limits it to existing users and recommends Gemini 3 for new work."
+      "notes": "Google routes its requests to gemini-3.8-flash, at that model’s rates, from 2026-12-01."
     },
     "gemini-2.5-flash": {
       "provider": "google",
@@ -387,7 +506,7 @@
       "knowledgeCutoff": "2025-01",
       "status": "deprecated",
       "endpoints": ["generateContent"],
-      "notes": "Google limits it to existing users and recommends Gemini 3 for new work."
+      "notes": "Google routes its requests to gemini-3.5-flash-lite, at that model’s rates, from 2026-12-01."
     },
     "gemini-2.5-flash-lite": {
       "provider": "google",

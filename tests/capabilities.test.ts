@@ -165,14 +165,14 @@ test('tool options are removed together when the model cannot call tools', () =>
 
 test('cached reads and writes are priced separately from standard input', () => {
   const estimate = estimateCost({
-    model: 'claude-sonnet-5-5',
+    model: 'claude-sonnet-5',
     inputTokens: 1000,
     outputTokens: 1000,
     cachedReadTokens: 10000,
     cachedWriteTokens: 2000,
   });
 
-  const model = describeModel('claude-sonnet-5-5').capabilities;
+  const model = describeModel('claude-sonnet-5').capabilities;
   assert.ok(model);
   assert.equal(estimate.inputCost, model.costPer1kInput);
   assert.equal(estimate.outputCost, model.costPer1kOutput);
@@ -271,7 +271,7 @@ test('costAmount reads the priced amount, and 0 for a response nothing priced', 
 
 test('model provenance reports an alias stage and a verification date', () => {
   const floating = describeModel('anthropic/best');
-  assert.equal(floating.model, 'claude-fable-5-1');
+  assert.equal(floating.model, 'claude-fable-5-2');
   assert.equal(floating.alias?.stage, 'stable');
   assert.equal(floating.alias?.floating, true, 'intent aliases can change target between releases');
   assert.match(floating.verifiedAt, /^\d{4}-\d{2}-\d{2}$/);

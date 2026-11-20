@@ -1,6 +1,111 @@
 {
   "provider": "openai",
   "models": {
+    "gpt-6.2-astra": {
+      "provider": "openai",
+      "family": "gpt-6.2",
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
+      "streaming": true,
+      "toolCalling": true,
+      "structuredOutputs": true,
+      "jsonMode": true,
+      "reasoning": {
+        "efforts": ["low", "medium", "high", "xhigh", "max"]
+      },
+      "promptCaching": {
+        "explicit": false,
+        "ttls": ["5m"]
+      },
+      "toolChoice": true,
+      "parallelToolCalls": true,
+      "topK": false,
+      "seed": true,
+      "penalties": true,
+      "maxContextTokens": 1050000,
+      "maxOutputTokens": 128000,
+      "costPer1kInput": 0.008,
+      "costPer1kOutput": 0.04,
+      "costPer1kCachedInput": 0.0004,
+      "qualityScore": 100,
+      "speedScore": 72,
+      "release": "2026-11-17",
+      "knowledgeCutoff": "2026-05-18",
+      "status": "stable",
+      "endpoints": ["chat", "responses"],
+      "costPer1kCacheWrite": 0.01,
+      "notes": "OpenAI flagship for the hardest reasoning and agentic work. Rejects reasoning effort none."
+    },
+    "gpt-6.2-sol": {
+      "provider": "openai",
+      "family": "gpt-6.2",
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
+      "streaming": true,
+      "toolCalling": true,
+      "structuredOutputs": true,
+      "jsonMode": true,
+      "reasoning": {
+        "efforts": ["low", "medium", "high", "xhigh", "max"]
+      },
+      "promptCaching": {
+        "explicit": false,
+        "ttls": ["5m"]
+      },
+      "toolChoice": true,
+      "parallelToolCalls": true,
+      "topK": false,
+      "seed": true,
+      "penalties": true,
+      "maxContextTokens": 1050000,
+      "maxOutputTokens": 128000,
+      "costPer1kInput": 0.002,
+      "costPer1kOutput": 0.01,
+      "costPer1kCachedInput": 0.0001,
+      "qualityScore": 99,
+      "speedScore": 85,
+      "release": "2026-11-17",
+      "knowledgeCutoff": "2026-06-01",
+      "status": "stable",
+      "endpoints": ["chat", "responses"],
+      "costPer1kCacheWrite": 0.0025,
+      "notes": "Near-Astra quality at a lower price and higher speed. Rejects reasoning effort none."
+    },
+    "gpt-6.1-terra": {
+      "provider": "openai",
+      "family": "gpt-6.1",
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
+      "streaming": true,
+      "toolCalling": true,
+      "structuredOutputs": true,
+      "jsonMode": true,
+      "reasoning": {
+        "efforts": ["none", "low", "medium", "high", "xhigh", "max"]
+      },
+      "promptCaching": {
+        "explicit": false,
+        "ttls": ["5m"]
+      },
+      "toolChoice": true,
+      "parallelToolCalls": true,
+      "topK": false,
+      "seed": true,
+      "penalties": true,
+      "maxContextTokens": 1050000,
+      "maxOutputTokens": 128000,
+      "costPer1kInput": 0.001,
+      "costPer1kOutput": 0.005,
+      "costPer1kCachedInput": 0.00005,
+      "qualityScore": 95,
+      "speedScore": 92,
+      "release": "2026-10-26",
+      "knowledgeCutoff": "2026-06-01",
+      "status": "stable",
+      "endpoints": ["responses"],
+      "costPer1kCacheWrite": 0.00125,
+      "notes": "OpenAI mid-tier model. Tool calling requires the Responses API, so it is sent through Responses."
+    },
     "gpt-6-astra": {
       "provider": "openai",
       "family": "gpt-6",
@@ -34,7 +139,7 @@
       "status": "stable",
       "endpoints": ["responses"],
       "costPer1kCacheWrite": 0.0125,
-      "notes": "OpenAI flagship for the hardest reasoning and agentic work."
+      "notes": "Superseded by gpt-6.2-astra."
     },
     "gpt-6.1-sol": {
       "provider": "openai",
@@ -68,7 +173,7 @@
       "knowledgeCutoff": "2026-04-30",
       "status": "stable",
       "endpoints": ["responses"],
-      "notes": "Near-Astra quality for coding, computer use, and professional work, at a lower price."
+      "notes": "Superseded by gpt-6.2-sol."
     },
     "gpt-6-sol": {
       "provider": "openai",
@@ -635,7 +740,7 @@
       "knowledgeCutoff": "2024-09-30",
       "status": "deprecated",
       "endpoints": ["chat", "responses"],
-      "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-5.6-sol."
+      "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-sol."
     },
     "gpt-5-pro": {
       "provider": "openai",
@@ -667,8 +772,9 @@
       "speedScore": 50,
       "release": "2025",
       "knowledgeCutoff": "2024-09-30",
-      "status": "stable",
-      "endpoints": ["responses"]
+      "status": "deprecated",
+      "endpoints": ["responses"],
+      "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-sol with pro reasoning in the Responses API."
     },
     "gpt-5-mini": {
       "provider": "openai",
@@ -702,7 +808,7 @@
       "knowledgeCutoff": "2024-05-31",
       "status": "deprecated",
       "endpoints": ["chat", "responses"],
-      "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-5.6-terra."
+      "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-terra."
     },
     "gpt-5-nano": {
       "provider": "openai",
@@ -736,29 +842,7 @@
       "knowledgeCutoff": "2024-05-31",
       "status": "deprecated",
       "endpoints": ["chat", "responses"],
-      "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-5.6-luna."
-    },
-    "o1": {
-      "provider": "openai",
-      "family": "o-series",
-      "inputModalities": ["text", "image"],
-      "outputModalities": ["text"],
-      "streaming": true,
-      "toolCalling": true,
-      "structuredOutputs": true,
-      "jsonMode": true,
-      "reasoning": {
-        "efforts": ["low", "medium", "high"]
-      },
-      "maxContextTokens": 200000,
-      "maxOutputTokens": 100000,
-      "costPer1kInput": 0.015,
-      "costPer1kOutput": 0.06,
-      "qualityScore": 80,
-      "speedScore": 60,
-      "release": "2024",
-      "status": "stable",
-      "endpoints": ["chat", "responses"]
+      "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6-luna."
     },
     "gpt-4.1": {
       "provider": "openai",
@@ -777,8 +861,9 @@
       "qualityScore": 82,
       "speedScore": 80,
       "release": "2025",
-      "status": "stable",
-      "endpoints": ["chat", "responses"]
+      "status": "deprecated",
+      "endpoints": ["chat", "responses"],
+      "notes": "OpenAI shuts down its snapshots on 2027-01-14; migrate to gpt-6-luna."
     },
     "gpt-4.1-mini": {
       "provider": "openai",
@@ -797,28 +882,9 @@
       "qualityScore": 78,
       "speedScore": 94,
       "release": "2025",
-      "status": "stable",
-      "endpoints": ["chat", "responses"]
-    },
-    "gpt-4.1-nano": {
-      "provider": "openai",
-      "family": "gpt-4.1",
-      "inputModalities": ["text", "image"],
-      "outputModalities": ["text"],
-      "streaming": true,
-      "toolCalling": true,
-      "structuredOutputs": true,
-      "jsonMode": true,
-      "maxContextTokens": 1047576,
-      "maxOutputTokens": 32768,
-      "costPer1kInput": 0.0001,
-      "costPer1kOutput": 0.0004,
-      "costPer1kCachedInput": 0.000025,
-      "qualityScore": 70,
-      "speedScore": 98,
-      "release": "2025",
-      "status": "stable",
-      "endpoints": ["chat", "responses"]
+      "status": "deprecated",
+      "endpoints": ["chat", "responses"],
+      "notes": "OpenAI shuts down its snapshots on 2027-01-14; migrate to gpt-6-luna."
     },
     "gpt-4o": {
       "provider": "openai",
@@ -837,8 +903,9 @@
       "qualityScore": 78,
       "speedScore": 84,
       "release": "2024",
-      "status": "stable",
-      "endpoints": ["chat", "responses", "realtime"]
+      "status": "deprecated",
+      "endpoints": ["chat", "responses", "realtime"],
+      "notes": "OpenAI shuts down its snapshots on 2027-01-14; migrate to gpt-6-luna."
     },
     "gpt-4o-mini": {
       "provider": "openai",
@@ -857,8 +924,9 @@
       "qualityScore": 72,
       "speedScore": 96,
       "release": "2024",
-      "status": "stable",
-      "endpoints": ["chat", "responses"]
+      "status": "deprecated",
+      "endpoints": ["chat", "responses"],
+      "notes": "OpenAI shuts down its snapshots on 2027-01-14; migrate to gpt-6-luna."
     },
     "o3": {
       "provider": "openai",
@@ -880,8 +948,9 @@
       "qualityScore": 84,
       "speedScore": 66,
       "release": "2025",
-      "status": "stable",
-      "endpoints": ["chat", "responses"]
+      "status": "deprecated",
+      "endpoints": ["chat", "responses"],
+      "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-sol."
     },
     "o3-pro": {
       "provider": "openai",
@@ -902,55 +971,9 @@
       "qualityScore": 86,
       "speedScore": 40,
       "release": "2025",
-      "status": "stable",
-      "endpoints": ["responses"]
-    },
-    "o3-mini": {
-      "provider": "openai",
-      "family": "o-series",
-      "inputModalities": ["text"],
-      "outputModalities": ["text"],
-      "streaming": true,
-      "toolCalling": true,
-      "structuredOutputs": true,
-      "jsonMode": true,
-      "reasoning": {
-        "efforts": ["low", "medium", "high"]
-      },
-      "maxContextTokens": 200000,
-      "maxOutputTokens": 100000,
-      "costPer1kInput": 0.0011,
-      "costPer1kOutput": 0.0044,
-      "costPer1kCachedInput": 0.00055,
-      "qualityScore": 78,
-      "speedScore": 82,
-      "release": "2025",
       "status": "deprecated",
-      "endpoints": ["chat", "responses"],
-      "notes": "OpenAI shuts it down on 2026-10-23; migrate to gpt-5.6-sol."
-    },
-    "o4-mini": {
-      "provider": "openai",
-      "family": "o-series",
-      "inputModalities": ["text", "image"],
-      "outputModalities": ["text"],
-      "streaming": true,
-      "toolCalling": true,
-      "structuredOutputs": true,
-      "jsonMode": true,
-      "reasoning": {
-        "efforts": ["low", "medium", "high"]
-      },
-      "maxContextTokens": 200000,
-      "maxOutputTokens": 100000,
-      "costPer1kInput": 0.0011,
-      "costPer1kOutput": 0.0044,
-      "costPer1kCachedInput": 0.000275,
-      "qualityScore": 80,
-      "speedScore": 88,
-      "release": "2025",
-      "status": "stable",
-      "endpoints": ["chat", "responses"]
+      "endpoints": ["responses"],
+      "notes": "OpenAI shuts it down on 2026-12-11; migrate to gpt-6.1-sol with pro reasoning in the Responses API."
     },
     "gpt-oss-120b": {
       "provider": "openai",

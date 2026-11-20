@@ -219,6 +219,31 @@
       "release": "2026",
       "status": "preview",
       "endpoints": ["chat"]
+    },
+    "groq/meta-models/muse-spark-open": {
+      "provider": "groq",
+      "family": "muse-spark",
+      "inputModalities": ["text"],
+      "outputModalities": ["text"],
+      "streaming": true,
+      "toolCalling": true,
+      "structuredOutputs": true,
+      "jsonMode": true,
+      "reasoning": false,
+      "toolChoice": true,
+      "parallelToolCalls": true,
+      "seed": true,
+      "penalties": true,
+      "maxContextTokens": 131072,
+      "maxOutputTokens": 131072,
+      "costPer1kInput": 0,
+      "costPer1kOutput": 0,
+      "qualityScore": 86,
+      "speedScore": 88,
+      "release": "2026-10",
+      "status": "preview",
+      "endpoints": ["chat"],
+      "notes": "Groq prices it through sales; override costs in models.registry."
     }
   }
 }
